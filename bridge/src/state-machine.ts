@@ -8,6 +8,7 @@ import {
   type StateTransition,
   transitions,
 } from './types.js';
+import type { BillingType } from '@agentdeck/shared';
 import { UsageTracker } from './usage-tracker.js';
 import { debug } from './logger.js';
 
@@ -20,6 +21,7 @@ export class StateMachine extends EventEmitter {
   private question: string | null = null;
   private projectName: string | null = null;
   private modelName: string | null = null;
+  private billingType: BillingType = 'unknown';
   private usageTracker: UsageTracker;
   private stuckTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -179,9 +181,20 @@ export class StateMachine extends EventEmitter {
 
       case 'model_info': {
         const model = data?.model as string | undefined;
+        const plan = data?.plan as string | undefined;
         if (model) {
           this.modelName = model;
           debug('SM', `model: ${model}`);
+        }
+        if (plan) {
+          if (/max/i.test(plan)) {
+            this.billingType = 'subscription';
+          } else if (/api/i.test(plan)) {
+            this.billingType = 'api';
+          }
+          debug('SM', `billingType: ${this.billingType} (plan="${plan}")`);
+        }
+        if (model || plan) {
           this.emitSnapshot();
         }
         break;
@@ -287,6 +300,7 @@ export class StateMachine extends EventEmitter {
       question: this.question,
       projectName: this.projectName,
       modelName: this.modelName,
+      billingType: this.billingType,
       sessionDurationSec: usage.sessionDurationSec,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,

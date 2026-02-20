@@ -10,7 +10,7 @@ import { State } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { dlog } from '../log.js';
 
-const COMMANDS = ['/compact', '/status', '/cost', '/clear', '/model'];
+const COMMANDS = ['/compact', '/status', '/usage', '/clear', '/model'];
 
 let bridge: BridgeClient;
 let currentState = State.DISCONNECTED;

@@ -5,7 +5,7 @@ import streamDeck, {
   WillAppearEvent,
   WillDisappearEvent,
 } from '@elgato/streamdeck';
-import { State } from '@agentdeck/shared';
+import { State, type BillingType } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { dlog } from '../log.js';
@@ -34,10 +34,15 @@ let outputTokens = 0;
 // Display pages: 5h → 7d → extra (if enabled) → session
 type Page = '5h' | '7d' | 'extra' | 'session';
 let pageIndex = 0;
+let billingType: BillingType = 'unknown';
 
 const actionIds: string[] = [];
 
 function getPages(): Page[] {
+  // API users have no subscription rate limits — only show session page
+  if (billingType === 'api') {
+    return ['session'];
+  }
   const pages: Page[] = ['5h', '7d'];
   if (extraUsageEnabled) {
     pages.push('extra');
@@ -65,7 +70,9 @@ export function updateUsageButton(
     extraUsageUsedCredits?: number;
     extraUsageUtilization?: number;
   },
+  bt?: BillingType,
 ): void {
+  if (bt) billingType = bt;
   currentState = state;
   inputTokens = usage.inputTokens;
   outputTokens = usage.outputTokens;

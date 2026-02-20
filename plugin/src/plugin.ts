@@ -8,6 +8,7 @@ import {
   VoiceStateEvent,
   State,
   PermissionMode,
+  type BillingType,
 } from '@agentdeck/shared';
 
 import { BridgeClient } from './bridge-client.js';
@@ -68,6 +69,7 @@ let currentMode = PermissionMode.DEFAULT;
 let currentTool: string | undefined;
 let currentProjectName: string | undefined;
 let currentModelName: string | undefined;
+let currentBillingType: BillingType = 'unknown';
 let currentOptions: import('@agentdeck/shared').PromptOption[] = [];
 
 // ---- Instances ----
@@ -93,6 +95,7 @@ bridge.on('state_update', (ev: StateUpdateEvent) => {
   currentTool = ev.currentTool;
   if (ev.projectName) currentProjectName = ev.projectName;
   if (ev.modelName) currentModelName = ev.modelName;
+  if (ev.billingType) currentBillingType = ev.billingType;
 
   // Clear options when leaving option state
   if (ev.state !== State.AWAITING_OPTION) {
@@ -122,7 +125,7 @@ bridge.on('usage_update', (ev: UsageEvent) => {
     extraUsageMonthlyLimit: ev.extraUsageMonthlyLimit,
     extraUsageUsedCredits: ev.extraUsageUsedCredits,
     extraUsageUtilization: ev.extraUsageUtilization,
-  });
+  }, currentBillingType);
 });
 
 bridge.on('connection', (ev: ConnectionEvent) => {

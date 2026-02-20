@@ -242,6 +242,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       toolProgress: snapshot.toolProgress ?? undefined,
       projectName: snapshot.projectName ?? undefined,
       modelName: snapshot.modelName ?? undefined,
+      billingType: snapshot.billingType,
     };
     wsServer.broadcast(stateEvent);
 
@@ -323,17 +324,25 @@ async function startBridge(port: number, command: string): Promise<void> {
         handleVoiceCommand(cmd.action, voiceManager, ptyManager, wsServer);
         break;
 
-      case 'query_usage':
+      case 'query_usage': {
         // Fetch usage from Anthropic API (no PTY echo)
-        debug('sdc', 'Fetching usage from API');
-        fetchUsageFromApi().then((apiUsage) => {
-          if (apiUsage) {
-            cachedApiUsage = apiUsage;
-          }
-          const snapshot = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage));
-        });
+        // Skip OAuth fetch for API billing — no subscription data available
+        const snap = stateMachine.getSnapshot();
+        if (snap.billingType === 'api') {
+          debug('sdc', 'Skipping API usage fetch (api billing)');
+          wsServer.broadcast(buildUsageEvent(snap, cachedApiUsage));
+        } else {
+          debug('sdc', 'Fetching usage from API');
+          fetchUsageFromApi().then((apiUsage) => {
+            if (apiUsage) {
+              cachedApiUsage = apiUsage;
+            }
+            const snapshot = stateMachine.getSnapshot();
+            wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage));
+          });
+        }
         break;
+      }
     }
   });
 
@@ -348,6 +357,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       toolProgress: snapshot.toolProgress ?? undefined,
       projectName: snapshot.projectName ?? undefined,
       modelName: snapshot.modelName ?? undefined,
+      billingType: snapshot.billingType,
     };
     wsServer.sendTo(ws, stateEvent);
     wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage));
@@ -359,12 +369,13 @@ async function startBridge(port: number, command: string): Promise<void> {
     wsServer.sendTo(ws, connectEvt);
 
     // Fetch API usage on first client connect (silent — no PTY echo)
-    if (!cachedApiUsage) {
+    // Skip for API billing — no subscription data available
+    if (!cachedApiUsage && snapshot.billingType !== 'api') {
       fetchUsageFromApi().then((apiUsage) => {
         if (apiUsage) {
           cachedApiUsage = apiUsage;
-          const snap = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snap, cachedApiUsage));
+          const snap2 = stateMachine.getSnapshot();
+          wsServer.broadcast(buildUsageEvent(snap2, cachedApiUsage));
         }
       });
     }
@@ -435,8 +446,9 @@ async function startBridge(port: number, command: string): Promise<void> {
   }, 5000);
 
   // 14b. Periodic API usage refresh (silent — no PTY echo)
+  // Skipped for API billing — no subscription data available
   const apiUsageInterval = setInterval(() => {
-    if (wsServer.getClientCount() > 0) {
+    if (wsServer.getClientCount() > 0 && stateMachine.getSnapshot().billingType !== 'api') {
       fetchUsageFromApi().then((apiUsage) => {
         if (apiUsage) {
           cachedApiUsage = apiUsage;

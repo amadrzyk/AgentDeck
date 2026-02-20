@@ -7,6 +7,7 @@ export {
   transitions,
   type PromptOption,
   type StateSnapshot,
+  type BillingType,
 } from '@agentdeck/shared';
 
 export {

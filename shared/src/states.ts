@@ -59,6 +59,7 @@ export interface StateSnapshot {
   question: string | null;
   projectName: string | null;
   modelName: string | null;
+  billingType: import('./protocol.js').BillingType;
   sessionDurationSec: number;
   inputTokens: number;
   outputTokens: number;

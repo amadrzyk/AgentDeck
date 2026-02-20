@@ -1,5 +1,9 @@
 import { State, PermissionMode, PromptOption } from './states.js';
 
+// ===== Billing Type =====
+
+export type BillingType = 'subscription' | 'api' | 'unknown';
+
 // ===== Bridge → Plugin (State Updates) =====
 
 export interface StateUpdateEvent {
@@ -10,6 +14,7 @@ export interface StateUpdateEvent {
   toolProgress?: string;
   projectName?: string;
   modelName?: string;
+  billingType?: BillingType;
 }
 
 export interface PromptOptionsEvent {
