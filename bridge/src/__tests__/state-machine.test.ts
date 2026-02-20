@@ -332,4 +332,69 @@ describe('StateMachine', () => {
       expect(snap.modelName).toBe('claude-opus-4');
     });
   });
+
+  // === Billing Type Detection ===
+
+  describe('billingType detection', () => {
+    it('defaults to unknown', () => {
+      const sm = bootToIdle();
+      expect(sm.getSnapshot().billingType).toBe('unknown');
+    });
+
+    it('detects subscription from "Claude Max" plan', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('model_info', { model: 'claude-opus-4', plan: 'Claude Max' });
+      expect(sm.getSnapshot().billingType).toBe('subscription');
+    });
+
+    it('detects subscription from "Max" (case-insensitive)', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('model_info', { model: 'claude-opus-4', plan: 'max plan' });
+      expect(sm.getSnapshot().billingType).toBe('subscription');
+    });
+
+    it('detects api from "api.anthropic.com"', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('model_info', { model: 'claude-opus-4', plan: 'api.anthropic.com' });
+      expect(sm.getSnapshot().billingType).toBe('api');
+    });
+
+    it('detects api (case-insensitive)', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('model_info', { model: 'claude-sonnet-4', plan: 'API key' });
+      expect(sm.getSnapshot().billingType).toBe('api');
+    });
+
+    it('stays unknown for unrecognized plan', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('model_info', { model: 'claude-opus-4', plan: 'some-other-plan' });
+      expect(sm.getSnapshot().billingType).toBe('unknown');
+    });
+
+    it('stays unknown when plan is absent', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('model_info', { model: 'claude-opus-4' });
+      expect(sm.getSnapshot().billingType).toBe('unknown');
+    });
+
+    it('persists billingType across subsequent model_info without plan', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('model_info', { model: 'claude-opus-4', plan: 'Claude Max' });
+      expect(sm.getSnapshot().billingType).toBe('subscription');
+
+      // Later model_info without plan should not reset billingType
+      sm.handleParserEvent('model_info', { model: 'claude-sonnet-4' });
+      expect(sm.getSnapshot().billingType).toBe('subscription');
+    });
+
+    it('emits state_changed when billingType is set', () => {
+      const sm = bootToIdle();
+      const snapshots: any[] = [];
+      sm.on('state_changed', (s: any) => snapshots.push(s));
+
+      sm.handleParserEvent('model_info', { model: 'claude-opus-4', plan: 'api.anthropic.com' });
+      expect(snapshots.length).toBeGreaterThan(0);
+      expect(snapshots[snapshots.length - 1].billingType).toBe('api');
+    });
+  });
 });
