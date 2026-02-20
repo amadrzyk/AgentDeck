@@ -134,10 +134,9 @@ bridge.on('connection', (ev: ConnectionEvent) => {
     currentState = State.DISCONNECTED;
     currentOptions = [];
     broadcastStateUpdate();
-  } else if (ev.status === 'connected') {
-    currentState = State.IDLE;
-    broadcastStateUpdate();
   }
+  // 'connected' case: state_update (sent before connection event) already
+  // set the correct state — don't clobber it to IDLE here.
 });
 
 bridge.on('user_prompt', (ev: UserPromptEvent) => {
