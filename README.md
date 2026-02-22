@@ -7,6 +7,12 @@ AgentDeck turns your Elgato Stream Deck+ into a physical control surface for AI 
 > Control sessions. Interrupt runs. Switch modes. Monitor usage.
 > Steer your AI — without leaving your keyboard flow.
 
+| | Requirement |
+|---|---|
+| **Platform** | macOS 14+ (Sonoma) — Windows/Linux not supported |
+| **Hardware** | Elgato Stream Deck+ (8 keys, 4 encoders, LCD touch strip) |
+| **Terminal** | iTerm2 (required for session management and voice paste) |
+
 ```
 ┌──────────────────────┐   WebSocket (ws://localhost:9120)   ┌────────────────────┐
 │  Stream Deck Plugin  │◄───────────────────────────────────►│   Bridge Server    │
@@ -55,11 +61,11 @@ It's a **control surface** — like an audio mixing console or a video color pan
 |---|---|
 | **Respond instantly** to permission prompts | YES / NO / ALWAYS buttons appear when needed |
 | **Interrupt** a runaway agent | STOP button sends Ctrl+C |
-| **Switch modes** on the fly | Encoder cycles Plan / Accept Edits / Default |
+| **Switch modes** on the fly | Mode button cycles Plan / Accept Edits / Default |
 | **Navigate options** physically | Encoder scrolls and selects multi-choice prompts |
 | **Speak to your agent** | Push-to-talk voice → whisper.cpp transcription → auto-send |
 | **Monitor usage** | Usage dashboard with 5h / 7d / extra / session pages |
-| **Run quick commands** | Encoder cycles /compact /status /cost /clear /model |
+| **Run quick actions** | GO ON / REVIEW / COMMIT / CLEAR buttons; encoder cycles custom prompts |
 | **Manage terminal sessions** | iTerm dial switches sessions, auto-attaches detached tmux, auto-switches on tab focus |
 | **Stay in flow** | Hardware augments your keyboard — never interrupts it |
 | **Control from anywhere** | Commands work even when the terminal is in the background — no need to switch windows |
@@ -79,12 +85,14 @@ The bridge stays transparent: if it's off, Claude Code works exactly as before.
 
 | Item | Required | Install |
 |------|----------|---------|
+| **macOS 14+** (Sonoma) | Yes | Windows/Linux not supported |
 | **Node.js** >= 20 | Yes | `brew install node` |
 | **pnpm** | Yes | `npm install -g pnpm` |
-| **Elgato Stream Deck app** | Yes | [Elgato Downloads](https://www.elgato.com/downloads) |
+| **Elgato Stream Deck app** >= 6.7 | Yes | [Elgato Downloads](https://www.elgato.com/downloads) |
 | **Stream Deck+ hardware** | Yes | 8 keys + 4 encoders + LCD touch strip |
+| **iTerm2** | Yes | Terminal management, voice paste, session switching |
 | **Claude Code CLI** | Yes | `npm install -g @anthropic-ai/claude-code` |
-| **Stream Deck CLI** | Yes | `npm install -g @elgato/cli` |
+| **Stream Deck CLI** | Auto | Installed by `pnpm setup` if missing |
 | **sox** (audio capture) | For voice | See [Voice Setup](#4-voice-setup-optional) |
 | **whisper.cpp** (transcription) | For voice | See [Voice Setup](#4-voice-setup-optional) |
 
@@ -175,6 +183,11 @@ The `sdc` command is now available globally.
 
 Voice input requires **sox** (audio capture) and **whisper.cpp** (local transcription).
 
+- **arm64 Homebrew** (`/opt/homebrew/`) required on Apple Silicon — x86 Homebrew runs through Rosetta without Metal GPU (10-20x slower)
+- **Binaries needed**: `rec` (from sox), `whisper-cli` and `whisper-server` (from whisper-cpp)
+- **Whisper model**: `~/.local/share/whisper-cpp/` or Homebrew share dir — `large-v3-turbo` recommended (~1.5GB)
+- **GPU memory**: ~1.8GB (shared across sessions, one whisper-server instance)
+
 #### Apple Silicon (M1/M2/M3/M4)
 
 > **Important:** You must use **arm64 Homebrew** (`/opt/homebrew/`). The x86 Homebrew (`/usr/local/`) installs Intel binaries that run through Rosetta 2 without Metal GPU — transcription will be 10-20x slower.
@@ -249,6 +262,8 @@ sdc
 
 This starts the bridge on port 9120 (HTTP + WebSocket), spawns Claude Code inside a PTY, and proxies your terminal transparently. Use Claude exactly as before — the Stream Deck adds a parallel control channel.
 
+> **Security:** The bridge HTTP/WS server binds to `127.0.0.1` (localhost only). It is not accessible from other machines on the network. No authentication token is required for local connections.
+
 ### CLI Commands
 
 ```bash
@@ -262,13 +277,13 @@ sdc --command 'claude --model opus'  # custom Claude command
 
 ## Stream Deck+ Layout (v3)
 
-### Keypad — 7 Actions
+### Keypad — 8 Actions
 
 ```
 ┌────────┬─────────┬─────────┬───────────┐
-│  MODE  │ SESSION │  USAGE  │  ACTION 1 │
+│  MODE  │ SESSION │  USAGE  │  GO ON    │
 ├────────┼─────────┼─────────┼───────────┤
-│ ACT 2  │  ACT 3  │  STOP   │           │
+│ REVIEW │ COMMIT  │  CLEAR  │   STOP    │
 └────────┴─────────┴─────────┴───────────┘
 ```
 
@@ -277,8 +292,8 @@ sdc --command 'claude --model opus'  # custom Claude command
 | 0 | **Mode** | Toggle Default / Plan / Accept Edits |
 | 1 | **Session** | Project name + state + session switch |
 | 2 | **Usage** | Usage dashboard (5h / 7d / extra / session pages) |
-| 3–5 | **Quick Action ×3** | TPL1 / TPL2 / COMPACT when idle — YES / NO / ALWAYS on permission prompt |
-| 6 | **Stop** | Interrupt (Ctrl+C) |
+| 3–6 | **Quick Action ×4** | GO ON / REVIEW / COMMIT / CLEAR when idle — up to 4 options on permission/select prompt. 5+ options → 3 + MORE ▼ |
+| 7 | **Stop** | Interrupt (Ctrl+C when processing) / Escape (when idle) |
 
 ### Encoders — 4 Slots
 
@@ -295,32 +310,38 @@ The keypad reconfigures automatically based on agent state:
 
 **IDLE** — waiting for input:
 ```
-[ MODE  ] [ SESS  ] [ USAGE ] [ ACT 1 ]
-[ ACT 2 ] [ ACT 3 ] [ STOP  ] [       ]
+[ MODE  ] [ SESS  ] [ USAGE ] [GO ON  ]
+[REVIEW ] [COMMIT ] [ CLEAR ] [ STOP  ]
 ```
 
 **PROCESSING** — agent working:
 ```
-[  dim  ] [  dim  ] [  dim  ] [  dim  ]
-[  dim  ] [  dim  ] [ STOP  ] [       ]     ← only STOP active
+[ MODE  ] [ SESS  ] [ USAGE ] [START  ]
+[  dim  ] [  dim  ] [  dim  ] [ STOP  ]     ← STOP active, START spawns new session
 ```
 
 **AWAITING PERMISSION** — Yes/No/Always:
 ```
 [ MODE  ] [ SESS  ] [ USAGE ] [  YES  ]
-[  NO   ] [ALWAYS ] [ STOP  ] [       ]
+[  NO   ] [ALWAYS ] [  dim  ] [ STOP  ]
 ```
 
-**AWAITING OPTION** — multi-choice:
+**AWAITING OPTION** — multi-choice (≤4):
 ```
 [ MODE  ] [ SESS  ] [ USAGE ] [ OPT 1 ]
-[ OPT 2 ] [ OPT 3 ] [ STOP  ] [       ]
+[ OPT 2 ] [ OPT 3 ] [ OPT 4 ] [ STOP  ]
+```
+
+**AWAITING OPTION** — multi-choice (5+):
+```
+[ MODE  ] [ SESS  ] [ USAGE ] [ OPT 1 ]
+[ OPT 2 ] [ OPT 3 ] [MORE ▼] [ STOP  ]
 ```
 
 **DISCONNECTED** — no session:
 ```
-[  dim  ] [  dim  ] [  dim  ] [  dim  ]
-[  dim  ] [  dim  ] [  dim  ] [       ]     ← all disabled
+[  dim  ] [  dim  ] [  dim  ] [START  ]
+[  dim  ] [  dim  ] [  dim  ] [  dim  ]     ← START available if configured
 ```
 
 ### Terminal Dial (E3) — iTerm Session Manager
@@ -422,7 +443,8 @@ AgentDeck/
 │   └── src/
 │       ├── index.ts              # Re-exports
 │       ├── states.ts             # State enum, transitions, StateSnapshot
-│       └── protocol.ts           # WebSocket event/command types, constants
+│       ├── protocol.ts           # WebSocket event/command types, constants
+│       └── voice-paths.ts        # Shared binary/model path constants (rec, whisper)
 │
 ├── bridge/                       # Bridge server (PTY + Hook + WS + Voice)
 │   └── src/
@@ -432,29 +454,50 @@ AgentDeck/
 │       ├── hook-server.ts        # HTTP POST receiver (Claude Code hooks)
 │       ├── state-machine.ts      # Hook + PTY event → state management
 │       ├── ws-server.ts          # WebSocket server (plugin comms)
+│       ├── session-registry.ts   # Multi-session registry (~/.agentdeck/sessions.json)
 │       ├── usage-tracker.ts      # Session usage tracking (tokens, cost)
+│       ├── usage-api.ts          # Anthropic API usage fetch (OAuth + Keychain)
 │       ├── voice.ts              # sox capture + whisper.cpp transcription
+│       ├── whisper-server-manager.ts  # Singleton whisper-server lifecycle (port 9100)
 │       ├── check-deps.ts         # Runtime dependency check
+│       ├── logger.ts             # Structured logging
 │       └── types.ts              # Bridge-local types + shared re-exports
 │
 ├── plugin/                       # Stream Deck SDK v2 plugin
 │   ├── src/
-│   │   ├── plugin.ts             # SDK entry, action registration
+│   │   ├── plugin.ts             # SDK entry, action registration, takeover guard
 │   │   ├── bridge-client.ts      # WebSocket client (auto-reconnect)
 │   │   ├── layout-manager.ts     # State-driven button/encoder layout
+│   │   ├── encoder-takeover.ts   # Encoder wide-canvas takeover (option/permission)
+│   │   ├── encoder-registry.ts   # String ID → action lookup (no stale references)
+│   │   ├── expanded-actions.ts   # 5+ option expanded keypad mode
+│   │   ├── label-summarizer.ts   # Haiku CLI fallback for long button labels
+│   │   ├── voice-local.ts        # Local voice recording (bridge-independent)
+│   │   ├── project-scanner.ts    # Project directory scanner
+│   │   ├── project-picker.ts     # Project/session picker UI
+│   │   ├── log.ts                # Plugin logger
 │   │   ├── actions/
-│   │   │   ├── response-button.ts    # Dynamic response button
-│   │   │   ├── stop-button.ts        # Ctrl+C interrupt
-│   │   │   ├── mode-dial.ts          # Mode encoder
-│   │   │   ├── option-dial.ts        # Option scroll/select encoder
-│   │   │   ├── history-dial.ts       # Prompt history encoder
-│   │   │   └── voice-dial.ts         # Voice input encoder
+│   │   │   ├── response-button.ts    # Quick Action buttons (×4, configurable)
+│   │   │   ├── stop-button.ts        # Interrupt / Escape
+│   │   │   ├── mode-button.ts        # Mode toggle (Default/Plan/Accept)
+│   │   │   ├── session-button.ts     # Session info + project switch
+│   │   │   ├── usage-button.ts       # Usage dashboard (animated water gauge)
+│   │   │   ├── option-dial.ts        # Action encoder: scroll options / cycle prompts
+│   │   │   ├── utility-dial.ts       # Utility encoder: volume/mic/media/timer
+│   │   │   ├── iterm-dial.ts         # Terminal encoder: iTerm session manager
+│   │   │   └── voice-dial.ts         # Voice encoder: push-to-talk + transcription
 │   │   └── renderers/
-│   │       ├── button-renderer.ts    # SVG button image generation
-│   │       └── lcd-renderer.ts       # LCD strip feedback
+│   │       ├── button-renderer.ts    # SVG button image (pixel-aware text + abbreviation)
+│   │       ├── option-renderer.ts    # Encoder LCD option list (wide canvas)
+│   │       ├── response-renderer.ts  # Quick Action button state rendering
+│   │       ├── utility-renderer.ts   # Utility mode LCD panels
+│   │       ├── iterm-renderer.ts     # Terminal session LCD panel
+│   │       ├── voice-renderer.ts     # Voice status / transcription LCD
+│   │       └── text-utils.ts         # CJK-aware text measurement + wrapping
 │   ├── .sdPlugin/
 │   │   ├── manifest.json         # Stream Deck plugin manifest
 │   │   ├── bin/                  # Build output (plugin.js)
+│   │   ├── layouts/              # Encoder LCD layout (voice-layout.json)
 │   │   └── static/imgs/         # Icon assets
 │   └── rollup.config.mjs        # Bundle config
 │
@@ -463,7 +506,7 @@ AgentDeck/
 │       └── install.ts            # Register/unregister hooks in settings.local.json
 │
 ├── config/
-│   ├── prompt-templates.json     # Prompt templates (dynamic button labels)
+│   ├── prompt-templates.json     # Prompt templates (encoder prompt cycling)
 │   └── default-settings.json     # Defaults (port, voice, timeouts)
 │
 ├── scripts/
@@ -483,9 +526,22 @@ AgentDeck/
 
 ## Configuration
 
+### Quick Action Buttons
+
+The four Quick Action buttons (slots 3–6) are configurable via the Stream Deck Property Inspector. Defaults:
+
+| Slot | Label | Action |
+|------|-------|--------|
+| 3 | GO ON | `continue` (sends prompt to continue) |
+| 4 | REVIEW | `/review` |
+| 5 | COMMIT | `/commit` |
+| 6 | CLEAR | `/clear` |
+
+Slot 3 also shows **START** when disconnected (spawns a new `sdc` session).
+
 ### Prompt Templates
 
-Edit `config/prompt-templates.json` to customize the dynamic buttons shown during IDLE state:
+Edit `config/prompt-templates.json` to customize the prompts cycled by the **Action encoder** (E2) rotate:
 
 ```json
 {
@@ -514,7 +570,10 @@ Edit `config/prompt-templates.json` to customize the dynamic buttons shown durin
 | "Is whisper.cpp installed?" | whisper.cpp missing | See [Voice Setup](#4-voice-setup-optional) |
 | Voice transcription very slow / timeout | x86 whisper-cli (no Metal GPU) | Install arm64 Homebrew + whisper-cpp. See [Voice Setup](#4-voice-setup-optional) |
 | `whisper-cli: arm64=false, metal=false` | Using x86 binary through Rosetta | Install arm64 Homebrew at `/opt/homebrew/` |
-| Plugin not in Stream Deck app | Plugin not linked | Restart app, re-run `streamdeck link` |
+| Plugin not in Stream Deck app | Plugin not linked | Restart Stream Deck app, then `cd plugin && streamdeck link .sdPlugin` |
+| Hooks not firing | Hooks not installed or stale | `node hooks/dist/install.js` (re-installs all 7 hooks) |
+| Need to remove hooks | Uninstalling AgentDeck | `node hooks/dist/install.js uninstall` |
+| Plugin loads but buttons blank | Plugin needs rebuild | `pnpm build && pnpm generate-icons`, restart Stream Deck app |
 
 ### tmux -CC Compatibility
 
@@ -557,6 +616,19 @@ pnpm -r --parallel dev    # Watch mode for all packages
 cd plugin && pnpm build   # Rebuild plugin only
 cd bridge && pnpm build   # Rebuild bridge only
 pnpm -r typecheck         # Type check without building
+```
+
+### Testing
+
+```bash
+pnpm test                 # Run all tests (vitest)
+pnpm test -- --watch      # Watch mode
+```
+
+Tests cover output parsing, state machine transitions, hook installation, option rendering, and text utilities. Quick smoke test after changes:
+
+```bash
+pnpm build && pnpm test && sdc status
 ```
 
 ### Debugging
