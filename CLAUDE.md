@@ -47,15 +47,16 @@ sdc stop           # stop bridge and session
 - **pnpm workspaces** for monorepo management
 - **ES modules** throughout (type: "module")
 - **Node16 module resolution** in TypeScript
-- **Port 9120–9129** for multi-session (base 9120, auto-increment). `AGENTDECK_PORT` env var injected into Claude process so hooks POST to correct bridge
+- **Port 9120–9139** for multi-session (base 9120, auto-increment, max 20). `AGENTDECK_PORT` env var injected into Claude process so hooks POST to correct bridge. **Whisper-server** uses fixed singleton port **9100** (`~/.agentdeck/whisper-server.json` info file for discovery, last session exit kills server)
 - **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
-- **sox/rec** for audio capture, **whisper.cpp** for transcription
+- **sox/rec** for audio capture, **whisper-server** for transcription (싱글톤 포트 9100, 세션 간 공유, `detached` 프로세스). 미설치 시 **whisper-cli** 폴백. GPU 메모리 ~1.8GB (세션 수 무관, 1 인스턴스)
 - Hook scripts use `|| true` to avoid blocking Claude when bridge is down
 - **Action ID pattern**: All SD actions store string IDs and use `getActionById()` — never store action object references
 - **Plugin UUID**: `bound.serendipity.agentdeck` (확정 — 배포 후 변경 불가)
 - **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks)
 - **User data dir**: `~/.agentdeck/sessions.json`
 - **BillingType detection**: PTY `model_info` parser event의 `plan` 필드로 subscription/api/unknown 판별. API 사용자는 OAuth fetch 스킵 + session 페이지만 표시
+- **Encoder LCD design**: 모든 인코더 LCD는 SVG pixmap 렌더링 (`voice-layout.json` 공용). 배경 `#0f172a`, 14px 가운데 정렬 헤더, icon+value 가운데 그룹, 2px accent bar 패턴 통일. Renderer는 `plugin/src/renderers/{name}-renderer.ts` 순수 함수로 분리. Utility 모드는 clean 영문 title + emoji icon + value 구조 통일
 
 ## v3 Layout (0.3.0)
 
@@ -63,20 +64,20 @@ sdc stop           # stop bridge and session
 
 | Slot | Action | Description |
 |------|--------|-------------|
-| 0 | MODE | Mode toggle (Default/Plan/Accept) |
-| 1 | SESSION & STATUS | Project + state + session switch (merged from v2 Session + Status) |
-| 2 | USAGE | Usage dashboard (5h/7d/extra/session pages) |
-| 3-5 | DYNAMIC ×3 | TPL1/TPL2/COMPACT (idle) or YES/NO/ALWAYS (permission) |
-| 6 | STOP / ESC | Interrupt (processing) or Escape (awaiting prompt) |
+| 0 | Mode | Mode toggle (Default/Plan/Accept) |
+| 1 | Session | Project + state + session switch |
+| 2 | Usage | Usage dashboard (5h/7d/extra/session pages) |
+| 3-5 | Quick Action ×3 | TPL1/TPL2/COMPACT (idle) or YES/NO/ALWAYS (permission) |
+| 6 | Stop | Interrupt (processing) or Escape (awaiting prompt) |
 
 **Encoders (4 slots):**
 
-| E# | Action | Rotate | Push |
-|----|--------|--------|------|
-| E1 | Option Selector | Scroll options | Select |
-| E2 | Voice Input | Scroll transcription | Hold=record, tap(<500ms)=cancel |
-| E3 | Quick Command | Cycle /compact /status /cost /clear /model | Execute |
-| E4 | (empty) | — | — |
+| E# | Action | Rotate | Push | Touch |
+|----|--------|--------|------|-------|
+| E1 | Utility | Adjust value | Toggle/Action | Switch mode |
+| E2 | Action | Scroll options / cycle prompts | Send prompt / Confirm | Same as push |
+| E3 | Terminal | Switch session | Activate / Attach tmux | — |
+| E4 | Voice | Scroll text | Hold=record, tap(<500ms)=cancel | — |
 
 ## References
 
@@ -89,9 +90,9 @@ sdc stop           # stop bridge and session
 ## v3 Changes from v2
 
 - **Encoder LCD fix**: Stale action references → string ID + `getActionById()` pattern
-- **Session & Status merged**: One button shows project/mode/model (idle) or state labels (running/permission/etc)
+- **Session**: One button shows project/mode/model (idle) or state labels (running/permission/etc)
 - **SEND removed**: Replaced with /compact quick button
 - **Extra Usage**: API usage page for pay-per-use billing (`extra_usage`)
-- **Quick Command dial**: New E3 encoder for slash commands
+- **Terminal dial**: iTerm session switcher on E3
 - **Voice UX**: Min recording time, pulsing indicator bar, error clear, scroll transcription
 - **Mode debounce**: 100ms bridge debounce + 2s parser timeout fallback for default mode detection

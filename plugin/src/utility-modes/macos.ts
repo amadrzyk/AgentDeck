@@ -151,7 +151,7 @@ export interface ItermSession {
 const TMUX_PATHS = ['/usr/local/bin/tmux', '/opt/homebrew/bin/tmux', '/usr/bin/tmux'];
 
 /** Build tty → tmux session name map from `tmux list-clients`. */
-async function getTmuxSessionMap(): Promise<Map<string, string>> {
+export async function getTmuxSessionMap(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   for (const tmuxBin of TMUX_PATHS) {
     try {
@@ -260,15 +260,13 @@ export async function getActiveItermTty(): Promise<string | null> {
   }
 }
 
-/** Open a new iTerm2 tab and attach to a tmux session. */
+/** Open a new iTerm2 window and attach to a tmux session using iTerm2's tmux integration (-CC). */
 export async function attachTmuxInIterm(sessionName: string): Promise<void> {
   await osascript(
     'tell application "iTerm2"\n' +
     '  activate\n' +
-    '  tell current window\n' +
-    '    set newTab to (create tab with default profile)\n' +
-    `    tell current session of newTab to write text "tmux attach -t ${sessionName.replace(/"/g, '\\"')}"\n` +
-    '  end tell\n' +
+    '  set newWin to (create window with default profile)\n' +
+    `  tell current session of current tab of newWin to write text "tmux -CC attach -t ${sessionName.replace(/"/g, '\\"')}"\n` +
     'end tell',
   ).catch(() => {});
 }
