@@ -382,6 +382,7 @@ function findLatestSessionPort(): number | undefined {
 
 streamDeck.connect().then(() => {
   dinfo('Plugin', 'Stream Deck connected, starting bridge client');
+  bridge.scanLatestPort = () => findLatestSessionPort();
   const port = findLatestSessionPort();
   bridge.connect(port);
 });

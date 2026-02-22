@@ -57,8 +57,11 @@ const IDLE_DEBOUNCE_MS = 300;
 const OPTION_DEBOUNCE_MS = 150;
 const SUGGESTION_DEBOUNCE_MS = 500;
 
-// Ghost text: dim(2), bright black(90), 256-color grays(240-255)
-const GHOST_TEXT_RE = /\x1b\[(?:2|90|38;5;2[4-5]\d)m([^\x1b]+)/;
+// Ghost text: bright black(90), 256-color grays(232-255)
+// NOTE: dim(2) excluded — used broadly in Claude Code UI (status bars, hints, quoted text)
+// Ghost text is always single-line, so \n/\r excluded from capture group
+// Global flag: ghost text may span multiple ANSI segments (e.g. "다\x1b[90m시 시도해봐")
+const GHOST_TEXT_RE = /\x1b\[(?:90|38;5;2(?:[3-5]\d))m([^\x1b\n\r]+)/g;
 
 export class OutputParser extends EventEmitter {
   private buffer = '';
@@ -101,20 +104,61 @@ export class OutputParser extends EventEmitter {
   private detectGhostText(rawData: string): void {
     if (!this.seenFirstIdle) return;
 
-    const match = rawData.match(GHOST_TEXT_RE);
-    if (!match) return;
-
-    let text = match[1].trim();
-    if (!text || text.length < 2) return;
-
-    // Unwrap Try "..." wrapper (including smart quotes)
-    const tryMatch = text.match(/^Try\s+["\u201C](.+)["\u201D]$/i);
-    if (tryMatch) {
-      text = tryMatch[1].trim();
+    // Strategy 1 (high confidence): "Try ..." visible in clean text on the prompt line.
+    // Claude Code renders ghost text as `❯ Try "command"` — detectable without ANSI parsing.
+    // This handles the most common case and has zero false positives.
+    const clean = stripAnsi(rawData);
+    const tryLineMatch = clean.match(/^[❯>][ \t\u00A0]+Try\s+["\u201C](.+)["\u201D]/m);
+    if (tryLineMatch) {
+      debug('Parser', `ghostText strategy1 HIT: "${tryLineMatch[1].trim()}"`);
+      this.scheduleSuggestion(tryLineMatch[1].trim());
+      return;
     }
+
+    // Strategy 2 (ANSI fallback): gray segments, but ONLY on the line containing ❯.
+    // This prevents false positives from diff line numbers, status bars, etc.
+    // Split by newlines; PTY may use \r to rewrite current line — split on \n only.
+    const promptLineRaw = rawData.split('\n').find(line => /[❯>][ \t\u00A0]/.test(stripAnsi(line)));
+    if (!promptLineRaw) {
+      // Debug: log lines that contain prompt chars for diagnosis
+      const hasPromptChar = clean.includes('❯') || clean.includes('>');
+      if (hasPromptChar && clean.length < 200) {
+        const escaped = rawData.replace(/\x1b/g, '\\e').replace(/[\n\r]/g, '\\n').slice(0, 300);
+        debug('Parser', `ghostText: prompt char found but no ❯-line match. raw=${escaped}`);
+      }
+      return;
+    }
+
+    GHOST_TEXT_RE.lastIndex = 0;
+    const segments: string[] = [];
+    for (const m of promptLineRaw.matchAll(GHOST_TEXT_RE)) {
+      segments.push(m[1]);
+    }
+    if (segments.length === 0) {
+      const escaped = promptLineRaw.replace(/\x1b/g, '\\e').replace(/[\n\r]/g, '\\n').slice(0, 300);
+      debug('Parser', `ghostText: ❯-line found but no gray segments. raw=${escaped}`);
+      return;
+    }
+
+    debug('Parser', `ghostText strategy2 HIT: segments=${segments.length} "${segments.join('').trim().slice(0, 60)}"`);
+    this.scheduleSuggestion(segments.join('').trim());
+  }
+
+  /** Validate and debounce a candidate suggestion text */
+  private scheduleSuggestion(text: string): void {
+    if (!text || text.length < 3 || text.length > 200) return;
+
+    // Reject pure numbers (e.g. diff line numbers like "65")
+    if (/^\d+$/.test(text)) return;
+
+    // Must contain at least one word sequence of 2+ characters (not just symbols/spaces)
+    if (!/\w{2,}/.test(text)) return;
 
     // Filter out UI chrome fragments
     if (/^[?]$|^esc\b|^shift\b|^ctrl\b|^enter\b|for\s+shortcuts/i.test(text)) return;
+
+    // Filter out file paths (e.g. "/Users/foo/project" from PTY screen redraws)
+    if (/^[~/]/.test(text) && /\//.test(text)) return;
 
     // Skip if same as last suggestion
     if (text === this.lastSuggestedPrompt) return;
@@ -281,7 +325,7 @@ export class OutputParser extends EventEmitter {
         const parsed = this.parseOptions(this.buffer.slice(-1000));
         if (parsed.options.length > 0) {
           // Check if this looks like a permission prompt (Yes/No style from tool approval)
-          if (this.looksLikePermission(parsed.options)) {
+          if (this.looksLikePermission(parsed.options) && !this.isCursorSelectionUI()) {
             const options = parsed.options.map(opt => ({
               ...opt,
               shortcut: opt.shortcut || this.inferShortcut(opt.label),
@@ -529,6 +573,12 @@ export class OutputParser extends EventEmitter {
     return lower.charAt(0);
   }
 
+  /** Check if the current buffer indicates a cursor-navigable selection UI (Enter to confirm) */
+  private isCursorSelectionUI(): boolean {
+    const tail = this.buffer.slice(-500);
+    return /Enter\s*to\s*confirm/i.test(tail);
+  }
+
   /** Check if numbered options look like a permission prompt (Yes/No/Always style) */
   private looksLikePermission(options: PromptOption[]): boolean {
     const labels = options.map(o => o.label.toLowerCase());
@@ -574,7 +624,7 @@ export class OutputParser extends EventEmitter {
         byIndex.set(idx, { index: idx, label: bm[2].trim() });
       }
     }
-    return { options: Array.from(byIndex.values()), navigable, cursorIndex };
+    return { options: Array.from(byIndex.values()).sort((a, b) => a.index - b.index), navigable, cursorIndex };
   }
 
   /**

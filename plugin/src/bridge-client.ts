@@ -15,6 +15,9 @@ export class BridgeClient extends EventEmitter {
   private _port = BRIDGE_WS_PORT;
   private _connectGeneration = 0;
 
+  /** Optional callback to rescan sessions.json for the latest port */
+  scanLatestPort: (() => number | undefined) | null = null;
+
   connect(port?: number): void {
     if (port != null) this._port = port;
     dlog('Bridge', `connect(port=${this._port})`);
@@ -24,6 +27,14 @@ export class BridgeClient extends EventEmitter {
     this.attemptConnect(gen);
     this.reconnectTimer = setInterval(() => {
       if (!this._connected && gen === this._connectGeneration) {
+        // Rescan sessions to discover newly started bridges
+        if (this.scanLatestPort) {
+          const latestPort = this.scanLatestPort();
+          if (latestPort && latestPort !== this._port) {
+            dlog('Bridge', `rescan: new port ${latestPort} (was ${this._port})`);
+            this._port = latestPort;
+          }
+        }
         this.attemptConnect(gen);
       }
     }, RECONNECT_INTERVAL_MS);

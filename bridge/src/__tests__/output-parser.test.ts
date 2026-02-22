@@ -719,14 +719,26 @@ describe('OutputParser', () => {
       expect(events[0].plan).toBeNull();
     });
 
-    it('emits model_info only once (caches)', () => {
+    it('emits model_info only once for same model (caches)', () => {
+      const p = createParser();
+      const events = collectEvents(p, 'model_info');
+
+      p.feed('Opus 4.6 \u00B7 Claude Max\n');
+      p.feed('Opus 4.6 \u00B7 Claude Max\n');
+
+      expect(events).toHaveLength(1);
+    });
+
+    it('re-emits model_info when model changes', () => {
       const p = createParser();
       const events = collectEvents(p, 'model_info');
 
       p.feed('Opus 4.6 \u00B7 Claude Max\n');
       p.feed('Sonnet 4.6\n');
 
-      expect(events).toHaveLength(1);
+      expect(events).toHaveLength(2);
+      expect(events[0].model).toContain('Opus');
+      expect(events[1].model).toContain('Sonnet');
     });
 
     it('parses ANSI-stripped model_info', () => {
@@ -1440,6 +1452,37 @@ describe('OutputParser', () => {
       expect(permEvents).toHaveLength(0);
     });
 
+    it('does NOT reclassify cursor-selection UI with "Enter to confirm" as permission', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const permEvents = collectEvents(p, 'permission_prompt');
+      const optEvents = collectEvents(p, 'option_prompt');
+
+      // Security Guide: cursor-navigable Yes/No with "Enter to confirm"
+      p.feed('❯ 1. Yes, I trust this folder\n  2. No, exit\n\nEnter to confirm · Esc to cancel\n');
+      vi.advanceTimersByTime(200);
+
+      expect(optEvents).toHaveLength(1);
+      expect(permEvents).toHaveLength(0);
+      expect(optEvents[0].navigable).toBe(true);
+    });
+
+    it('detects cursor-selection UI even when ANSI stripping removes spaces', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const permEvents = collectEvents(p, 'permission_prompt');
+      const optEvents = collectEvents(p, 'option_prompt');
+
+      // Real PTY output: ANSI cursor positioning strips spaces between words
+      p.feed('❯1.Yes,Itrustthisfolder\n\n\n2.No,exit\n\n\n\n\n\nEntertoconfirm·Esctocancel\n');
+      vi.advanceTimersByTime(200);
+
+      expect(optEvents).toHaveLength(1);
+      expect(permEvents).toHaveLength(0);
+    });
+
     it('infers shortcuts for reclassified permission options', () => {
       const p = armParser();
       vi.advanceTimersByTime(500);
@@ -1463,27 +1506,31 @@ describe('OutputParser', () => {
   // === Ghost Text / Suggested Prompt ===
 
   describe('ghost text suggestion', () => {
-    it('detects SGR 2 (dim) ghost text', () => {
+    // All ghost text tests use realistic PTY format: ❯ prompt line + SGR 90 (bright black)
+    // Dim (\x1b[2m) is intentionally excluded from detection — used broadly in Claude Code UI
+
+    it('detects SGR 90 (bright black) ghost text on prompt line', () => {
       const p = armParser();
       vi.advanceTimersByTime(500);
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      // Raw ANSI: dim text "refactor the code"
-      p.feed('\x1b[2mrefactor the code\x1b[0m');
+      // Realistic PTY: prompt char + gray ghost text on same line
+      p.feed('❯ \x1b[90mrefactor the code\x1b[0m');
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(1);
       expect(events[0].text).toBe('refactor the code');
     });
 
-    it('detects SGR 90 (bright black) ghost text', () => {
+    it('detects ghost text via Strategy 1 (Try "..." in clean text)', () => {
       const p = armParser();
       vi.advanceTimersByTime(500);
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      p.feed('\x1b[90mwrite unit tests\x1b[0m');
+      // Strategy 1: clean text matches ❯ Try "..." — no ANSI gray needed
+      p.feed('❯ Try \u201Cwrite unit tests\u201D');
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(1);
@@ -1496,7 +1543,7 @@ describe('OutputParser', () => {
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      p.feed('\x1b[2mTry \u201Crefactor the code\u201D\x1b[0m');
+      p.feed('❯ \x1b[90mTry \u201Crefactor the code\u201D\x1b[0m');
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(1);
@@ -1509,7 +1556,7 @@ describe('OutputParser', () => {
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      p.feed('\x1b[2mTry "fix the bug"\x1b[0m');
+      p.feed('❯ \x1b[90mTry "fix the bug"\x1b[0m');
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(1);
@@ -1520,7 +1567,7 @@ describe('OutputParser', () => {
       const p = createParser(); // no idle yet
       const events = collectEvents(p, 'suggested_prompt');
 
-      p.feed('\x1b[2mrefactor the code\x1b[0m');
+      p.feed('❯ \x1b[90mrefactor the code\x1b[0m');
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(0);
@@ -1533,7 +1580,7 @@ describe('OutputParser', () => {
       const events = collectEvents(p, 'suggested_prompt');
 
       // First, establish a suggestion
-      p.feed('\x1b[2mrefactor the code\x1b[0m');
+      p.feed('❯ \x1b[90mrefactor the code\x1b[0m');
       vi.advanceTimersByTime(600);
       expect(events).toHaveLength(1);
       expect(events[0].text).toBe('refactor the code');
@@ -1550,17 +1597,29 @@ describe('OutputParser', () => {
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      // Rapid-fire ghost text updates
-      p.feed('\x1b[2mfirst\x1b[0m');
+      // Rapid-fire ghost text updates on prompt line
+      p.feed('❯ \x1b[90mfirst\x1b[0m');
       vi.advanceTimersByTime(100);
-      p.feed('\x1b[2msecond\x1b[0m');
+      p.feed('❯ \x1b[90msecond\x1b[0m');
       vi.advanceTimersByTime(100);
-      p.feed('\x1b[2mthird\x1b[0m');
+      p.feed('❯ \x1b[90mthird\x1b[0m');
       vi.advanceTimersByTime(600);
 
       // Only the last one should have been emitted
       expect(events).toHaveLength(1);
       expect(events[0].text).toBe('third');
+    });
+
+    it('ignores dim (SGR 2) text — not a ghost text signal', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Dim text without ❯ prompt — should NOT trigger (dim excluded from detection)
+      p.feed('\x1b[2msome dim text\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
     });
 
     it('filters UI chrome fragments', () => {
@@ -1569,15 +1628,35 @@ describe('OutputParser', () => {
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      p.feed('\x1b[2m?\x1b[0m');
+      // Single char "?" — too short
+      p.feed('❯ \x1b[90m?\x1b[0m');
       vi.advanceTimersByTime(600);
       expect(events).toHaveLength(0);
 
-      p.feed('\x1b[90mesc to cancel\x1b[0m');
+      // "esc to cancel" — UI chrome
+      p.feed('❯ \x1b[90mesc to cancel\x1b[0m');
       vi.advanceTimersByTime(600);
       expect(events).toHaveLength(0);
 
-      p.feed('\x1b[2mshift+tab to cycle\x1b[0m');
+      // "shift+tab to cycle" — UI chrome
+      p.feed('❯ \x1b[90mshift+tab to cycle\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
+    });
+
+    it('filters file paths (false positive from screen redraws)', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Absolute path — common false positive from PTY redraws mixing prompt + banner
+      p.feed('❯ \x1b[90m/Users/foo/github/MyProject\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
+
+      // Home-relative path
+      p.feed('❯ \x1b[90m~/github/MyProject\x1b[0m');
       vi.advanceTimersByTime(600);
       expect(events).toHaveLength(0);
     });
@@ -1588,12 +1667,57 @@ describe('OutputParser', () => {
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      // 256-color gray (e.g. color 245)
-      p.feed('\x1b[38;5;245mexplain this function\x1b[0m');
+      // 256-color gray (e.g. color 245) on prompt line
+      p.feed('❯ \x1b[38;5;245mexplain this function\x1b[0m');
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(1);
       expect(events[0].text).toBe('explain this function');
+    });
+
+    it('handles multi-segment ghost text on prompt line', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Ghost text split across multiple ANSI segments (e.g. Korean + English)
+      p.feed('❯ \x1b[90mrefactor \x1b[90mthe code\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('refactor the code');
+    });
+
+    it('ignores ghost text on non-prompt lines', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Gray text NOT on ❯ line — should be ignored (e.g. diff line numbers)
+      p.feed('some output\n\x1b[90m65\x1b[0m\n');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+  });
+
+  describe('option index ordering', () => {
+    it('returns options sorted by index even when TUI lines arrive out of order', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // TUI buffer has options in scrambled order: 2, 1, 3
+      p.feed('  2. Sonnet\n  1. Default\n  3. Haiku\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      const opts: PromptOption[] = events[0].options;
+      expect(opts).toHaveLength(3);
+      expect(opts[0]).toMatchObject({ index: 0, label: 'Default' });
+      expect(opts[1]).toMatchObject({ index: 1, label: 'Sonnet' });
+      expect(opts[2]).toMatchObject({ index: 2, label: 'Haiku' });
     });
   });
 });
