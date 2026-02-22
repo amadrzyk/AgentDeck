@@ -336,8 +336,8 @@ async function startBridge(port: number, command: string): Promise<void> {
         const cur = stateMachine.getCursorIndex();
         const newIdx = total > 0
           ? (cmd.direction === 'up'
-              ? (cur - 1 + total) % total
-              : (cur + 1) % total)
+              ? Math.max(cur - 1, 0)
+              : Math.min(cur + 1, total - 1))
           : cur;
         stateMachine.updateCursorIndex(newIdx);
         debug('sdc', `navigate_option: ${cmd.direction} cursor=${cur}->${newIdx}`);

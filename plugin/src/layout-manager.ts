@@ -122,24 +122,8 @@ export class LayoutManager {
    * Returns a ButtonConfig for the stop slot (slot 6) when it should show
    * a 4th option or a MORE button instead of ESC/STOP.
    */
-  getStopSlotOverride(state: State, options: PromptOption[]): ButtonConfig | null {
-    if (!isInteractive(state)) return null;
-
-    // Permission/diff prompts always use ≤3 options — no override needed
-    if (state === State.AWAITING_PERMISSION || state === State.AWAITING_DIFF) return null;
-
-    if (options.length === 4) {
-      return this.optionToConfig(options[3], state);
-    }
-    if (options.length >= 5) {
-      return {
-        title: 'MORE \u25BC',
-        color: '#334155',
-        textColor: '#94a3b8',
-        enabled: true,
-        action: 'expand_options',
-      };
-    }
+  getStopSlotOverride(_state: State, _options: PromptOption[]): ButtonConfig | null {
+    // STOP/ESC always preserved — MORE moved to 3rd Quick Action slot
     return null;
   }
 
@@ -207,16 +191,30 @@ export class LayoutManager {
   }
 
   private optionButtons(options: PromptOption[]): ButtonConfig[] {
-    // Show first 3 options in slots 3-5 using optionToConfig for rich display
-    const buttons: ButtonConfig[] = [];
-    for (let i = 0; i < 3; i++) {
-      if (i < options.length) {
-        buttons.push(this.optionToConfig(options[i], State.AWAITING_OPTION));
-      } else {
-        buttons.push(DIM);
+    // ≤3 options: show all in slots 3-5
+    if (options.length <= 3) {
+      const buttons: ButtonConfig[] = [];
+      for (let i = 0; i < 3; i++) {
+        if (i < options.length) {
+          buttons.push(this.optionToConfig(options[i], State.AWAITING_OPTION));
+        } else {
+          buttons.push(DIM);
+        }
       }
+      return buttons;
     }
-    return buttons;
+    // 4+ options: first 2 options + MORE in 3rd slot (STOP preserved in slot 6)
+    return [
+      this.optionToConfig(options[0], State.AWAITING_OPTION),
+      this.optionToConfig(options[1], State.AWAITING_OPTION),
+      {
+        title: 'MORE \u25BC',
+        color: '#334155',
+        textColor: '#94a3b8',
+        enabled: true,
+        action: 'expand_options',
+      },
+    ];
   }
 
   private diffButtons(options: PromptOption[]): ButtonConfig[] {

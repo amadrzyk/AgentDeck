@@ -420,7 +420,7 @@ export class StateMachine extends EventEmitter {
   /** Update cursor index (called by bridge when navigate_option moves the PTY cursor) */
   updateCursorIndex(idx: number): void {
     this.cursorIndex = idx;
-    // No snapshot emit — cursor tracking is internal, avoid unnecessary broadcasts
+    this.emitSnapshot();
   }
 
   getCursorIndex(): number {

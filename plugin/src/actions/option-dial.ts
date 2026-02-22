@@ -70,6 +70,8 @@ export function updateOptionDialState(
   suggestedPrompt?: string,
 ): void {
   const prevSuggestion = currentSuggestedPrompt;
+  const prevState = currentState;
+  const prevOptions = currentOptions;
   currentState = state;
   currentOptions = options;
   currentQuestion = question;
@@ -91,7 +93,7 @@ export function updateOptionDialState(
     // Sync cursor from PTY if provided, otherwise reset to 0 on new prompt
     if (cursorIdx !== undefined && cursorIdx >= 0 && cursorIdx < options.length) {
       selectedIndex = cursorIdx;
-    } else if (state !== currentState || options !== currentOptions) {
+    } else if (state !== prevState || options !== prevOptions) {
       selectedIndex = 0;
     }
     dlog('ResDial', `options received: ${options.length} items, nav=${navigable}, cursor=${selectedIndex}`);
@@ -216,9 +218,10 @@ export function handleTakeoverPush(): void {
     currentOptions.length > 0
   ) {
     const opt = currentOptions[selectedIndex];
-    if (opt?.shortcut) {
-      dlog('ResDial', `takeoverPush: respond "${opt.label}" (${opt.shortcut})`);
-      bridge.send({ type: 'respond', value: opt.shortcut });
+    const shortcut = opt?.shortcut || opt?.label?.charAt(0).toLowerCase();
+    if (shortcut) {
+      dlog('ResDial', `takeoverPush: respond "${opt.label}" (${shortcut})`);
+      bridge.send({ type: 'respond', value: shortcut });
     }
   }
 }
@@ -230,10 +233,19 @@ export function handleTakeoverPush(): void {
 export function handleTakeoverRotate(ticks: number): void {
   if (!isInteractive() || currentOptions.length === 0) return;
 
-  if (ticks > 0) {
-    selectedIndex = (selectedIndex + 1) % currentOptions.length;
+  if (navigable) {
+    // Clamp: stop at boundaries instead of wrapping
+    if (ticks > 0) {
+      selectedIndex = Math.min(selectedIndex + 1, currentOptions.length - 1);
+    } else {
+      selectedIndex = Math.max(selectedIndex - 1, 0);
+    }
   } else {
-    selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
+    if (ticks > 0) {
+      selectedIndex = (selectedIndex + 1) % currentOptions.length;
+    } else {
+      selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
+    }
   }
 
   if (navigable) {
@@ -291,10 +303,19 @@ export class ResponseDialAction extends SingletonAction {
 
     // Interactive mode: scroll options
     if (isInteractive() && currentOptions.length > 0) {
-      if (ev.payload.ticks > 0) {
-        selectedIndex = (selectedIndex + 1) % currentOptions.length;
+      if (navigable) {
+        // Clamp: stop at boundaries instead of wrapping
+        if (ev.payload.ticks > 0) {
+          selectedIndex = Math.min(selectedIndex + 1, currentOptions.length - 1);
+        } else {
+          selectedIndex = Math.max(selectedIndex - 1, 0);
+        }
       } else {
-        selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
+        if (ev.payload.ticks > 0) {
+          selectedIndex = (selectedIndex + 1) % currentOptions.length;
+        } else {
+          selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
+        }
       }
       if (navigable) {
         const dir = ev.payload.ticks > 0 ? 'down' : 'up';
@@ -332,9 +353,10 @@ export class ResponseDialAction extends SingletonAction {
       currentOptions.length > 0
     ) {
       const opt = currentOptions[selectedIndex];
-      if (opt?.shortcut) {
-        dlog('ResDial', `push: respond "${opt.label}" (${opt.shortcut})`);
-        bridge.send({ type: 'respond', value: opt.shortcut });
+      const shortcut = opt?.shortcut || opt?.label?.charAt(0).toLowerCase();
+      if (shortcut) {
+        dlog('ResDial', `push: respond "${opt.label}" (${shortcut})`);
+        bridge.send({ type: 'respond', value: shortcut });
       }
     } else if (currentState === State.IDLE && bridge) {
       const { list } = getEffectivePrompts();
