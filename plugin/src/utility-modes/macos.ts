@@ -3,11 +3,6 @@
  * Uses execFile (no shell) for safety. Debounced execution for rapid dial rotation.
  */
 import { execFile, spawn } from 'child_process';
-import { appendFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-
-const PASTE_LOG = join(homedir(), '.agentdeck', 'paste-debug.log');
 
 // ---- Core executor ----
 
@@ -278,19 +273,22 @@ export async function attachTmuxInIterm(sessionName: string): Promise<void> {
 
 // ---- Clipboard Paste (STT) ----
 
-/** Copy text to clipboard and simulate Cmd+V to paste at current cursor position. */
+/**
+ * Paste text at current cursor position.
+ * iTerm2: use `write text` API directly.
+ * Other apps: copy to clipboard + notification (Cmd+V unreliable via System Events).
+ */
 export function pasteText(text: string): void {
   const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  appendFileSync(PASTE_LOG, `[${new Date().toISOString()}] pasteText called, text(${text.length}): "${text.slice(0, 80)}"\n`);
   osascript(
-    `set the clipboard to "${escaped}"\n` +
-    'delay 0.1\n' +
-    'tell application "System Events" to keystroke "v" using command down',
-  ).then(() => {
-    appendFileSync(PASTE_LOG, `[${new Date().toISOString()}] osascript OK\n`);
-  }).catch((err) => {
-    appendFileSync(PASTE_LOG, `[${new Date().toISOString()}] osascript FAILED: ${err}\n`);
-  });
+    `set frontApp to name of (info for (path to frontmost application))\n` +
+    `if frontApp is "iTerm.app" then\n` +
+    `  tell application "iTerm2" to tell current session of current tab of current window to write text "${escaped}"\n` +
+    `else\n` +
+    `  set the clipboard to "${escaped}"\n` +
+    `  display notification "Press ⌘V to paste" with title "AgentDeck" sound name "Pop"\n` +
+    `end if`,
+  ).catch(() => {});
 }
 
 // ---- Notification ----

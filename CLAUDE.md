@@ -50,6 +50,8 @@ sdc stop           # stop bridge and session
 - **Port 9120–9139** for multi-session (base 9120, auto-increment, max 20). `AGENTDECK_PORT` env var injected into Claude process so hooks POST to correct bridge. **Whisper-server** uses fixed singleton port **9100** (`~/.agentdeck/whisper-server.json` info file for discovery, last session exit kills server)
 - **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
 - **sox/rec** for audio capture, **whisper-server** for transcription (싱글톤 포트 9100, 세션 간 공유, `detached` 프로세스). 미설치 시 **whisper-cli** 폴백. GPU 메모리 ~1.8GB (세션 수 무관, 1 인스턴스)
+- **Voice local recording**: 브리지 연결 상태와 무관하게 항상 로컬 녹음. iTerm2 `create window with default profile command`로 `rec` 실행 (iTerm2 마이크 권한 상속). `pkill -INT`로 녹음 중지. RMS 무음 감지 (threshold 0.001). 전사 결과 전달: iTerm2 최전면 → `write text`, 기타 앱 → 클립보드 복사 + 알림
+- **Voice binary/model paths**: `shared/src/voice-paths.ts`에 `REC_CANDIDATES`, `WHISPER_CANDIDATES`, `MODEL_SEARCH_DIRS` 등 공유 상수 정의 — bridge/plugin 양쪽에서 import
 - Hook scripts use `|| true` to avoid blocking Claude when bridge is down
 - **Action ID pattern**: All SD actions store string IDs and use `getActionById()` — never store action object references
 - **Plugin UUID**: `bound.serendipity.agentdeck` (확정 — 배포 후 변경 불가)
@@ -77,7 +79,7 @@ sdc stop           # stop bridge and session
 | E1 | Utility | Adjust value | Toggle/Action | Switch mode |
 | E2 | Action | Scroll options / cycle prompts | Send prompt / Confirm | Same as push |
 | E3 | Terminal | Switch session | Activate / Attach tmux | — |
-| E4 | Voice | Scroll text | Hold=record, tap(<500ms)=cancel | — |
+| E4 | Voice | Scroll text | Hold=record, tap(<500ms)=cancel, VT push=send/paste | — |
 
 ## References
 
