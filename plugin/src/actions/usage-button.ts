@@ -51,12 +51,27 @@ let waveFrameFine = 0;     // 0-63, drives smooth wave sloshing (8s cycle at 8fp
 
 // Animation timer — runs while any usage button is visible
 let animInterval: ReturnType<typeof setInterval> | null = null;
+let waveAccum = 0; // float accumulator for fractional wave speed
+
+function getWaveParams(): { amp: number; speedMul: number } {
+  if (currentState !== State.PROCESSING) {
+    return { amp: 0, speedMul: 1 };
+  }
+  if (tokenDelta <= 0) {
+    return { amp: 2, speedMul: 0.5 };
+  }
+  const scaled = Math.min(8, 3 + Math.log10(Math.max(1, tokenDelta)) * 1.5);
+  const speed = Math.min(2, 0.8 + tokenDelta / 2000);
+  return { amp: scaled, speedMul: speed };
+}
 
 function startAnimLoop(): void {
   if (animInterval) return;
   animInterval = setInterval(() => {
     borderFrame++;
-    waveFrameFine = (waveFrameFine + 1) % 64;
+    const { speedMul } = getWaveParams();
+    waveAccum += speedMul;
+    waveFrameFine = Math.floor(waveAccum) % 64;
     refreshAll();
   }, 125); // 8fps
 }
@@ -312,9 +327,9 @@ function waterFillSvg(
   const clampedPct = Math.max(0, Math.min(100, pct));
   const fillY = Math.round(4 + (140 * (1 - clampedPct / 100)));
 
-  // Active = Claude is currently processing (most reliable signal)
+  // Wave amplitude and speed based on token activity
   const isActive = currentState === State.PROCESSING;
-  const amp = isActive ? 5 : 3;
+  const { amp } = getWaveParams();
   const phase = Math.sin((waveFrameFine / 64) * 2 * Math.PI);
   const a = phase * amp;
   const b = -phase * amp;
@@ -352,7 +367,9 @@ function waterFillSvg(
 
   // ---- Spinning border — only shown while tokens are being consumed ----
   const perim = 544;
-  const advPx = 45; // 1.5s/rev at 8fps
+  const advPx = tokenDelta > 0
+    ? Math.min(60, 30 + Math.log10(Math.max(1, tokenDelta)) * 10)
+    : 25;
   const dashLen = 160;
   const borderOffset = -((borderFrame * advPx) % perim);
   const borderOpacity = 0.92;

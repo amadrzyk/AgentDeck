@@ -70,19 +70,62 @@ export function svgToDataUrl(svg: string): string {
 
 function wrapText(text: string, maxChars: number): string[] {
   if (text.length <= maxChars) return [text];
-  const words = text.split(' ');
+
+  // Split into tokens: spaces, hyphens, underscores, and camelCase boundaries
+  const tokens = tokenize(text);
+
   const lines: string[] = [];
   let current = '';
-  for (const word of words) {
-    if (current.length + word.length + (current ? 1 : 0) > maxChars) {
+  for (const token of tokens) {
+    if (current.length + token.length > maxChars) {
       if (current) lines.push(current);
-      current = word;
+      current = token;
     } else {
-      current = current ? `${current} ${word}` : word;
+      current += token;
     }
   }
   if (current) lines.push(current);
-  return lines;
+
+  // Hard-break any line still exceeding maxChars
+  const result: string[] = [];
+  for (const line of lines) {
+    if (line.length <= maxChars) {
+      result.push(line);
+    } else {
+      for (let i = 0; i < line.length; i += maxChars) {
+        result.push(line.slice(i, i + maxChars));
+      }
+    }
+  }
+  return result;
+}
+
+/** Split text into wrap-friendly tokens at spaces, hyphens, underscores, and camelCase boundaries */
+function tokenize(text: string): string[] {
+  const tokens: string[] = [];
+  let buf = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    // Break after space, hyphen, underscore (keep delimiter with preceding token)
+    if (ch === ' ' || ch === '-' || ch === '_') {
+      buf += ch;
+      tokens.push(buf);
+      buf = '';
+    }
+    // camelCase boundary: lowercase followed by uppercase
+    else if (
+      buf.length > 0 &&
+      ch >= 'A' && ch <= 'Z' &&
+      buf[buf.length - 1] >= 'a' && buf[buf.length - 1] <= 'z'
+    ) {
+      tokens.push(buf);
+      buf = ch;
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf) tokens.push(buf);
+  return tokens;
 }
 
 function escapeXml(str: string): string {

@@ -7,6 +7,7 @@ import {
   renderFocusPanel,
   renderListPanel,
   renderDetailPanel,
+  renderWideOptionList,
 } from './renderers/option-renderer.js';
 import { resetItermLayout } from './actions/iterm-dial.js';
 import { dlog } from './log.js';
@@ -15,6 +16,11 @@ const PIXMAP_LAYOUT = 'layouts/option-pixmap-layout.json';
 
 let active = false;
 let generation = 0;
+
+// Wide scroll state for option list (E2-E4)
+let wideScrollY = 0;
+let wideMaxScroll = 0;
+let wideLineHeight = 22;
 
 export function isEncoderTakeoverActive(): boolean {
   return active;
@@ -64,6 +70,7 @@ export async function enterEncoderTakeover(): Promise<void> {
   }
   const gen = ++generation;
   active = true;
+  resetWideScroll();
   const groups = getActiveGroups();
   dlog('Takeover', `enter ${groups.length} groups (util=${encoderRegistry.utilityIds.length} opt=${encoderRegistry.optionIds.length} iterm=${encoderRegistry.itermIds.length} voice=${encoderRegistry.voiceIds.length})`);
 
@@ -108,36 +115,30 @@ export async function exitEncoderTakeover(): Promise<void> {
   }
 }
 
-/**
- * Panel type assigned per encoder group.
- *
- * Dynamic assignment by active group count:
- *   1 group:  [Focus]
- *   2 groups: [Focus, List]
- *   3 groups: [Context, Focus, List]
- *   4 groups: [Context, Focus, List, Detail]
- *   5+:       extra groups repeat List
- */
-type PanelType = 'context' | 'focus' | 'list' | 'detail';
+/** Auto-scroll so selectedIndex is visible in wide canvas */
+function autoScrollToIndex(selectedIndex: number): void {
+  const itemTop = selectedIndex * wideLineHeight;
+  const itemBottom = itemTop + wideLineHeight;
+  const visibleH = 100; // panel height
 
-function getPanelAssignment(count: number): PanelType[] {
-  switch (count) {
-    case 1: return ['focus'];
-    case 2: return ['focus', 'list'];
-    case 3: return ['context', 'focus', 'list'];
-    case 4: return ['context', 'focus', 'list', 'detail'];
-    default: {
-      // 5+: context, focus, list, detail, then repeat list
-      const panels: PanelType[] = ['context', 'focus', 'list', 'detail'];
-      for (let i = 4; i < count; i++) panels.push('list');
-      return panels;
-    }
+  if (itemTop < wideScrollY) {
+    wideScrollY = itemTop;
+  } else if (itemBottom > wideScrollY + visibleH) {
+    wideScrollY = itemBottom - visibleH;
   }
+  wideScrollY = Math.max(0, Math.min(wideScrollY, wideMaxScroll));
+}
+
+/** Reset wide scroll state (called on new takeover entry) */
+export function resetWideScroll(): void {
+  wideScrollY = 0;
+  wideMaxScroll = 0;
 }
 
 /**
  * Refresh all taken-over encoder LCDs with SVG pixmap rendering.
- * Dynamically assigns panels based on active encoder groups.
+ * E1 = context panel, E2-E4 = wide option list canvas.
+ * Falls back to single-panel focus view when only 1 group is active.
  */
 export function refreshEncoderTakeover(
   state: State,
@@ -157,38 +158,39 @@ export function refreshEncoderTakeover(
   const isPermOrDiff = isPermission || isDiff;
 
   const groups = getActiveGroups();
-  const panels = getPanelAssignment(groups.length);
-  const hasContext = panels.includes('context');
 
-  dlog('Takeover', `refresh ${groups.length} groups: [${panels.join(',')}] idx=${selectedIndex}/${options.length}`);
+  dlog('Takeover', `refresh ${groups.length} groups idx=${selectedIndex}/${options.length}`);
 
-  for (let i = 0; i < groups.length; i++) {
-    let svg: string;
-    switch (panels[i]) {
-      case 'context':
-        svg = renderContextPanel({
-          state, selectedIndex, total: options.length,
-          question, currentTool,
-        });
-        break;
-      case 'focus':
-        svg = renderFocusPanel({
-          opt, selectedIndex, total: options.length,
-          isPermOrDiff, state, currentTool, fourEnc: hasContext,
-        });
-        break;
-      case 'list':
-        svg = renderListPanel({
-          options, selectedIndex, isPermOrDiff, state,
-        });
-        break;
-      case 'detail':
-        svg = renderDetailPanel({
-          opt, isPermOrDiff, state, selectedIndex,
-          total: options.length, toolInput, question,
-        });
-        break;
-    }
-    setCanvasFeedback(groups[i], svg);
+  if (groups.length <= 1) {
+    // Single encoder: show focus panel only
+    const svg = renderFocusPanel({
+      opt, selectedIndex, total: options.length,
+      isPermOrDiff, state, currentTool, fourEnc: false,
+    });
+    if (groups[0]) setCanvasFeedback(groups[0], svg);
+    return;
+  }
+
+  // E1 = context panel (first group)
+  const contextSvg = renderContextPanel({
+    state, selectedIndex, total: options.length,
+    question, currentTool,
+  });
+  setCanvasFeedback(groups[0], contextSvg);
+
+  // E2-E4 = wide option list (remaining groups)
+  const wideGroups = groups.slice(1);
+  autoScrollToIndex(selectedIndex);
+
+  const result = renderWideOptionList(
+    options, selectedIndex, isPermOrDiff, state,
+    wideGroups.length, wideScrollY,
+  );
+
+  wideMaxScroll = result.maxScrollY;
+  wideLineHeight = result.lineHeight;
+
+  for (let i = 0; i < wideGroups.length; i++) {
+    setCanvasFeedback(wideGroups[i], result.panels[i]);
   }
 }

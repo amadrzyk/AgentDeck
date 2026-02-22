@@ -15,7 +15,7 @@ const PIXMAP_LAYOUT = 'layouts/option-pixmap-layout.json';
 let active = false;
 let projects: ProjectEntry[] = [];
 let cursor = 0;
-let baseDir = '~/github';
+let baseDir = '~/Documents';
 let refreshButtonsCb: ((configs: ButtonConfig[] | null) => void) | null = null;
 
 /** Register callback to update response buttons (avoids circular dep) */

@@ -203,38 +203,49 @@ function onVtRotate(ticks: number): void {
   refreshVoiceTextTakeover();
 }
 
+let vtLongPressTimer: ReturnType<typeof setTimeout> | null = null;
+let vtCancelled = false;
+
 function onVtDown(): void {
   vtDownTime = Date.now();
+  vtCancelled = false;
+  // Auto-cancel after threshold — immediate visual feedback
+  vtLongPressTimer = setTimeout(() => {
+    vtLongPressTimer = null;
+    vtCancelled = true;
+    dlog('VoiceDial', 'vtCancel: discard transcription (long press auto)');
+    lastTranscription = undefined;
+    vtScrollY = 0;
+    exitVoiceTextTakeover();
+    refreshVoiceDials();
+  }, VT_PRESS_THRESHOLD);
 }
 
 function onVtUp(): void {
+  // Clear pending long-press timer
+  if (vtLongPressTimer) {
+    clearTimeout(vtLongPressTimer);
+    vtLongPressTimer = null;
+  }
+  // Already cancelled by long-press timer — nothing to do
+  if (vtCancelled) return;
+
   const elapsed = Date.now() - vtDownTime;
   dlog('VoiceDial', `onVtUp: elapsed=${elapsed}, hasText=${!!lastTranscription}, state=${currentState}, connected=${bridge.isConnected()}`);
-  if (elapsed < VT_PRESS_THRESHOLD) {
-    // Short press: confirm transcription
-    if (lastTranscription) {
-      if (currentState === State.IDLE && bridge.isConnected()) {
-        // IDLE + connected: send as prompt to Claude PTY
-        dlog('VoiceDial', `vtSend: "${lastTranscription.slice(0, 60)}"`);
-        bridge.send({ type: 'send_prompt', text: lastTranscription });
-      } else {
-        // Otherwise: paste at cursor
-        dlog('VoiceDial', `vtPaste: "${lastTranscription.slice(0, 60)}"`);
-        smartPaste(lastTranscription);
-      }
+  // Short press: confirm transcription
+  if (lastTranscription) {
+    if (currentState === State.IDLE && bridge.isConnected()) {
+      dlog('VoiceDial', `vtSend: "${lastTranscription.slice(0, 60)}"`);
+      bridge.send({ type: 'send_prompt', text: lastTranscription });
+    } else {
+      dlog('VoiceDial', `vtPaste: "${lastTranscription.slice(0, 60)}"`);
+      smartPaste(lastTranscription);
     }
-    lastTranscription = undefined;
-    vtScrollY = 0;
-    exitVoiceTextTakeover();
-    refreshVoiceDials();
-  } else {
-    // Long press: cancel / discard transcription
-    dlog('VoiceDial', 'vtCancel: discard transcription');
-    lastTranscription = undefined;
-    vtScrollY = 0;
-    exitVoiceTextTakeover();
-    refreshVoiceDials();
   }
+  lastTranscription = undefined;
+  vtScrollY = 0;
+  exitVoiceTextTakeover();
+  refreshVoiceDials();
 }
 
 /**

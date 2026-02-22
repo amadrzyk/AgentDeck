@@ -234,6 +234,7 @@ export function handleTakeoverPush(): void {
 export function handleTakeoverRotate(ticks: number): void {
   if (!isInteractive() || currentOptions.length === 0) return;
 
+  const prevIndex = selectedIndex;
   if (navigable) {
     // Clamp: stop at boundaries instead of wrapping
     if (ticks > 0) {
@@ -249,7 +250,7 @@ export function handleTakeoverRotate(ticks: number): void {
     }
   }
 
-  if (navigable) {
+  if (navigable && selectedIndex !== prevIndex) {
     const dir = ticks > 0 ? 'down' : 'up';
     bridge.send({ type: 'navigate_option', direction: dir });
   }
@@ -305,6 +306,7 @@ export class ResponseDialAction extends SingletonAction {
 
     // Interactive mode: scroll options
     if (isInteractive() && currentOptions.length > 0) {
+      const prevIndex = selectedIndex;
       if (navigable) {
         // Clamp: stop at boundaries instead of wrapping
         if (ev.payload.ticks > 0) {
@@ -319,7 +321,7 @@ export class ResponseDialAction extends SingletonAction {
           selectedIndex = (selectedIndex - 1 + currentOptions.length) % currentOptions.length;
         }
       }
-      if (navigable) {
+      if (navigable && selectedIndex !== prevIndex) {
         const dir = ev.payload.ticks > 0 ? 'down' : 'up';
         bridge.send({ type: 'navigate_option', direction: dir });
       }

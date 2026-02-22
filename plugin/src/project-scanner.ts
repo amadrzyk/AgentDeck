@@ -14,7 +14,7 @@ export interface ProjectEntry {
  * Scan baseDir for subdirectories containing .git, sorted by name.
  * Expands leading ~ to home directory.
  */
-export function scanProjects(baseDir = '~/github'): ProjectEntry[] {
+export function scanProjects(baseDir = '~/Documents'): ProjectEntry[] {
   const resolved = baseDir.startsWith('~')
     ? join(homedir(), baseDir.slice(1))
     : baseDir;
