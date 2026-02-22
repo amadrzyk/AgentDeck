@@ -1767,6 +1767,23 @@ describe('OutputParser', () => {
       expect(events).toHaveLength(0);
     });
 
+    it('filters box-drawing lines as UI chrome', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Pure box-drawing line on ❯ prompt line
+      p.feed('❯ \x1b[90m───────────────────────────────────\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
+
+      // Mixed box-drawing with dashes
+      p.feed('❯ \x1b[90m─────━━━━━═════\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(0);
+    });
+
     it('filters file paths (false positive from screen redraws)', () => {
       const p = armParser();
       vi.advanceTimersByTime(500);
@@ -1959,6 +1976,39 @@ describe('OutputParser', () => {
       const events = collectEvents(p, 'suggested_prompt');
 
       p.feed('❯ \x1b[90m(thought for 1m 30s)\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects "✻ Cooked for 1m 26s" sparkle indicator', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[90m✻ Cooked for 1m 26s\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects "✻ Cooked for 5s" short duration variant', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[90m✻ Cooked for 5s\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects "Cooked for 10s" without sparkle (cross-chunk)', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Cross-chunk: ❯ in buffer, thinking text arrives separately
+      p.feed('❯ ');
+      vi.advanceTimersByTime(50);
+      p.feed('\x1b[90mCooked for 10s\x1b[0m');
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(0);

@@ -444,6 +444,22 @@ describe('StateMachine', () => {
       expect(sm.getSnapshot().cursorIndex).toBe(0);
     });
 
+    it('stores navigable and cursorIndex from permission_prompt', () => {
+      const sm = bootToIdle();
+      sm.handleParserEvent('permission_prompt', {
+        options: [
+          { index: 0, label: 'Yes', shortcut: 'y' },
+          { index: 1, label: 'No', shortcut: 'n' },
+          { index: 2, label: 'Always allow', shortcut: 'a' },
+        ],
+        navigable: true,
+        cursorIndex: 0,
+      });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      expect(sm.getSnapshot().navigable).toBe(true);
+      expect(sm.getSnapshot().cursorIndex).toBe(0);
+    });
+
     it('cursor index tracking via updateCursorIndex', () => {
       const sm = bootToIdle();
       sm.handleParserEvent('option_prompt', {

@@ -139,6 +139,8 @@ export class StateMachine extends EventEmitter {
       case 'permission_prompt': {
         this.options = (data?.options as PromptOption[]) || [];
         this.question = (data?.question as string) || null;
+        this.navigable = (data?.navigable as boolean) ?? false;
+        this.cursorIndex = (data?.cursorIndex as number) ?? 0;
         this.transition(State.AWAITING_PERMISSION, 'permission_prompt', 'pty');
         break;
       }
@@ -331,8 +333,13 @@ export class StateMachine extends EventEmitter {
         break;
 
       case 'select_option':
-        if (this.state === State.AWAITING_OPTION) {
+        if (
+          this.state === State.AWAITING_OPTION ||
+          this.state === State.AWAITING_PERMISSION ||
+          this.state === State.AWAITING_DIFF
+        ) {
           this.options = [];
+          this.question = null;
           this.navigable = false;
           this.cursorIndex = 0;
           this.toolInput = null;

@@ -205,6 +205,12 @@ async function startBridge(port: number, command: string): Promise<void> {
   const wsServer = new WsServer(hookServer.getServer());
   log(`[sdc] WebSocket server ready on port ${port}`);
 
+  // 3b. Handle VoiceManager errors (prevent uncaught exception crash)
+  voiceManager.on('error', (err: Error) => {
+    debug('sdc', `Voice error: ${err.message}`);
+    wsServer.broadcast({ type: 'voice_state', state: 'error', error: err.message } as any);
+  });
+
   // 4. Wire HookServer events → StateMachine
   hookServer.on('hook', ({ event, data }: { event: string; data: Record<string, unknown> }) => {
     if (event === 'shutdown') {

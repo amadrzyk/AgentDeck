@@ -291,6 +291,81 @@ export async function attachTmuxInIterm(sessionName: string): Promise<void> {
   ).catch(() => {});
 }
 
+// ---- iTerm2 Window Cycling & Exposé ----
+
+/** Cmd+` (next window) */
+export async function cycleItermWindowNext(): Promise<void> {
+  await osascript(
+    'tell application "iTerm2" to activate\n' +
+    // Use physical key code (50 = `~) to avoid layout-dependent failures
+    'tell application "System Events" to key code 50 using command down',
+  ).catch(() => {});
+}
+
+/** Cmd+Shift+` (previous window) */
+export async function cycleItermWindowPrev(): Promise<void> {
+  await osascript(
+    'tell application "iTerm2" to activate\n' +
+    'tell application "System Events" to key code 50 using {command down, shift down}',
+  ).catch(() => {});
+}
+
+/** Activate iTerm2 + App Exposé (Control+↓) */
+export async function enterItermExpose(): Promise<void> {
+  await osascript(
+    'tell application "iTerm2" to activate\n' +
+    'delay 0.15\n' +
+    'tell application "System Events" to key code 125 using control down',
+  ).catch(() => {});
+}
+
+/** Arrow key navigation in Exposé */
+export async function exposeNavigate(dir: 'left' | 'right'): Promise<void> {
+  const keyCode = dir === 'left' ? 123 : 124;
+  await osascript(
+    `tell application "System Events" to key code ${keyCode}`,
+  ).catch(() => {});
+}
+
+/** Return key to confirm Exposé selection */
+export async function exposeConfirm(): Promise<void> {
+  await osascript(
+    'tell application "System Events" to key code 36',
+  ).catch(() => {});
+}
+
+/** Escape key to cancel Exposé */
+export async function exposeCancel(): Promise<void> {
+  await osascript(
+    'tell application "System Events" to key code 53',
+  ).catch(() => {});
+}
+
+// ---- Window Highlight (optional) ----
+
+/**
+ * Briefly nudge the front iTerm2 window and restore its position to make it visually stand out.
+ * Requires Accessibility permission (same as other System Events keystrokes).
+ */
+export async function shakeItermFrontWindow(amplitude = 10): Promise<void> {
+  const amp = Math.max(1, Math.min(30, Math.floor(amplitude)));
+  await osascript(
+    'tell application "System Events"\n' +
+    '  try\n' +
+    '    tell process "iTerm2"\n' +
+    '      set w to front window\n' +
+    '      set p to position of w\n' +
+    '      set px to item 1 of p\n' +
+    '      set py to item 2 of p\n' +
+    `      set position of w to {px + ${amp}, py + ${amp}}\n` +
+    '      delay 0.03\n' +
+    '      set position of w to {px, py}\n' +
+    '    end tell\n' +
+    '  end try\n' +
+    'end tell',
+  ).catch(() => {});
+}
+
 // ---- Clipboard Paste (STT) ----
 
 /**

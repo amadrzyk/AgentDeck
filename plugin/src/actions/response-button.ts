@@ -12,7 +12,7 @@ import { LayoutManager, ButtonConfig } from '../layout-manager.js';
 import { renderButton, svgToDataUrl, labelNeedsHaiku, BUTTON_MAX_CHARS } from '../renderers/button-renderer.js';
 import { requestAbbreviation } from '../label-summarizer.js';
 import { handleExpandedAction } from '../expanded-actions.js';
-import { isPickerActive, selectByButtonSlot, openPicker, setPickerButtonCallback } from '../project-picker.js';
+import { isPickerActive, selectByButtonSlot, openPicker, setPickerButtonCallback, setPickerBaseDir } from '../project-picker.js';
 import { dlog, derr } from '../log.js';
 
 import type { JsonValue } from '@elgato/utils';
@@ -24,10 +24,11 @@ interface ResponseButtonSettings {
   action?: string;
   disconnectedLabel?: string;
   disconnectedAction?: string;
+  baseDir?: string;
 }
 
 const DEFAULT_IDLE_SETTINGS: ResponseButtonSettings[] = [
-  { label: 'GO ON', action: 'continue', disconnectedLabel: 'START', disconnectedAction: 'sdc' },
+  { label: 'GO ON', action: 'continue', disconnectedLabel: 'START', disconnectedAction: 'sdc', baseDir: '~/Documents' },
   { label: 'REVIEW', action: '/review' },
   { label: 'COMMIT', action: '/commit' },
   { label: 'CLEAR', action: '/clear' },
@@ -52,7 +53,8 @@ function hasUserCustomizations(settings: ResponseButtonSettings, slotIndex: numb
   const defaults = (slotIndex >= 0 && slotIndex < DEFAULT_IDLE_SETTINGS.length)
     ? DEFAULT_IDLE_SETTINGS[slotIndex] : {};
   return (!!settings.label && settings.label !== defaults.label) ||
-         (!!settings.action && settings.action !== defaults.action);
+         (!!settings.action && settings.action !== defaults.action) ||
+         (!!settings.baseDir && settings.baseDir !== (defaults as ResponseButtonSettings).baseDir);
 }
 
 let bridge: BridgeClient;
@@ -244,9 +246,16 @@ export class ResponseButtonAction extends SingletonAction {
     if (hasUserCustomizations(settings, slotIndex)) {
       userSettingsMap.set(ev.action.id, settings);
     }
-    // If slotIndex was auto-assigned, persist only slotIndex (no defaults push)
-    if (settings.slotIndex == null) {
-      void ev.action.setSettings({ slotIndex } as ResponseButtonSettings).catch(() => {});
+    // Persist slot defaults so PI shows actual values (not just placeholders)
+    const defaults = (slotIndex >= 0 && slotIndex < DEFAULT_IDLE_SETTINGS.length)
+      ? DEFAULT_IDLE_SETTINGS[slotIndex] : {};
+    if (settings.slotIndex == null || settings.label == null || settings.action == null) {
+      void ev.action.setSettings({
+        ...settings,
+        slotIndex,
+        label: settings.label ?? defaults.label ?? '',
+        action: settings.action ?? defaults.action ?? '',
+      } as ResponseButtonSettings).catch(() => {});
     }
     // Refresh ALL buttons so every slot gets the correct number after sort
     refreshAllButtons();
@@ -294,6 +303,7 @@ export class ResponseButtonAction extends SingletonAction {
         return;
       }
       dlog('RspBut', `keyDown slot=${slot} → openPicker (state=${currentState})`);
+      setPickerBaseDir(s.baseDir ?? '~/Documents');
       void openPicker();
       return;
     }
@@ -350,7 +360,7 @@ export class ResponseButtonAction extends SingletonAction {
     for (let i = 0; i < DEFAULT_IDLE_SETTINGS.length; i++) {
       if (!used.has(i)) return i;
     }
-    return actionSlots.size;
+    return DEFAULT_IDLE_SETTINGS.length - 1; // cap at last slot (CLEAR)
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {

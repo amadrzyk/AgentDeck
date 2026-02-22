@@ -126,14 +126,29 @@ function getAllEncoderIds(): string[] {
 async function launchSdc(projectPath: string): Promise<void> {
   const resolved = projectPath.startsWith('~/') ? projectPath.replace('~', process.env.HOME || '~') : projectPath;
   const cmd = `cd ${JSON.stringify(resolved)} && sdc`;
+  // Prefer iTerm2 (native scripting), fallback to legacy iTerm, then Terminal.app
   const script = [
-    'tell application "iTerm"',
-    '  create window with default profile',
-    '  tell current session of current window',
-    `    write text ${JSON.stringify(cmd)}`,
+    `set cmd to ${JSON.stringify(cmd)}`,
+    'try',
+    '  tell application "iTerm2"',
+    '    set newWin to (create window with default profile)',
+    '    tell current session of current tab of newWin to write text cmd',
+    '    activate',
     '  end tell',
-    '  activate',
-    'end tell',
+    'on error',
+    '  try',
+    '    tell application "iTerm"',
+    '      create window with default profile',
+    '      tell current session of current window to write text cmd',
+    '      activate',
+    '    end tell',
+    '  on error',
+    '    tell application "Terminal"',
+    '      do script cmd',
+    '      activate',
+    '    end tell',
+    '  end try',
+    'end try',
   ].join('\n');
   try {
     await osascript(script);

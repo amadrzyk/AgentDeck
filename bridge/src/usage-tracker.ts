@@ -42,7 +42,7 @@ export class UsageTracker {
   }
 
   setOutputTokens(tokens: number): void {
-    this.outputTokens = tokens;
+    this.outputTokens = Math.max(this.outputTokens, tokens);
   }
 
   incrementToolCalls(): void {

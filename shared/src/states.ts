@@ -40,8 +40,10 @@ export const transitions: StateTransition[] = [
   { from: State.PROCESSING, to: State.AWAITING_DIFF, trigger: 'diff_ui_detected', source: 'pty' },
   { from: State.IDLE, to: State.AWAITING_DIFF, trigger: 'diff_ui_detected', source: 'pty' },
   { from: State.AWAITING_PERMISSION, to: State.PROCESSING, trigger: 'user_response', source: 'user' },
+  { from: State.AWAITING_PERMISSION, to: State.PROCESSING, trigger: 'user_selection', source: 'user' },
   { from: State.AWAITING_OPTION, to: State.PROCESSING, trigger: 'user_selection', source: 'user' },
   { from: State.AWAITING_DIFF, to: State.PROCESSING, trigger: 'user_response', source: 'user' },
+  { from: State.AWAITING_DIFF, to: State.PROCESSING, trigger: 'user_selection', source: 'user' },
   // Recovery: spinner_start from awaiting states (user responded via keyboard, not Stream Deck)
   { from: State.AWAITING_PERMISSION, to: State.PROCESSING, trigger: 'spinner_start', source: 'pty' },
   { from: State.AWAITING_OPTION, to: State.PROCESSING, trigger: 'spinner_start', source: 'pty' },

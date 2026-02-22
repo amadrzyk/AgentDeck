@@ -103,8 +103,11 @@ function isUiChrome(text: string): boolean {
     /ctrl[\+\-]|shift[\+\-]|⌘|⌥|⌃/i.test(t) ||
     /^\(\d+[mhs]/i.test(t) ||
     /\(thought\s+for\s/i.test(t) ||
+    /(?:✻|⏻)\s*.+\d+[smh]/i.test(t) ||
+    /(thought|cooked|thinking)\s+for\s+\d/i.test(t) ||
     /^[?]\s|for\s+shortcuts|esc\s+to|enter\s+to/i.test(t) ||
-    /to\s+(expand|cycle|confirm|exit|edit\s+in)/i.test(t)
+    /to\s+(expand|cycle|confirm|exit|edit\s+in)/i.test(t) ||
+    /^[─━═┄┅┈┉│┃┌┐└┘├┤┬┴┼╌╍╎╏\-_=.\s]+$/.test(t)
   );
 }
 
@@ -258,7 +261,12 @@ export class OutputParser extends EventEmitter {
     if (/ctrl[\+\-]|shift[\+\-]/i.test(text)) return;
     if (/^\(\d+[mhs]/i.test(text)) return;
     if (/\(thought\s+for\s/i.test(text)) return;
+    if (/(?:✻|⏻)\s*.+\d+[smh]/i.test(text)) return;
+    if (/(thought|cooked|thinking)\s+for\s+\d/i.test(text)) return;
     if (/to\s+(expand|cycle|confirm|exit|edit\s+in)/i.test(text)) return;
+
+    // Filter out box-drawing / decorative lines (─━═ etc.)
+    if (/^[─━═┄┅┈┉│┃┌┐└┘├┤┬┴┼╌╍╎╏\-_=.\s]+$/.test(text)) return;
 
     // Filter out file paths (e.g. "/Users/foo/project" from PTY screen redraws)
     if (/^[~/]/.test(text) && /\//.test(text)) return;

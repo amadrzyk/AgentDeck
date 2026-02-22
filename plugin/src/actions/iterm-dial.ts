@@ -12,7 +12,7 @@ import { isEncoderTakeoverActive } from '../encoder-takeover.js';
 import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
 import { isPickerActive, scrollPicker, selectProject } from '../project-picker.js';
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
-import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, getLiveTmuxSessionNames, type ItermSession } from '../utility-modes/macos.js';
+import { getItermSessions, activateItermSession, attachTmuxInIterm, getActiveItermTty, getTmuxSessionMap, getLiveTmuxSessionNames, cycleItermWindowNext, cycleItermWindowPrev, enterItermExpose, exposeNavigate, exposeConfirm, exposeCancel, type ItermSession } from '../utility-modes/macos.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderItermPanel, renderItermReady } from '../renderers/iterm-renderer.js';
 import { switchToPort } from './session-button.js';
@@ -23,6 +23,9 @@ import { homedir } from 'os';
 
 const POLL_INTERVAL = 2000;
 const SKIP_AFTER_ACTION = 3000;
+// After a rotate, do a quick one-shot refresh based on the active iTerm TTY
+// so the dial label updates immediately instead of waiting for the poll.
+const FAST_REFRESH_DELAY_MS = 120;
 const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
 const SESSIONS_FILE = `${homedir()}/.agentdeck/sessions.json`;
 
@@ -34,6 +37,23 @@ let lastActionAt = 0;
 let polling = false;
 let currentLayout = PIXMAP_LAYOUT;
 let bridgeRef: BridgeClient | null = null;
+let exposeActive = false;
+let exposeTimeout: ReturnType<typeof setTimeout> | null = null;
+const EXPOSE_TIMEOUT_MS = 8000;
+let fastRotateTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearExposeTimeout(): void {
+  if (exposeTimeout) { clearTimeout(exposeTimeout); exposeTimeout = null; }
+}
+
+function startExposeTimeout(): void {
+  clearExposeTimeout();
+  exposeTimeout = setTimeout(() => {
+    exposeActive = false;
+    exposeTimeout = null;
+    void exposeCancel();
+  }, EXPOSE_TIMEOUT_MS);
+}
 
 interface AgentDeckSession {
   port: number;
@@ -263,42 +283,61 @@ export class ItermDialAction extends SingletonAction {
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
-    if (sessions.length === 0) return;
-
     lastActionAt = Date.now();
-    activeIndex = ((activeIndex + ev.payload.ticks) % sessions.length + sessions.length) % sessions.length;
-    const s = sessions[activeIndex];
-    if (s.windowId !== DETACHED_MARKER) {
-      activateItermSession(s.windowId, s.tabIndex, s.sessionId);
+
+    if (exposeActive) {
+      // Arrow key navigation within Exposé
+      void exposeNavigate(ev.payload.ticks > 0 ? 'right' : 'left');
+      startExposeTimeout();
+      return;
     }
-    refreshItermDials();
+
+    // Cmd+~ / Cmd+Shift+~ window cycling
+    if (ev.payload.ticks > 0) {
+      void cycleItermWindowNext();
+    } else {
+      void cycleItermWindowPrev();
+    }
+
+    // Quick one-shot refresh: after a short delay (allow focus switch to settle),
+    // read active iTerm TTY and sync the index so the name updates instantly.
+    if (fastRotateTimer) clearTimeout(fastRotateTimer);
+    fastRotateTimer = setTimeout(async () => {
+      try {
+        const tty = await getActiveItermTty();
+        if (!tty) return;
+        const idx = sessions.findIndex((s) => s.tty === tty);
+        if (idx !== -1 && idx !== activeIndex) {
+          activeIndex = idx;
+          refreshItermDials();
+        }
+      } catch {
+        // ignore fast refresh errors
+      }
+    }, FAST_REFRESH_DELAY_MS);
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
     if (isPickerActive()) { void selectProject(); return; }
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
+
+    if (!exposeActive) {
+      exposeActive = true;
+      void enterItermExpose();
+      startExposeTimeout();
+    }
   }
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
     if (isEncoderTakeoverActive()) return;
     if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
 
-    // Push = activate selected session or attach detached tmux
-    const selected = sessions[activeIndex];
-    if (!selected) return;
-
-    if (selected.isGhost && selected.tmuxName) {
-      // Ghost session — tmux alive but bridge dead, re-attach
-      dlog('ItermDial', `push: re-attach ghost tmux ${selected.tmuxName}`);
-      attachTmuxInIterm(selected.tmuxName);
-    } else if (selected.windowId === DETACHED_MARKER) {
-      // Virtual entry — attach detached tmux session
-      dlog('ItermDial', `push: attach tmux ${selected.tabIndex}`);
-      attachTmuxInIterm(selected.tabIndex);
-    } else {
-      dlog('ItermDial', `push: activate session ${selected.name}`);
-      activateItermSession(selected.windowId, selected.tabIndex, selected.sessionId);
+    if (exposeActive) {
+      exposeActive = false;
+      clearExposeTimeout();
+      void exposeConfirm();
+      return;
     }
   }
 

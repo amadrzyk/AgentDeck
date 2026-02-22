@@ -53,8 +53,8 @@ export class HookServer extends EventEmitter {
         }
       });
 
-      this.server.listen(port, () => {
-        debug('Hook', `listening on port ${port}`);
+      this.server.listen(port, '127.0.0.1', () => {
+        debug('Hook', `listening on 127.0.0.1:${port}`);
         resolve();
       });
     });

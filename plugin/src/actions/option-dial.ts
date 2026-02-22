@@ -218,11 +218,17 @@ export function handleTakeoverPush(): void {
     (currentState === State.AWAITING_PERMISSION || currentState === State.AWAITING_DIFF) &&
     currentOptions.length > 0
   ) {
-    const opt = currentOptions[selectedIndex];
-    const shortcut = opt?.shortcut || opt?.label?.charAt(0).toLowerCase();
-    if (shortcut) {
-      dlog('ResDial', `takeoverPush: respond "${opt.label}" (${shortcut})`);
-      bridge.send({ type: 'respond', value: shortcut });
+    if (navigable) {
+      // Navigable TUI (❯ cursor): use select_option (arrow keys + Enter)
+      dlog('ResDial', `takeoverPush: select_option (nav) idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);
+      bridge.send({ type: 'select_option', index: selectedIndex });
+    } else {
+      const opt = currentOptions[selectedIndex];
+      const shortcut = opt?.shortcut || opt?.label?.charAt(0).toLowerCase();
+      if (shortcut) {
+        dlog('ResDial', `takeoverPush: respond "${opt.label}" (${shortcut})`);
+        bridge.send({ type: 'respond', value: shortcut });
+      }
     }
   }
 }
@@ -357,11 +363,17 @@ export class ResponseDialAction extends SingletonAction {
       (currentState === State.AWAITING_PERMISSION || currentState === State.AWAITING_DIFF) &&
       currentOptions.length > 0
     ) {
-      const opt = currentOptions[selectedIndex];
-      const shortcut = opt?.shortcut || opt?.label?.charAt(0).toLowerCase();
-      if (shortcut) {
-        dlog('ResDial', `push: respond "${opt.label}" (${shortcut})`);
-        bridge.send({ type: 'respond', value: shortcut });
+      if (navigable) {
+        // Navigable TUI (❯ cursor): use select_option (arrow keys + Enter)
+        dlog('ResDial', `push: select_option (nav) idx=${selectedIndex} "${currentOptions[selectedIndex]?.label}"`);
+        bridge.send({ type: 'select_option', index: selectedIndex });
+      } else {
+        const opt = currentOptions[selectedIndex];
+        const shortcut = opt?.shortcut || opt?.label?.charAt(0).toLowerCase();
+        if (shortcut) {
+          dlog('ResDial', `push: respond "${opt.label}" (${shortcut})`);
+          bridge.send({ type: 'respond', value: shortcut });
+        }
       }
     } else if (currentState === State.IDLE && bridge) {
       const { list } = getEffectivePrompts();
