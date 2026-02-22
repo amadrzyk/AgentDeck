@@ -21,6 +21,8 @@ import {
 } from './encoder-takeover.js';
 import { setVoiceTextExitCallback } from './encoder-registry.js';
 import { dlog, dinfo } from './log.js';
+import { readFileSync } from 'fs';
+import { homedir } from 'os';
 
 // Keypad button actions
 import {
@@ -124,7 +126,7 @@ initUsageButton(bridge);
 initOptionDial(bridge);
 initVoiceDial(bridge);
 initUtilityDial();
-initItermDial();
+initItermDial(bridge);
 
 // Refresh other dials when voice text takeover exits
 setVoiceTextExitCallback(() => {
@@ -359,7 +361,27 @@ streamDeck.actions.registerAction(new UtilityDialAction());
 streamDeck.actions.registerAction(new ItermDialAction());
 
 // ---- Connect ----
+
+/** Find the most recently started session's port, or undefined for default */
+function findLatestSessionPort(): number | undefined {
+  try {
+    const data = readFileSync(`${homedir()}/.agentdeck/sessions.json`, 'utf-8');
+    const sessions = JSON.parse(data) as Array<{ port: number; pid: number; startedAt: string }>;
+    // Filter alive sessions
+    const alive = sessions.filter((s) => {
+      try { process.kill(s.pid, 0); return true; } catch { return false; }
+    });
+    if (alive.length === 0) return undefined;
+    alive.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    dinfo('Plugin', `Latest session port: ${alive[0].port} (${alive.length} active)`);
+    return alive[0].port;
+  } catch {
+    return undefined;
+  }
+}
+
 streamDeck.connect().then(() => {
   dinfo('Plugin', 'Stream Deck connected, starting bridge client');
-  bridge.connect();
+  const port = findLatestSessionPort();
+  bridge.connect(port);
 });

@@ -25,8 +25,10 @@ import { randomUUID } from 'crypto';
 import {
   register as registerSession,
   deregister as deregisterSession,
+  listActive as listActiveSessions,
   findAvailablePort,
   detectTmuxSession,
+  detectTty,
 } from './session-registry.js';
 import { fetchUsageFromApi, type ApiUsageData } from './usage-api.js';
 
@@ -154,6 +156,15 @@ async function startBridge(port: number, command: string): Promise<void> {
 
   const sessionId = randomUUID();
   const tmuxSession = detectTmuxSession();
+  const projectName = process.cwd().split('/').pop() || 'unknown';
+
+  // Warn if same project is already running in another session
+  const existingSessions = listActiveSessions();
+  const sameProject = existingSessions.filter((s) => s.projectName === projectName);
+  if (sameProject.length > 0) {
+    const ports = sameProject.map((s) => s.port).join(', ');
+    log(`[sdc] ⚠ Session "${projectName}" already running on port ${ports}. Starting new session on port ${port}.`);
+  }
 
   log(`[sdc] Starting AgentDeck bridge on port ${port}...`);
 
@@ -170,11 +181,11 @@ async function startBridge(port: number, command: string): Promise<void> {
   const stateMachine = new StateMachine(usageTracker);
   const ptyManager = new PtyManager();
   const outputParser = new OutputParser();
-  const voiceManager = new VoiceManager(port);
+  const voiceManager = new VoiceManager();
 
-  // 1b. Start whisper-server in background (non-blocking — don't delay bridge startup)
-  voiceManager.startServer().catch((err) => {
-    debug('sdc', `whisper-server startup failed (will use whisper-cli): ${err}`);
+  // 1b. Connect to singleton whisper-server (non-blocking — don't delay bridge startup)
+  voiceManager.connectToServer().catch((err) => {
+    debug('sdc', `whisper-server connection failed (will use whisper-cli): ${err}`);
   });
 
   // 2. Start HTTP server
@@ -494,8 +505,9 @@ async function startBridge(port: number, command: string): Promise<void> {
     id: sessionId,
     port,
     pid: process.pid,
-    projectName: outputParser.getProjectName() || process.cwd().split('/').pop() || 'unknown',
+    projectName: outputParser.getProjectName() || projectName,
     tmuxSession,
+    tty: detectTty(),
     startedAt: new Date().toISOString(),
   });
 
@@ -574,7 +586,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       process.stdin.setRawMode(false);
     }
 
-    voiceManager.stopServer();
+    voiceManager.disconnectFromServer();
 
     if (ptyManager.isAlive()) {
       ptyManager.kill();

@@ -1,0 +1,213 @@
+import streamDeck, {
+  action,
+  SingletonAction,
+  DialRotateEvent,
+  DialDownEvent,
+  DialUpEvent,
+  WillAppearEvent,
+  WillDisappearEvent,
+} from '@elgato/streamdeck';
+import { State } from '@agentdeck/shared';
+import { isEncoderTakeoverActive } from '../encoder-takeover.js';
+import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
+import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
+import { getItermSessions, activateItermSession, getActiveItermTty, type ItermSession } from '../utility-modes/macos.js';
+import { svgToDataUrl } from '../renderers/button-renderer.js';
+import { renderItermPanel, renderItermReady } from '../renderers/iterm-renderer.js';
+import { switchToPort } from './session-button.js';
+import { BridgeClient } from '../bridge-client.js';
+import { dlog, dinfo } from '../log.js';
+import { readFileSync } from 'fs';
+import { homedir } from 'os';
+
+const POLL_INTERVAL = 2000;
+const SKIP_AFTER_ACTION = 3000;
+const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
+const SESSIONS_FILE = `${homedir()}/.agentdeck/sessions.json`;
+
+let currentState = State.DISCONNECTED;
+let sessions: ItermSession[] = [];
+let activeIndex = 0;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let lastActionAt = 0;
+let polling = false;
+let currentLayout = PIXMAP_LAYOUT;
+let bridgeRef: BridgeClient | null = null;
+
+interface AgentDeckSession {
+  port: number;
+  pid: number;
+  tty?: string;
+}
+
+function loadAgentDeckSessions(): AgentDeckSession[] {
+  try {
+    return JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8')) as AgentDeckSession[];
+  } catch {
+    return [];
+  }
+}
+
+async function syncFromSystem(): Promise<void> {
+  if (polling) return;
+  if (Date.now() - lastActionAt < SKIP_AFTER_ACTION) return;
+  polling = true;
+  try {
+    const [newSessions, activeTty] = await Promise.all([
+      getItermSessions(),
+      getActiveItermTty(),
+    ]);
+    dlog('ItermDial', `syncFromSystem: got ${newSessions.length} sessions (was ${sessions.length}), activeTty=${activeTty}`);
+    if (JSON.stringify(newSessions) !== JSON.stringify(sessions)) {
+      sessions = newSessions;
+      if (activeIndex >= sessions.length) activeIndex = Math.max(0, sessions.length - 1);
+      refreshItermDials();
+    }
+
+    // Auto-switch bridge if focused iTerm tty matches an AgentDeck session
+    if (activeTty && bridgeRef) {
+      const adSessions = loadAgentDeckSessions();
+      const match = adSessions.find((s) => s.tty === activeTty);
+      if (match && match.port !== bridgeRef.getPort()) {
+        dlog('ItermDial', `auto-switch: tty ${activeTty} → port ${match.port}`);
+        lastActionAt = Date.now(); // suppress re-trigger for SKIP_AFTER_ACTION
+        switchToPort(match.port);
+      }
+    }
+  } catch (e) {
+    dlog('ItermDial', `syncFromSystem error: ${e}`);
+  } finally {
+    polling = false;
+  }
+}
+
+function startPolling(): void {
+  stopPolling();
+  pollTimer = setInterval(syncFromSystem, POLL_INTERVAL);
+}
+
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+export function initItermDial(bridge: BridgeClient): void {
+  bridgeRef = bridge;
+  dinfo('ItermDial', 'initItermDial called');
+}
+
+export function updateItermDialState(state: State): void {
+  currentState = state;
+  // Do NOT reset currentLayout here — causes setFeedbackLayout on every state update → SD flicker.
+  // Layout is reset only on encoder takeover exit (via resetEncoderLayouts hook below).
+
+  if (encoderRegistry.itermIds.length > 0 && !pollTimer) {
+    void syncFromSystem();
+    startPolling();
+  }
+  refreshItermDials();
+}
+
+/** Called by encoder-takeover on exit so iterm re-applies its layout after takeover. */
+export function resetItermLayout(): void {
+  currentLayout = '';
+}
+
+function ensurePixmapLayout(): void {
+  if (currentLayout === PIXMAP_LAYOUT) return;
+  currentLayout = PIXMAP_LAYOUT;
+  for (const id of encoderRegistry.itermIds) {
+    const dial = streamDeck.actions.getActionById(id) as any;
+    if (dial) void dial.setFeedbackLayout(PIXMAP_LAYOUT).catch(() => {});
+  }
+}
+
+function refreshItermDials(): void {
+  if (isEncoderTakeoverActive()) return;
+  if (isVoiceTextTakeoverActive()) return;
+  if (encoderRegistry.itermIds.length === 0) return;
+
+  ensurePixmapLayout();
+
+  let svg: string;
+  if (sessions.length === 0) {
+    svg = renderItermReady();
+  } else {
+    const s = sessions[activeIndex];
+    svg = renderItermPanel({ name: s.name, index: activeIndex, total: sessions.length });
+  }
+
+  const feedback = { canvas: svgToDataUrl(svg) };
+  for (const id of encoderRegistry.itermIds) {
+    const dial = streamDeck.actions.getActionById(id) as any;
+    if (dial) void dial.setFeedback(feedback).catch(() => {});
+  }
+}
+
+@action({ UUID: 'bound.serendipity.agentdeck.iterm-dial' })
+export class ItermDialAction extends SingletonAction {
+  static get actionIds(): string[] { return encoderRegistry.itermIds; }
+
+  override async onWillAppear(ev: WillAppearEvent): Promise<void> {
+    dinfo('ItermDial', `onWillAppear: id=${ev.action.id}`);
+    if (!encoderRegistry.itermIds.includes(ev.action.id)) {
+      encoderRegistry.itermIds.push(ev.action.id);
+    }
+    // If encoder takeover is active, join the takeover rendering instead of iterm feedback
+    if (isEncoderTakeoverActive()) {
+      requestTakeoverRefresh();
+      startPolling();
+      return;
+    }
+    // If sessions already cached, show immediately to avoid "No sessions" flash.
+    // If not cached yet, fetch first then render.
+    if (sessions.length > 0) {
+      refreshItermDials();
+    }
+    await syncFromSystem();
+    startPolling();
+    refreshItermDials();
+  }
+
+  override async onDialRotate(ev: DialRotateEvent): Promise<void> {
+    if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
+    if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
+    if (sessions.length === 0) return;
+
+    lastActionAt = Date.now();
+    activeIndex = ((activeIndex + ev.payload.ticks) % sessions.length + sessions.length) % sessions.length;
+    const s = sessions[activeIndex];
+    activateItermSession(s.windowId, s.tabIndex, s.sessionId);
+    refreshItermDials();
+  }
+
+  override async onDialDown(_ev: DialDownEvent): Promise<void> {
+    if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
+    if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
+  }
+
+  override async onDialUp(_ev: DialUpEvent): Promise<void> {
+    if (isEncoderTakeoverActive()) return;
+    if (isVoiceTextTakeoverActive()) { handleVtUp(); return; }
+
+    // Push = refresh session list
+    dlog('ItermDial', 'push: refresh sessions');
+    lastActionAt = Date.now();
+    sessions = await getItermSessions();
+    if (activeIndex >= sessions.length) activeIndex = Math.max(0, sessions.length - 1);
+    refreshItermDials();
+  }
+
+  override onWillDisappear(ev: WillDisappearEvent): void {
+    dinfo('ItermDial', `onWillDisappear: id=${ev.action.id}`);
+    const idx = encoderRegistry.itermIds.indexOf(ev.action.id);
+    if (idx !== -1) {
+      encoderRegistry.itermIds.splice(idx, 1);
+    }
+    if (encoderRegistry.itermIds.length === 0) {
+      stopPolling();
+    }
+  }
+}

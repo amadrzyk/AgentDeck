@@ -12,7 +12,7 @@ import { renderButton, svgToDataUrl } from '../renderers/button-renderer.js';
 import { ButtonConfig } from '../layout-manager.js';
 import { handleExpandedAction } from '../expanded-actions.js';
 import { dlog } from '../log.js';
-import { readFileSync } from 'fs';
+import { readFileSync, watchFile, unwatchFile } from 'fs';
 import { execSync } from 'child_process';
 import { homedir } from 'os';
 
@@ -27,6 +27,7 @@ interface SessionEntry {
   pid: number;
   projectName: string;
   tmuxSession?: string;
+  tty?: string;
   startedAt: string;
 }
 
@@ -41,6 +42,7 @@ let sessions: SessionEntry[] = [];
 let keyDownTime = 0;
 let animTimer: ReturnType<typeof setInterval> | null = null;
 let animFrame = 0;
+let fileWatchActive = false;
 
 const ANIM_INTERVAL_MS = 150; // ~6.7 FPS
 const ANIM_TOTAL_FRAMES = 24; // full rotation = 24 frames × 150ms = 3.6s
@@ -51,6 +53,50 @@ const actionIds: string[] = [];
 
 export function initSessionButton(b: BridgeClient): void {
   bridge = b;
+  startFileWatch();
+}
+
+function startFileWatch(): void {
+  if (fileWatchActive) return;
+  fileWatchActive = true;
+  watchFile(SESSIONS_FILE, { interval: 1000 }, () => {
+    const prevCount = sessions.length;
+    const prevPort = bridge.getPort();
+    sessions = loadSessions();
+
+    if (sessions.length > prevCount) {
+      // New session added — only auto-switch if currently disconnected
+      if (currentState === State.DISCONNECTED) {
+        const sorted = [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+        const newest = sorted[0];
+        if (newest && newest.port !== prevPort) {
+          currentSessionIndex = sessions.indexOf(newest);
+          currentProjectName = newest.projectName;
+          dlog('SesBut', `New session detected (disconnected) — auto-switching to ${getDisplayName(newest, sessions)}:${newest.port}`);
+          bridge.reconnectTo(newest.port);
+        }
+      } else {
+        dlog('SesBut', `New session detected — staying on current (state=${currentState}), count ${prevCount}→${sessions.length}`);
+        // Update currentSessionIndex to keep pointing at the same port
+        const idx = sessions.findIndex((s) => s.port === prevPort);
+        if (idx !== -1) currentSessionIndex = idx;
+      }
+    } else if (currentSessionIndex >= sessions.length) {
+      // Sessions shrunk — fix index
+      currentSessionIndex = Math.max(0, sessions.length - 1);
+    } else {
+      // Session removed — keep pointing at same port if still alive
+      const idx = sessions.findIndex((s) => s.port === prevPort);
+      if (idx !== -1) currentSessionIndex = idx;
+    }
+    refreshAll();
+  });
+}
+
+function stopFileWatch(): void {
+  if (!fileWatchActive) return;
+  fileWatchActive = false;
+  unwatchFile(SESSIONS_FILE);
 }
 
 export function overrideSessionButton(config: ButtonConfig | null): void {
@@ -122,14 +168,47 @@ function autoReconnect(): void {
   }
 }
 
+/** Switch bridge to a specific port (used by iTerm auto-switch). */
+export function switchToPort(port: number): void {
+  sessions = loadSessions();
+  const idx = sessions.findIndex((s) => s.port === port);
+  if (idx === -1) return;
+  if (bridge.getPort() === port) return;
+  currentSessionIndex = idx;
+  currentProjectName = sessions[idx].projectName;
+  dlog('SesBut', `switchToPort: → ${getDisplayName(sessions[idx], sessions)}:${port}`);
+  bridge.reconnectTo(port);
+  refreshAll();
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function loadSessions(): SessionEntry[] {
   try {
     const data = readFileSync(SESSIONS_FILE, 'utf-8');
     const parsed = JSON.parse(data) as SessionEntry[];
-    return parsed;
+    // Filter out dead sessions (PID liveness check)
+    return parsed.filter((s) => isProcessAlive(s.pid));
   } catch {
     return [];
   }
+}
+
+/** Get display name with #N suffix when multiple sessions share the same projectName */
+function getDisplayName(session: SessionEntry, allSessions: SessionEntry[]): string {
+  const same = allSessions
+    .filter((s) => s.projectName === session.projectName)
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  if (same.length <= 1) return session.projectName;
+  const idx = same.findIndex((s) => s.id === session.id);
+  return `${session.projectName} #${idx + 1}`;
 }
 
 function refreshAll(): void {
@@ -242,7 +321,10 @@ function renderSessionSvg(): string {
       return simpleSvg('NO', 'SESSION', '#666666', '#1a1a1a');
 
     case State.IDLE: {
-      const name = currentProjectName || 'Session';
+      const currentSession = sessions[currentSessionIndex];
+      const name = currentSession
+        ? getDisplayName(currentSession, sessions)
+        : (currentProjectName || 'Session');
       const nameLines = splitProjectName(name, MAX_CHARS_PER_LINE);
       const isTwoLine = nameLines.length > 1;
       const total = sessions.length;
@@ -406,7 +488,7 @@ function cycleSession(): void {
   currentSessionIndex = (currentSessionIndex + 1) % sessions.length;
   const next = sessions[currentSessionIndex];
   if (next) {
-    dlog('SesBut', `cycle: ${currentSessionIndex + 1}/${sessions.length} → ${next.projectName}:${next.port}`);
+    dlog('SesBut', `cycle: ${currentSessionIndex + 1}/${sessions.length} → ${getDisplayName(next, sessions)}:${next.port}`);
     currentProjectName = next.projectName;
     bridge.reconnectTo(next.port);
     refreshAll();
