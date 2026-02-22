@@ -405,6 +405,12 @@ export class OutputParser extends EventEmitter {
 
     // --- Idle prompt ---
     if (hasIdlePrompt) {
+      // If option timer is already pending, don't let idle override it.
+      // Screen redraws can contain both option prompts and ❯ in rapid succession.
+      if (this.optionTimer) {
+        debug('Parser', 'idle prompt ignored — option debounce pending');
+        return;
+      }
       if (!this.seenFirstIdle) {
         this.seenFirstIdle = true;
         debug('Parser', 'first idle prompt seen — spinner detection now armed');
