@@ -10,18 +10,21 @@ import streamDeck, {
 import { State } from '@agentdeck/shared';
 import { BridgeClient } from '../bridge-client.js';
 import { isEncoderTakeoverActive } from '../encoder-takeover.js';
-import { handleTakeoverPush, handleTakeoverRotate } from './option-dial.js';
-import { encoderRegistry } from '../encoder-registry.js';
+import { handleTakeoverPush, handleTakeoverRotate, requestTakeoverRefresh } from './option-dial.js';
+import {
+  encoderRegistry, resetEncoderLayouts,
+  setVoiceTextTakeover,
+} from '../encoder-registry.js';
 import { dlog } from '../log.js';
+import { pasteText } from '../utility-modes/macos.js';
+import { startLocalRecording, stopLocalRecording, cancelLocalRecording } from '../voice-local.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import {
   renderVoiceReady,
-  renderVoiceIdle,
   renderVoiceRecording,
   renderVoiceTranscribing,
   renderVoiceError,
-  renderVoiceDisabled,
-  estimateTextWidth,
+  renderWideVoiceText,
 } from '../renderers/voice-renderer.js';
 
 let bridge: BridgeClient;
@@ -33,25 +36,19 @@ let lastTranscription: string | undefined;
 let errorMessage: string | undefined;
 let recordStartTime = 0;
 
-// Scroll state (pixel-based)
-let scrollPx = 0;
-let textTotalWidth = 0;
-
-// Auto-scroll state
-let autoScrollActive = false;
-let autoScrollPauseUntil = 0;
-let autoScrollStartDelay = 0;
-const AUTO_SCROLL_INITIAL_DELAY = 1500;
-const AUTO_SCROLL_PAUSE_DURATION = 3000;
-const AUTO_SCROLL_END_PAUSE = 2000;
-let autoScrollEndPauseUntil = 0;
-
 // Unified animation
 let animationTimer: ReturnType<typeof setInterval> | null = null;
 let animationFrame = 0;
 
 const MIN_RECORDING_MS = 500;
-const MAX_VISIBLE_PX = 184;
+
+// Voice text takeover state
+let vtActive = false;
+let vtScrollY = 0;       // pixel-based scroll offset
+let vtMaxScroll = 0;     // max scrollY from last render
+let vtLineHeight = 20;   // line height from last render
+let vtDownTime = 0;
+const VT_PRESS_THRESHOLD = 500; // ms: short press = send, long press = cancel
 
 export function initVoiceDial(b: BridgeClient): void {
   bridge = b;
@@ -59,9 +56,11 @@ export function initVoiceDial(b: BridgeClient): void {
 
 export function updateVoiceDialState(state: State): void {
   currentState = state;
-  if (state !== State.IDLE) {
-    voiceState = 'idle';
-    stopAnimation();
+  // Exit VT if encoder takeover active or interactive state incoming (takeover imminent)
+  const interactiveIncoming = state === State.AWAITING_PERMISSION
+    || state === State.AWAITING_OPTION || state === State.AWAITING_DIFF;
+  if (vtActive && (isEncoderTakeoverActive() || interactiveIncoming)) {
+    exitVoiceTextTakeover();
   }
   refreshVoiceDials();
 }
@@ -76,9 +75,6 @@ export function setVoiceRecordingState(vs: VoiceState): void {
     startAnimation(100);
   } else {
     stopAnimation();
-    if (vs === 'idle' && lastTranscription) {
-      startAutoScroll();
-    }
   }
   refreshVoiceDials();
 }
@@ -86,12 +82,9 @@ export function setVoiceRecordingState(vs: VoiceState): void {
 export function setVoiceTranscription(text: string): void {
   dlog('VoiceDial', `transcription(${text.length} chars): "${text.slice(0, 60)}"`);
   lastTranscription = text;
-  scrollPx = 0;
-  textTotalWidth = estimateTextWidth(text);
-  autoScrollStartDelay = Date.now() + AUTO_SCROLL_INITIAL_DELAY;
-  autoScrollEndPauseUntil = 0;
-  autoScrollPauseUntil = 0;
-  startAutoScroll();
+
+  // Always enter voice text takeover for review-then-send
+  enterVoiceTextTakeover();
   refreshVoiceDials();
 }
 
@@ -113,64 +106,146 @@ function startAnimation(intervalMs: number): void {
   }, intervalMs);
 }
 
-function startAutoScroll(): void {
-  if (autoScrollActive) return;
-  if (!lastTranscription || textTotalWidth <= MAX_VISIBLE_PX) return;
-  autoScrollActive = true;
-  if (!animationTimer) {
-    animationFrame = 0;
-    animationTimer = setInterval(() => {
-      animationFrame++;
-      tickAutoScroll();
-      refreshVoiceDials();
-    }, 80);
-  }
-}
-
-function stopAutoScroll(): void {
-  autoScrollActive = false;
-  if (voiceState === 'idle' && animationTimer) {
-    clearInterval(animationTimer);
-    animationTimer = null;
-  }
-}
-
-function tickAutoScroll(): void {
-  if (!autoScrollActive || !lastTranscription) return;
-  const now = Date.now();
-
-  if (now < autoScrollStartDelay) return;
-  if (now < autoScrollPauseUntil) return;
-  if (now < autoScrollEndPauseUntil) return;
-
-  const maxScroll = Math.max(0, textTotalWidth - MAX_VISIBLE_PX);
-  if (maxScroll <= 0) { stopAutoScroll(); return; }
-
-  scrollPx += 2;
-
-  if (scrollPx >= maxScroll) {
-    scrollPx = maxScroll;
-    autoScrollEndPauseUntil = now + AUTO_SCROLL_END_PAUSE;
-    setTimeout(() => {
-      scrollPx = 0;
-      autoScrollStartDelay = Date.now() + 500;
-    }, AUTO_SCROLL_END_PAUSE);
-  }
-}
-
 function stopAnimation(): void {
   if (animationTimer) {
     clearInterval(animationTimer);
     animationTimer = null;
   }
-  autoScrollActive = false;
   animationFrame = 0;
+}
+
+// --- Voice Text Takeover ---
+
+/** Physical left-to-right order of encoder ID arrays */
+function getVtPanelIds(): string[][] {
+  const panels: string[][] = [];
+  if (encoderRegistry.utilityIds.length > 0) panels.push(encoderRegistry.utilityIds);
+  panels.push(encoderRegistry.optionIds);
+  if (encoderRegistry.itermIds.length > 0) panels.push(encoderRegistry.itermIds);
+  panels.push(encoderRegistry.voiceIds);
+  return panels;
+}
+
+function enterVoiceTextTakeover(): void {
+  if (isEncoderTakeoverActive() || vtActive) return;
+  vtActive = true;
+  vtScrollY = 0;
+
+  const panelIds = getVtPanelIds();
+  const totalPanels = panelIds.length;
+
+  setVoiceTextTakeover(true, onVtRotate, onVtDown, onVtUp);
+  dlog('VoiceDial', `enterVoiceTextTakeover: ${totalPanels} panels (wide canvas)`);
+
+  // Switch all non-voice panels to pixmap canvas layout
+  for (let i = 0; i < totalPanels - 1; i++) { // exclude voice (last), already pixmap
+    for (const id of panelIds[i]) {
+      const dial = streamDeck.actions.getActionById(id) as any;
+      if (dial) void dial.setFeedbackLayout('layouts/voice-layout.json').catch(() => {});
+    }
+  }
+}
+
+function exitVoiceTextTakeover(): void {
+  if (!vtActive) return;
+  vtActive = false;
+  dlog('VoiceDial', 'exitVoiceTextTakeover: clearing & restoring all panels');
+
+  const panelIds = getVtPanelIds();
+
+  // Clear all panels with blank background (atomic visual reset — no VT traces)
+  const blank = svgToDataUrl(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#0f172a"/></svg>',
+  );
+  for (const ids of panelIds) {
+    for (const id of ids) {
+      const dial = streamDeck.actions.getActionById(id) as any;
+      if (dial) void dial.setFeedback({ canvas: blank }).catch(() => {});
+    }
+  }
+
+  // Restore layouts for all non-voice panels
+  resetEncoderLayouts();
+  for (let i = 0; i < panelIds.length - 1; i++) { // exclude voice (last)
+    for (const id of panelIds[i]) {
+      const dial = streamDeck.actions.getActionById(id) as any;
+      if (dial) void dial.setFeedbackLayout('layouts/voice-layout.json').catch(() => {});
+    }
+  }
+
+  setVoiceTextTakeover(false); // triggers _onVtExitCallback for content refresh
+}
+
+function refreshVoiceTextTakeover(): void {
+  if (!lastTranscription) return;
+
+  const panelIds = getVtPanelIds();
+  const panelCount = panelIds.length;
+
+  const { panels, maxScrollY, lineHeight } = renderWideVoiceText(
+    lastTranscription, panelCount, vtScrollY,
+  );
+  vtMaxScroll = maxScrollY;
+  vtLineHeight = lineHeight;
+
+  for (let i = 0; i < panelCount; i++) {
+    const feedback = { canvas: svgToDataUrl(panels[i]) };
+    for (const id of panelIds[i]) {
+      const dial = streamDeck.actions.getActionById(id) as any;
+      if (dial) void dial.setFeedback(feedback).catch(() => {});
+    }
+  }
+}
+
+function onVtRotate(ticks: number): void {
+  vtScrollY = Math.max(0, Math.min(vtScrollY + ticks * vtLineHeight, vtMaxScroll));
+  refreshVoiceTextTakeover();
+}
+
+function onVtDown(): void {
+  vtDownTime = Date.now();
+}
+
+function onVtUp(): void {
+  const elapsed = Date.now() - vtDownTime;
+  if (elapsed < VT_PRESS_THRESHOLD) {
+    // Short press: confirm transcription
+    if (lastTranscription) {
+      if (currentState === State.IDLE) {
+        // IDLE: send as prompt to Claude
+        dlog('VoiceDial', `vtSend: "${lastTranscription.slice(0, 60)}"`);
+        bridge.send({ type: 'send_prompt', text: lastTranscription });
+      } else {
+        // Non-IDLE: paste at cursor (standalone STT)
+        dlog('VoiceDial', `vtPaste: "${lastTranscription.slice(0, 60)}"`);
+        pasteText(lastTranscription);
+      }
+    }
+    lastTranscription = undefined;
+    vtScrollY = 0;
+    exitVoiceTextTakeover();
+    refreshVoiceDials();
+  } else {
+    // Long press: cancel / discard transcription
+    dlog('VoiceDial', 'vtCancel: discard transcription');
+    lastTranscription = undefined;
+    vtScrollY = 0;
+    exitVoiceTextTakeover();
+    refreshVoiceDials();
+  }
 }
 
 // --- Rendering ---
 
 function refreshVoiceDials(): void {
   if (isEncoderTakeoverActive()) return;
+
+  // Voice text takeover: render to all panels
+  if (vtActive && lastTranscription) {
+    refreshVoiceTextTakeover();
+    return;
+  }
+
   const feedback = getVoiceFeedback();
   for (const id of encoderRegistry.voiceIds) {
     const dial = streamDeck.actions.getActionById(id) as any;
@@ -183,27 +258,20 @@ function refreshVoiceDials(): void {
 function getVoiceFeedback(): Record<string, unknown> {
   let svg: string;
 
-  if (currentState !== State.IDLE) {
-    svg = renderVoiceDisabled();
-  } else {
-    switch (voiceState) {
-      case 'recording':
-        svg = renderVoiceRecording(Date.now() - recordStartTime, animationFrame);
-        break;
-      case 'transcribing':
-        svg = renderVoiceTranscribing(animationFrame);
-        break;
-      case 'error':
-        svg = renderVoiceError(errorMessage);
-        break;
-      default:
-        if (lastTranscription) {
-          svg = renderVoiceIdle(lastTranscription, scrollPx, textTotalWidth);
-        } else {
-          svg = renderVoiceReady();
-        }
-        break;
-    }
+  // Always show active UI — voice is independent like utility dial
+  switch (voiceState) {
+    case 'recording':
+      svg = renderVoiceRecording(Date.now() - recordStartTime, animationFrame);
+      break;
+    case 'transcribing':
+      svg = renderVoiceTranscribing(animationFrame);
+      break;
+    case 'error':
+      svg = renderVoiceError(errorMessage);
+      break;
+    default:
+      svg = renderVoiceReady();
+      break;
   }
 
   return { canvas: svgToDataUrl(svg) };
@@ -219,17 +287,33 @@ export class VoiceDialAction extends SingletonAction {
     if (!encoderRegistry.voiceIds.includes(ev.action.id)) {
       encoderRegistry.voiceIds.push(ev.action.id);
     }
+    // If encoder takeover is active, join the takeover rendering instead of voice feedback
+    if (isEncoderTakeoverActive()) {
+      requestTakeoverRefresh();
+      return;
+    }
     await (ev.action as any).setFeedback(getVoiceFeedback());
   }
 
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
     if (isEncoderTakeoverActive()) { handleTakeoverPush(); return; }
-    if (currentState !== State.IDLE) return;
+    if (vtActive) { onVtDown(); return; }
 
     if (voiceState === 'error') {
       voiceState = 'idle';
       errorMessage = undefined;
       stopAnimation();
+      refreshVoiceDials();
+      return;
+    }
+
+    if (!bridge.isConnected()) {
+      // Disconnected: local recording mode
+      dlog('VoiceDial', 'dialDown: start local recording (disconnected)');
+      recordStartTime = Date.now();
+      voiceState = 'recording';
+      startLocalRecording();
+      startAnimation(60);
       refreshVoiceDials();
       return;
     }
@@ -244,9 +328,42 @@ export class VoiceDialAction extends SingletonAction {
 
   override async onDialUp(_ev: DialUpEvent): Promise<void> {
     if (isEncoderTakeoverActive()) return;
+    if (vtActive) { onVtUp(); return; }
     if (voiceState !== 'recording') return;
 
     const elapsed = Date.now() - recordStartTime;
+
+    if (!bridge.isConnected()) {
+      // Disconnected: local recording mode
+      if (elapsed < MIN_RECORDING_MS) {
+        dlog('VoiceDial', `dialUp: cancel local (${elapsed}ms < ${MIN_RECORDING_MS}ms)`);
+        voiceState = 'idle';
+        cancelLocalRecording();
+        stopAnimation();
+        refreshVoiceDials();
+        return;
+      }
+
+      dlog('VoiceDial', `dialUp: stop local recording (${elapsed}ms)`);
+      voiceState = 'transcribing';
+      startAnimation(100);
+      refreshVoiceDials();
+      try {
+        const text = await stopLocalRecording();
+        lastTranscription = text;
+        voiceState = 'idle';
+        stopAnimation();
+        enterVoiceTextTakeover();
+        refreshVoiceDials();
+      } catch (err) {
+        voiceState = 'error';
+        errorMessage = err instanceof Error ? err.message : String(err);
+        stopAnimation();
+        refreshVoiceDials();
+      }
+      return;
+    }
+
     if (elapsed < MIN_RECORDING_MS) {
       dlog('VoiceDial', `dialUp: cancel (${elapsed}ms < ${MIN_RECORDING_MS}ms)`);
       voiceState = 'idle';
@@ -265,18 +382,7 @@ export class VoiceDialAction extends SingletonAction {
 
   override async onDialRotate(ev: DialRotateEvent): Promise<void> {
     if (isEncoderTakeoverActive()) { handleTakeoverRotate(ev.payload.ticks); return; }
-    if (voiceState === 'idle' && lastTranscription && currentState === State.IDLE) {
-      const step = 20;
-      if (ev.payload.ticks > 0) {
-        scrollPx += step;
-      } else {
-        scrollPx -= step;
-      }
-      const maxScroll = Math.max(0, textTotalWidth - MAX_VISIBLE_PX);
-      scrollPx = Math.max(0, Math.min(scrollPx, maxScroll));
-      autoScrollPauseUntil = Date.now() + AUTO_SCROLL_PAUSE_DURATION;
-      refreshVoiceDials();
-    }
+    if (vtActive) { onVtRotate(ev.payload.ticks); return; }
   }
 
   override onWillDisappear(ev: WillDisappearEvent): void {
