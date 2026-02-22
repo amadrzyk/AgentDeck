@@ -754,8 +754,8 @@ export class OutputParser extends EventEmitter {
   private parseOptions(text: string): { options: PromptOption[]; navigable: boolean; cursorIndex: number } {
     // ANSI cursor movement removal can leave numbered options concatenated without newlines.
     // Insert a newline before number patterns that aren't preceded by one.
-    // (?!\d) prevents matching version numbers like "4.6" in "Opus 4.6"
-    const normalized = text.replace(/([^\n\d.])((?:\s*)❯?\s*\d{1,2}[.)](?!\d))/g, '$1\n$2');
+    // (?![a-z\d]) prevents matching version numbers like "4.6" and file extensions like "_01.png"
+    const normalized = text.replace(/([^\n\d.])((?:\s*)❯?\s*\d{1,2}[.)](?![a-z\d]))/g, '$1\n$2');
 
     // Backward scan: restrict to the last contiguous block of option lines.
     // This prevents stale numbered list items (e.g. "5. Deploy") from earlier in the
@@ -800,6 +800,8 @@ export class OutputParser extends EventEmitter {
           cursorIndex = idx;
         }
         const raw = nm[2].trim();
+        // Skip file extension artifacts from tool call paths: "png)", "json)", "ts)" etc.
+        if (/^[a-z]{1,10}\)$/.test(raw)) continue;
         const recommended = /\(recommended\)/i.test(raw);
         const selected = /✔/.test(raw);
         const label = this.cleanOptionLabel(raw);

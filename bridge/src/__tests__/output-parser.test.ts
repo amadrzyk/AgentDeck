@@ -2165,6 +2165,32 @@ describe('OutputParser', () => {
       expect(events[0].options).toHaveLength(3);
       expect(events[0].options[0]).toMatchObject({ index: 0, label: 'Default' });
     });
+
+    it('excludes file path fragments from Read() tool in permission prompt', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'permission_prompt');
+
+      // Simulates: Read tool showing file path with D_01.png before permission options.
+      // The "_01.png)" must NOT be normalized into a ghost option that overwrites "Yes".
+      p.feed(
+        '  Read(/tmp/agentdeck-thumbs/CAM_20260222191227_0013_D_01.png)\n' +
+        '\n' +
+        ' Do you want to proceed?\n' +
+        '   1. Yes\n' +
+        ' \u276F 2. Yes, allow reading from agentdeck-thumbs/ during this session\n' +
+        '   3. No\n' +
+        '\n' +
+        ' Esc to cancel\n',
+      );
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      const opts: PromptOption[] = events[0].options;
+      expect(opts).toHaveLength(3);
+      expect(opts[0]).toMatchObject({ index: 0, label: 'Yes' });
+      expect(opts[1].label).toContain('Yes, allow');
+      expect(opts[2]).toMatchObject({ index: 2, label: 'No' });
+    });
   });
 
   describe('option index ordering', () => {
