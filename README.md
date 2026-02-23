@@ -79,7 +79,7 @@ It's a **control surface** — like an audio mixing console or a video color pan
 The bridge stays transparent: if it's off, Claude Code works exactly as before.
 
 <p align="center">
-  <video src="https://raw.githubusercontent.com/puritysb/AgentDeck/master/docs/media/demo-clip.mp4" width="720" controls muted autoplay loop playsinline>
+  <video src="docs/media/demo-clip.mp4" width="720" controls muted autoplay loop playsinline>
     <a href="docs/media/demo-clip.mp4">Watch demo clip</a>
   </video>
 </p>
