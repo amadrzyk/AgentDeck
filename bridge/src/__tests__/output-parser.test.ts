@@ -1686,14 +1686,16 @@ describe('OutputParser', () => {
       expect(events[0].text).toBe('fix the bug');
     });
 
-    it('ignores ghost text before seenFirstIdle', () => {
+    it('detects ghost text on first idle (❯ and suggestion in same chunk)', () => {
       const p = createParser(); // no idle yet
       const events = collectEvents(p, 'suggested_prompt');
 
+      // ❯ sets seenFirstIdle via detectPatterns, then detectGhostText picks up the suggestion
       p.feed('❯ \x1b[90mrefactor the code\x1b[0m');
       vi.advanceTimersByTime(600);
 
-      expect(events).toHaveLength(0);
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('refactor the code');
     });
 
     it('clears suggestion on spinner start', () => {
@@ -1733,16 +1735,42 @@ describe('OutputParser', () => {
       expect(events[0].text).toBe('third');
     });
 
-    it('ignores dim (SGR 2) text — not a ghost text signal', () => {
+    it('ignores dim (SGR 2) text without ❯ prompt context', () => {
       const p = armParser();
       vi.advanceTimersByTime(500);
 
       const events = collectEvents(p, 'suggested_prompt');
 
-      // Dim text without ❯ prompt — should NOT trigger (dim excluded from detection)
+      // Dim text without ❯ prompt — should NOT trigger (no prompt line context)
       p.feed('\x1b[2msome dim text\x1b[0m');
       vi.advanceTimersByTime(600);
       expect(events).toHaveLength(0);
+    });
+
+    it('detects dim (SGR 2) ghost text on ❯ prompt line', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Dim ghost text inline with ❯ — Claude Code uses SGR 2 for suggestions
+      p.feed('❯ \x1b[2mrefactor the auth module\x1b[22m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('refactor the auth module');
+    });
+
+    it('detects ghost text with cursor-forward spacing (Strategy 1)', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Claude Code TUI uses \x1b[1C (cursor forward) instead of spaces between words
+      p.feed('❯\xa0\x1b[1CTry\x1b[1C\x1b[2m"fix the login bug"\x1b[0m');
+      vi.advanceTimersByTime(600);
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('fix the login bug');
     });
 
     it('filters UI chrome fragments', () => {
@@ -2056,6 +2084,21 @@ describe('OutputParser', () => {
 
       expect(events).toHaveLength(1);
       expect(events[0].text).toBe('show me the diff');
+    });
+
+    it('does NOT cross-chunk detect when chunk contains ⎿ output fence', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Chunk 1: prompt (triggers idle)
+      p.feed('❯ ');
+      vi.advanceTimersByTime(50);
+
+      // Chunk 2: interrupt message with ⎿ fence — gray text but NOT ghost text
+      p.feed('\x1b[5A⎿ \x1b[38;2;153;153;153mInterrupted · What should Claude do instead?\x1b[39m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
     });
 
     it('does NOT cross-chunk detect when new chunk has \\n (different line)', () => {

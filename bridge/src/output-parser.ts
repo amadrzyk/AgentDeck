@@ -70,6 +70,8 @@ function hasGrayForeground(paramsList: string[]): boolean {
   for (const params of paramsList) {
     const nums = params.split(';').map(Number);
     for (let i = 0; i < nums.length; i++) {
+      // SGR 2 (dim/faint) — Claude Code uses this for ghost text suggestions
+      if (nums[i] === 2) return true;
       // SGR 90 (bright black)
       if (nums[i] === 90) return true;
       // 256-color foreground: 38;5;N (grays 230-255)
@@ -158,9 +160,6 @@ export class OutputParser extends EventEmitter {
   }
 
   private processFeed(rawData: string): void {
-    // Detect ghost text from raw ANSI before stripping
-    this.detectGhostText(rawData);
-
     // Replace cursor-forward sequences (e.g. \x1b[1C) with spaces before stripping ANSI,
     // so word spacing is preserved (Claude Code TUI uses cursor movement instead of spaces)
     const spaced = rawData.replace(/\x1b\[\d*C/g, ' ');
@@ -177,6 +176,10 @@ export class OutputParser extends EventEmitter {
     }
 
     this.detectPatterns(clean);
+
+    // Detect ghost text from raw ANSI data (must run after detectPatterns
+    // which sets seenFirstIdle on the first ❯ prompt)
+    this.detectGhostText(rawData);
   }
 
   /** Detect ghost text (dim/gray ANSI-styled autocomplete suggestions) from raw PTY data */
@@ -186,7 +189,9 @@ export class OutputParser extends EventEmitter {
     // Strategy 1 (high confidence): "Try ..." visible in clean text on the prompt line.
     // Claude Code renders ghost text as `❯ Try "command"` — detectable without ANSI parsing.
     // This handles the most common case and has zero false positives.
-    const clean = stripAnsi(rawData);
+    // Replace cursor-forward (\x1b[NC) with spaces before stripping ANSI so word spacing is preserved
+    // (Claude Code TUI uses cursor movement instead of literal spaces for layout).
+    const clean = stripAnsi(rawData.replace(/\x1b\[\d*C/g, ' '));
     const tryLineMatch = clean.match(/^[❯>][ \t\u00A0]+Try\s+["\u201C](.+)["\u201D]/m);
     if (tryLineMatch) {
       debug('Parser', `ghostText strategy1 HIT: "${tryLineMatch[1].trim()}"`);
@@ -201,7 +206,8 @@ export class OutputParser extends EventEmitter {
     // Strategy 3 (cross-chunk): ghost text may arrive in a separate PTY chunk from ❯.
     // If no ❯-line in current chunk and no \n (same terminal line continuation),
     // check if the buffer's last visible line starts with ❯.
-    if (!promptLineRaw && !rawData.includes('\n')) {
+    // Skip if chunk contains ⎿ (output fence) — that's Claude's response, not ghost text.
+    if (!promptLineRaw && !rawData.includes('\n') && !clean.includes('⎿')) {
       const rawLastLine = this.buffer.split('\n').pop() ?? '';
       const visibleLastLine = rawLastLine.split('\r').pop() ?? '';
       if (/^[❯>][ \t\u00A0]/.test(visibleLastLine)) {
@@ -264,6 +270,9 @@ export class OutputParser extends EventEmitter {
     if (/(?:✻|⏻)\s*.+\d+[smh]/i.test(text)) return;
     if (/(thought|cooked|thinking)\s+for\s+\d/i.test(text)) return;
     if (/to\s+(expand|cycle|confirm|exit|edit\s+in)/i.test(text)) return;
+
+    // Filter out interrupt/status messages (gray text after ⎿ output fence)
+    if (/^Interrupted\b/i.test(text)) return;
 
     // Filter out box-drawing / decorative lines (─━═ etc.)
     if (/^[─━═┄┅┈┉│┃┌┐└┘├┤┬┴┼╌╍╎╏\-_=.\s]+$/.test(text)) return;
