@@ -6,6 +6,7 @@ import { createVolumeMode } from './volume.js';
 import { createMicMode } from './mic.js';
 import { createMediaMode } from './media.js';
 import { createTimerMode } from './timer.js';
+import { createDiagMode } from './diag.js';
 export type { UtilityMode, RefreshCallback } from './types.js';
 
 const DEFAULT_ENABLED = ['volume'];
@@ -20,10 +21,11 @@ const FACTORIES: Record<string, (opts: ModeFactoryOptions) => UtilityMode> = {
   mic: (opts) => createMicMode(opts.refresh),
   media: (opts) => createMediaMode(opts.refresh),
   timer: (opts) => createTimerMode(opts.refresh),
+  diag: (opts) => createDiagMode(opts.refresh),
 };
 
 /** Ordered list of all available mode IDs. */
-export const ALL_MODE_IDS = ['volume', 'mic', 'media', 'timer'];
+export const ALL_MODE_IDS = ['volume', 'mic', 'media', 'timer', 'diag'];
 
 /**
  * Create the enabled modes based on a comma-separated list.

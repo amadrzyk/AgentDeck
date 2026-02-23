@@ -1,4 +1,5 @@
 import { State, PermissionMode, PromptOption } from './states.js';
+import type { AgentType, AgentCapabilities } from './adapter.js';
 
 // ===== Billing Type =====
 
@@ -10,6 +11,8 @@ export interface StateUpdateEvent {
   type: 'state_update';
   state: State;
   permissionMode: PermissionMode;
+  agentType?: AgentType;
+  agentCapabilities?: AgentCapabilities;
   currentTool?: string;
   toolInput?: string;
   toolProgress?: string;
@@ -126,6 +129,11 @@ export interface QueryUsageCommand {
   type: 'query_usage';
 }
 
+export interface DiagCommand {
+  type: 'diag';
+  action: 'dump' | 'analyze';
+}
+
 export type PluginCommand =
   | ResponseCommand
   | SelectOptionCommand
@@ -135,7 +143,8 @@ export type PluginCommand =
   | InterruptCommand
   | EscapeCommand
   | VoiceCommand
-  | QueryUsageCommand;
+  | QueryUsageCommand
+  | DiagCommand;
 
 // ===== Hook Event Types =====
 

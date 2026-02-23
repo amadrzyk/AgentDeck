@@ -7,6 +7,7 @@ export class WsServer {
   private wss: WebSocketServer;
   private commandCallback: ((cmd: PluginCommand) => void) | null = null;
   private onConnectCallback: ((ws: WebSocket) => void) | null = null;
+  private onDisconnectCallback: (() => void) | null = null;
 
   constructor(server: Server) {
     this.wss = new WebSocketServer({ server });
@@ -33,6 +34,9 @@ export class WsServer {
 
       ws.on('close', () => {
         debug('WS', 'Plugin disconnected');
+        if (this.onDisconnectCallback) {
+          this.onDisconnectCallback();
+        }
       });
 
       ws.on('error', (err) => {
@@ -58,6 +62,10 @@ export class WsServer {
 
   onClientConnect(callback: (ws: WebSocket) => void): void {
     this.onConnectCallback = callback;
+  }
+
+  onClientDisconnect(callback: () => void): void {
+    this.onDisconnectCallback = callback;
   }
 
   sendTo(ws: WebSocket, event: BridgeEvent): void {

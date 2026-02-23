@@ -6,6 +6,7 @@ import { debug } from './logger.js';
 export class HookServer extends EventEmitter {
   private app: express.Application;
   private server: Server;
+  private diagHandler: ((tail?: number) => unknown) | null = null;
 
   constructor() {
     super();
@@ -15,11 +16,32 @@ export class HookServer extends EventEmitter {
     this.server = createServer(this.app);
   }
 
+  /** Register a callback that provides diagnostic dump data */
+  onDiag(handler: (tail?: number) => unknown): void {
+    this.diagHandler = handler;
+  }
+
   private setupRoutes(): void {
     // Health check
     this.app.get('/health', (_req, res) => {
       debug('Hook', 'GET /health');
       res.json({ status: 'ok', uptime: process.uptime() });
+    });
+
+    // Diagnostic endpoint
+    this.app.get('/diag', (req, res) => {
+      debug('Hook', 'GET /diag');
+      if (!this.diagHandler) {
+        res.status(503).json({ error: 'Diagnostic system not initialized' });
+        return;
+      }
+      const tail = req.query.tail ? parseInt(req.query.tail as string, 10) : undefined;
+      try {
+        const dump = this.diagHandler(tail);
+        res.json(dump);
+      } catch (err) {
+        res.status(500).json({ error: String(err) });
+      }
     });
 
     // Hook endpoint - receives JSON POST from Claude Code hooks

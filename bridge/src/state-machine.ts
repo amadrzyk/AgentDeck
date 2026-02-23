@@ -63,6 +63,7 @@ export class StateMachine extends EventEmitter {
   private modelName: string | null = null;
   private billingType: BillingType = 'unknown';
   private suggestedPrompt: string | null = null;
+  private lastValidSuggestedPrompt: string | null = null;
   private usageTracker: UsageTracker;
   private stuckTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -81,6 +82,7 @@ export class StateMachine extends EventEmitter {
 
       case 'UserPromptSubmit':
         this.suggestedPrompt = null;
+        this.lastValidSuggestedPrompt = null;
         this.transition(State.PROCESSING, 'user_prompt_submit', 'hook');
         break;
 
@@ -168,6 +170,9 @@ export class StateMachine extends EventEmitter {
 
       case 'suggested_prompt': {
         this.suggestedPrompt = (data?.text as string) ?? null;
+        if (this.suggestedPrompt) {
+          this.lastValidSuggestedPrompt = this.suggestedPrompt;
+        }
         this.emitSnapshot();
         break;
       }
@@ -386,14 +391,10 @@ export class StateMachine extends EventEmitter {
     const prev = this.state;
     this.state = to;
 
-    // Manage stuck-state timer for any non-terminal active state
+    // Manage stuck-state timer: only for PROCESSING (Claude seems hung).
+    // AWAITING_* states wait indefinitely for user response — no timeout.
     this.resetStuckTimer();
-    if (
-      to === State.PROCESSING ||
-      to === State.AWAITING_PERMISSION ||
-      to === State.AWAITING_OPTION ||
-      to === State.AWAITING_DIFF
-    ) {
+    if (to === State.PROCESSING) {
       this.stuckTimer = setTimeout(() => {
         debug('SM', `Stuck timeout: ${to} for >${STUCK_TIMEOUT_MS / 1000}s, recovering to IDLE`);
         this.currentTool = null;
@@ -413,18 +414,13 @@ export class StateMachine extends EventEmitter {
     }
   }
 
-  /** Reset stuck timer on PTY activity while in an interactive state */
+  /** Reset stuck timer on PTY activity while PROCESSING */
   onPtyActivity(): void {
-    if (
-      this.stuckTimer &&
-      (this.state === State.AWAITING_OPTION ||
-       this.state === State.AWAITING_PERMISSION ||
-       this.state === State.AWAITING_DIFF)
-    ) {
+    if (this.stuckTimer && this.state === State.PROCESSING) {
       debug('SM', 'PTY activity — resetting stuck timer');
       this.resetStuckTimer();
       this.stuckTimer = setTimeout(() => {
-        debug('SM', `Stuck timeout: ${this.state} for >${STUCK_TIMEOUT_MS / 1000}s, recovering to IDLE`);
+        debug('SM', `Stuck timeout: PROCESSING for >${STUCK_TIMEOUT_MS / 1000}s, recovering to IDLE`);
         this.currentTool = null;
         this.toolInput = null;
         this.toolProgress = null;
@@ -498,5 +494,10 @@ export class StateMachine extends EventEmitter {
 
   getState(): State {
     return this.state;
+  }
+
+  /** Get last valid suggested prompt (for reconnection recovery when suggestedPrompt is already null) */
+  getLastValidSuggestedPrompt(): string | null {
+    return this.lastValidSuggestedPrompt;
   }
 }

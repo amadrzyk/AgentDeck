@@ -193,7 +193,7 @@ describe('StateMachine', () => {
       expect(sm.getState()).toBe(State.IDLE);
     });
 
-    it('AWAITING_PERMISSION for >5min → auto-recovery to IDLE', () => {
+    it('AWAITING_PERMISSION does NOT timeout (waits for user)', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
       sm.handleParserEvent('permission_prompt', {
@@ -202,10 +202,10 @@ describe('StateMachine', () => {
       expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
 
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
-      expect(sm.getState()).toBe(State.IDLE);
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
     });
 
-    it('AWAITING_OPTION for >5min → auto-recovery to IDLE', () => {
+    it('AWAITING_OPTION does NOT timeout (waits for user)', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
       sm.handleParserEvent('option_prompt', {
@@ -214,10 +214,10 @@ describe('StateMachine', () => {
       expect(sm.getState()).toBe(State.AWAITING_OPTION);
 
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
-      expect(sm.getState()).toBe(State.IDLE);
+      expect(sm.getState()).toBe(State.AWAITING_OPTION);
     });
 
-    it('AWAITING_DIFF for >5min → auto-recovery to IDLE', () => {
+    it('AWAITING_DIFF does NOT timeout (waits for user)', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
       sm.handleParserEvent('diff_prompt', {
@@ -226,7 +226,7 @@ describe('StateMachine', () => {
       expect(sm.getState()).toBe(State.AWAITING_DIFF);
 
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
-      expect(sm.getState()).toBe(State.IDLE);
+      expect(sm.getState()).toBe(State.AWAITING_DIFF);
     });
 
     it('timer resets on state change before timeout', () => {

@@ -268,6 +268,24 @@ export class OutputParser extends EventEmitter {
     // Filter out box-drawing / decorative lines (─━═ etc.)
     if (/^[─━═┄┅┈┉│┃┌┐└┘├┤┬┴┼╌╍╎╏\-_=.\s]+$/.test(text)) return;
 
+    // Filter out text starting with box-drawing characters (e.g. "├─ │Initializing…❯")
+    if (/^[├┤┬┴┼│─┌┐└┘⎿]/.test(text)) return;
+
+    // Filter out prompt characters at end (e.g. "(thinking)❯")
+    if (/[❯>]$/.test(text)) return;
+
+    // Filter out Claude TUI markers (⎿ output fence, ⏺ tool use, ⏸⏵ mode indicators)
+    if (/[⏺⏸⏵]\s/.test(text)) return;
+
+    // Filter out token count fragments (e.g. "6.3k tokens · thought for")
+    if (/\d+\.?\d*k?\s*tokens/i.test(text)) return;
+
+    // Filter out agent progress indicators
+    if (/Initializing|Running \d/i.test(text)) return;
+
+    // Filter out numbered list items (but allow "Try ..." suggestions)
+    if (/^\d+\.\s*\S/.test(text) && !/^Try\s/i.test(text)) return;
+
     // Filter out file paths (e.g. "/Users/foo/project" from PTY screen redraws)
     if (/^[~/]/.test(text) && /\//.test(text)) return;
 

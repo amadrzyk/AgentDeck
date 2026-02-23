@@ -1,21 +1,24 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { PtyManager } from './pty-manager.js';
-import { OutputParser } from './output-parser.js';
-import { HookServer } from './hook-server.js';
 import { UsageTracker } from './usage-tracker.js';
 import { StateMachine } from './state-machine.js';
 import { WsServer } from './ws-server.js';
 import { VoiceManager } from './voice.js';
 import { checkDependencies } from './check-deps.js';
 import { enableDebugLog, debug } from './logger.js';
+import { EventJournal } from './event-journal.js';
+import { PtyRingBuffer } from './pty-ringbuffer.js';
+import { createDiagDump } from './diag-analyzer.js';
+import { createAdapter } from './adapters/index.js';
 import {
   BRIDGE_WS_PORT,
   State,
   type PluginCommand,
   type BridgeEvent,
   type StateSnapshot,
+  type AdapterEvent,
+  type AgentType,
 } from './types.js';
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -79,9 +82,10 @@ program
 // Default command: start bridge + spawn claude + attach terminal
 program
   .command('start', { isDefault: true })
-  .description('Start bridge server and spawn Claude CLI')
+  .description('Start bridge server and spawn agent CLI')
   .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
   .option('-c, --command <cmd>', 'Command to spawn', 'claude')
+  .option('-a, --agent <type>', 'Agent type (claude-code)', 'claude-code')
   .option('-d, --debug', 'Enable debug logging to /tmp/sdc-debug.log')
   .action(async (opts) => {
     if (opts.debug) {
@@ -89,7 +93,8 @@ program
       log('[sdc] Debug logging enabled → /tmp/sdc-debug.log');
     }
     const port = parseInt(opts.port, 10);
-    await startBridge(port, opts.command);
+    const agentType = opts.agent as AgentType;
+    await startBridge(port, opts.command, agentType);
   });
 
 program
@@ -133,9 +138,47 @@ program
     }
   });
 
+program
+  .command('diag')
+  .description('Generate diagnostic dump and optionally run AI analysis')
+  .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
+  .option('-a, --analyze', 'Run AI analysis on the dump')
+  .option('-t, --tail <lines>', 'Number of journal entries to include', '200')
+  .action(async (opts) => {
+    const port = parseInt(opts.port, 10);
+    const tail = parseInt(opts.tail, 10);
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/diag?tail=${tail}`);
+      if (!res.ok) {
+        log(`Diag endpoint error: ${res.status} ${res.statusText}`);
+        process.exit(1);
+      }
+      const dump = await res.json() as import('./diag-analyzer.js').DiagDump;
+
+      // Save dump to disk
+      const { saveDiagDump, analyzeDump } = await import('./diag-analyzer.js');
+      const dumpPath = saveDiagDump(dump);
+      log(`Diagnostic dump saved: ${dumpPath}`);
+
+      if (opts.analyze) {
+        log('Running AI analysis...');
+        const analysis = await analyzeDump(dumpPath);
+        if (analysis) {
+          log('\n--- AI Analysis ---\n');
+          log(analysis);
+        } else {
+          log('AI analysis failed (is `claude` CLI available?)');
+        }
+      }
+    } catch {
+      log('Bridge is not running. Cannot generate live diagnostic dump.');
+      process.exit(1);
+    }
+  });
+
 program.parse();
 
-async function startBridge(port: number, command: string): Promise<void> {
+async function startBridge(port: number, command: string, agentType: AgentType): Promise<void> {
   const deps = checkDependencies();
   if (!deps.ok) {
     process.exit(1);
@@ -170,104 +213,111 @@ async function startBridge(port: number, command: string): Promise<void> {
     log(`[sdc] ⚠ Session "${projectName}" already running on port ${ports}. Starting new session on port ${port}.`);
   }
 
-  log(`[sdc] Starting AgentDeck bridge on port ${port}...`);
+  log(`[sdc] Starting AgentDeck bridge on port ${port} (agent: ${agentType})...`);
 
   // API usage data (fetched from Anthropic, not from PTY)
   let cachedApiUsage: ApiUsageData | null = null;
   let lastApiFetchTime = 0;
 
-  // Mode switch debounce
-  let lastModeSwitchTime = 0;
-
   // 1. Initialize components
-  const hookServer = new HookServer();
+  const adapter = createAdapter(agentType);
   const usageTracker = new UsageTracker();
   const stateMachine = new StateMachine(usageTracker);
-  const ptyManager = new PtyManager();
-  const outputParser = new OutputParser();
   const voiceManager = new VoiceManager();
+  const journal = new EventJournal();
+  const ptyRingBuffer = new PtyRingBuffer();
 
   // 1b. Connect to singleton whisper-server (non-blocking — don't delay bridge startup)
   voiceManager.connectToServer().catch((err) => {
     debug('sdc', `whisper-server connection failed (will use whisper-cli): ${err}`);
   });
 
-  // 2. Start HTTP server
+  // 2. Start adapter (creates HTTP server, spawns agent process)
   try {
-    await hookServer.listen(port);
-    log(`[sdc] Hook server listening on port ${port}`);
+    await adapter.start({ port, command });
+    log(`[sdc] Adapter started: ${adapter.capabilities.displayName}`);
   } catch (err) {
-    log(`[sdc] Failed to start server: ${err}`);
+    log(`[sdc] Failed to start adapter: ${err}`);
     process.exit(1);
   }
 
-  // 3. Attach WebSocket server to HTTP server
-  const wsServer = new WsServer(hookServer.getServer());
+  // 3. Attach WebSocket server to adapter's HTTP server
+  const wsServer = new WsServer(adapter.getHttpServer());
   log(`[sdc] WebSocket server ready on port ${port}`);
 
-  // 3b. Handle VoiceManager errors (prevent uncaught exception crash)
+  // 3b. Register diag handler
+  adapter.onDiag((tail) => createDiagDump(stateMachine, wsServer, journal, ptyRingBuffer, tail));
+
+  // 3c. Register raw agent data handler for diagnostics
+  adapter.onRawData((data: string) => {
+    ptyRingBuffer.push(data);
+    const preview = data.replace(/[\x00-\x1f\x1b]/g, '').slice(0, 200);
+    journal.write('pty_chunk', 'pty', { size: data.length, preview });
+  });
+
+  // 3d. Handle VoiceManager errors (prevent uncaught exception crash)
   voiceManager.on('error', (err: Error) => {
     debug('sdc', `Voice error: ${err.message}`);
     wsServer.broadcast({ type: 'voice_state', state: 'error', error: err.message } as any);
   });
 
-  // 4. Wire HookServer events → StateMachine
-  hookServer.on('hook', ({ event, data }: { event: string; data: Record<string, unknown> }) => {
-    if (event === 'shutdown') {
-      shutdown();
-      return;
-    }
-    stateMachine.handleHookEvent(event, data);
-  });
+  // 4. Wire adapter events → StateMachine + journal
+  adapter.on('event', (evt: AdapterEvent) => {
+    switch (evt.source) {
+      case 'hook':
+        journal.write('hook', 'hook', { event: evt.event, data: evt.data });
+        if (evt.event === 'shutdown') {
+          shutdown();
+          return;
+        }
+        stateMachine.handleHookEvent(evt.event, evt.data);
+        break;
 
-  // 5. Wire OutputParser events → StateMachine
-  const parserEvents = [
-    'spinner_start',
-    'spinner_stop',
-    'permission_prompt',
-    'option_prompt',
-    'diff_prompt',
-    'idle',
-    'status_line',
-    'tool_action',
-    'project_name',
-    'model_info',
-    'mode_change',
-    'suggested_prompt',
-  ];
-  for (const eventName of parserEvents) {
-    outputParser.on(eventName, (data?: Record<string, unknown>) => {
-      stateMachine.handleParserEvent(eventName, data);
-    });
-  }
+      case 'parser':
+        journal.write('parser_emit', 'pty', { event: evt.event, ...evt.data });
+        stateMachine.handleParserEvent(evt.event, evt.data);
+        break;
 
-  // 5a. Wire cursor_update → StateMachine (separate from parser events — not a state transition)
-  outputParser.on('cursor_update', (data?: Record<string, unknown>) => {
-    const idx = (data?.cursorIndex as number) ?? 0;
-    stateMachine.updateCursorIndex(idx);
-  });
+      case 'metadata':
+        switch (evt.event) {
+          case 'cursor_update': {
+            const idx = (evt.data?.cursorIndex as number) ?? 0;
+            stateMachine.updateCursorIndex(idx);
+            break;
+          }
+          case 'usage_info':
+            usageTracker.setUsageInfo(evt.data);
+            // Immediately broadcast updated usage
+            wsServer.broadcast(buildUsageEvent(stateMachine.getSnapshot(), cachedApiUsage));
+            break;
+          case 'user_prompt': {
+            const text = evt.data?.text as string | undefined;
+            if (text) {
+              wsServer.broadcast({ type: 'user_prompt', text } as BridgeEvent);
+            }
+            break;
+          }
+        }
+        break;
 
-  // 5b. Wire usage_info events → UsageTracker
-  outputParser.on('usage_info', (data?: Record<string, unknown>) => {
-    if (data) {
-      usageTracker.setUsageInfo(data);
-      // Immediately broadcast updated usage
-      const snapshot = stateMachine.getSnapshot();
-      wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage));
-    }
-  });
+      case 'activity':
+        stateMachine.onPtyActivity();
+        break;
 
-  // 5c. Wire user_prompt events → broadcast for plugin history
-  outputParser.on('user_prompt', (data?: Record<string, unknown>) => {
-    const text = data?.text as string | undefined;
-    if (text) {
-      const evt: BridgeEvent = { type: 'user_prompt', text };
-      wsServer.broadcast(evt);
+      case 'connection':
+        wsServer.broadcast({ type: 'connection', status: evt.status } as BridgeEvent);
+        break;
     }
   });
 
-  // 6. Wire StateMachine state changes → WsServer broadcast
+  // 4b. Handle adapter exit (agent process died)
+  adapter.on('exit', (_code: number, _signal: number) => {
+    shutdown();
+  });
+
+  // 5. Wire StateMachine state changes → WsServer broadcast
   stateMachine.on('state_changed', (snapshot: StateSnapshot) => {
+    journal.write('state_change', 'internal', { state: snapshot.state, permissionMode: snapshot.permissionMode, suggestedPrompt: snapshot.suggestedPrompt });
     // Compute promptType if options are present
     let promptType: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review' | undefined;
     if (snapshot.options.length > 0) {
@@ -280,10 +330,12 @@ async function startBridge(port: number, command: string): Promise<void> {
     }
 
     // Include options atomically in state_update to avoid race conditions
+    // Note: agentCapabilities sent only on client connect (static), not on every broadcast
     const stateEvent: BridgeEvent = {
       type: 'state_update',
       state: snapshot.state,
       permissionMode: snapshot.permissionMode,
+      agentType: adapter.capabilities.type,
       currentTool: snapshot.currentTool ?? undefined,
       toolInput: snapshot.toolInput ?? undefined,
       toolProgress: snapshot.toolProgress ?? undefined,
@@ -313,16 +365,29 @@ async function startBridge(port: number, command: string): Promise<void> {
     wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage));
   });
 
-  // 7. Handle PluginCommands from WsServer
+  // 6. Handle PluginCommands from WsServer
   wsServer.onCommand((cmd: PluginCommand) => {
     debug('sdc', `pluginCmd: ${cmd.type}`);
-    switch (cmd.type) {
-      case 'respond':
-        debug('sdc', `respond: "${cmd.value}"`);
-        ptyManager.write(cmd.value + '\r');
-        stateMachine.handleUserAction('respond');
-        break;
 
+    // Let adapter handle commands it owns (switch_mode, interrupt, escape, respond)
+    if (adapter.handleCommand(cmd)) {
+      // Adapter handled the transport side; update StateMachine as needed
+      switch (cmd.type) {
+        case 'respond':
+          stateMachine.handleUserAction('respond');
+          break;
+        case 'interrupt':
+          stateMachine.handleUserAction('interrupt');
+          break;
+        case 'escape':
+          stateMachine.handleUserAction('interrupt');
+          break;
+      }
+      return;
+    }
+
+    // Commands that need bridge coordination
+    switch (cmd.type) {
       case 'select_option': {
         const snapshot = stateMachine.getSnapshot();
         debug('sdc', `select_option: idx=${cmd.index} navigable=${snapshot.navigable} cursor=${snapshot.cursorIndex}`);
@@ -333,15 +398,15 @@ async function startBridge(port: number, command: string): Promise<void> {
             const arrow = delta > 0 ? '\x1b[B' : '\x1b[A';
             const steps = Math.abs(delta);
             debug('sdc', `select_option: navigating ${steps} steps ${delta > 0 ? 'down' : 'up'}`);
-            ptyManager.write(arrow.repeat(steps));
+            adapter.writeInput(arrow.repeat(steps));
           }
           // Brief delay for PTY to process arrow keys, then confirm with Enter
           setTimeout(() => {
-            ptyManager.write('\r');
+            adapter.writeInput('\r');
           }, 50);
         } else {
           // Number input mode: type the 1-based index
-          ptyManager.write(String(cmd.index + 1) + '\r');
+          adapter.writeInput(String(cmd.index + 1) + '\r');
         }
         stateMachine.handleUserAction('select_option');
         break;
@@ -357,7 +422,7 @@ async function startBridge(port: number, command: string): Promise<void> {
           : cur;
         stateMachine.updateCursorIndex(newIdx);
         debug('sdc', `navigate_option: ${cmd.direction} cursor=${cur}->${newIdx}`);
-        ptyManager.write(cmd.direction === 'up' ? '\x1b[A' : '\x1b[B');
+        adapter.writeInput(cmd.direction === 'up' ? '\x1b[A' : '\x1b[B');
         // Don't call handleUserAction — cursor movement is not a selection
         break;
       }
@@ -377,39 +442,15 @@ async function startBridge(port: number, command: string): Promise<void> {
           }
         }
         if (text) {
-          ptyManager.write(text);
-          setTimeout(() => ptyManager.write('\r'), 50);
+          adapter.writeInput(text);
+          setTimeout(() => adapter.writeInput('\r'), 50);
           stateMachine.handleUserAction('send_prompt');
         }
         break;
       }
 
-      case 'switch_mode': {
-        const now = Date.now();
-        if (now - lastModeSwitchTime < 100) {
-          debug('sdc', `switch_mode: debounced (${now - lastModeSwitchTime}ms < 100ms)`);
-          break;
-        }
-        lastModeSwitchTime = now;
-        debug('sdc', 'switch_mode: sending Shift+Tab');
-        outputParser.notifyModeSwitchSent();
-        ptyManager.write('\x1b[Z');
-        break;
-      }
-
-      case 'interrupt':
-        ptyManager.interrupt();
-        stateMachine.handleUserAction('interrupt');
-        break;
-
-      case 'escape':
-        debug('sdc', 'escape: sending Esc');
-        ptyManager.write('\x1b');
-        stateMachine.handleUserAction('interrupt');
-        break;
-
       case 'voice':
-        handleVoiceCommand(cmd.action, voiceManager, ptyManager, wsServer);
+        handleVoiceCommand(cmd.action, voiceManager, wsServer);
         break;
 
       case 'query_usage': {
@@ -431,8 +472,26 @@ async function startBridge(port: number, command: string): Promise<void> {
     }
   });
 
-  // 8. Send current state to newly connected WebSocket clients
+  // 6b. Wire WS connect/disconnect to journal
+  wsServer.onClientDisconnect(() => {
+    journal.write('ws_event', 'ws', { action: 'disconnect', clients: wsServer.getClientCount() });
+  });
+
+  // Register with session registry for multi-session support
+  registerSession({
+    id: sessionId,
+    port,
+    pid: process.pid,
+    projectName: adapter.getProjectName() || projectName,
+    tmuxSession,
+    parentTty,
+    tty: adapter.getTtyPath(),
+    startedAt: new Date().toISOString(),
+  });
+
+  // 7. Send current state to newly connected WebSocket clients
   wsServer.onClientConnect((ws) => {
+    journal.write('ws_event', 'ws', { action: 'connect', clients: wsServer.getClientCount() });
     const snapshot = stateMachine.getSnapshot();
 
     // Compute promptType for initial state
@@ -446,10 +505,21 @@ async function startBridge(port: number, command: string): Promise<void> {
       }
     }
 
+    // Restore last valid suggestion on reconnect when IDLE (current suggestedPrompt may already be null)
+    let reconnectSuggestion: string | null = snapshot.suggestedPrompt;
+    if (!reconnectSuggestion && snapshot.state === State.IDLE) {
+      reconnectSuggestion = stateMachine.getLastValidSuggestedPrompt();
+      if (reconnectSuggestion) {
+        debug('sdc', `Restoring lastValidSuggestedPrompt on reconnect: "${reconnectSuggestion.slice(0, 40)}"`);
+      }
+    }
+
     const stateEvent: BridgeEvent = {
       type: 'state_update',
       state: snapshot.state,
       permissionMode: snapshot.permissionMode,
+      agentType: adapter.capabilities.type,
+      agentCapabilities: adapter.capabilities,
       currentTool: snapshot.currentTool ?? undefined,
       toolInput: snapshot.toolInput ?? undefined,
       toolProgress: snapshot.toolProgress ?? undefined,
@@ -461,7 +531,7 @@ async function startBridge(port: number, command: string): Promise<void> {
       question: snapshot.question ?? undefined,
       navigable: snapshot.navigable || undefined,
       cursorIndex: snapshot.navigable ? snapshot.cursorIndex : undefined,
-      suggestedPrompt: snapshot.suggestedPrompt ?? undefined,
+      suggestedPrompt: reconnectSuggestion ?? undefined,
     };
     wsServer.sendTo(ws, stateEvent);
 
@@ -479,7 +549,7 @@ async function startBridge(port: number, command: string): Promise<void> {
 
     const connectEvt: BridgeEvent = {
       type: 'connection',
-      status: ptyManager.isAlive() ? 'connected' : 'disconnected',
+      status: adapter.isAlive() ? 'connected' : 'disconnected',
     };
     wsServer.sendTo(ws, connectEvt);
 
@@ -503,66 +573,16 @@ async function startBridge(port: number, command: string): Promise<void> {
     }
   });
 
-  // 9. Spawn Claude via PTY (with AGENTDECK_PORT so hooks POST to this bridge)
-  try {
-    ptyManager.spawn(command, { AGENTDECK_PORT: String(port) });
-    log(`[sdc] Spawned: ${command}`);
-  } catch (err) {
-    log(`[sdc] Failed to spawn ${command}: ${err}`);
-    await hookServer.close();
-    process.exit(1);
+  // 8. Attach user's terminal to adapter (PTY agents proxy stdin/stdout)
+  if (adapter.capabilities.hasTerminal) {
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
+    process.stdin.resume();
+    adapter.attachTerminal(process.stdin, process.stdout);
   }
 
-  // PTY spawned successfully — assume session started (hooks may arrive later as confirmation)
-  stateMachine.handleHookEvent('SessionStart', {});
-
-  // Register with session registry for multi-session support
-  registerSession({
-    id: sessionId,
-    port,
-    pid: process.pid,
-    projectName: outputParser.getProjectName() || projectName,
-    tmuxSession,
-    parentTty,
-    tty: ptyManager.getTtyPath(),
-    startedAt: new Date().toISOString(),
-  });
-
-  // 10. Feed PTY output to OutputParser
-  ptyManager.on('data', (data: string) => {
-    outputParser.feed(data);
-    stateMachine.onPtyActivity();
-  });
-
-  // 11. Handle PTY exit
-  ptyManager.on('exit', (code: number, signal: number) => {
-    debug('sdc', `Claude exited (code=${code}, signal=${signal})`);
-    stateMachine.handleHookEvent('SessionEnd', {});
-
-    const disconnectEvent: BridgeEvent = {
-      type: 'connection',
-      status: 'disconnected',
-    };
-    wsServer.broadcast(disconnectEvent);
-
-    shutdown();
-  });
-
-  // 12. Attach user's terminal to PTY
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
-  }
-  process.stdin.resume();
-  ptyManager.attachTerminal(process.stdin, process.stdout);
-
-  // 13. Broadcast initial connection event
-  const connectEvent: BridgeEvent = {
-    type: 'connection',
-    status: 'connected',
-  };
-  wsServer.broadcast(connectEvent);
-
-  // 14. Periodic usage update (so session timer ticks on Stream Deck)
+  // 9. Periodic usage update (so session timer ticks on Stream Deck)
   const usageInterval = setInterval(() => {
     if (wsServer.getClientCount() > 0) {
       const snapshot = stateMachine.getSnapshot();
@@ -570,7 +590,7 @@ async function startBridge(port: number, command: string): Promise<void> {
     }
   }, 5000);
 
-  // 14b. Periodic API usage refresh (silent — no PTY echo)
+  // 9b. Periodic API usage refresh (silent — no PTY echo)
   const apiUsageInterval = setInterval(() => {
     if (wsServer.getClientCount() > 0) {
       fetchUsageFromApi().then((apiUsage) => {
@@ -588,7 +608,7 @@ async function startBridge(port: number, command: string): Promise<void> {
     }
   }, 60_000);
 
-  // 15. Graceful shutdown
+  // 10. Graceful shutdown
   let shutdownInProgress = false;
 
   function shutdown(): void {
@@ -605,16 +625,15 @@ async function startBridge(port: number, command: string): Promise<void> {
     }
 
     voiceManager.disconnectFromServer();
-
-    if (ptyManager.isAlive()) {
-      ptyManager.kill();
-    }
-
+    journal.close();
     wsServer.close();
-    hookServer.close().then(() => {
+
+    // Adapter handles killing the agent process and closing its HTTP server
+    adapter.shutdown().then(() => {
       process.exit(0);
     });
 
+    // Force exit if adapter shutdown hangs
     setTimeout(() => {
       process.exit(1);
     }, 3000);
@@ -659,7 +678,6 @@ function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null
 function handleVoiceCommand(
   action: 'start' | 'stop' | 'cancel',
   voiceManager: VoiceManager,
-  ptyManager: PtyManager,
   wsServer: WsServer,
 ): void {
   switch (action) {

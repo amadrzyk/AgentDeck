@@ -8,6 +8,18 @@ export {
   type PromptOption,
   type StateSnapshot,
   type BillingType,
+  type AgentType,
+  type AgentCapabilities,
+  type AgentAdapter,
+  type AgentAdapterEvents,
+  type AdapterStartOptions,
+  type AdapterEvent,
+  type AdapterHookEvent,
+  type AdapterParserEvent,
+  type AdapterMetadataEvent,
+  type AdapterActivityEvent,
+  type AdapterConnectionEvent,
+  CLAUDE_CODE_CAPABILITIES,
 } from '@agentdeck/shared';
 
 export {
