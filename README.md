@@ -7,6 +7,10 @@ AgentDeck turns your Elgato Stream Deck+ into a physical control surface for AI 
 > Control sessions. Interrupt runs. Switch modes. Monitor usage.
 > Steer your AI — without leaving your keyboard flow.
 
+<p align="center">
+  <img src="docs/media/hero.jpg" width="720" alt="AgentDeck — Stream Deck+ controlling Claude Code with ACCEPT mode and voice recording">
+</p>
+
 | | Requirement |
 |---|---|
 | **Platform** | macOS 14+ (Sonoma) — Windows/Linux not supported |
@@ -73,6 +77,12 @@ It's a **control surface** — like an audio mixing console or a video color pan
 | **Control from anywhere** | Commands work even when the terminal is in the background — no need to switch windows |
 
 The bridge stays transparent: if it's off, Claude Code works exactly as before.
+
+<p align="center">
+  <video src="https://raw.githubusercontent.com/puritysb/AgentDeck/master/docs/media/demo-clip.mp4" width="720" controls muted autoplay loop playsinline>
+    <a href="docs/media/demo-clip.mp4">Watch demo clip</a>
+  </video>
+</p>
 
 ### Supported Agents
 
@@ -279,6 +289,10 @@ sdc --command 'claude --model opus'  # custom Claude command
 
 ## Stream Deck+ Layout (v3)
 
+<p align="center">
+  <img src="docs/media/layout-overview.jpg" width="720" alt="Stream Deck+ layout — 8 buttons and 4 encoder LCDs showing project list, session info, and quick actions">
+</p>
+
 ### Keypad — 8 Actions
 
 ```
@@ -327,6 +341,13 @@ The Utility encoder supports multiple modes, switchable via touch (long press �
 - **Recording**: Hold push to record, release to transcribe. Pulsing red indicator with waveform animation
 - **Voice Text Takeover**: After transcription, the text spans all 4 encoder LCDs (wide canvas, adaptive font 48→16px). Short push (<500ms) = send to Claude, long push (≥500ms) = cancel
 - **Offline-first**: Recording works even when bridge is disconnected — text is pasted via clipboard
+
+<p align="center">
+  <img src="docs/media/voice-korean.jpg" width="360" alt="PLAN mode with Korean voice transcription on encoder LCD">
+  &nbsp;&nbsp;
+  <img src="docs/media/model-selection.jpg" width="360" alt="Model selection — Opus, Haiku, Sonnet buttons with encoder list">
+</p>
+<p align="center"><em>Left: Voice transcription (Korean) on wide-canvas LCD &nbsp;|&nbsp; Right: Model selection with encoder option list</em></p>
 
 ### Dynamic Button States
 
@@ -476,6 +497,10 @@ When Claude presents options, permissions, or diff prompts, the encoder LCDs swi
 |---------|-------|---------|
 | E1 | **Context** | State indicator (color-coded), question text, cursor position |
 | E2–E4 | **Option List** | 600px-wide scrollable list with highlight, badges (★ recommended, ✓ selected), semantic colors |
+
+<p align="center">
+  <img src="docs/media/encoder-takeover.jpg" width="720" alt="Encoder takeover — plan approval with numbered options on wide-canvas LCD and terminal output">
+</p>
 
 Rotate E2 to scroll, push to confirm. The wide canvas auto-scrolls to keep the selected option visible. When the prompt is answered, all encoders restore to their normal displays.
 
