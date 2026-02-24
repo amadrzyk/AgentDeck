@@ -2453,6 +2453,100 @@ describe('OutputParser', () => {
     });
   });
 
+  // === CUP-positioned options (cursor positioning instead of newlines) ===
+
+  describe('CUP-positioned options', () => {
+    it('parses options using CUP (\\x1b[row;colH) instead of newlines', () => {
+      const p = armParser();
+      const permEvents = collectEvents(p, 'permission_prompt');
+
+      // Simulates ink TUI output: options separated by CUP sequences, not \n
+      const cupFeed =
+        '  Bash command\x1b[4;3H' +
+        '/Users/dev/project/openclaw models list --json 2>&1 | head -50\x1b[5;1H' +
+        ' Do you want to proceed?\x1b[6;3H' +
+        '  1. Yes\x1b[7;1H' +
+        '\u276F 2. Yes, and don\'t ask again for: head:*\x1b[8;3H' +
+        '  3. No\x1b[9;1H' +
+        '  Esc to cancel \u00B7 ctrl+e to explain';
+      p.feed(cupFeed);
+      vi.advanceTimersByTime(200);
+
+      expect(permEvents).toHaveLength(1);
+      const opts: PromptOption[] = permEvents[0].options;
+      expect(opts).toHaveLength(3);
+      expect(opts[0]).toMatchObject({ index: 0, label: 'Yes' });
+      expect(opts[1].label).toContain('head:*');
+      expect(opts[1].label).not.toContain('/Users/');
+      expect(opts[2]).toMatchObject({ index: 2, label: 'No' });
+    });
+
+    it('parses options using CUD (\\x1b[B) for vertical movement', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // Options separated by CUD (cursor down) sequences
+      const cudFeed =
+        '  1. Default\x1b[B' +
+        '  2. Sonnet\x1b[B' +
+        '  3. Haiku';
+      p.feed(cudFeed);
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options).toHaveLength(3);
+      expect(events[0].options[0]).toMatchObject({ index: 0, label: 'Default' });
+      expect(events[0].options[1]).toMatchObject({ index: 1, label: 'Sonnet' });
+      expect(events[0].options[2]).toMatchObject({ index: 2, label: 'Haiku' });
+    });
+  });
+
+  // === Trailing TUI chrome on last option ===
+
+  describe('trailing TUI chrome stripping', () => {
+    it('strips "Esc to cancel" from last option label', () => {
+      const p = armParser();
+      const permEvents = collectEvents(p, 'permission_prompt');
+
+      // Last option concatenated with footer (no newline between)
+      p.feed('❯1. Yes\n2. No  Esc to cancel \u00B7 ctrl+e to explain\n');
+      vi.advanceTimersByTime(200);
+
+      expect(permEvents).toHaveLength(1);
+      const opts: PromptOption[] = permEvents[0].options;
+      expect(opts).toHaveLength(2);
+      expect(opts[0]).toMatchObject({ index: 0, label: 'Yes' });
+      expect(opts[1]).toMatchObject({ index: 1, label: 'No' });
+      expect(opts[1].label).not.toContain('Esc');
+    });
+
+    it('strips "Enter to confirm" from last option label', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      p.feed('❯1. Default\n2. Sonnet\n3. Haiku  Enter to confirm \u00B7 Esc to exit\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      const opts: PromptOption[] = events[0].options;
+      expect(opts[2]).toMatchObject({ index: 2 });
+      expect(opts[2].label).not.toContain('Enter');
+      expect(opts[2].label).toContain('Haiku');
+    });
+
+    it('does NOT strip "Esc" when it appears within legitimate label text', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // "Escape hatch" is a legitimate label word — only strip when preceded by 2+ spaces
+      p.feed('❯1. Escape hatch\n2. Normal\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options[0].label).toContain('Escape hatch');
+    });
+  });
+
   // === CJK ghost text suggestion ===
 
   describe('CJK suggestion detection', () => {
@@ -2478,6 +2572,50 @@ describe('OutputParser', () => {
 
       expect(events).toHaveLength(1);
       expect(events[0].text).toBe('버그를 수정해줘');
+    });
+  });
+
+  // === AskUserQuestion separator / description tolerance ===
+
+  describe('AskUserQuestion with separators and descriptions', () => {
+    it('handles AskUserQuestion with separator and descriptions', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      p.feed([
+        '❯ 1. Option Alpha',
+        '     Description for alpha.',
+        '  2. Option Beta',
+        '     Description for beta.',
+        '  3. Option Gamma',
+        '     Description for gamma.',
+        '  4. Type something.',
+        '────────────────────────────────────────',
+        '  5. Chat about this',
+        '  6. Skip interview and plan immediately',
+        '',
+        'Enter to select · ↑/↓ to navigate · Esc to cancel',
+      ].join('\n'));
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options).toHaveLength(6);
+      expect(events[0].options[0].label).toBe('Option Alpha');
+      expect(events[0].options[5].label).toBe('Skip interview and plan immediately');
+    });
+
+    it('handles options starting from non-zero index (buffer truncation)', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'option_prompt');
+
+      // Simulate buffer where option 1 was cut off
+      p.feed('  2. Beta\n  3. Gamma\n  4. Delta\n');
+      vi.advanceTimersByTime(200);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options).toHaveLength(3);
+      expect(events[0].options[0].index).toBe(0); // re-indexed
+      expect(events[0].options[0].label).toBe('Beta');
     });
   });
 });

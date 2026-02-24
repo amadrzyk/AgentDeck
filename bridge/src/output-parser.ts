@@ -160,9 +160,12 @@ export class OutputParser extends EventEmitter {
   }
 
   private processFeed(rawData: string): void {
-    // Replace cursor-forward sequences (e.g. \x1b[1C) with spaces before stripping ANSI,
-    // so word spacing is preserved (Claude Code TUI uses cursor movement instead of spaces)
-    const spaced = rawData.replace(/\x1b\[\d*C/g, ' ');
+    // Replace cursor movement sequences before stripping ANSI,
+    // so word spacing is preserved (Claude Code TUI uses cursor movement instead of spaces/newlines)
+    const spaced = rawData
+      .replace(/\x1b\[\d*C/g, ' ')              // cursor forward → space (existing)
+      .replace(/\x1b\[\d*(?:;\d*)?[Hf]/g, '\n') // CUP/HVP → newline
+      .replace(/\x1b\[\d*[ABEF]/g, '\n');        // CUU/CUD/CNL/CPL → newline
     const clean = stripAnsi(spaced);
     this.buffer += clean;
 
@@ -479,7 +482,7 @@ export class OutputParser extends EventEmitter {
       this.resetOptionTimer();
       this.optionTimer = setTimeout(() => {
         this.optionTimer = null;
-        const parsed = this.parseOptions(this.buffer.slice(-1000));
+        const parsed = this.parseOptions(this.buffer.slice(-2000));
         if (parsed.options.length > 0) {
           // Check if this looks like a permission prompt (Yes/No style from tool approval)
           if (this.looksLikePermission(parsed.options) && !this.isCursorSelectionUI()) {
@@ -515,7 +518,7 @@ export class OutputParser extends EventEmitter {
       this.resetOptionTimer();
       this.optionTimer = setTimeout(() => {
         this.optionTimer = null;
-        const parsed = this.parseOptions(this.buffer.slice(-1000));
+        const parsed = this.parseOptions(this.buffer.slice(-2000));
         if (parsed.navigable && parsed.cursorIndex !== this.lastCursorIndex) {
           this.lastCursorIndex = parsed.cursorIndex;
           debug('Parser', `EMIT cursor_update: cursorIndex=${parsed.cursorIndex}`);
@@ -788,7 +791,7 @@ export class OutputParser extends EventEmitter {
     // ANSI cursor movement removal can leave numbered options concatenated without newlines.
     // Insert a newline before number patterns that aren't preceded by one.
     // (?![a-z\d]) prevents matching version numbers like "4.6" and file extensions like "_01.png"
-    const normalized = text.replace(/([^\n\d.])((?:\s*)❯?\s*\d{1,2}[.)](?![a-z\d]))/g, '$1\n$2');
+    const normalized = text.replace(/([^\n\d.\u276F])((?:\s*)❯?\s*\d{1,2}[.)](?![a-z\d]))/g, '$1\n$2');
 
     // Backward scan: restrict to the last contiguous block of option lines.
     // This prevents stale numbered list items (e.g. "5. Deploy") from earlier in the
@@ -800,19 +803,31 @@ export class OutputParser extends EventEmitter {
     while (blockEnd > 0 && !optLineRe.test(allLines[blockEnd - 1])) {
       blockEnd--;
     }
-    // Collect contiguous option lines (tolerate blank lines within the block)
+    // Collect contiguous option lines scanning backward. Tolerates:
+    // - Blank/separator lines (unlimited — TUI redraws create variable blank runs)
+    // - Indented text lines (option descriptions, up to MAX_DESC_GAP between options)
+    // Breaks on unindented text (real content boundaries like "Would you like to proceed?")
     let blockStart = blockEnd;
     let foundOption = false;
+    let descGap = 0;
+    const MAX_DESC_GAP = 2; // max indented description lines between consecutive options
+    const sepRe = /^[\s\u2500-\u257F]*$/; // box-drawing characters + whitespace only
     while (blockStart > 0) {
       const line = allLines[blockStart - 1];
       if (optLineRe.test(line)) {
         blockStart--;
         foundOption = true;
-      } else if (line.trim() === '') {
-        // Blank line — tolerate within block, keep scanning
+        descGap = 0;
+      } else if (line.trim() === '' || sepRe.test(line)) {
+        // Blank or separator line — always tolerate (TUI redraws create variable blank runs)
+        blockStart--;
+      } else if (foundOption && /^\s/.test(line)) {
+        // Indented text line — likely option description, tolerate within limit
+        descGap++;
+        if (descGap > MAX_DESC_GAP) break;
         blockStart--;
       } else {
-        // Non-blank, non-option line = block boundary
+        // Unindented text or no options found yet — hard block boundary
         break;
       }
     }
@@ -832,7 +847,10 @@ export class OutputParser extends EventEmitter {
           navigable = true;
           cursorIndex = idx;
         }
-        const raw = nm[2].trim();
+        let raw = nm[2].trim();
+        // Strip TUI footer text concatenated after last option (no newline from cursor positioning)
+        raw = raw.replace(/\s{2,}(?:Esc|Enter|ctrl\+\w)\s+to\s+.*/i, '');
+        raw = raw.trim();
         // Skip file extension artifacts from tool call paths: "png)", "json)", "ts)" etc.
         if (/^[a-z]{1,10}\)$/.test(raw)) continue;
         const recommended = /\(recommended\)/i.test(raw);
@@ -853,14 +871,23 @@ export class OutputParser extends EventEmitter {
     }
     const sorted = Array.from(byIndex.values()).sort((a, b) => a.index - b.index);
 
-    // Filter to contiguous run starting from index 0 to discard ghost options
-    // from stale buffer content (e.g. idx=98 from previous numbered lists)
-    const contiguous: PromptOption[] = [];
+    // Filter to longest contiguous run to discard ghost options
+    // from stale buffer content (e.g. idx=98 from previous numbered lists).
+    // Uses longest run instead of 0-based to handle buffer truncation where
+    // option 0 may have been cut off.
+    let bestRun: PromptOption[] = [];
+    let currentRun: PromptOption[] = [];
     for (const opt of sorted) {
-      if (opt.index === contiguous.length) {
-        contiguous.push(opt);
+      if (currentRun.length === 0 || opt.index === currentRun[currentRun.length - 1].index + 1) {
+        currentRun.push(opt);
+      } else {
+        if (currentRun.length > bestRun.length) bestRun = currentRun;
+        currentRun = [opt];
       }
     }
+    if (currentRun.length > bestRun.length) bestRun = currentRun;
+    // Re-index to 0-based for downstream consumers
+    const contiguous = bestRun.map((opt, i) => ({ ...opt, index: i }));
     const finalOptions = contiguous.length >= 2 ? contiguous : sorted;
     return { options: finalOptions, navigable, cursorIndex };
   }
