@@ -185,6 +185,8 @@ export class OutputParser extends EventEmitter {
   /** Detect ghost text (dim/gray ANSI-styled autocomplete suggestions) from raw PTY data */
   private detectGhostText(rawData: string): void {
     if (!this.seenFirstIdle) return;
+    // Ghost text only appears at the idle prompt — skip during processing
+    if (this.spinnerActive) return;
 
     // Strategy 1 (high confidence): "Try ..." visible in clean text on the prompt line.
     // Claude Code renders ghost text as `❯ Try "command"` — detectable without ANSI parsing.
@@ -254,8 +256,12 @@ export class OutputParser extends EventEmitter {
   private scheduleSuggestion(text: string): void {
     if (!text || text.length < 3 || text.length > 200) return;
 
-    // Reject pure numbers (e.g. diff line numbers like "65")
-    if (/^\d+$/.test(text)) return;
+    // Reject pure numbers or digit+operator fragments (e.g. diff line numbers "65", "96 +")
+    if (/^[\d\s+\-*/=<>]+$/.test(text)) return;
+
+    // Reject text entirely enclosed in parentheses — placeholders/status, not actionable prompts
+    // e.g. "(no content)", "(loading...)", "(empty)"
+    if (/^\([^)]+\)$/.test(text)) return;
 
     // Must contain at least one word sequence of 2+ characters (not just symbols/spaces)
     // \p{L} matches Unicode letters including CJK (Korean, Japanese, Chinese)

@@ -1911,6 +1911,43 @@ describe('OutputParser', () => {
       // or gray segment is just "❯ " which is too short / no meaningful content
       expect(events).toHaveLength(0);
     });
+
+    it('suppresses ghost text detection during spinner (processing)', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Establish ❯ in buffer so strategy 3 would normally trigger
+      p.feed('❯ ');
+      vi.advanceTimersByTime(600);
+
+      // Start spinner (processing)
+      p.feed('✻');
+      vi.advanceTimersByTime(100);
+
+      // Diff chunk with dim line numbers — strategy 3 would match buffer's ❯
+      // but spinnerActive should suppress detection entirely
+      p.feed('\x1b[38;2;248;248;242m\x1b[2m 96 +\x1b[22m');
+      vi.advanceTimersByTime(600);
+
+      // Only the null event from spinner clearing the first suggestion
+      const nonNull = events.filter(e => e.text !== null);
+      expect(nonNull).toHaveLength(0);
+    });
+
+    it('rejects digit+operator fragments like diff markers "96 +"', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const events = collectEvents(p, 'suggested_prompt');
+
+      // Simulate ghost text that looks like a diff line marker
+      p.feed('❯ \x1b[2m96 +\x1b[22m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
   });
 
   // === UI Chrome False Positive Filtering ===
@@ -2040,6 +2077,82 @@ describe('OutputParser', () => {
       vi.advanceTimersByTime(600);
 
       expect(events).toHaveLength(0);
+    });
+  });
+
+  // === Parenthesized Placeholder Filtering ===
+
+  describe('parenthesized placeholder filtering', () => {
+    it('rejects "(no content)" via SGR 2 (dim)', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[2m(no content)\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects "(no content)" via SGR 90 (bright black)', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[90m(no content)\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects "(loading...)"', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[2m(loading...)\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects "(empty)"', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[90m(empty)\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects "(waiting for response)"', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[2m(waiting for response)\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('allows "fix the broken (auth) module" — parens in middle', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[90mfix the broken (auth) module\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('fix the broken (auth) module');
+    });
+
+    it('allows "(optional) refactor the code" — paren prefix with text after', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'suggested_prompt');
+
+      p.feed('❯ \x1b[2m(optional) refactor the code\x1b[0m');
+      vi.advanceTimersByTime(600);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].text).toBe('(optional) refactor the code');
     });
   });
 
