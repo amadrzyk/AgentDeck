@@ -2618,4 +2618,90 @@ describe('OutputParser', () => {
       expect(events[0].options[0].label).toBe('Beta');
     });
   });
+
+  describe('permission scroll does not trigger idle (Bug 1)', () => {
+    it('scroll chunk with ❯ option text does NOT cause idle when navigable', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const permEvents = collectEvents(p, 'permission_prompt');
+      const idleEvents = collectEvents(p, 'idle');
+
+      // Initial permission prompt — sets lastNavigableEmit=true
+      p.feed('❯ 1. Yes\n  2. Yes, and don\'t ask again for: file:*\n  3. No\n');
+      vi.advanceTimersByTime(200);
+      expect(permEvents).toHaveLength(1);
+
+      // Simulate scroll: PTY redraws with ❯ on option text.
+      // "❯ Yes, allow..." matches IDLE_PROMPT — but should NOT trigger idle.
+      p.feed('\n \n  Yes\n \n❯ Yes, and don\'t ask again for: file:*\n \nctrl+e to explain');
+      vi.advanceTimersByTime(500);
+
+      expect(idleEvents).toHaveLength(0);
+    });
+
+    it('genuine idle prompt exits navigable state and emits idle', () => {
+      const p = armParser();
+      vi.advanceTimersByTime(500);
+
+      const permEvents = collectEvents(p, 'permission_prompt');
+      const idleEvents = collectEvents(p, 'idle');
+
+      // Initial permission prompt — sets lastNavigableEmit=true
+      p.feed('❯ 1. Yes\n  2. No\n  3. Always\n');
+      vi.advanceTimersByTime(200);
+      expect(permEvents).toHaveLength(1);
+
+      // Esc/selection → tiny idle prompt "❯ \n" arrives.
+      // Small chunk (non-ws < 10) recognized as genuine idle, not scroll redraw.
+      p.feed('❯ \n');
+      vi.advanceTimersByTime(500);
+
+      expect(idleEvents).toHaveLength(1);
+    });
+  });
+
+  describe('TUI cursor-overwrite label correction (Bug 2)', () => {
+    it('fixes contaminated permission option label using correction line', () => {
+      const p = armParser();
+      const permEvents = collectEvents(p, 'permission_prompt');
+
+      // First TUI draw: full command text contaminates option 2
+      p.feed(
+        ' 1. Yes\n' +
+        '\n' +
+        '\n' +
+        ' 2. Yes, and don\'t ask again for: file "/Users/puritysb/Desktop/AgentDeck"/* 2>/dev/nul\n',
+      );
+
+      // Correction draw: CUP-repositioned ":*" with trailing spaces
+      p.feed('\n \n:*                                                \n');
+
+      // Third draw with cursor and full option set
+      p.feed('❯ 1. Yes\n  2. Yes, and don\'t ask again for: file:*\n  3. No\n');
+      vi.advanceTimersByTime(200);
+
+      expect(permEvents).toHaveLength(1);
+      const opts = permEvents[0].options;
+      // Option 2 should have the corrected label, not the contaminated one
+      const opt2 = opts.find((o: PromptOption) => /don.t ask again/i.test(o.label));
+      expect(opt2).toBeDefined();
+      expect(opt2!.label).toContain('file:*');
+      expect(opt2!.label).not.toContain('/Users/');
+      expect(opt2!.label).not.toContain('2>/dev/nul');
+    });
+
+    it('leaves labels unchanged when no correction line is present', () => {
+      const p = armParser();
+      const permEvents = collectEvents(p, 'permission_prompt');
+
+      p.feed('❯ 1. Yes\n  2. Yes, and don\'t ask again for: file:*\n  3. No\n');
+      vi.advanceTimersByTime(200);
+
+      expect(permEvents).toHaveLength(1);
+      const opt2 = permEvents[0].options.find((o: PromptOption) => /don.t ask again/i.test(o.label));
+      expect(opt2).toBeDefined();
+      expect(opt2!.label).toContain('file:*');
+    });
+  });
 });

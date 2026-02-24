@@ -512,20 +512,38 @@ export class OutputParser extends EventEmitter {
     // --- Cursor-only redraw detection (navigable option state) ---
     // ink's minimal redraw: only moves ❯ character. Chunk lacks digits, so
     // OPTION_NUMBERED won't match. Re-parse buffer tail to detect cursor change.
-    if (this.lastNavigableEmit && chunk.includes('❯') && !hasIdlePrompt) {
-      debug('Parser', 'cursor-only redraw detected — debouncing buffer re-parse');
-      this.resetIdleTimer();
-      this.resetOptionTimer();
-      this.optionTimer = setTimeout(() => {
-        this.optionTimer = null;
-        const parsed = this.parseOptions(this.buffer.slice(-2000));
-        if (parsed.navigable && parsed.cursorIndex !== this.lastCursorIndex) {
-          this.lastCursorIndex = parsed.cursorIndex;
-          debug('Parser', `EMIT cursor_update: cursorIndex=${parsed.cursorIndex}`);
-          this.emit('cursor_update', { cursorIndex: parsed.cursorIndex });
-        }
-      }, OPTION_DEBOUNCE_MS);
-      return;
+    // Note: IDLE_PROMPT falsely matches "❯ Yes, allow..." option text in scroll
+    // chunks. Distinguish genuine idle (tiny chunk like "❯ \n") from scroll redraws
+    // (large chunks with option labels) using non-whitespace length.
+    if (this.lastNavigableEmit && chunk.includes('❯')) {
+      const isGenuineIdle = hasIdlePrompt && chunk.replace(/\s/g, '').length < 10;
+      if (!isGenuineIdle) {
+        debug('Parser', 'cursor-only redraw detected — debouncing buffer re-parse');
+        this.resetIdleTimer();
+        this.resetOptionTimer();
+        this.optionTimer = setTimeout(() => {
+          this.optionTimer = null;
+          const parsed = this.parseOptions(this.buffer.slice(-2000));
+          if (parsed.navigable) {
+            // Options still present — emit cursor_update if index changed
+            if (parsed.cursorIndex !== this.lastCursorIndex) {
+              this.lastCursorIndex = parsed.cursorIndex;
+              debug('Parser', `EMIT cursor_update: cursorIndex=${parsed.cursorIndex}`);
+              this.emit('cursor_update', { cursorIndex: parsed.cursorIndex });
+            }
+          } else {
+            // Options disappeared (Esc, selection made, etc.) — exit navigable state
+            this.lastNavigableEmit = false;
+            this.lastCursorIndex = 0;
+            debug('Parser', 'navigable options disappeared — emitting idle');
+            this.emit('idle');
+          }
+        }, OPTION_DEBOUNCE_MS);
+        return;
+      }
+      // Genuine idle prompt in tiny chunk — clear navigable state, fall through to idle handler
+      this.lastNavigableEmit = false;
+      this.lastCursorIndex = 0;
     }
 
     // --- Idle prompt ---
@@ -869,6 +887,32 @@ export class OutputParser extends EventEmitter {
         byIndex.set(idx, { index: idx, label: bm[2].trim() });
       }
     }
+
+    // Fix TUI cursor-overwrite contamination.
+    // Claude Code's ink TUI sometimes draws the full command on the option line first
+    // (e.g. 'file "/Users/foo/bar"/* 2>/dev/null'), then sends a CUP-repositioned
+    // correction like ':*                ' to overwrite with the short scope pattern.
+    // Our linear buffer appends both draws, so the option label gets contaminated.
+    // Detect the correction line and patch the affected label.
+    const correctionRe = /^(:\S+)\s{5,}/;
+    let correctionScope: string | null = null;
+    for (const line of allLines) {
+      const cm = line.match(correctionRe);
+      if (cm) { correctionScope = cm[1]; break; }
+    }
+    if (correctionScope) {
+      for (const [idx, opt] of byIndex) {
+        // Match: "Yes, and don't ask again for: file /path/..." (contaminated)
+        const m = opt.label.match(
+          /^(Yes,?\s+and\s+don['\u2019]t\s+ask\s+again\s+for:\s+)(\S+)\s+\S/i,
+        );
+        if (m) {
+          opt.label = m[1] + m[2] + correctionScope;
+          byIndex.set(idx, opt);
+        }
+      }
+    }
+
     const sorted = Array.from(byIndex.values()).sort((a, b) => a.index - b.index);
 
     // Filter to longest contiguous run to discard ghost options
