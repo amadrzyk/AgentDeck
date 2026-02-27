@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Server } from 'http';
+import type { Server, IncomingMessage } from 'http';
 import type { BridgeEvent, PluginCommand } from './types.js';
+import { isLocalConnection, validateToken } from './auth.js';
 import { debug } from './logger.js';
 
 export class WsServer {
@@ -12,7 +13,20 @@ export class WsServer {
   constructor(server: Server) {
     this.wss = new WebSocketServer({ server });
 
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req: IncomingMessage) => {
+      // Token auth for remote connections
+      const remoteIp = req.socket.remoteAddress || '';
+      if (!isLocalConnection(remoteIp)) {
+        const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+        const token = url.searchParams.get('token') || '';
+        if (!validateToken(token)) {
+          debug('WS', `Rejected remote connection from ${remoteIp} (invalid token)`);
+          ws.close(4001, 'Unauthorized');
+          return;
+        }
+        debug('WS', `Remote client authenticated from ${remoteIp}`);
+      }
+
       debug('WS', 'Plugin connected');
 
       // Send current state to newly connected client

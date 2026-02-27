@@ -177,8 +177,8 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
           reject(err);
         }
       });
-      this.httpServer.listen(options.port, '127.0.0.1', () => {
-        debug('adapter:openclaw', `HTTP server listening on 127.0.0.1:${options.port}`);
+      this.httpServer.listen(options.port, '0.0.0.0', () => {
+        debug('adapter:openclaw', `HTTP server listening on 0.0.0.0:${options.port}`);
         resolve();
       });
     });

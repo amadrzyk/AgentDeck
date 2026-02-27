@@ -11,6 +11,7 @@ import { EventJournal } from './event-journal.js';
 import { PtyRingBuffer } from './pty-ringbuffer.js';
 import { createDiagDump } from './diag-analyzer.js';
 import { createAdapter } from './adapters/index.js';
+import { ClaudeCodeAdapter } from './adapters/claude-code.js';
 import {
   BRIDGE_WS_PORT,
   State,
@@ -35,6 +36,9 @@ import {
   detectTmuxSession,
 } from './session-registry.js';
 import { fetchUsageFromApi, type ApiUsageData } from './usage-api.js';
+import { advertiseBridge } from './mdns.js';
+import { getOrCreateToken, getWsUrl } from './auth.js';
+import type { HookServer } from './hook-server.js';
 
 // Load prompt templates
 interface PromptTemplate {
@@ -246,6 +250,22 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     process.exit(1);
   }
 
+  // 2b. mDNS service advertising (LAN discovery for Android/browser clients)
+  const mdnsCleanup = advertiseBridge(port, projectName, agentType);
+
+  // 2c. Auth token initialization + QR URL for pairing
+  getOrCreateToken(); // Ensure token exists on disk
+  const wsUrl = getWsUrl(port);
+  log(`[sdc] Auth token ready. Pairing URL: ${wsUrl}`);
+
+  // 2d. SSE broadcasting helper (only for ClaudeCode adapter which has HookServer)
+  let hookServer: HookServer | null = null;
+  if (adapter instanceof ClaudeCodeAdapter) {
+    hookServer = adapter.hookServer;
+    hookServer.setMeta({ agentType, projectName });
+  }
+  const broadcastSse = (event: BridgeEvent) => hookServer?.broadcastSse(event);
+
   // 3. Attach WebSocket server to adapter's HTTP server
   const wsServer = new WsServer(adapter.getHttpServer());
   log(`[sdc] WebSocket server ready on port ${port}`);
@@ -327,9 +347,12 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
         stateMachine.onPtyActivity();
         break;
 
-      case 'connection':
-        wsServer.broadcast({ type: 'connection', status: evt.status } as BridgeEvent);
+      case 'connection': {
+        const connEvt: BridgeEvent = { type: 'connection', status: evt.status };
+        wsServer.broadcast(connEvt);
+        broadcastSse(connEvt);
         break;
+      }
     }
   });
 
@@ -378,6 +401,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       remoteUrl: snapshot.remoteUrl ?? undefined,
     };
     wsServer.broadcast(stateEvent);
+    broadcastSse(stateEvent);
 
     // Also send separate prompt_options for backward compatibility
     if (snapshot.options.length > 0) {
@@ -390,7 +414,9 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       wsServer.broadcast(promptEvent);
     }
 
-    wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage));
+    const usageEvt = buildUsageEvent(snapshot, cachedApiUsage);
+    wsServer.broadcast(usageEvt);
+    broadcastSse(usageEvt);
   });
 
   // 6. Handle PluginCommands from WsServer
@@ -510,9 +536,10 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     }
   });
 
-  // 6b. Wire WS connect/disconnect to journal
+  // 6b. Wire WS connect/disconnect to journal + update SSE metadata
   wsServer.onClientDisconnect(() => {
     journal.write('ws_event', 'ws', { action: 'disconnect', clients: wsServer.getClientCount() });
+    hookServer?.setMeta({ clientCount: wsServer.getClientCount() });
   });
 
   // Kick initial state: synthetic SessionStart in adapter.start() was emitted before
@@ -536,6 +563,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   // 7. Send current state to newly connected WebSocket clients
   wsServer.onClientConnect((ws) => {
     journal.write('ws_event', 'ws', { action: 'connect', clients: wsServer.getClientCount() });
+    hookServer?.setMeta({ clientCount: wsServer.getClientCount() });
     const snapshot = stateMachine.getSnapshot();
 
     // Compute promptType for initial state
@@ -672,6 +700,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       process.stdin.setRawMode(false);
     }
 
+    mdnsCleanup();
     voiceManager.disconnectFromServer();
     journal.close();
     wsServer.close();

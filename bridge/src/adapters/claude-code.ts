@@ -25,7 +25,8 @@ export class ClaudeCodeAdapter extends EventEmitter implements AgentAdapter {
 
   private ptyManager: PtyManager;
   private outputParser: OutputParser;
-  private hookServer: HookServer;
+  /** Exposed for SSE broadcasting from bridge index */
+  readonly hookServer: HookServer;
   private port = 0;
 
   /** Mode switch debounce */
