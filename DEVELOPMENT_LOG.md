@@ -2,6 +2,54 @@
 
 ---
 
+## 2026-02-27 — Usage 버튼 QR 코드 표시 + Remote URL 자동 감지
+
+### 문제
+Stream Deck 버튼에서 QR 코드를 표시하여 휴대폰으로 스캔 → Claude Code remote-control URL이나 OpenClaw Gateway에 즉시 접속하고 싶음.
+
+### 해결
+1. `qrcode` 라이브러리의 `create()` API로 모듈 매트릭스 추출 → SVG `<path>` 직접 생성 (`plugin/src/renderers/qr-renderer.ts`)
+2. Usage 버튼 페이지 사이클에 `'qr'` 페이지 추가. URL 소스: (1) `--remote` URL (PTY 자동감지) (2) OC Gateway
+3. Bridge OutputParser에서 `remote_url` 이벤트 파이프라인: Parser → Adapter → StateMachine → WS → Plugin
+4. QR 페이지에서 push → `pbcopy`로 URL 클립보드 복사
+
+### 핵심 이슈: PTY cursor-forward 시퀀스가 URL을 파괴
+Claude Code TUI는 문자 사이에 `\x1b[\d*C` (cursor forward) 시퀀스를 삽입. 기존 파서의 `processFeed()`가 이를 공백으로 치환하여 `https://claude .ai/code /...` 형태가 되어 URL 매칭 실패.
+
+**해결**: `parseRemoteUrl()`을 raw ANSI 데이터에서 실행. cursor movement 시퀀스를 공백 없이 제거한 후 ANSI color strip → URL regex 매칭.
+
+### 교훈
+- 144×144 버튼에 QR Version 3 (29 modules) × 4px/module = 116px가 최적. 헤더 라벨 제거해야 충분한 크기 확보
+- PTY 출력의 raw ANSI 데이터는 TUI 렌더링 시퀀스가 텍스트 사이에 삽입되어 있어, URL 등 구조화된 문자열 추출 시 cursor movement만 선택적으로 제거해야 함 (공백 치환 불가)
+- `qrcode` 라이브러리의 `create()` API는 canvas/PNG 불필요 — 순수 모듈 매트릭스 반환으로 SVG 직접 생성 가능
+
+---
+
+## 2026-02-27 — Claude Code v2.1 훅 포맷 변경 대응
+
+### 문제
+Bash 커맨드 퍼미션 선택지가 스트림덱에 표시되지 않음. 브릿지 디버그 로그(`/tmp/sdc-debug.log`) 분석 결과, **PreToolUse 등 모든 훅 이벤트가 0건** — 훅이 실행 자체가 되지 않고 있었음.
+
+### 원인
+Claude Code v2.1+에서 hooks 설정 포맷이 변경됨:
+- **구 포맷** (flat): `{ type: "command", command: "curl ..." }` → 자동 무시
+- **신 포맷** (3-level nesting): `{ matcher: "", hooks: [{ type: "command", command: "curl ..." }] }`
+
+`settings.local.json`에 구 포맷으로 설정되어 있어 Claude Code가 훅을 인식하지 못함.
+
+### 해결
+1. `~/.claude/settings.local.json` — 신 matcher-group 포맷으로 즉시 수정
+2. `hooks/src/install.ts` — `buildHookEntry()`가 matcher-group 포맷 생성, install/uninstall 모두 양쪽 포맷 인식
+3. `bridge/src/index.ts` — `migrateHooksIfNeeded()`에 flat→matcher 자동 마이그레이션 추가
+4. 테스트 전면 업데이트 (382 tests pass)
+
+### 교훈
+- Claude Code의 hook 포맷은 외부 의존성 — 메이저 버전 업데이트 시 포맷 변경 가능
+- 훅 실패는 `|| true`로 에러가 마스킹되어 문제 인지가 어려움. 브릿지 디버그 로그에서 hook event 카운트를 확인하는 것이 가장 빠른 진단법
+- `migrateHooksIfNeeded()`로 하위 호환 자동 마이그레이션 확보
+
+---
+
 ## 2026-02-25 — Permission 스크롤 시 UI 소멸 + 옵션 라벨 오염 수정
 
 ### 문제

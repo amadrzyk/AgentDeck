@@ -44,8 +44,8 @@ function isAwaiting(state: State): boolean {
 }
 
 function getButtonConfig(state: State): ButtonConfig {
-  // Standby → DIM
-  if (currentStandby && state !== State.AWAITING_PERMISSION) {
+  // Standby → DIM only when IDLE
+  if (currentStandby && state === State.IDLE) {
     return { title: 'STOP', color: '#1a1a1a', textColor: '#444444', enabled: false };
   }
   if (state === State.PROCESSING) {

@@ -2653,7 +2653,7 @@ describe('OutputParser', () => {
       expect(permEvents).toHaveLength(1);
 
       // Esc/selection → tiny idle prompt "❯ \n" arrives.
-      // Small chunk (non-ws < 10) recognized as genuine idle, not scroll redraw.
+      // Only ❯ char as non-ws (nonWs=1, < 2) → genuine idle, not cursor-move.
       p.feed('❯ \n');
       vi.advanceTimersByTime(500);
 

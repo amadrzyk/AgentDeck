@@ -59,6 +59,7 @@ import {
   setUsageBridgeConnected,
   setUsageCapabilities,
   setUsageState,
+  setRemoteUrl,
 } from './actions/usage-button.js';
 
 // Encoder actions
@@ -183,6 +184,10 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
   // Capture session status (OpenClaw)
   if (ev.sessionStatus !== undefined) {
     currentSessionStatus = ev.sessionStatus;
+  }
+  // Capture remote URL for QR display
+  if (ev.remoteUrl !== undefined) {
+    setRemoteUrl(ev.remoteUrl);
   }
   // Clear suggestion on non-IDLE states
   if (ev.state !== State.IDLE) {

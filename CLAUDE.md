@@ -53,10 +53,12 @@ sdc stop           # stop bridge and session
 - **Voice local recording**: 브리지 연결 상태와 무관하게 항상 로컬 녹음. iTerm2 `create window with default profile command`로 `rec` 실행 (iTerm2 마이크 권한 상속). `pkill -INT`로 녹음 중지. RMS 무음 감지 (threshold 0.001). 전사 결과 전달: iTerm2 최전면 → `write text`, 기타 앱 → 클립보드 복사 + 알림
 - **Voice binary/model paths**: `shared/src/voice-paths.ts`에 `REC_CANDIDATES`, `WHISPER_CANDIDATES`, `MODEL_SEARCH_DIRS` 등 공유 상수 정의 — bridge/plugin 양쪽에서 import
 - Hook scripts use `|| true` to avoid blocking Claude when bridge is down
+- **Hook format**: Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "command", command: "..." }] }`. Old flat format `{ type, command }` silently fails. `migrateHooksIfNeeded()` auto-upgrades on bridge start
 - **Action ID pattern**: All SD actions store string IDs and use `getActionById()` — never store action object references
 - **Plugin UUID**: `bound.serendipity.agentdeck` (확정 — 배포 후 변경 불가)
 - **Package scope**: `@agentdeck/*` (shared, bridge, plugin, hooks)
 - **User data dir**: `~/.agentdeck/sessions.json`
+- **QR code display**: Usage 버튼 `qr` 페이지 — `qrcode` 라이브러리 → SVG path 렌더링 (144×144, Version 3 QR 29 modules × 4px = 116px). URL 우선순위: (1) `--remote` URL (PTY 자동감지) (2) OC Gateway `http://LAN:18789`. Bridge OutputParser가 raw ANSI에서 cursor-forward 시퀀스 제거 후 URL 추출. Push → 클립보드 복사 (`pbcopy`)
 - **BillingType detection**: PTY `model_info` parser event의 `plan` 필드로 subscription/api/unknown 판별. API 사용자는 OAuth fetch 스킵 + session 페이지만 표시
 - **Encoder LCD design**: 모든 인코더 LCD는 SVG pixmap 렌더링 (`voice-layout.json` 공용). 배경 `#0f172a`, 14px 가운데 정렬 헤더, icon+value 가운데 그룹, 2px accent bar 패턴 통일. Renderer는 `plugin/src/renderers/{name}-renderer.ts` 순수 함수로 분리. Utility 모드는 clean 영문 title + emoji icon + value 구조 통일
 - **Encoder takeover wide canvas**: Option/permission/diff 선택 시 E1=context 패널, E2-E4=600px wide canvas 옵션 목록 (voice text와 동일한 `translate(-i*200,0)` 슬라이싱). `renderWideOptionList()` 함수, `autoScrollToIndex()`로 선택 항목 자동 스크롤
@@ -72,7 +74,7 @@ sdc stop           # stop bridge and session
 |------|--------|-------------|
 | 0 | Mode | Mode toggle (Default/Plan/Accept) |
 | 1 | Session | Project + state + session switch |
-| 2 | Usage | Usage dashboard (5h/7d/extra/session/models/oc-usage pages) |
+| 2 | Usage | Usage dashboard (5h/7d/extra/session/models/oc-usage/qr pages) |
 | 3-6 | Quick Action ×4 | GO ON/REVIEW/COMMIT/CLEAR (idle) or up to 4 options (permission/select). 5+ options → 3 + MORE ▼ |
 | 7 | Stop | Interrupt (processing) or Escape (awaiting prompt) |
 

@@ -10,8 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@elgato/streamdeck": "^2.0.0",
     "@agentdeck/shared": "workspace:*",
+    "@elgato/streamdeck": "^2.0.0",
+    "qrcode": "^1.5.4",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -19,6 +20,7 @@
     "@rollup/plugin-node-resolve": "^15.3.0",
     "@rollup/plugin-replace": "^6.0.3",
     "@rollup/plugin-typescript": "^12.1.0",
+    "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.5.12",
     "rollup": "^4.24.0",
     "tslib": "^2.7.0",

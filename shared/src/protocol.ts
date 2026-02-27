@@ -46,6 +46,7 @@ export interface StateUpdateEvent {
   suggestedPrompt?: string;
   modelCatalog?: ModelCatalogEntry[];
   sessionStatus?: OcSessionStatus;
+  remoteUrl?: string;
 }
 
 export interface PromptOptionsEvent {

@@ -6,9 +6,10 @@ import streamDeck, {
   WillDisappearEvent,
 } from '@elgato/streamdeck';
 import { execSync } from 'child_process';
-import { State, augmentedPath, resolveOpenClawBin, type BillingType, type AgentCapabilities, type ModelCatalogEntry } from '@agentdeck/shared';
+import { State, augmentedPath, resolveOpenClawBin, getLanIp, OPENCLAW_GATEWAY_PORT, BRIDGE_HTTP_PORT, type BillingType, type AgentCapabilities, type ModelCatalogEntry } from '@agentdeck/shared';
 import type { AgentLink } from '../agent-link.js';
 import { renderButton, svgToDataUrl } from '../renderers/button-renderer.js';
+import { renderQrButtonSvg, extractUrlLabel } from '../renderers/qr-renderer.js';
 import { measureTextWidth } from '../renderers/text-utils.js';
 import { ButtonConfig } from '../layout-manager.js';
 import { handleExpandedAction } from '../expanded-actions.js';
@@ -51,8 +52,11 @@ interface OcUsageData {
 let ocUsageData: OcUsageData | null = null;
 let ocUsageInterval: ReturnType<typeof setInterval> | null = null;
 
-// Display pages: 5h → 7d → extra (if enabled) → session → models
-type Page = '5h' | '7d' | 'extra' | 'session' | 'models' | 'oc-usage';
+// Remote URL detected from PTY (Claude Code --remote)
+let remoteUrl: string | null = null;
+
+// Display pages: 5h → 7d → extra (if enabled) → session → models → qr
+type Page = '5h' | '7d' | 'extra' | 'session' | 'models' | 'oc-usage' | 'qr';
 let pageIndex = 0;
 let billingType: BillingType = 'unknown';
 let bridgeConnected = false;
@@ -291,21 +295,47 @@ export function setUsageBridgeConnected(connected: boolean): void {
   }
 }
 
+/** Check if a meaningful QR URL is available (not just bridge health) */
+function hasQrUrl(): boolean {
+  return !!(remoteUrl || currentCapabilities?.hasModelCatalog);
+}
+
 function getPages(): Page[] {
-  // OpenClaw: show model roster + optional usage
+  // OpenClaw: show model roster + optional usage + QR (gateway web)
   if (currentCapabilities?.hasModelCatalog) {
-    return ocUsageData ? ['models', 'oc-usage'] : ['models'];
+    const pages: Page[] = ocUsageData ? ['models', 'oc-usage'] : ['models'];
+    pages.push('qr'); // Gateway web console always available in OC mode
+    return pages;
   }
   // API users have no subscription rate limits — only show session page
   if (billingType === 'api') {
-    return ['session'];
+    const pages: Page[] = ['session'];
+    if (remoteUrl) pages.push('qr');
+    return pages;
   }
   const pages: Page[] = ['5h', '7d'];
   if (extraUsageEnabled) {
     pages.push('extra');
   }
-  // Session page only for API users — subscription users use rate-limit pages
+  // QR only when --remote URL is detected (bridge health endpoint isn't useful)
+  if (remoteUrl) pages.push('qr');
   return pages;
+}
+
+/** Get the best QR URL based on priority: remote > gateway */
+function getQrUrl(): string {
+  if (remoteUrl) return remoteUrl;
+  const ip = getLanIp();
+  if (currentCapabilities?.hasModelCatalog) {
+    return `http://${ip}:${OPENCLAW_GATEWAY_PORT}`;
+  }
+  // Fallback — should not normally reach here due to hasQrUrl() gating
+  return `http://${ip}:${BRIDGE_HTTP_PORT}`;
+}
+
+export function setRemoteUrl(url: string | null): void {
+  remoteUrl = url;
+  refreshAll();
 }
 
 export function initUsageButton(b: AgentLink): void {
@@ -473,6 +503,12 @@ function renderUsageSvg(): string {
         return infoSvg('USAGE', '--', 'Fetching...', '#666666', '#111111', pages);
       }
       return renderOcUsageSvg(ocUsageData, pages);
+    }
+
+    case 'qr': {
+      const url = getQrUrl();
+      const label = extractUrlLabel(url);
+      return renderQrButtonSvg(url, label, pages.length, pageIndex, '#22d3ee');
     }
 
     default:
@@ -879,6 +915,16 @@ export class UsageButtonAction extends SingletonAction {
     }
     if (currentCapabilities && !currentCapabilities.hasApiUsage && !currentCapabilities.hasModelCatalog) return;
     const pages = getPages();
+
+    // If currently on QR page, copy URL to clipboard before cycling
+    if (pages[pageIndex] === 'qr') {
+      const url = getQrUrl();
+      try {
+        execSync(`printf '%s' ${JSON.stringify(url)} | pbcopy`, { timeout: 2000 });
+        dlog('UsaBut', `QR URL copied: ${url}`);
+      } catch { /* ignore */ }
+    }
+
     pageIndex = (pageIndex + 1) % pages.length;
     dlog('UsaBut', `keyDown: page=${pages[pageIndex]} (${pageIndex + 1}/${pages.length})`);
     if (currentCapabilities?.hasApiUsage) {

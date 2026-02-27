@@ -26,6 +26,12 @@ const STATUS_LINE = /(\d+m\s*\d+s)\s*·\s*↓\s*([\d.]+)k?\s*tokens/;
 // Project dir from Claude startup banner: "~/github/ProjectName"
 const PROJECT_DIR = /[~\/][\w.\-\/]+\/(\w[\w.\-]*)\s*$/m;
 
+// Remote Control URL detection:
+// 1. claude.ai/code URLs — always capture (from /remote-control or /rc command)
+// 2. General remote/tunnel URLs — keyword + URL on same line
+const REMOTE_CLAUDE_URL = /https?:\/\/(?:claude\.ai|console\.anthropic\.com)\/code\S*/;
+const REMOTE_KEYWORD_URL = /(?:remote|tunnel|server|listening|session\s*url)\s*:?\s*(https?:\/\/\S+)/i;
+
 // Tool action: "⏺ ToolName(description)" — capture args inside parens
 const TOOL_ACTION = /⏺\s+(\w+)\(([^)]*)\)/;
 
@@ -137,6 +143,7 @@ export class OutputParser extends EventEmitter {
   // Cooldown after emitting permission/diff prompt — suppresses false idle
   // from user prompt echo (❯ text) in the same PTY batch
   private interactiveCooldown: ReturnType<typeof setTimeout> | null = null;
+  private remoteUrl: string | null = null;
 
   feed(rawData: string): void {
     const data = this.pendingAnsi + rawData;
@@ -179,6 +186,10 @@ export class OutputParser extends EventEmitter {
     }
 
     this.detectPatterns(clean);
+
+    // Remote URL detection on raw data: cursor-forward sequences ([1C]) break URLs
+    // when replaced with spaces, so we strip them entirely for URL extraction
+    this.parseRemoteUrl(rawData);
 
     // Detect ghost text from raw ANSI data (must run after detectPatterns
     // which sets seenFirstIdle on the first ❯ prompt)
@@ -512,11 +523,13 @@ export class OutputParser extends EventEmitter {
     // --- Cursor-only redraw detection (navigable option state) ---
     // ink's minimal redraw: only moves ❯ character. Chunk lacks digits, so
     // OPTION_NUMBERED won't match. Re-parse buffer tail to detect cursor change.
-    // Note: IDLE_PROMPT falsely matches "❯ Yes, allow..." option text in scroll
-    // chunks. Distinguish genuine idle (tiny chunk like "❯ \n") from scroll redraws
-    // (large chunks with option labels) using non-whitespace length.
+    // Note: IDLE_PROMPT falsely matches "❯ No" option text in cursor-move chunks.
+    // Genuine idle has only ❯ char as non-whitespace (nonWs=1, e.g. "❯ \n").
+    // Option cursor-move chunks always have ❯ + label text (nonWs≥2).
+    // Threshold < 2 separates the two cases (lowered from < 10 which failed
+    // for short option lists like Yes/No where the entire chunk was tiny).
     if (this.lastNavigableEmit && chunk.includes('❯')) {
-      const isGenuineIdle = hasIdlePrompt && chunk.replace(/\s/g, '').length < 10;
+      const isGenuineIdle = hasIdlePrompt && chunk.replace(/\s/g, '').length < 2;
       if (!isGenuineIdle) {
         debug('Parser', 'cursor-only redraw detected — debouncing buffer re-parse');
         this.resetIdleTimer();
@@ -541,7 +554,7 @@ export class OutputParser extends EventEmitter {
         }, OPTION_DEBOUNCE_MS);
         return;
       }
-      // Genuine idle prompt in tiny chunk — clear navigable state, fall through to idle handler
+      // Genuine idle prompt (only ❯ char, no label text) — clear navigable state, fall through
       this.lastNavigableEmit = false;
       this.lastCursorIndex = 0;
     }
@@ -606,6 +619,37 @@ export class OutputParser extends EventEmitter {
       const toolArgs = match[2]?.trim() || null;
       debug('Parser', `tool_action: ${match[1]}${toolArgs ? `(${toolArgs.slice(0, 60)})` : ''}`);
       this.emit('tool_action', { toolName: match[1], toolArgs });
+    }
+  }
+
+  private parseRemoteUrl(rawData: string): void {
+    if (this.remoteUrl) return; // Only capture once per session
+
+    // Strip cursor movement sequences WITHOUT adding spaces (preserves URLs intact),
+    // then strip ANSI color/style sequences
+    const urlSafe = stripAnsi(
+      rawData
+        .replace(/\x1b\[\d*[CABDEFGH]/g, '')  // cursor movement → remove
+        .replace(/\x1b\[\d*(?:;\d*)?[Hf]/g, '') // CUP/HVP → remove
+    );
+
+    // Strategy 1: claude.ai/code URL — high confidence, always capture
+    const claudeMatch = urlSafe.match(REMOTE_CLAUDE_URL);
+    if (claudeMatch) {
+      const url = claudeMatch[0].replace(/[.,;)\]]+$/, '');
+      this.remoteUrl = url;
+      debug('Parser', `remote_url (claude.ai): ${url}`);
+      this.emit('remote_url', { url });
+      return;
+    }
+
+    // Strategy 2: keyword + URL pattern (remote/tunnel/server/session url)
+    const keywordMatch = urlSafe.match(REMOTE_KEYWORD_URL);
+    if (keywordMatch && keywordMatch[1]) {
+      const url = keywordMatch[1].replace(/[.,;)\]]+$/, '');
+      this.remoteUrl = url;
+      debug('Parser', `remote_url (keyword): ${url}`);
+      this.emit('remote_url', { url });
     }
   }
 
@@ -1008,8 +1052,8 @@ export class OutputParser extends EventEmitter {
     if (this.optionTimer) { clearTimeout(this.optionTimer); this.optionTimer = null; }
   }
 
-  /** Brief cooldown after permission/diff emit — prevents false idle from PTY batch echo */
-  private startInteractiveCooldown(): void {
+  /** Brief cooldown after permission/diff emit or navigation — prevents false idle from PTY echo */
+  startInteractiveCooldown(): void {
     if (this.interactiveCooldown) clearTimeout(this.interactiveCooldown);
     this.interactiveCooldown = setTimeout(() => {
       this.interactiveCooldown = null;

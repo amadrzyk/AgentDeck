@@ -86,4 +86,5 @@ export interface StateSnapshot {
   resetTime: string | null;
   resetDate: string | null;
   suggestedPrompt: string | null;
+  remoteUrl: string | null;
 }

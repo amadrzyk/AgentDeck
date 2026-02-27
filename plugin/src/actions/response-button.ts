@@ -237,8 +237,8 @@ function getOpenClawIdlePresets(): ButtonConfig[] {
 function refreshAllButtons(): void {
   const sorted = getSortedIds();
 
-  // Standby mode: all DIM (unless AWAITING_PERMISSION for alert)
-  if (currentStandby && currentState !== State.AWAITING_PERMISSION) {
+  // Standby mode: all DIM only when IDLE
+  if (currentStandby && currentState === State.IDLE) {
     for (let i = 0; i < sorted.length; i++) {
       // Keep slot 0 START button if it has a disconnectedAction
       if (i === 0) {

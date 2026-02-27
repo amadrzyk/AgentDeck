@@ -372,6 +372,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
       cursorIndex: snapshot.navigable ? snapshot.cursorIndex : undefined,
       suggestedPrompt: snapshot.suggestedPrompt ?? undefined,
       modelCatalog: cachedModelCatalog ?? undefined,
+      remoteUrl: snapshot.remoteUrl ?? undefined,
     };
     wsServer.broadcast(stateEvent);
 
@@ -454,6 +455,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
           : cur;
         stateMachine.updateCursorIndex(newIdx);
         debug('sdc', `navigate_option: ${cmd.direction} cursor=${cur}->${newIdx}`);
+        adapter.prepareForNavigation?.();
         adapter.writeInput(cmd.direction === 'up' ? '\x1b[A' : '\x1b[B');
         // Don't call handleUserAction — cursor movement is not a selection
         break;
@@ -744,15 +746,19 @@ function handleVoiceCommand(
   }
 }
 
-/** Auto-migrate hooks from hardcoded localhost:9120 to $AGENTDECK_PORT env var */
+/**
+ * Auto-migrate hooks:
+ * 1. Hardcoded localhost:9120 → $AGENTDECK_PORT env var
+ * 2. Old flat format → new matcher-group format (Claude Code v2.1+)
+ *    Old: { type: "command", command: "curl ..." }
+ *    New: { matcher: "", hooks: [{ type: "command", command: "curl ..." }] }
+ */
 function migrateHooksIfNeeded(): void {
   const settingsPath = join(homedir(), '.claude', 'settings.local.json');
   try {
     if (!existsSync(settingsPath)) return;
     const raw = readFileSync(settingsPath, 'utf-8');
-
-    // Quick check: old format has literal "localhost:9120" but NOT "AGENTDECK_PORT"
-    if (!raw.includes('localhost:9120') || raw.includes('AGENTDECK_PORT')) return;
+    if (!raw.includes('AGENTDECK_PORT') && !raw.includes('localhost:9120')) return;
 
     const settings = JSON.parse(raw);
     if (!settings.hooks) return;
@@ -761,7 +767,10 @@ function migrateHooksIfNeeded(): void {
     for (const event of Object.keys(settings.hooks)) {
       const hooks = settings.hooks[event];
       if (!Array.isArray(hooks)) continue;
-      for (const hook of hooks) {
+      for (let i = 0; i < hooks.length; i++) {
+        const hook = hooks[i];
+
+        // Migration 1: hardcoded port → env var
         if (hook.command?.includes('localhost:9120') && !hook.command?.includes('AGENTDECK_PORT')) {
           hook.command = hook.command.replace(
             /localhost:9120/g,
@@ -769,12 +778,33 @@ function migrateHooksIfNeeded(): void {
           );
           migrated = true;
         }
+
+        // Migration 2: flat format → matcher-group format
+        // Detect flat format: has "type" + "command" at top level, no "hooks" array
+        if (hook.type === 'command' && hook.command?.includes('AGENTDECK_PORT') && !hook.hooks) {
+          const handler: Record<string, unknown> = { type: hook.type, command: hook.command };
+          hooks[i] = { matcher: '', hooks: [handler] };
+          migrated = true;
+        }
+
+        // Also migrate matcher-group entries with hardcoded port inside
+        if (Array.isArray(hook.hooks)) {
+          for (const inner of hook.hooks) {
+            if (inner.command?.includes('localhost:9120') && !inner.command?.includes('AGENTDECK_PORT')) {
+              inner.command = inner.command.replace(
+                /localhost:9120/g,
+                'localhost:${AGENTDECK_PORT:-9120}',
+              );
+              migrated = true;
+            }
+          }
+        }
       }
     }
 
     if (migrated) {
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-      log('[sdc] Auto-migrated hooks to dynamic port format');
+      log('[sdc] Auto-migrated hooks to v2.1 matcher-group format');
     }
   } catch (err) {
     debug('sdc', `Hook migration check failed: ${err}`);

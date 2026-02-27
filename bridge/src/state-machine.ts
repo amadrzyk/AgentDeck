@@ -61,6 +61,7 @@ export class StateMachine extends EventEmitter {
   private cursorIndex = 0;
   private projectName: string | null = null;
   private modelName: string | null = null;
+  private remoteUrl: string | null = null;
   private billingType: BillingType = 'unknown';
   private suggestedPrompt: string | null = null;
   private lastValidSuggestedPrompt: string | null = null;
@@ -307,6 +308,16 @@ export class StateMachine extends EventEmitter {
         break;
       }
 
+      case 'remote_url': {
+        const url = data?.url as string | undefined;
+        if (url) {
+          this.remoteUrl = url;
+          debug('SM', `remoteUrl: ${url}`);
+          this.emitSnapshot();
+        }
+        break;
+      }
+
       default:
         break;
     }
@@ -484,6 +495,7 @@ export class StateMachine extends EventEmitter {
       resetTime: usage.resetTime,
       resetDate: usage.resetDate,
       suggestedPrompt: this.suggestedPrompt,
+      remoteUrl: this.remoteUrl,
     };
   }
 

@@ -139,6 +139,9 @@ export interface AgentAdapter extends EventEmitter {
    */
   getHttpServer(): Server;
 
+  /** Prepare parser for navigation — suppress false idle from PTY cursor-move echo */
+  prepareForNavigation?(): void;
+
   /** Register a diagnostic dump handler */
   onDiag(handler: (tail?: number) => unknown): void;
 

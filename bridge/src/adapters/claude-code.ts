@@ -70,6 +70,7 @@ export class ClaudeCodeAdapter extends EventEmitter implements AgentAdapter {
       'model_info',
       'mode_change',
       'suggested_prompt',
+      'remote_url',
     ];
     for (const eventName of parserEvents) {
       this.outputParser.on(eventName, (data?: Record<string, unknown>) => {
@@ -194,6 +195,10 @@ export class ClaudeCodeAdapter extends EventEmitter implements AgentAdapter {
 
   getProjectName(): string | null {
     return this.outputParser.getProjectName();
+  }
+
+  prepareForNavigation(): void {
+    this.outputParser.startInteractiveCooldown();
   }
 
   getHttpServer(): Server {

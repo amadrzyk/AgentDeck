@@ -335,13 +335,13 @@ function getStatusInfo(): { label: string; detail: string; color: string; bg: st
 }
 
 function renderSessionSvg(): string {
-  // Standby mode: gateway connected in auto mode, no bridge
-  if (currentStandby) {
+  // Standby mode: gateway connected in auto mode, no bridge — only show in IDLE
+  if (currentStandby && currentState === State.IDLE) {
     return renderStandbySvg();
   }
 
-  // OpenClaw active (explicit selection)
-  if (currentAgentType === 'openclaw' && !currentStandby) {
+  // OpenClaw active (explicit selection or standby with active state)
+  if (currentAgentType === 'openclaw') {
     return renderOpenClawSvg();
   }
 
