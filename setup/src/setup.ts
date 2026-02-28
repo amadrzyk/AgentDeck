@@ -1,0 +1,255 @@
+#!/usr/bin/env node
+
+import { execSync } from 'child_process';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+// ─── Colors ──────────────────────────────────────────────────────────
+
+const RED = '\x1b[0;31m';
+const GREEN = '\x1b[0;32m';
+const YELLOW = '\x1b[1;33m';
+const BLUE = '\x1b[0;34m';
+const NC = '\x1b[0m';
+
+function info(msg: string) { console.log(`${BLUE}[INFO]${NC} ${msg}`); }
+function ok(msg: string) { console.log(`${GREEN}[OK]${NC} ${msg}`); }
+function warn(msg: string) { console.log(`${YELLOW}[WARN]${NC} ${msg}`); }
+function fail(msg: string) { console.log(`${RED}[FAIL]${NC} ${msg}`); }
+
+function which(cmd: string): string | null {
+  try {
+    return execSync(`which ${cmd}`, { encoding: 'utf-8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// ─── 1. Banner ───────────────────────────────────────────────────────
+
+function banner() {
+  console.log('');
+  console.log('=========================================');
+  console.log('  AgentDeck Setup');
+  console.log('=========================================');
+  console.log('');
+}
+
+// ─── 2. Prerequisites ────────────────────────────────────────────────
+
+function checkPrerequisites(): boolean {
+  let pass = true;
+
+  // Node.js >= 20
+  const major = parseInt(process.version.replace('v', '').split('.')[0], 10);
+  if (major >= 20) {
+    ok(`Node.js ${process.version}`);
+  } else {
+    fail(`Node.js ${process.version} — version 20+ required`);
+    pass = false;
+  }
+
+  // Claude Code CLI
+  if (which('claude')) {
+    ok('Claude Code CLI found');
+  } else {
+    fail('Claude Code CLI not found — install with: npm install -g @anthropic-ai/claude-code');
+    pass = false;
+  }
+
+  // Stream Deck app
+  if (
+    existsSync('/Applications/Elgato Stream Deck.app') ||
+    existsSync('/Applications/Stream Deck.app')
+  ) {
+    ok('Stream Deck app installed');
+  } else {
+    fail('Stream Deck app not found — download from https://www.elgato.com/downloads');
+    pass = false;
+  }
+
+  if (!pass) {
+    console.log('');
+    fail('Required dependencies missing. Please install them and re-run.');
+  }
+
+  return pass;
+}
+
+// ─── 3. Stream Deck CLI ──────────────────────────────────────────────
+
+function installStreamDeckCli() {
+  if (which('streamdeck')) {
+    ok('Stream Deck CLI found');
+    return;
+  }
+
+  info('Installing Stream Deck CLI (@elgato/cli)...');
+  execSync('npm install -g @elgato/cli', { stdio: 'inherit' });
+  ok('Stream Deck CLI installed');
+}
+
+// ─── 4. Install Bridge (sdc) ─────────────────────────────────────────
+
+function installBridge() {
+  info('Installing AgentDeck bridge (@agentdeck/bridge)...');
+  execSync('npm install -g @agentdeck/bridge', { stdio: 'inherit' });
+
+  if (which('sdc')) {
+    ok('sdc CLI installed');
+  } else {
+    fail('sdc CLI not found after install — check npm global path');
+    process.exit(1);
+  }
+}
+
+// ─── 5. Install Hooks (inlined from @agentdeck/hooks) ────────────────
+
+const HOOK_EVENTS = [
+  'SessionStart',
+  'SessionEnd',
+  'PreToolUse',
+  'PostToolUse',
+  'Stop',
+  'Notification',
+  'UserPromptSubmit',
+] as const;
+
+function buildHookEntry(eventName: string) {
+  return {
+    matcher: '',
+    hooks: [
+      {
+        type: 'command',
+        command: `curl -sf -X POST http://localhost:\${AGENTDECK_PORT:-9120}/hooks/${eventName} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+      },
+    ],
+  };
+}
+
+function installHooks() {
+  info('Installing Claude Code hooks...');
+
+  const claudeDir = join(homedir(), '.claude');
+  const settingsPath = join(claudeDir, 'settings.local.json');
+
+  if (!existsSync(claudeDir)) {
+    mkdirSync(claudeDir, { recursive: true });
+  }
+
+  let settings: any = {};
+  if (existsSync(settingsPath)) {
+    const content = readFileSync(settingsPath, 'utf-8');
+    settings = JSON.parse(content);
+  }
+
+  if (!settings.hooks) {
+    settings.hooks = {};
+  }
+
+  for (const event of HOOK_EVENTS) {
+    if (!settings.hooks[event]) {
+      settings.hooks[event] = [];
+    }
+
+    // Remove existing AgentDeck hooks (old flat + new matcher format)
+    settings.hooks[event] = settings.hooks[event].filter((h: any) => {
+      if (h.command?.includes('AGENTDECK_PORT') || h.command?.includes('localhost:9120')) {
+        return false;
+      }
+      if (
+        Array.isArray(h.hooks) &&
+        h.hooks.some(
+          (hh: any) =>
+            hh.command?.includes('AGENTDECK_PORT') || hh.command?.includes('localhost:9120'),
+        )
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    settings.hooks[event].push(buildHookEntry(event));
+  }
+
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  ok(`Hooks installed to ${settingsPath}`);
+}
+
+// ─── 6. Data directory ───────────────────────────────────────────────
+
+function ensureDataDir() {
+  const dir = join(homedir(), '.agentdeck');
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+    ok('Created ~/.agentdeck/');
+  }
+}
+
+// ─── 7. Optional dependencies ────────────────────────────────────────
+
+function checkOptionalDeps() {
+  console.log('');
+  console.log('----- Optional Dependencies -----');
+
+  if (which('sox') || which('rec')) {
+    ok('sox installed (voice recording)');
+  } else {
+    warn('sox not found — voice input won\'t work');
+    console.log('     Install with: brew install sox');
+  }
+
+  if (which('whisper-cli') || which('whisper')) {
+    ok('whisper.cpp installed (voice transcription)');
+  } else {
+    warn('whisper.cpp not found — voice transcription won\'t work');
+    console.log('     Install with: brew install whisper-cpp');
+    console.log('     Then download model: whisper-cli --download-model large-v3-turbo');
+  }
+}
+
+// ─── 8. Success ──────────────────────────────────────────────────────
+
+function success() {
+  console.log('');
+  console.log('=========================================');
+  console.log('  Setup Complete!');
+  console.log('=========================================');
+  console.log('');
+  console.log('  Next steps:');
+  console.log('  1. Restart Stream Deck app');
+  console.log('  2. Add AgentDeck actions to your Stream Deck profile');
+  console.log("  3. Run 'sdc' in terminal to start the bridge");
+  console.log('');
+  console.log('  Usage:');
+  console.log('    sdc              Start bridge + Claude');
+  console.log('    sdc status       Check status');
+  console.log('    sdc stop         Stop bridge');
+  console.log('');
+}
+
+// ─── Main ────────────────────────────────────────────────────────────
+
+async function main() {
+  banner();
+
+  if (!checkPrerequisites()) {
+    process.exit(1);
+  }
+
+  console.log('');
+  installStreamDeckCli();
+  console.log('');
+  installBridge();
+  console.log('');
+  installHooks();
+  ensureDataDir();
+  checkOptionalDeps();
+  success();
+}
+
+main().catch((err) => {
+  fail(`Unexpected error: ${err.message}`);
+  process.exit(1);
+});

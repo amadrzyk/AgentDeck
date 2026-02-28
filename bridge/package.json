@@ -1,8 +1,14 @@
 {
   "name": "@agentdeck/bridge",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/puritysb/AgentDeck.git",
+    "directory": "bridge"
+  },
+  "files": ["dist", "!dist/__tests__"],
   "main": "./dist/index.js",
   "bin": {
     "sdc": "./dist/index.js"

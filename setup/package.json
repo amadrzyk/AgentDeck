@@ -1,0 +1,25 @@
+{
+  "name": "@agentdeck/setup",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/puritysb/AgentDeck.git",
+    "directory": "setup"
+  },
+  "bin": {
+    "@agentdeck/setup": "./dist/setup.js",
+    "agentdeck-setup": "./dist/setup.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

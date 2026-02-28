@@ -3,6 +3,7 @@ packages:
   - bridge
   - plugin
   - hooks
+  - setup
 
 ignoredBuiltDependencies:
   - esbuild
