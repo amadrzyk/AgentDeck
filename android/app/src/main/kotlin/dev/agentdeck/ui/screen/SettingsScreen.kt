@@ -108,8 +108,13 @@ fun SettingsScreen(
                             Text("Disconnect")
                         }
                     } else {
-                        Button(onClick = onNavigateToPairing) {
-                            Text("Connect")
+                        Button(onClick = {
+                            connection.connect("ws://127.0.0.1:9120")
+                        }) {
+                            Text("USB Connect")
+                        }
+                        OutlinedButton(onClick = onNavigateToPairing) {
+                            Text("QR Pair")
                         }
                     }
                 }

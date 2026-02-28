@@ -17,6 +17,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -29,6 +30,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.BridgeConnection
+import dev.agentdeck.net.ConnectionStatus
 import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.ui.screen.ControlScreen
 import dev.agentdeck.ui.screen.DashboardScreen
@@ -38,10 +40,14 @@ import dev.agentdeck.ui.screen.SettingsScreen
 import dev.agentdeck.ui.screen.UsageScreen
 import dev.agentdeck.ui.theme.AgentDeckTheme
 import dev.agentdeck.util.EinkDetector
+import android.util.Log
 import android.view.WindowManager
+import androidx.compose.runtime.LaunchedEffect
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
@@ -101,17 +107,21 @@ class MainActivity : ComponentActivity() {
                 if (isEink) {
                     EinkMonitorScreen(stateHolder, connection, displayPrefs)
                 } else {
-                    MainNavigation(stateHolder, connection, isEink)
+                    MainNavigation(stateHolder, connection, displayPrefs, isEink)
                 }
             }
         }
     }
 }
 
+private const val TAG = "MainActivity"
+private const val SAVED_URL_TIMEOUT_MS = 8_000L
+
 @Composable
 fun MainNavigation(
     stateHolder: AgentStateHolder,
     connection: BridgeConnection,
+    displayPrefs: DisplayPreferences,
     isEink: Boolean,
 ) {
     val navController = rememberNavController()
@@ -119,6 +129,33 @@ fun MainNavigation(
     val currentDestination = navBackStackEntry?.destination
 
     val showBottomBar = currentDestination?.route != Screen.Pairing.route
+
+    // Auto-connect to saved bridge URL on launch
+    LaunchedEffect(Unit) {
+        val savedUrl = displayPrefs.lastBridgeUrlFlow.first()
+        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
+        if (savedUrl != null) {
+            connection.autoConnect(savedUrl)
+            delay(SAVED_URL_TIMEOUT_MS)
+            if (connection.status.value != ConnectionStatus.CONNECTED) {
+                Log.w(TAG, "Auto-connect timeout — disconnecting saved URL")
+                connection.disconnect()
+                displayPrefs.setLastBridgeUrl(null)
+            } else {
+                Log.i(TAG, "Auto-connect succeeded to $savedUrl")
+            }
+        }
+    }
+
+    // Persist URL on successful connection
+    val connectionStatus by connection.status.collectAsState()
+    val currentUrl by connection.url.collectAsState()
+    LaunchedEffect(connectionStatus) {
+        if (connectionStatus == ConnectionStatus.CONNECTED) {
+            val url = currentUrl
+            if (url != null) displayPrefs.setLastBridgeUrl(url)
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
