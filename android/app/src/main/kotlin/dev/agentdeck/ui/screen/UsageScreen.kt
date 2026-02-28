@@ -20,9 +20,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.state.AgentStateHolder
+import dev.agentdeck.state.SessionMetrics
 import dev.agentdeck.ui.component.TokenCounter
 import dev.agentdeck.ui.component.UsageGauge
+import dev.agentdeck.ui.eink.formatDuration
+import dev.agentdeck.ui.eink.formatDurationLong
+import dev.agentdeck.ui.theme.AgentDeckColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun UsageScreen(
@@ -31,6 +39,7 @@ fun UsageScreen(
 ) {
     val state by stateHolder.state.collectAsState()
     val usage = state.usage
+    val metrics by SessionMetrics.instance.metrics.collectAsState()
 
     Column(
         modifier = Modifier
@@ -59,7 +68,59 @@ fun UsageScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 UsageGauge(label = "5-Hour", percent = usage.fiveHourPercent)
+                if (usage.fiveHourResetsAt != null) {
+                    Text(
+                        text = "Resets at ${formatTimestamp(usage.fiveHourResetsAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 UsageGauge(label = "7-Day", percent = usage.sevenDayPercent)
+                if (usage.sevenDayResetsAt != null) {
+                    Text(
+                        text = "Resets at ${formatTimestamp(usage.sevenDayResetsAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        // Extra usage section
+        if (usage.extraUsageEnabled == true) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "Extra Usage",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    if (usage.extraUsageMonthlyLimit != null) {
+                        InfoRow(
+                            label = "Monthly limit",
+                            value = "$${String.format("%.2f", usage.extraUsageMonthlyLimit)}",
+                        )
+                    }
+                    if (usage.extraUsageUsedCredits != null) {
+                        InfoRow(
+                            label = "Used",
+                            value = "$${String.format("%.2f", usage.extraUsageUsedCredits)}",
+                        )
+                    }
+                    if (usage.extraUsageUtilization != null) {
+                        UsageGauge(
+                            label = "Utilization",
+                            percent = usage.extraUsageUtilization,
+                        )
+                    }
+                }
             }
         }
 
@@ -78,20 +139,14 @@ fun UsageScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = "Duration",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = formatDuration(usage.sessionDurationSec),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+                // Uptime from SessionMetrics
+                val uptimeText = if (metrics.connectedSince != null) {
+                    val elapsed = System.currentTimeMillis() - metrics.connectedSince
+                    formatDurationLong(elapsed)
+                } else {
+                    formatDuration(usage.sessionDurationSec)
                 }
+                InfoRow(label = "Uptime", value = uptimeText)
 
                 TokenCounter(label = "Input tokens", count = usage.inputTokens)
                 TokenCounter(label = "Output tokens", count = usage.outputTokens)
@@ -99,19 +154,40 @@ fun UsageScreen(
 
                 if (usage.estimatedCostUsd != null) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "Estimated cost",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = "$${String.format("%.4f", usage.estimatedCostUsd)}",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                    InfoRow(
+                        label = "Estimated cost",
+                        value = "$${String.format("%.4f", usage.estimatedCostUsd)}",
+                        valueStyle = MaterialTheme.typography.titleMedium,
+                    )
+                }
+
+                if (metrics.reconnectCount > 0) {
+                    InfoRow(
+                        label = "Reconnects",
+                        value = "${metrics.reconnectCount}",
+                    )
+                }
+            }
+        }
+
+        // Model catalog (OpenClaw)
+        val catalog = state.modelCatalog
+        if (!catalog.isNullOrEmpty()) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "Models",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    catalog.forEach { entry ->
+                        ModelRow(entry)
                     }
                 }
             }
@@ -119,9 +195,59 @@ fun UsageScreen(
     }
 }
 
-private fun formatDuration(seconds: Int): String {
-    val h = seconds / 3600
-    val m = (seconds % 3600) / 60
-    val s = seconds % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String,
+    valueStyle: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.labelLarge,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = valueStyle,
+        )
+    }
 }
+
+@Composable
+private fun ModelRow(entry: ModelCatalogEntry) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (entry.role != null) {
+                Text(
+                    text = entry.role,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            text = if (entry.available) "\u2713" else "\u2717",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (entry.available) AgentDeckColors.Green else AgentDeckColors.SlateText,
+        )
+    }
+}
+
+private val timeFormatter = SimpleDateFormat("HH:mm", Locale.US)
+
+private fun formatTimestamp(epochMs: Long): String {
+    return timeFormatter.format(Date(epochMs))
+}
+

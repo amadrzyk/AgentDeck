@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,12 +33,16 @@ import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.state.AgentStateHolder
+import dev.agentdeck.state.SessionMetrics
 import dev.agentdeck.state.TimelineStore
+import dev.agentdeck.ui.eink.EinkActionColumn
+import dev.agentdeck.ui.eink.EinkAgentColumn
+import dev.agentdeck.ui.eink.EinkEngineColumn
+import dev.agentdeck.ui.eink.EinkFooterBar
 import dev.agentdeck.ui.eink.EinkSettingsOverlay
-import dev.agentdeck.ui.eink.EinkStatusPanel
 import dev.agentdeck.ui.eink.EinkTimelinePanel
 import dev.agentdeck.ui.eink.EinkUsageCompact
-import dev.agentdeck.ui.eink.EinkUsagePanel
+import dev.agentdeck.ui.eink.compactStateMarker
 
 @Composable
 fun EinkMonitorScreen(
@@ -50,6 +52,7 @@ fun EinkMonitorScreen(
 ) {
     val state by stateHolder.state.collectAsState()
     val timelineEntries by TimelineStore.instance.entries.collectAsState()
+    val metrics by SessionMetrics.instance.metrics.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
 
     val configuration = LocalConfiguration.current
@@ -61,26 +64,47 @@ fun EinkMonitorScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         if (isLandscape) {
-            EinkLandscapeLayout(
-                agentState = state.agentState,
-                projectName = state.projectName,
-                modelName = state.modelName,
-                agentType = state.agentType,
-                currentTool = state.currentTool,
-                toolProgress = state.toolProgress,
-                usage = state.usage,
-                timelineEntries = timelineEntries,
-                onSettingsClick = { showSettings = true },
-            )
+            // 3-column console layout
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.weight(1f)) {
+                    EinkAgentColumn(
+                        state = state,
+                        onSettingsClick = { showSettings = true },
+                        modifier = Modifier
+                            .weight(0.25f)
+                            .fillMaxHeight(),
+                    )
+                    VerticalDivider(thickness = 2.dp, color = Color.Black)
+                    EinkActionColumn(
+                        state = state,
+                        timelineEntries = timelineEntries,
+                        onSelectOption = { index ->
+                            connection.sendSelectOption(index)
+                        },
+                        modifier = Modifier
+                            .weight(0.45f)
+                            .fillMaxHeight(),
+                    )
+                    VerticalDivider(thickness = 2.dp, color = Color.Black)
+                    EinkEngineColumn(
+                        usage = state.usage,
+                        modifier = Modifier
+                            .weight(0.30f)
+                            .fillMaxHeight(),
+                    )
+                }
+                HorizontalDivider(thickness = 2.dp, color = Color.Black)
+                EinkFooterBar(
+                    metrics = metrics,
+                    usage = state.usage,
+                    isEink = true,
+                )
+            }
         } else {
             EinkPortraitLayout(
-                agentState = state.agentState,
-                projectName = state.projectName,
-                modelName = state.modelName,
-                currentTool = state.currentTool,
-                toolProgress = state.toolProgress,
-                usage = state.usage,
+                state = state,
                 timelineEntries = timelineEntries,
+                metrics = metrics,
                 onSettingsClick = { showSettings = true },
             )
         }
@@ -96,107 +120,38 @@ fun EinkMonitorScreen(
 }
 
 @Composable
-private fun EinkLandscapeLayout(
-    agentState: AgentState,
-    projectName: String?,
-    modelName: String?,
-    agentType: String?,
-    currentTool: String?,
-    toolProgress: String?,
-    usage: dev.agentdeck.net.UsageUpdate,
-    timelineEntries: List<dev.agentdeck.state.TimelineEntry>,
-    onSettingsClick: () -> Unit,
-) {
-    Row(modifier = Modifier.fillMaxSize()) {
-        // Left panel: status + usage + settings gear
-        Column(
-            modifier = Modifier
-                .weight(0.35f)
-                .fillMaxHeight(),
-        ) {
-            EinkStatusPanel(
-                agentState = agentState,
-                projectName = projectName,
-                modelName = modelName,
-                agentType = agentType,
-                currentTool = currentTool,
-                toolProgress = toolProgress,
-            )
-
-            HorizontalDivider(thickness = 1.dp, color = Color.Black)
-
-            EinkUsagePanel(usage = usage)
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Settings gear
-            Text(
-                text = "\u2699 Settings",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .clickable(onClick = onSettingsClick)
-                    .padding(16.dp),
-            )
-        }
-
-        // Vertical divider
-        VerticalDivider(
-            thickness = 2.dp,
-            color = Color.Black,
-            modifier = Modifier.fillMaxHeight(),
-        )
-
-        // Right panel: timeline
-        Column(
-            modifier = Modifier
-                .weight(0.65f)
-                .fillMaxHeight(),
-        ) {
-            Text(
-                text = "Timeline",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            )
-            HorizontalDivider(thickness = 1.dp, color = Color.Black)
-            EinkTimelinePanel(
-                entries = timelineEntries,
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-@Composable
 private fun EinkPortraitLayout(
-    agentState: AgentState,
-    projectName: String?,
-    modelName: String?,
-    currentTool: String?,
-    toolProgress: String?,
-    usage: dev.agentdeck.net.UsageUpdate,
+    state: dev.agentdeck.state.DashboardState,
     timelineEntries: List<dev.agentdeck.state.TimelineEntry>,
+    metrics: dev.agentdeck.state.MetricsSnapshot,
     onSettingsClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         // Compact header: ~20% of screen
         EinkCompactHeader(
-            agentState = agentState,
-            projectName = projectName,
-            modelName = modelName,
-            currentTool = currentTool,
-            toolProgress = toolProgress,
-            usage = usage,
+            agentState = state.agentState,
+            projectName = state.projectName,
+            modelName = state.modelName,
+            currentTool = state.currentTool,
+            toolProgress = state.toolProgress,
+            usage = state.usage,
             onSettingsClick = onSettingsClick,
         )
 
         HorizontalDivider(thickness = 2.dp, color = Color.Black)
 
-        // Timeline: ~80% of screen
+        // Timeline: ~75% of screen
         EinkTimelinePanel(
             entries = timelineEntries,
             modifier = Modifier.weight(1f),
+        )
+
+        // Compact footer
+        HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        EinkFooterBar(
+            metrics = metrics,
+            usage = state.usage,
+            isEink = true,
         )
     }
 }
@@ -268,13 +223,4 @@ private fun EinkCompactHeader(
         // Row 2: compact usage
         EinkUsageCompact(usage = usage)
     }
-}
-
-private fun compactStateMarker(state: AgentState): String = when (state) {
-    AgentState.IDLE -> "\u25CF IDLE"
-    AgentState.PROCESSING -> "\u25C9 PROC"
-    AgentState.AWAITING_PERMISSION -> "\u26A0 PERM"
-    AgentState.AWAITING_OPTION -> "\u25C7 SEL"
-    AgentState.AWAITING_DIFF -> "\u25A1 DIFF"
-    AgentState.DISCONNECTED -> "\u25CB OFF"
 }

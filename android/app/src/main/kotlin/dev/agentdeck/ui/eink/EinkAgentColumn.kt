@@ -1,28 +1,30 @@
 package dev.agentdeck.ui.eink
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.agentdeck.net.AgentState
+import dev.agentdeck.net.PermissionMode
+import dev.agentdeck.state.DashboardState
 
+/**
+ * LEFT column (25%) — "The Brain"
+ * State marker, project, agent/model, permission mode, settings gear.
+ */
 @Composable
-fun EinkStatusPanel(
-    agentState: AgentState,
-    projectName: String?,
-    modelName: String?,
-    agentType: String?,
-    currentTool: String?,
-    toolProgress: String?,
+fun EinkAgentColumn(
+    state: DashboardState,
+    onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -31,19 +33,19 @@ fun EinkStatusPanel(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // State marker with text prefix
+        // State marker (large)
         Text(
-            text = stateMarker(agentState),
+            text = stateMarker(state.agentState),
             style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = if (agentState == AgentState.PROCESSING) FontWeight.Bold else FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
             ),
             color = MaterialTheme.colorScheme.onSurface,
         )
 
         // Project name
-        if (projectName != null) {
+        if (state.projectName != null) {
             Text(
-                text = projectName,
+                text = state.projectName,
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -51,19 +53,18 @@ fun EinkStatusPanel(
 
         // Agent type + model
         Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (agentType != null) {
+            if (state.agentType != null) {
                 Text(
-                    text = agentType,
+                    text = state.agentType,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (modelName != null) {
+            if (state.modelName != null) {
                 Text(
-                    text = modelName,
+                    text = state.modelName,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontFamily = FontFamily.Monospace,
                     ),
@@ -72,24 +73,23 @@ fun EinkStatusPanel(
             }
         }
 
-        // Current tool (during processing)
-        if (currentTool != null && agentState == AgentState.PROCESSING) {
+        // Permission mode (only if not DEFAULT)
+        if (state.permissionMode != PermissionMode.DEFAULT) {
             Text(
-                text = buildString {
-                    append("> ")
-                    append(currentTool)
-                    if (toolProgress != null) {
-                        append(" (")
-                        append(toolProgress)
-                        append(")")
-                    }
-                },
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                ),
+                text = "Mode: ${state.permissionMode.name}",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Settings gear
+        Text(
+            text = "\u2699 Settings",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clickable(onClick = onSettingsClick),
+        )
     }
 }

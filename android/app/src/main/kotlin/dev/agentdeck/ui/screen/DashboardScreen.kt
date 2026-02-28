@@ -3,6 +3,7 @@ package dev.agentdeck.ui.screen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,10 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.state.AgentStateHolder
+import dev.agentdeck.state.SessionMetrics
 import dev.agentdeck.state.TimelineStore
 import dev.agentdeck.ui.component.PermissionDialog
 import dev.agentdeck.ui.component.StatusCard
+import dev.agentdeck.ui.component.SyncIndicator
 import dev.agentdeck.ui.component.TimelineList
+import dev.agentdeck.ui.component.UsageSummaryCard
 
 @Composable
 fun DashboardScreen(
@@ -28,6 +32,7 @@ fun DashboardScreen(
 ) {
     val state by stateHolder.state.collectAsState()
     val timelineEntries by TimelineStore.instance.entries.collectAsState()
+    val metrics by SessionMetrics.instance.metrics.collectAsState()
 
     Column(
         modifier = Modifier
@@ -44,6 +49,12 @@ fun DashboardScreen(
             toolProgress = state.toolProgress,
         )
 
+        // Usage summary card
+        UsageSummaryCard(
+            usage = state.usage,
+            metrics = metrics,
+        )
+
         // Permission/option prompt
         if (state.agentState == AgentState.AWAITING_PERMISSION ||
             state.agentState == AgentState.AWAITING_OPTION ||
@@ -58,13 +69,20 @@ fun DashboardScreen(
             )
         }
 
-        // Timeline
+        // Timeline header with sync indicator
         if (timelineEntries.isNotEmpty()) {
-            Text(
-                text = "Timeline",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Timeline",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SyncIndicator(metrics = metrics)
+            }
             TimelineList(
                 entries = timelineEntries,
                 modifier = Modifier

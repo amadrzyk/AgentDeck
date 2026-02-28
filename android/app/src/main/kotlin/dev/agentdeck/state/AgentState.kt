@@ -1,9 +1,11 @@
 package dev.agentdeck.state
 
+import dev.agentdeck.net.AgentCapabilities
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeEvent
-import dev.agentdeck.net.ConnectionStatus
+import dev.agentdeck.net.ModelCatalogEntry
+import dev.agentdeck.net.OcSessionStatus
 import dev.agentdeck.net.PermissionMode
 import dev.agentdeck.net.PromptOption
 import dev.agentdeck.net.StateUpdate
@@ -33,6 +35,12 @@ data class DashboardState(
     val voice: VoiceState = VoiceState(),
     val sessionId: String? = null,
     val bridgeConnected: Boolean = false,
+    val agentCapabilities: AgentCapabilities? = null,
+    val modelCatalog: List<ModelCatalogEntry>? = null,
+    val sessionStatus: OcSessionStatus? = null,
+    val pairingUrl: String? = null,
+    val navigable: Boolean? = null,
+    val cursorIndex: Int? = null,
 )
 
 class AgentStateHolder private constructor() {
@@ -72,14 +80,23 @@ class AgentStateHolder private constructor() {
                         question = event.data.question,
                         suggestedPrompt = event.data.suggestedPrompt,
                         remoteUrl = event.data.remoteUrl ?: current.remoteUrl,
+                        agentCapabilities = event.data.agentCapabilities ?: current.agentCapabilities,
+                        modelCatalog = event.data.modelCatalog ?: current.modelCatalog,
+                        sessionStatus = event.data.sessionStatus ?: current.sessionStatus,
+                        pairingUrl = event.data.pairingUrl ?: current.pairingUrl,
+                        navigable = event.data.navigable,
+                        cursorIndex = event.data.cursorIndex,
                     )
                 }
                 lastKnownState = _state.value
+                StateTimelineGenerator.instance.onStateUpdate(event.data)
+                SessionMetrics.instance.onMessageReceived()
             }
 
             is BridgeEvent.Usage -> {
                 _state.update { it.copy(usage = event.data) }
                 lastKnownState = _state.value
+                SessionMetrics.instance.onMessageReceived()
             }
 
             is BridgeEvent.Voice -> {
@@ -93,6 +110,7 @@ class AgentStateHolder private constructor() {
                         sessionId = event.sessionId,
                     )
                 }
+                SessionMetrics.instance.onConnected()
             }
 
             is BridgeEvent.Disconnected -> {
@@ -102,6 +120,8 @@ class AgentStateHolder private constructor() {
                         agentState = AgentState.DISCONNECTED,
                     )
                 }
+                SessionMetrics.instance.onDisconnected()
+                StateTimelineGenerator.instance.onDisconnected()
             }
         }
     }

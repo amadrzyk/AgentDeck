@@ -28,10 +28,44 @@ enum class PermissionMode {
 }
 
 @Serializable
+data class AgentCapabilities(
+    val type: String? = null,
+    val displayName: String? = null,
+    val hasTerminal: Boolean = false,
+    val hasModeSwitching: Boolean = false,
+    val hasDiffReview: Boolean = false,
+    val hasOptionLists: Boolean = false,
+    val hasNavigablePrompts: Boolean = false,
+    val hasSuggestedPrompts: Boolean = false,
+    val hasApiUsage: Boolean = false,
+    val hasModelCatalog: Boolean = false,
+)
+
+@Serializable
+data class ModelCatalogEntry(
+    val name: String,
+    val role: String? = null,
+    val available: Boolean = true,
+)
+
+@Serializable
+data class OcSessionStatus(
+    val model: String? = null,
+    val contextTokens: Int? = null,
+    val messageCount: Int? = null,
+    val uptime: Int? = null,
+    val sessionId: String? = null,
+)
+
+@Serializable
 data class PromptOption(
     val label: String,
     val value: String? = null,
     val description: String? = null,
+    val index: Int? = null,
+    val shortcut: String? = null,
+    val recommended: Boolean? = null,
+    val selected: Boolean? = null,
 )
 
 @Serializable
@@ -50,6 +84,12 @@ data class StateUpdate(
     val question: String? = null,
     val suggestedPrompt: String? = null,
     val remoteUrl: String? = null,
+    val navigable: Boolean? = null,
+    val cursorIndex: Int? = null,
+    val agentCapabilities: AgentCapabilities? = null,
+    val modelCatalog: List<ModelCatalogEntry>? = null,
+    val sessionStatus: OcSessionStatus? = null,
+    val pairingUrl: String? = null,
 )
 
 @Serializable
@@ -61,6 +101,12 @@ data class UsageUpdate(
     val estimatedCostUsd: Double? = null,
     val fiveHourPercent: Double? = null,
     val sevenDayPercent: Double? = null,
+    val fiveHourResetsAt: Long? = null,
+    val sevenDayResetsAt: Long? = null,
+    val extraUsageEnabled: Boolean? = null,
+    val extraUsageMonthlyLimit: Double? = null,
+    val extraUsageUsedCredits: Double? = null,
+    val extraUsageUtilization: Double? = null,
 )
 
 @Serializable
