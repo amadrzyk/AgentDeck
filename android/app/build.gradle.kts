@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,6 +9,28 @@ plugins {
 android {
     namespace = "dev.agentdeck"
     compileSdk = 34
+
+    signingConfigs {
+        create("release") {
+            val envKeystore = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (envKeystore != null) {
+                storeFile = file(envKeystore)
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                storePassword = System.getenv("ANDROID_STORE_PASSWORD")
+            } else {
+                val propsFile = rootProject.file("signing.properties")
+                if (propsFile.exists()) {
+                    val props = Properties()
+                    propsFile.inputStream().use { props.load(it) }
+                    storeFile = rootProject.file(props.getProperty("storeFile"))
+                    keyAlias = props.getProperty("keyAlias")
+                    keyPassword = props.getProperty("keyPassword")
+                    storePassword = props.getProperty("storePassword")
+                }
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "dev.agentdeck"
@@ -23,6 +47,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

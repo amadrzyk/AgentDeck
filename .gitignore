@@ -19,3 +19,7 @@ Thumbs.db
 
 # Temp
 *.tmp
+
+# Android signing
+android/signing.properties
+android/*.jks

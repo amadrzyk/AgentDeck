@@ -20,6 +20,18 @@ pnpm build                  # shared must build before bridge/plugin
 pnpm generate-icons         # SVG → PNG icons (first build or after icon changes)
 ```
 
+## Android Build
+
+Requires JDK 17+ (`brew install openjdk@17`). Build script auto-detects Homebrew JDK.
+
+```bash
+bash scripts/build-android-release.sh   # local → dist/agentdeck-v{VERSION}.apk
+```
+
+**Signing**: `android/signing.properties` (gitignored) with `storeFile`, `keyAlias`, `keyPassword`, `storePassword`. CI uses env vars from GitHub Secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_STORE_PASSWORD`).
+
+**Release**: `git tag android-v{VERSION} && git push origin android-v{VERSION}` → GitHub Actions builds + creates Release with APK.
+
 ## Setup & Distribution
 
 ```bash
