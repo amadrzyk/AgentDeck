@@ -51,9 +51,15 @@ let fileWatchActive = false;
 const ANIM_INTERVAL_MS = 150; // ~6.7 FPS
 const ANIM_TOTAL_FRAMES = 24; // full rotation = 24 frames × 150ms = 3.6s
 
+let setupRequired = false;
 let overrideConfig: ButtonConfig | null = null;
 
 const actionIds: string[] = [];
+
+export function setSessionSetupRequired(value: boolean): void {
+  setupRequired = value;
+  refreshAll();
+}
 
 export function initSessionButton(b: ConnectionManager): void {
   bridge = b;
@@ -334,6 +340,17 @@ function getStatusInfo(): { label: string; detail: string; color: string; bg: st
   }
 }
 
+function setupRequiredSvg(): string {
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
+    `<rect width="${SIZE}" height="${SIZE}" rx="12" fill="#1a1a2e"/>`,
+    `<text x="72" y="46" text-anchor="middle" font-family="Arial,sans-serif" font-size="36">\u2699\uFE0F</text>`,
+    `<text x="72" y="86" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="bold" fill="#818cf8">SETUP</text>`,
+    `<text x="72" y="110" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#64748b">AgentDeck</text>`,
+    `</svg>`,
+  ].join('');
+}
+
 function renderSessionSvg(): string {
   // Standby mode: gateway connected in auto mode, no bridge — only show in IDLE
   if (currentStandby && currentState === State.IDLE) {
@@ -353,6 +370,7 @@ function renderSessionSvg(): string {
 
   switch (isActive ? 'active' : currentState) {
     case State.DISCONNECTED:
+      if (setupRequired) return setupRequiredSvg();
       return simpleSvg('NO', 'SESSION', '#666666', '#1a1a1a');
 
     case State.IDLE: {

@@ -9,7 +9,7 @@ import streamDeck, {
 import { State, PromptOption, type AgentCapabilities, type AgentType, OPENCLAW_GATEWAY_PORT, augmentedPath, resolveOpenClawBin } from '@agentdeck/shared';
 import { execFileSync } from 'child_process';
 import type { AgentLink } from '../agent-link.js';
-import { openOrFocusBrowserTab } from '../utility-modes/macos.js';
+import { openOrFocusBrowserTab, osascript } from '../utility-modes/macos.js';
 import { LayoutManager, ButtonConfig } from '../layout-manager.js';
 import { renderButton, svgToDataUrl, labelNeedsHaiku, BUTTON_MAX_CHARS } from '../renderers/button-renderer.js';
 import { requestAbbreviation } from '../label-summarizer.js';
@@ -64,6 +64,7 @@ function hasUserCustomizations(settings: ResponseButtonSettings, slotIndex: numb
 
 let bridge: AgentLink;
 let layoutManager: LayoutManager;
+let setupRequired = false;
 let currentState = State.DISCONNECTED;
 let currentMode = 'default';
 let currentOptions: PromptOption[] = [];
@@ -79,6 +80,11 @@ function getSortedIds(): string[] {
   return [...actionSlots.keys()].sort((a, b) =>
     (actionSlots.get(a) ?? 99) - (actionSlots.get(b) ?? 99)
   );
+}
+
+export function setResponseSetupRequired(value: boolean): void {
+  setupRequired = value;
+  refreshAllButtons();
 }
 
 export function initResponseButtons(
@@ -307,8 +313,22 @@ function refreshAllButtons(): void {
     return;
   }
 
-  // DISCONNECTED: show shell-command buttons active, others dimmed
+  // DISCONNECTED: setup mode or normal disconnected
   if (currentState === State.DISCONNECTED) {
+    if (setupRequired) {
+      dlog('RspBut', `refresh SETUP: ids=${sorted.length}`);
+      const setupBtn: ButtonConfig = {
+        title: 'INSTALL',
+        color: '#1e3a5f',
+        textColor: '#e2e8f0',
+        enabled: true,
+        action: 'shell:npx @agentdeck/setup',
+      };
+      for (let i = 0; i < sorted.length; i++) {
+        applyButtonConfig(sorted[i], i === 0 ? setupBtn : DIM_BUTTON, actionSlots.get(sorted[i]));
+      }
+      return;
+    }
     dlog('RspBut', `refresh DISCONNECTED: ids=${sorted.length}`);
     for (let i = 0; i < sorted.length; i++) {
       const s = effectiveSettings(sorted[i]);
@@ -430,6 +450,15 @@ export class ResponseButtonAction extends SingletonAction {
     }
 
     let actionStr: string | undefined;
+
+    // === Guard B0: Setup mode — slot 0 launches installer ===
+    if (setupRequired && currentState === State.DISCONNECTED) {
+      if (slot === 0) {
+        dlog('RspBut', `keyDown slot=0 → launchSetup`);
+        void launchSetup();
+      }
+      return;
+    }
 
     // === Guard B: DISCONNECTED or PROCESSING ===
     if (currentState === State.DISCONNECTED || currentState === State.PROCESSING) {
@@ -568,6 +597,56 @@ export class ResponseButtonAction extends SingletonAction {
   override onWillDisappear(ev: WillDisappearEvent): void {
     actionSlots.delete(ev.action.id);
     userSettingsMap.delete(ev.action.id);
+  }
+}
+
+/** Launch npx @agentdeck/setup in iTerm (same pattern as project-picker launchSdc) */
+async function launchSetup(): Promise<void> {
+  const cmd = 'npx @agentdeck/setup';
+  const script = [
+    `set cmd to ${JSON.stringify(cmd)}`,
+    'set launched to false',
+    '',
+    'if application "iTerm2" is running then',
+    '  tell application "iTerm2"',
+    '    set newWin to (create window with default profile)',
+    '    tell current session of current tab of newWin to write text cmd',
+    '    activate',
+    '  end tell',
+    '  set launched to true',
+    'end if',
+    '',
+    'if not launched then',
+    '  try',
+    '    do shell script "open -a iTerm"',
+    '    repeat 50 times',
+    '      delay 0.1',
+    '      try',
+    '        tell application "iTerm2" to count windows',
+    '        exit repeat',
+    '      end try',
+    '    end repeat',
+    '    tell application "iTerm2"',
+    '      set newWin to (create window with default profile)',
+    '      tell current session of current tab of newWin to write text cmd',
+    '      activate',
+    '    end tell',
+    '    set launched to true',
+    '  end try',
+    'end if',
+    '',
+    'if not launched then',
+    '  tell application "Terminal"',
+    '    do script cmd',
+    '    activate',
+    '  end tell',
+    'end if',
+  ].join('\n');
+  try {
+    await osascript(script);
+    dlog('RspBut', 'launched setup installer');
+  } catch (e) {
+    derr('RspBut', `launchSetup failed: ${e}`);
   }
 }
 

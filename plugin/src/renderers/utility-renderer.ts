@@ -35,6 +35,18 @@ export interface UtilityRenderData {
   artist?: string;
 }
 
+/** Setup required state for E1 utility dial */
+export function renderSetupUtility(): string {
+  const accent = '#818cf8';
+  return svgWrap(`
+    <rect width="${W}" height="${H}" fill="#0f172a"/>
+    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="${accent}">SETUP</text>
+    <text x="82" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="${accent}" opacity="0.7">\u2699\uFE0F</text>
+    <text x="120" y="58" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="${accent}" opacity="0.6">Required</text>
+    <rect x="10" y="90" width="180" height="2" rx="1" fill="${accent}" opacity="0.2"/>
+  `);
+}
+
 /** Generic utility mode (volume, mic, timer, brightness, darkmode) */
 export function renderUtilityGeneric(data: UtilityRenderData): string {
   const { title, icon, value, indicator, dots } = data;

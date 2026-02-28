@@ -16,7 +16,7 @@ import { isPickerActive, scrollPicker, selectProject } from '../project-picker.j
 import { encoderRegistry, isVoiceTextTakeoverActive, handleVtRotate, handleVtDown, handleVtUp } from '../encoder-registry.js';
 import { createModes, modeDots, type UtilityMode } from '../utility-modes/index.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
-import { renderUtilityGeneric, renderUtilityMedia, type UtilityRenderData } from '../renderers/utility-renderer.js';
+import { renderUtilityGeneric, renderUtilityMedia, renderSetupUtility, type UtilityRenderData } from '../renderers/utility-renderer.js';
 import { dlog, dinfo, dwarn } from '../log.js';
 
 import type { JsonValue } from '@elgato/utils';
@@ -39,6 +39,7 @@ const PIXMAP_LAYOUT = 'layouts/voice-layout.json';
 
 const LONG_PRESS_MS = 500;
 
+let setupRequired = false;
 let currentState = State.DISCONNECTED;
 let modes: UtilityMode[] = [];
 let activeIndex = 0;
@@ -66,6 +67,11 @@ function rebuildModes(): void {
   }
 }
 
+export function setUtilitySetupRequired(value: boolean): void {
+  setupRequired = value;
+  refreshUtilityDials();
+}
+
 export function initUtilityDial(): void {
   dinfo('UtilDial', 'initUtilityDial called');
   rebuildModes();
@@ -90,6 +96,19 @@ function ensurePixmapLayout(): void {
 export function refreshUtilityDials(): void {
   if (isEncoderTakeoverActive()) return;
   if (isVoiceTextTakeoverActive()) return;
+
+  // Setup mode: show setup prompt on E1
+  if (setupRequired && currentState === State.DISCONNECTED) {
+    ensurePixmapLayout();
+    const svg = renderSetupUtility();
+    const canvasFeedback = { canvas: svgToDataUrl(svg) };
+    for (const id of encoderRegistry.utilityIds) {
+      const dial = streamDeck.actions.getActionById(id) as any;
+      if (dial) void dial.setFeedback(canvasFeedback).catch(() => {});
+    }
+    return;
+  }
+
   if (modes.length === 0) return;
 
   ensurePixmapLayout();

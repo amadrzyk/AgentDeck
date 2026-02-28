@@ -22,6 +22,7 @@ import {
   renderResponseDisabled,
   renderResponseInteractive,
   renderResponseSuggestion,
+  renderSetupPrompt,
 } from '../renderers/response-renderer.js';
 import { isPickerActive, scrollPicker, selectProject, closePicker } from '../project-picker.js';
 import { timelineStore } from '../timeline-store.js';
@@ -49,6 +50,7 @@ let promptIndex = 0;
 
 // ---- Option state (interactive mode) ----
 let bridge: AgentLink;
+let setupRequired = false;
 let currentState = State.DISCONNECTED;
 let currentOptions: PromptOption[] = [];
 let selectedIndex = 0;
@@ -60,6 +62,11 @@ let rotateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let currentSuggestedPrompt: string | null = null;
 let currentAgentType: AgentType | null = null;
 let currentSessionStatus: OcSessionStatus | null = null;
+
+export function setOptionSetupRequired(value: boolean): void {
+  setupRequired = value;
+  refreshOptionDials();
+}
 
 export function initOptionDial(b: AgentLink): void {
   bridge = b;
@@ -225,7 +232,7 @@ function refreshOptionDials(): void {
   } else if (currentState === State.PROCESSING) {
     svg = renderResponseProcessing();
   } else if (currentState === State.DISCONNECTED) {
-    svg = renderResponseDisconnected();
+    svg = setupRequired ? renderSetupPrompt() : renderResponseDisconnected();
   } else {
     svg = renderResponseDisabled();
   }

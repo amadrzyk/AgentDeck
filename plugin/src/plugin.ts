@@ -21,7 +21,8 @@ import {
 } from './encoder-takeover.js';
 import { setVoiceTextExitCallback } from './encoder-registry.js';
 import { dlog, dinfo } from './log.js';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { execSync } from 'child_process';
 import { homedir } from 'os';
 
 // Keypad button actions
@@ -29,6 +30,7 @@ import {
   ResponseButtonAction,
   initResponseButtons,
   updateResponseState,
+  setResponseSetupRequired,
 } from './actions/response-button.js';
 import {
   StopButtonAction,
@@ -47,6 +49,7 @@ import {
   initSessionButton,
   updateSessionButton,
   overrideSessionButton,
+  setSessionSetupRequired,
 } from './actions/session-button.js';
 
 // Keypad button actions (usage)
@@ -68,6 +71,7 @@ import {
   ResponseDialAction,
   initOptionDial,
   updateOptionDialState,
+  setOptionSetupRequired,
 } from './actions/option-dial.js';
 import {
   VoiceDialAction,
@@ -81,12 +85,35 @@ import {
   UtilityDialAction,
   initUtilityDial,
   updateUtilityDialState,
+  setUtilitySetupRequired,
 } from './actions/utility-dial.js';
 import {
   ItermDialAction,
   initItermDial,
   updateItermDialState,
 } from './actions/iterm-dial.js';
+
+// ---- Setup detection ----
+let setupRequired = false;
+
+function detectSetupState(): void {
+  const bridgeEverStarted = existsSync(`${homedir()}/.agentdeck/`);
+  let sdcInPath = false;
+  try {
+    execSync('which sdc', { stdio: 'ignore', timeout: 3000 });
+    sdcInPath = true;
+  } catch { /* not found */ }
+  setupRequired = !bridgeEverStarted && !sdcInPath;
+  dinfo('Plugin', `detectSetupState: bridgeEverStarted=${bridgeEverStarted} sdcInPath=${sdcInPath} setupRequired=${setupRequired}`);
+}
+
+function propagateSetupRequired(value: boolean): void {
+  setupRequired = value;
+  setSessionSetupRequired(value);
+  setResponseSetupRequired(value);
+  setUtilitySetupRequired(value);
+  setOptionSetupRequired(value);
+}
 
 // ---- Shared state ----
 let currentState = State.DISCONNECTED;
@@ -147,6 +174,12 @@ setVoiceTextExitCallback(() => {
 
 connMgr.on('state_update', (ev: StateUpdateEvent) => {
   dlog('Plugin', `state_update: ${ev.state} mode=${ev.permissionMode} tool=${ev.currentTool || '-'} project=${ev.projectName || '-'} opts=${ev.options?.length ?? '-'} nav=${ev.navigable ?? '-'}`);
+
+  // Auto-resolve setup state on first bridge connection
+  if (setupRequired) {
+    propagateSetupRequired(false);
+  }
+
   currentState = ev.state;
   currentMode = ev.permissionMode;
   currentTool = ev.currentTool;
@@ -432,6 +465,11 @@ function findLatestSessionPort(): number | undefined {
 
 streamDeck.connect().then(() => {
   dinfo('Plugin', 'Stream Deck connected, starting connection manager');
+  detectSetupState();
+  if (setupRequired) {
+    propagateSetupRequired(true);
+    broadcastStateUpdate();
+  }
   connMgr.scanLatestPort = () => findLatestSessionPort();
   const port = findLatestSessionPort();
   connMgr.start(port);
