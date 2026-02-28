@@ -2,6 +2,9 @@ package dev.agentdeck.ui.eink
 
 import android.content.pm.ActivityInfo
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -124,6 +127,13 @@ fun EinkSettingsOverlay(
 
                 // Disconnected: show manual URL input + mDNS list
                 if (connectionStatus == ConnectionStatus.DISCONNECTED) {
+                    val doConnect = {
+                        if (urlInput.isNotBlank()) {
+                            val url = if (urlInput.startsWith("ws://")) urlInput
+                                      else "ws://$urlInput"
+                            connection.connect(url)
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -143,6 +153,8 @@ fun EinkSettingsOverlay(
                             textStyle = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = FontFamily.Monospace,
                             ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                            keyboardActions = KeyboardActions(onGo = { doConnect() }),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color.Black,
                                 unfocusedBorderColor = Color.DarkGray,
@@ -150,11 +162,7 @@ fun EinkSettingsOverlay(
                             ),
                         )
                         Button(
-                            onClick = {
-                                val url = if (urlInput.startsWith("ws://")) urlInput
-                                          else "ws://$urlInput"
-                                connection.connect(url)
-                            },
+                            onClick = { doConnect() },
                             enabled = urlInput.isNotBlank(),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color.Black,

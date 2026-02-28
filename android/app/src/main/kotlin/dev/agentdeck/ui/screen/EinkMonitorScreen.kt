@@ -52,8 +52,11 @@ import dev.agentdeck.ui.eink.EinkSettingsOverlay
 import dev.agentdeck.ui.eink.EinkTimelinePanel
 import dev.agentdeck.ui.eink.EinkUsageCompact
 import dev.agentdeck.ui.eink.compactStateMarker
+import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+
+private const val TAG = "EinkMonitor"
 
 private const val SAVED_URL_TIMEOUT_MS = 8_000L
 
@@ -103,13 +106,17 @@ fun EinkMonitorScreen(
     // Auto-connect: try saved URL on first launch with timeout fallback
     LaunchedEffect(Unit) {
         val savedUrl = displayPrefs.lastBridgeUrlFlow.first()
+        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
         if (savedUrl != null) {
             connection.autoConnect(savedUrl)
             // Give saved URL time to connect; if it fails, give up and let mDNS take over
             delay(SAVED_URL_TIMEOUT_MS)
             if (connection.status.value != ConnectionStatus.CONNECTED) {
+                Log.w(TAG, "Auto-connect timeout — disconnecting saved URL")
                 connection.disconnect() // clears url, stops reconnect loop
                 displayPrefs.setLastBridgeUrl(null)
+            } else {
+                Log.i(TAG, "Auto-connect succeeded to $savedUrl")
             }
         }
     }

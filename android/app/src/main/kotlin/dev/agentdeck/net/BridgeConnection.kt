@@ -1,5 +1,6 @@
 package dev.agentdeck.net
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,6 +16,8 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
+
+private const val TAG = "BridgeConnection"
 
 enum class ConnectionStatus {
     DISCONNECTED,
@@ -49,6 +52,7 @@ class BridgeConnection private constructor() {
     var onEvent: ((BridgeEvent) -> Unit)? = null
 
     fun connect(wsUrl: String) {
+        Log.i(TAG, "connect($wsUrl) — current status=${_status.value}")
         // Cancel any existing connection/reconnect loop before starting fresh
         shouldReconnect = false
         webSocket?.close(1000, "New connection")
@@ -89,7 +93,11 @@ class BridgeConnection private constructor() {
     }
 
     private fun doConnect(wsUrl: String) {
-        if (_status.value == ConnectionStatus.CONNECTING) return
+        if (_status.value == ConnectionStatus.CONNECTING) {
+            Log.d(TAG, "doConnect($wsUrl) — skipped, already CONNECTING")
+            return
+        }
+        Log.i(TAG, "doConnect($wsUrl) — opening WebSocket")
         _status.value = ConnectionStatus.CONNECTING
 
         val request = Request.Builder()
@@ -98,6 +106,7 @@ class BridgeConnection private constructor() {
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.i(TAG, "onOpen — connected to $wsUrl")
                 _status.value = ConnectionStatus.CONNECTED
                 backoffMs = INITIAL_BACKOFF_MS
             }
@@ -110,16 +119,26 @@ class BridgeConnection private constructor() {
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                Log.d(TAG, "onClosing — code=$code reason=$reason")
                 webSocket.close(1000, null)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.w(TAG, "onClosed — code=$code reason=$reason")
                 _status.value = ConnectionStatus.DISCONNECTED
                 onEvent?.invoke(BridgeEvent.Disconnected)
-                scheduleReconnect()
+                // Don't reconnect on auth rejection — token required
+                if (code == 4001) {
+                    Log.w(TAG, "Auth rejected (4001) — stopping reconnect")
+                    shouldReconnect = false
+                    _url.value = null
+                } else {
+                    scheduleReconnect()
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e(TAG, "onFailure — ${t.message}", t)
                 _status.value = ConnectionStatus.DISCONNECTED
                 onEvent?.invoke(BridgeEvent.Disconnected)
                 scheduleReconnect()
@@ -131,6 +150,7 @@ class BridgeConnection private constructor() {
         if (!shouldReconnect) return
         val currentUrl = _url.value ?: return
 
+        Log.d(TAG, "scheduleReconnect — backoff=${backoffMs}ms url=$currentUrl")
         scope.launch {
             delay(backoffMs)
             backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)
