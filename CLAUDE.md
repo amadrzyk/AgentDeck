@@ -10,7 +10,7 @@ Stream Deck+ controller for Claude Code CLI — a bidirectional local control sy
 - **hooks/** — Claude Code hook installer for `~/.claude/settings.local.json`
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package: `npx @agentdeck/setup` one-command installer
-- **android/** — Jetpack Compose launcher app for e-ink monitoring (CremaS, Onyx, Kobo)
+- **android/** — Jetpack Compose launcher app: e-ink monitoring + interactive Deck control (CremaS, Onyx, Kobo, tablets)
 
 ## Build
 
@@ -82,7 +82,7 @@ sdc stop           # stop bridge and session
 - **Button label intelligence**: 3-tier 라벨 축약 시스템 — (1) CJK-aware 픽셀 기반 줄바꿈 (`text-utils.ts`) (2) 로컬 휴리스틱 약어 (`abbreviateLabel`) (3) `claude -p --model haiku` CLI 폴백 (`label-summarizer.ts`). 1-2단계 즉시(0ms), 3단계 1-3초(캐시 200개). 약어된 버튼 우하단 `~` 표시. CJK 문자 1em, Latin 0.55em 폭 계산. Wide canvas는 충분한 가로폭이라 변경 불필요
 - **npm packages**: `@agentdeck/shared`, `@agentdeck/bridge`, `@agentdeck/setup` — public npm packages (MIT license)
 - **Multi-surface monitoring**: mDNS (`_agentdeck._tcp`), auth token (`~/.agentdeck/auth-token`), SSE (`/sse`), remote WS token validation. `0.0.0.0` binding for LAN access
-- **Android launcher**: `android/` — Jetpack Compose, minSdk 29, CATEGORY_HOME, NSD mDNS discovery, QR pairing (CameraX + ML Kit), e-ink detection (Crema/Onyx/Kobo)
+- **Android launcher**: `android/` — Jetpack Compose, minSdk 29, CATEGORY_HOME, NSD mDNS discovery, QR pairing (CameraX + ML Kit), e-ink detection (Crema/Onyx/Kobo). **3-tab nav**: Dashboard (passive monitoring) / Deck (SD+ 2×4 button mirror + context area) / Settings. MonitorService: CPU wake lock + system stay-on + screen wake on state change (e-ink)
 - **Setup-required UI**: Plugin detects `sdc` not installed → INSTALL button → `npx @agentdeck/setup` via iTerm
 
 ## v3 Layout (0.3.0)
