@@ -48,7 +48,7 @@ export async function buildEnrichedSessionsList(
   ownState: string,
   gatewayAvailable: boolean,
 ): Promise<EnrichedSession[]> {
-  const siblings = listActiveSessions();
+  const siblings = listActiveSessions().filter(s => s.agentType !== 'daemon');
   const enriched = await enrichSessionsWithState(siblings, ownSessionId, ownState);
   // Inject virtual OpenClaw session if Gateway is available but no OC bridge running
   if (gatewayAvailable && !enriched.some(s => s.agentType === 'openclaw')) {
