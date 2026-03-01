@@ -31,16 +31,16 @@ private const val EINK_ANIM_FRAME_MS = 800L
 
 // --- E-ink octopus pixel grid (12×9, matching OctopusCreature) ---
 
-private const val EINK_OCTOPUS_COLS = 12
-private const val EINK_OCTOPUS_ROWS = 6
-private const val EINK_PIXEL_ASPECT = 1.7f
+private const val EINK_OCTOPUS_COLS = 14
+private const val EINK_OCTOPUS_ROWS = 5
+private const val EINK_PIXEL_ASPECT = 2.0f
+private const val EINK_PIXEL_GAP = 0.5f
 private val EINK_OCTOPUS_GRID = arrayOf(
-    intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 0: head (10w)
-    intArrayOf(0, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 0), // row 1: eyes (10w)
-    intArrayOf(3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4), // row 2: body + arms (12w)
-    intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 3: body (10w)
-    intArrayOf(0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0), // row 4: waist (10w)
-    intArrayOf(0, 0, 5, 0, 5, 0, 0, 6, 0, 6, 0, 0), // row 5: tentacles ×4
+    intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0), // row 0: head (10w)
+    intArrayOf(0, 0, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 0, 0), // row 1: eyes at 4,9 (10w)
+    intArrayOf(3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4), // row 2: body + arms (14w)
+    intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0), // row 3: waist (10w)
+    intArrayOf(0, 0, 0, 5, 0, 5, 0, 0, 6, 0, 6, 0, 0, 0), // row 4: tentacles ×4
 )
 
 // --- E-ink crayfish SVG paths (cached, android.graphics.Path) ---
@@ -354,20 +354,21 @@ private fun drawEinkOctopus(
     val startX = cx - gridW / 2f
     val startY = cy - gridH / 2f
 
-    // Animation offsets (4-frame, left/right opposite phase)
+    // Animation (4-frame, left/right opposite phase)
     val isActive = state != OctopusVisualState.SLEEPING
-    val leftTentacleOffset = if (isActive) when (animFrame % 4) {
+    val leftTentacleStretch = if (isActive) when (animFrame % 4) {
         1 -> pixelH * 0.4f
         3 -> -pixelH * 0.4f
         else -> 0f
     } else 0f
-    val rightTentacleOffset = -leftTentacleOffset
+    val rightTentacleStretch = -leftTentacleStretch
     val leftArmOffset = if (isActive) when (animFrame % 4) {
         0 -> pixelH * 0.2f
         2 -> -pixelH * 0.2f
         else -> 0f
     } else 0f
     val rightArmOffset = -leftArmOffset
+    val gap = EINK_PIXEL_GAP
 
     paint.style = Paint.Style.FILL
     for (row in 0 until EINK_OCTOPUS_ROWS) {
@@ -378,28 +379,39 @@ private fun drawEinkOctopus(
             val px = startX + col * pixelW
             var py = startY + row * pixelH
 
-            // Apply animation offsets
+            // Arm Y-offset
             when (cell) {
-                3 -> py += leftArmOffset        // LEFT_ARM
-                4 -> py += rightArmOffset        // RIGHT_ARM
-                5 -> py += leftTentacleOffset    // LEFT_LEG
-                6 -> py += rightTentacleOffset   // RIGHT_LEG
+                3 -> py += leftArmOffset
+                4 -> py += rightArmOffset
             }
 
             when (cell) {
                 2 -> { // EYE
                     if (state == OctopusVisualState.SLEEPING) {
-                        // Closed eyes — thin horizontal line
                         canvas.drawRect(
-                            px, py + pixelH * 0.4f,
-                            px + pixelW, py + pixelH * 0.6f, paint,
+                            px + gap, py + pixelH * 0.4f,
+                            px + pixelW - gap, py + pixelH * 0.6f, paint,
                         )
                     } else {
-                        canvas.drawRect(px, py, px + pixelW, py + pixelH, paint)
+                        canvas.drawRect(
+                            px + gap, py + gap,
+                            px + pixelW - gap, py + pixelH - gap, paint,
+                        )
                     }
                 }
+                5 -> { // LEFT_LEG — stretch height, no position offset
+                    val h = (pixelH + leftTentacleStretch - gap).coerceAtLeast(pixelH * 0.3f)
+                    canvas.drawRect(px + gap, py, px + pixelW - gap, py + h, paint)
+                }
+                6 -> { // RIGHT_LEG — stretch height
+                    val h = (pixelH + rightTentacleStretch - gap).coerceAtLeast(pixelH * 0.3f)
+                    canvas.drawRect(px + gap, py, px + pixelW - gap, py + h, paint)
+                }
                 else -> {
-                    canvas.drawRect(px, py, px + pixelW, py + pixelH, paint)
+                    canvas.drawRect(
+                        px + gap, py + gap,
+                        px + pixelW - gap, py + pixelH - gap, paint,
+                    )
                 }
             }
         }
