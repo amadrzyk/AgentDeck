@@ -24,6 +24,44 @@ export interface OcSessionStatus {
   [key: string]: unknown;
 }
 
+// ===== Encoder LCD State (Bridge → Plugin/Android) =====
+
+export interface EncoderSlotState {
+  slot: number; // 0-3 (E1~E4)
+  encoderType: 'utility' | 'action' | 'terminal' | 'voice';
+  header: string;         // "VOLUME", "PROMPT", "SESSION", "VOICE"
+  value?: string;         // "65%", "go on", session name, "Ready"
+  icon?: string;          // emoji
+  accentColor: string;    // hex — bottom indicator bar color
+  progress?: number;      // 0-1, indicator bar fill
+  counter?: string;       // "1/4" format
+  detail?: string;        // additional text (option description, error msg, etc.)
+  // Voice specific
+  voiceState?: 'idle' | 'recording' | 'transcribing' | 'error' | 'review';
+  recordingMs?: number;
+  transcription?: string;
+}
+
+export interface EncoderStateEvent {
+  type: 'encoder_state';
+  encoders: EncoderSlotState[];
+  takeoverActive: boolean; // AWAITING states: all encoders show options
+}
+
+// ===== Deck Slot Map (Plugin → Bridge → Android) =====
+
+export interface DeckSlotConfig {
+  slot: number;
+  actionType: string; // 'mode-button' | 'session-button' | 'usage-button' | 'response-button' | 'stop-button' | 'utility-dial' | 'option-dial' | 'iterm-dial' | 'voice-dial'
+  settings?: Record<string, unknown>;
+}
+
+export interface DeckSlotMapEvent {
+  type: 'deck_slot_map';
+  buttons: DeckSlotConfig[];
+  encoders: DeckSlotConfig[];
+}
+
 // ===== Bridge → Plugin (State Updates) =====
 
 export interface StateUpdateEvent {
@@ -49,6 +87,8 @@ export interface StateUpdateEvent {
   remoteUrl?: string;
   /** Authenticated WS URL for remote pairing (ws://ip:port?token=hex) */
   pairingUrl?: string;
+  /** Number of OpenClaw backend worker sessions (multi-agent) */
+  workerSessionCount?: number;
 }
 
 export interface PromptOptionsEvent {
@@ -101,13 +141,37 @@ export interface VoiceStateEvent {
   error?: string;
 }
 
+export interface DisplayStateEvent {
+  type: 'display_state';
+  displayOn: boolean;
+}
+
+// ===== Multi-session Discovery =====
+
+export interface SessionInfo {
+  id: string;
+  port: number;
+  projectName: string;
+  agentType?: AgentType;
+  alive: boolean;
+}
+
+export interface SessionsListEvent {
+  type: 'sessions_list';
+  sessions: SessionInfo[];
+}
+
 export type BridgeEvent =
   | StateUpdateEvent
   | PromptOptionsEvent
   | UsageEvent
   | ConnectionEvent
   | UserPromptEvent
-  | VoiceStateEvent;
+  | VoiceStateEvent
+  | DisplayStateEvent
+  | SessionsListEvent
+  | EncoderStateEvent
+  | DeckSlotMapEvent;
 
 // ===== Plugin → Bridge (Commands) =====
 
@@ -158,6 +222,13 @@ export interface DiagCommand {
   action: 'dump' | 'analyze';
 }
 
+export interface UtilityCommand {
+  type: 'utility';
+  action: 'adjust_volume' | 'toggle_mute' | 'adjust_brightness'
+        | 'media_play_pause' | 'media_next' | 'media_prev';
+  value?: number; // delta ticks (for adjust commands)
+}
+
 export type PluginCommand =
   | ResponseCommand
   | SelectOptionCommand
@@ -168,7 +239,8 @@ export type PluginCommand =
   | EscapeCommand
   | VoiceCommand
   | QueryUsageCommand
-  | DiagCommand;
+  | DiagCommand
+  | UtilityCommand;
 
 // ===== Hook Event Types =====
 

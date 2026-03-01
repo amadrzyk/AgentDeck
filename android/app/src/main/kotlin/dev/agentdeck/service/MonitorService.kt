@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import dev.agentdeck.AgentDeckApp
 import dev.agentdeck.MainActivity
 import dev.agentdeck.R
+import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.state.AgentStateHolder
@@ -22,8 +23,11 @@ import dev.agentdeck.ui.component.stateLabel
 import dev.agentdeck.util.EinkDetector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MonitorService : Service() {
@@ -44,6 +48,9 @@ class MonitorService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var savedStayOn: Int? = null
     private var savedScreenOffTimeout: Int? = null
+    private lateinit var brightnessController: BrightnessController
+    private lateinit var displayPrefs: DisplayPreferences
+    private var idleTimeoutJob: Job? = null
 
     private val keepaliveRunnable = object : Runnable {
         override fun run() {
@@ -54,6 +61,10 @@ class MonitorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        brightnessController = BrightnessController(contentResolver, pm, isEink)
+        displayPrefs = DisplayPreferences(this, isEink)
+
         acquireCpuWakeLock()
 
         if (isEink) {
@@ -66,7 +77,50 @@ class MonitorService : Service() {
                 if (state.agentState != lastState) {
                     lastState = state.agentState
                     updateNotification(state.agentState, state.projectName)
-                    if (isEink) wakeIfSleeping()
+                    // Only wake screen if host display is on
+                    if (isEink && state.hostDisplayOn) wakeIfSleeping()
+                }
+                handleDisplaySync(state.hostDisplayOn, state.bridgeConnected, state.agentState)
+            }
+        }
+    }
+
+    private fun handleDisplaySync(hostDisplayOn: Boolean, bridgeConnected: Boolean, agentState: AgentState) {
+        serviceScope.launch {
+            val syncEnabled = displayPrefs.displaySyncEnabledFlow.first()
+            if (!syncEnabled) {
+                // Sync disabled — restore if we dimmed, cancel any idle timeout
+                if (brightnessController.isDimmed()) brightnessController.restore()
+                idleTimeoutJob?.cancel()
+                idleTimeoutJob = null
+                return@launch
+            }
+
+            if (bridgeConnected) {
+                // Bridge connected — use host display state directly
+                idleTimeoutJob?.cancel()
+                idleTimeoutJob = null
+                if (!hostDisplayOn) {
+                    brightnessController.dim()
+                } else {
+                    brightnessController.restore()
+                }
+            } else {
+                // Bridge not connected — use idle timeout fallback
+                val isIdle = agentState == AgentState.DISCONNECTED || agentState == AgentState.IDLE
+                if (isIdle) {
+                    if (idleTimeoutJob == null) {
+                        val timeoutMinutes = displayPrefs.idleTimeoutMinutesFlow.first()
+                        idleTimeoutJob = serviceScope.launch {
+                            delay(timeoutMinutes * 60_000L)
+                            brightnessController.dim()
+                        }
+                    }
+                } else {
+                    // Agent active — cancel timeout and restore
+                    idleTimeoutJob?.cancel()
+                    idleTimeoutJob = null
+                    brightnessController.restore()
                 }
             }
         }
@@ -87,6 +141,8 @@ class MonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        idleTimeoutJob?.cancel()
+        if (brightnessController.isDimmed()) brightnessController.restore()
         handler.removeCallbacks(keepaliveRunnable)
         restoreStayOn()
         releaseCpuWakeLock()

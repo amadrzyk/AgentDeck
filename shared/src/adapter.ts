@@ -4,7 +4,7 @@ import type { PluginCommand } from './protocol.js';
 
 // ===== Agent Types =====
 
-export type AgentType = 'claude-code' | 'openclaw';
+export type AgentType = 'claude-code' | 'openclaw' | 'codex-cli';
 
 export interface AgentCapabilities {
   type: AgentType;

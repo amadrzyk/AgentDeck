@@ -1,0 +1,120 @@
+package dev.agentdeck.terrarium
+
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+
+/** Color palette and timing constants for the terrarium scene. */
+object TerrariumColors {
+    // Background layers
+    val DeepSea = Color(0xFF0A1628)
+    val MidWater = Color(0xFF0F2744)
+    val ShallowWater = Color(0xFF163B5C)
+
+    // Octopus
+    val OctopusBody = Color(0xFF6366F1)
+    val OctopusTentacle = Color(0xFF8B5CF6)
+    val OctopusEye = Color(0xFFE2E8F0)
+    val OctopusPupil = Color(0xFF0F172A)
+
+    // Crayfish (OpenClaw brand: #FF4D4D→#991B1B gradient, #00E5CC teal eyes)
+    val CrayfishShell = Color(0xFFFF4D4D)
+    val CrayfishDark = Color(0xFF991B1B)
+    val CrayfishClaw = Color(0xFFFF4D4D)
+    val CrayfishEye = Color(0xFF00E5CC)
+
+    // Neon Tetra
+    val TetraNeon = Color(0xFF00E5FF)
+    val TetraBody = Color(0xFF1E40AF)
+    val TetraFin = Color(0xFFFF6B6B)
+    val TetraStripe = Color(0xFF00E5FF)
+
+    // Environment
+    val BubbleWhite = Color(0x40FFFFFF)
+    val BubbleHighlight = Color(0x80FFFFFF)
+    val CausticsLight = Color(0x14FFFFFF)
+    val SandBase = Color(0xFF2A1F14)
+    val SandLight = Color(0xFF3D2E1F)
+    val RockDark = Color(0xFF1A1A2E)
+    val RockMid = Color(0xFF2D2D44)
+    val RockLight = Color(0xFF3A3A55)
+    val KelpGreen = Color(0xFF22C55E)
+    val KelpDark = Color(0xFF166534)
+
+    // LED cables
+    val LEDGreen = Color(0xFF22C55E)
+    val LEDAmber = Color(0xFFFBBF24)
+    val LEDRed = Color(0xFFEF4444)
+
+    // Holographic UI
+    val HoloBlue = Color(0x6000E5FF)
+    val HoloText = Color(0xB000E5FF)
+
+    // Error state
+    val ErrorTint = Color(0x40EF4444)
+
+    // HUD overlay
+    val HUDBg = Color(0x80000000)
+    val HUDText = Color(0xFFE2E8F0)
+    val HUDSubtext = Color(0xFF94A3B8)
+}
+
+/** Layout and sizing constants. */
+object TerrariumLayout {
+    // Scene proportions (fraction of canvas)
+    const val SAND_HEIGHT_FRACTION = 0.18f
+    const val ROCK_HEIGHT_FRACTION = 0.25f
+    const val WATER_SURFACE_Y_FRACTION = 0.05f
+
+    // Octopus sizing (fraction of canvas width)
+    const val OCTOPUS_BODY_RADIUS_FRACTION = 0.06f
+    const val OCTOPUS_CENTER_X_FRACTION = 0.4f
+    const val OCTOPUS_CENTER_Y_FRACTION = 0.45f
+    const val TENTACLE_LENGTH_FRACTION = 0.12f
+
+    // Crayfish sizing
+    const val CRAYFISH_WIDTH_FRACTION = 0.10f
+    const val CRAYFISH_CENTER_X_FRACTION = 0.78f
+    const val CRAYFISH_CENTER_Y_FRACTION = 0.78f
+
+    // Tetra sizing
+    const val TETRA_SIZE_FRACTION = 0.015f
+    const val TETRA_COUNT = 7
+}
+
+/** Animation timing constants. */
+object TerrariumTiming {
+    // Octopus
+    const val FLOAT_PERIOD_MS = 4000f
+    const val FLOAT_AMPLITUDE_FRACTION = 0.015f
+    const val TENTACLE_WAVE_SPEED = 2.5f
+    const val THINKING_PULSE_SPEED = 3.0f
+    const val TYPING_SPEED = 8.0f
+
+    // Crayfish
+    const val CLAW_CLAP_PERIOD_MS = 1200f
+    const val EYE_FLASH_PERIOD_MS = 800f
+
+    // Tetra
+    const val BOID_SPEED = 0.3f
+    const val STREAM_SPEED = 1.5f
+    const val SEPARATION_RADIUS = 0.04f
+    const val ALIGNMENT_RADIUS = 0.08f
+    const val COHESION_RADIUS = 0.12f
+
+    // Bubbles
+    const val BUBBLE_RISE_SPEED = 0.08f
+    const val BUBBLE_WOBBLE_SPEED = 3.0f
+    const val CALM_SPAWN_INTERVAL_MS = 2000f
+    const val ACTIVE_SPAWN_INTERVAL_MS = 300f
+    const val ERROR_SPAWN_INTERVAL_MS = 100f
+
+    // Environment
+    const val CAUSTICS_SPEED = 1.5f
+    const val KELP_SWAY_SPEED = 1.0f
+    const val LED_PULSE_SPEED = 2.0f
+
+    // Transitions
+    const val STATE_TRANSITION_MS = 500f
+    const val EINK_WIPE_MS = 300f
+    const val EINK_DEBOUNCE_MS = 500L
+}

@@ -16,6 +16,7 @@ export interface SessionEntry {
   port: number;
   pid: number;
   projectName: string;
+  agentType?: string;
   tmuxSession?: string;
   tty?: string;
   parentTty?: string;

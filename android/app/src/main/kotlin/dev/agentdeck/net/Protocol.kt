@@ -1,11 +1,13 @@
 package dev.agentdeck.net
 
+import android.util.Log
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonPrimitive
 
 @Serializable
@@ -90,6 +92,7 @@ data class StateUpdate(
     val modelCatalog: List<ModelCatalogEntry>? = null,
     val sessionStatus: OcSessionStatus? = null,
     val pairingUrl: String? = null,
+    val workerSessionCount: Int? = null,
 )
 
 @Serializable
@@ -116,12 +119,52 @@ data class VoiceState(
     val error: String? = null,
 )
 
+// --- Encoder LCD state (Bridge → Android) ---
+
+@Serializable
+data class EncoderSlotState(
+    val slot: Int,
+    val encoderType: String,
+    val header: String,
+    val value: String? = null,
+    val icon: String? = null,
+    val accentColor: String = "#94A3B8",
+    val progress: Float? = null,
+    val counter: String? = null,
+    val detail: String? = null,
+    val voiceState: String? = null,
+    val recordingMs: Long? = null,
+    val transcription: String? = null,
+)
+
+@Serializable
+data class DeckSlotConfig(
+    val slot: Int,
+    val actionType: String,
+    val settings: Map<String, JsonElement>? = null,
+)
+
+// --- Multi-session discovery ---
+
+@Serializable
+data class SessionInfo(
+    val id: String,
+    val port: Int,
+    val projectName: String? = null,
+    val agentType: String? = null,
+    val alive: Boolean = true,
+)
+
 sealed class BridgeEvent {
     data class State(val data: StateUpdate) : BridgeEvent()
     data class Usage(val data: UsageUpdate) : BridgeEvent()
     data class Voice(val data: VoiceState) : BridgeEvent()
     data class Connected(val sessionId: String?) : BridgeEvent()
     data object Disconnected : BridgeEvent()
+    data class DisplaySleep(val displayOn: Boolean) : BridgeEvent()
+    data class SessionsList(val sessions: List<SessionInfo>) : BridgeEvent()
+    data class EncoderState(val encoders: List<EncoderSlotState>, val takeoverActive: Boolean) : BridgeEvent()
+    data class SlotMap(val buttons: List<DeckSlotConfig>, val encoders: List<DeckSlotConfig>) : BridgeEvent()
 }
 
 // --- App -> Bridge commands ---
@@ -143,6 +186,14 @@ object PluginCommands {
     fun queryUsage(): String = """{"type":"query_usage"}"""
 
     fun switchMode(): String = """{"type":"switch_mode"}"""
+
+    fun utility(action: String, value: Int? = null): String {
+        val valueStr = if (value != null) ""","value":$value""" else ""
+        return """{"type":"utility","action":"$action"$valueStr}"""
+    }
+
+    fun navigateOption(direction: String): String =
+        """{"type":"navigate_option","direction":"$direction"}"""
 }
 
 // --- JSON parsing ---
@@ -178,9 +229,38 @@ fun parseBridgeMessage(text: String): BridgeEvent? {
                 if (status == "connected") BridgeEvent.Connected(sessionId)
                 else BridgeEvent.Disconnected
             }
+            "display_state" -> {
+                val displayOn = obj["displayOn"]?.jsonPrimitive?.boolean ?: true
+                BridgeEvent.DisplaySleep(displayOn)
+            }
+            "sessions_list" -> {
+                val sessionsArray = obj["sessions"]
+                if (sessionsArray != null) {
+                    val sessions = protocolJson.decodeFromJsonElement<List<SessionInfo>>(sessionsArray)
+                    BridgeEvent.SessionsList(sessions)
+                } else null
+            }
+            "encoder_state" -> {
+                val encodersArray = obj["encoders"]
+                val takeoverActive = obj["takeoverActive"]?.jsonPrimitive?.boolean ?: false
+                if (encodersArray != null) {
+                    val encoders = protocolJson.decodeFromJsonElement<List<EncoderSlotState>>(encodersArray)
+                    BridgeEvent.EncoderState(encoders, takeoverActive)
+                } else null
+            }
+            "deck_slot_map" -> {
+                val buttonsArray = obj["buttons"]
+                val encodersArray = obj["encoders"]
+                if (buttonsArray != null && encodersArray != null) {
+                    val buttons = protocolJson.decodeFromJsonElement<List<DeckSlotConfig>>(buttonsArray)
+                    val encoders = protocolJson.decodeFromJsonElement<List<DeckSlotConfig>>(encodersArray)
+                    BridgeEvent.SlotMap(buttons, encoders)
+                } else null
+            }
             else -> null
         }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.e("Terrarium", "parseBridgeMessage failed: ${e.message}, raw=${text.take(300)}")
         null
     }
 }

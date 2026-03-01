@@ -4,17 +4,23 @@ import dev.agentdeck.net.AgentCapabilities
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.BridgeEvent
+import dev.agentdeck.net.DeckSlotConfig
+import dev.agentdeck.net.EncoderSlotState
 import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.net.OcSessionStatus
 import dev.agentdeck.net.PermissionMode
 import dev.agentdeck.net.PromptOption
+import dev.agentdeck.net.SessionInfo
 import dev.agentdeck.net.StateUpdate
 import dev.agentdeck.net.UsageUpdate
 import dev.agentdeck.net.VoiceState
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+
+private const val TAG = "Terrarium"
 
 data class DashboardState(
     val agentState: AgentState = AgentState.DISCONNECTED,
@@ -41,6 +47,13 @@ data class DashboardState(
     val pairingUrl: String? = null,
     val navigable: Boolean? = null,
     val cursorIndex: Int? = null,
+    val hostDisplayOn: Boolean = true,
+    val siblingSessions: List<SessionInfo> = emptyList(),
+    val workerSessionCount: Int? = null,
+    val encoderStates: List<EncoderSlotState> = emptyList(),
+    val encoderTakeoverActive: Boolean = false,
+    val buttonSlotMap: List<DeckSlotConfig>? = null,
+    val encoderSlotMap: List<DeckSlotConfig>? = null,
 )
 
 class AgentStateHolder private constructor() {
@@ -64,11 +77,14 @@ class AgentStateHolder private constructor() {
     private fun handleEvent(event: BridgeEvent) {
         when (event) {
             is BridgeEvent.State -> {
+                Log.d(TAG, "StateEvent: state=${event.data.state}, agentType=${event.data.agentType}, tool=${event.data.currentTool}")
                 _state.update { current ->
+                    val resolvedAgentType = event.data.agentType ?: current.agentType
+                    Log.d(TAG, "AgentType resolve: event=${event.data.agentType}, current=${current.agentType}, resolved=$resolvedAgentType")
                     current.copy(
                         agentState = event.data.state,
                         permissionMode = event.data.permissionMode,
-                        agentType = event.data.agentType ?: current.agentType,
+                        agentType = resolvedAgentType,
                         currentTool = event.data.currentTool,
                         toolInput = event.data.toolInput,
                         toolProgress = event.data.toolProgress,
@@ -86,6 +102,7 @@ class AgentStateHolder private constructor() {
                         pairingUrl = event.data.pairingUrl ?: current.pairingUrl,
                         navigable = event.data.navigable,
                         cursorIndex = event.data.cursorIndex,
+                        workerSessionCount = event.data.workerSessionCount ?: current.workerSessionCount,
                     )
                 }
                 lastKnownState = _state.value
@@ -111,6 +128,28 @@ class AgentStateHolder private constructor() {
                     )
                 }
                 SessionMetrics.instance.onConnected()
+            }
+
+            is BridgeEvent.DisplaySleep -> {
+                _state.update { it.copy(hostDisplayOn = event.displayOn) }
+            }
+
+            is BridgeEvent.SessionsList -> {
+                _state.update { it.copy(siblingSessions = event.sessions) }
+            }
+
+            is BridgeEvent.EncoderState -> {
+                _state.update { it.copy(
+                    encoderStates = event.encoders,
+                    encoderTakeoverActive = event.takeoverActive,
+                ) }
+            }
+
+            is BridgeEvent.SlotMap -> {
+                _state.update { it.copy(
+                    buttonSlotMap = event.buttons,
+                    encoderSlotMap = event.encoders,
+                ) }
             }
 
             is BridgeEvent.Disconnected -> {

@@ -10,6 +10,7 @@ import { enableDebugLog, debug } from './logger.js';
 import { EventJournal } from './event-journal.js';
 import { PtyRingBuffer } from './pty-ringbuffer.js';
 import { createDiagDump } from './diag-analyzer.js';
+import { DisplayMonitor } from './display-monitor.js';
 import { createAdapter } from './adapters/index.js';
 import { ClaudeCodeAdapter } from './adapters/claude-code.js';
 import {
@@ -21,7 +22,12 @@ import {
   type AdapterEvent,
   type AgentType,
   type ModelCatalogEntry,
+  type EncoderSlotState,
+  type EncoderStateEvent,
+  type DeckSlotMapEvent,
+  type UtilityCommand,
 } from './types.js';
+import { UtilityProxy } from './utility-proxy.js';
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname, join } from 'path';
@@ -272,8 +278,12 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   const usageTracker = new UsageTracker();
   const stateMachine = new StateMachine(usageTracker);
   const voiceManager = new VoiceManager();
+  const utilityProxy = new UtilityProxy();
   const journal = new EventJournal();
   const ptyRingBuffer = new PtyRingBuffer();
+
+  // Slot map cache (plugin → bridge → Android relay)
+  let cachedSlotMap: DeckSlotMapEvent | null = null;
 
   // 1b. Connect to singleton whisper-server (non-blocking — don't delay bridge startup)
   voiceManager.connectToServer().catch((err) => {
@@ -289,25 +299,37 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     process.exit(1);
   }
 
-  // 2b. mDNS service advertising (LAN discovery for Android/browser clients)
+  // 2b. Display sleep monitor (macOS)
+  const displayMonitor = new DisplayMonitor();
+  displayMonitor.start();
+
+  // 2c. mDNS service advertising (LAN discovery for Android/browser clients)
   const mdnsCleanup = advertiseBridge(port, projectName, agentType);
 
-  // 2c. Auth token initialization + QR URL for pairing
+  // 2d. Auth token initialization + QR URL for pairing
   getOrCreateToken(); // Ensure token exists on disk
   const wsUrl = getWsUrl(port);
   log(`[sdc] Auth token ready. Pairing URL: ${wsUrl}`);
 
-  // 2d. SSE broadcasting helper (only for ClaudeCode adapter which has HookServer)
+  // 2e. SSE broadcasting helper (only for ClaudeCode adapter which has HookServer)
   let hookServer: HookServer | null = null;
   if (adapter instanceof ClaudeCodeAdapter) {
     hookServer = adapter.hookServer;
     hookServer.setMeta({ agentType, projectName });
+    hookServer.setVoiceManager(voiceManager);
   }
   const broadcastSse = (event: BridgeEvent) => hookServer?.broadcastSse(event);
 
   // 3. Attach WebSocket server to adapter's HTTP server
   const wsServer = new WsServer(adapter.getHttpServer());
   log(`[sdc] WebSocket server ready on port ${port}`);
+
+  // 3a. Display state broadcast (after wsServer is ready)
+  displayMonitor.on('display_state_changed', (displayOn: boolean) => {
+    const evt: BridgeEvent = { type: 'display_state', displayOn };
+    wsServer.broadcast(evt);
+    broadcastSse(evt);
+  });
 
   // 3b. Register diag handler
   adapter.onDiag((tail) => createDiagDump(stateMachine, wsServer, journal, ptyRingBuffer, tail));
@@ -457,6 +479,11 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     const usageEvt = buildUsageEvent(snapshot, cachedApiUsage);
     wsServer.broadcast(usageEvt);
     broadcastSse(usageEvt);
+
+    // Broadcast encoder state alongside state updates
+    const encEvt = computeEncoderState();
+    wsServer.broadcast(encEvt);
+    broadcastSse(encEvt);
   });
 
   // 6. Handle PluginCommands from WsServer
@@ -553,6 +580,13 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
         break;
       }
 
+      case 'utility':
+        utilityProxy.handleCommand(cmd as UtilityCommand);
+        // Broadcast updated encoder state after utility change
+        wsServer.broadcast(computeEncoderState());
+        broadcastSse(computeEncoderState());
+        break;
+
       case 'voice':
         handleVoiceCommand(cmd.action, voiceManager, wsServer);
         break;
@@ -576,6 +610,18 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     }
   });
 
+  // 6a. Handle deck_slot_map relay (plugin → bridge → other clients)
+  wsServer.onRawMessage((msg, sender) => {
+    if (msg.type === 'deck_slot_map') {
+      debug('sdc', `Received deck_slot_map from plugin, caching + relaying`);
+      cachedSlotMap = msg as unknown as DeckSlotMapEvent;
+      wsServer.broadcastExcept(cachedSlotMap, sender);
+      broadcastSse(cachedSlotMap);
+      return true; // consumed
+    }
+    return false;
+  });
+
   // 6b. Wire WS connect/disconnect to journal + update SSE metadata
   wsServer.onClientDisconnect(() => {
     journal.write('ws_event', 'ws', { action: 'disconnect', clients: wsServer.getClientCount() });
@@ -594,6 +640,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     port,
     pid: process.pid,
     projectName: adapter.getProjectName() || projectName,
+    agentType,
     tmuxSession,
     parentTty,
     tty: adapter.getTtyPath(),
@@ -670,6 +717,17 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     };
     wsServer.sendTo(ws, connectEvt);
 
+    // Send current display state
+    wsServer.sendTo(ws, { type: 'display_state', displayOn: displayMonitor.isDisplayOn() } as BridgeEvent);
+
+    // Send encoder state
+    wsServer.sendTo(ws, computeEncoderState());
+
+    // Send cached slot map if available
+    if (cachedSlotMap) {
+      wsServer.sendTo(ws, cachedSlotMap);
+    }
+
     // Fetch API usage on client connect:
     // - Always fetch if no cache yet
     // - Re-fetch if cache is stale (>5 min, e.g. after sleep/wake)
@@ -725,6 +783,90 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     }
   }, 60_000);
 
+  // 9c. Periodic sibling sessions broadcast (for multi-session terrarium)
+  const sessionsListInterval = setInterval(() => {
+    if (wsServer.getClientCount() > 0) {
+      const siblings = listActiveSessions();
+      wsServer.broadcast({
+        type: 'sessions_list',
+        sessions: siblings.map((s) => ({
+          id: s.id,
+          port: s.port,
+          projectName: s.projectName,
+          agentType: s.agentType,
+          alive: true,
+        })),
+      } as BridgeEvent);
+    }
+  }, 30_000);
+
+  // Encoder state computation (scoped inside startBridge for access to local vars)
+  function computeEncoderState(): EncoderStateEvent {
+    const snapshot = stateMachine.getSnapshot();
+    const isInteractive = snapshot.state === State.AWAITING_OPTION ||
+      snapshot.state === State.AWAITING_PERMISSION ||
+      snapshot.state === State.AWAITING_DIFF;
+
+    // E1: Utility
+    const utilState = utilityProxy.getState();
+    const e1: EncoderSlotState = {
+      slot: 0,
+      encoderType: 'utility',
+      header: utilState.mode.toUpperCase(),
+      value: utilState.value,
+      icon: utilState.icon,
+      accentColor: '#3b82f6',
+      progress: utilState.level,
+    };
+
+    // E2: Action
+    const e2: EncoderSlotState = {
+      slot: 1,
+      encoderType: 'action',
+      header: 'ACTION',
+      accentColor: '#f59e0b',
+    };
+    if (isInteractive && snapshot.options.length > 0) {
+      const opt = snapshot.options[snapshot.cursorIndex];
+      e2.header = 'OPTION';
+      e2.value = opt?.label ?? '';
+      e2.counter = `${snapshot.cursorIndex + 1}/${snapshot.options.length}`;
+      e2.detail = opt?.label;
+    } else if (snapshot.suggestedPrompt) {
+      e2.header = 'PROMPT';
+      e2.value = snapshot.suggestedPrompt;
+    }
+
+    // E3: Terminal
+    const sessions = listActiveSessions();
+    const e3: EncoderSlotState = {
+      slot: 2,
+      encoderType: 'terminal',
+      header: 'SESSION',
+      value: `${sessions.length} active`,
+      accentColor: '#22c55e',
+      counter: sessions.length > 1 ? `1/${sessions.length}` : undefined,
+    };
+
+    // E4: Voice
+    const isRec = voiceManager.isRecording();
+    const e4: EncoderSlotState = {
+      slot: 3,
+      encoderType: 'voice',
+      header: 'VOICE',
+      value: isRec ? 'Recording...' : 'Ready',
+      icon: isRec ? '🔴' : '🎤',
+      accentColor: isRec ? '#ef4444' : '#8b5cf6',
+      voiceState: isRec ? 'recording' : 'idle',
+    };
+
+    return {
+      type: 'encoder_state',
+      encoders: [e1, e2, e3, e4],
+      takeoverActive: isInteractive && snapshot.options.length > 0,
+    };
+  }
+
   // 10. Graceful shutdown
   let shutdownInProgress = false;
 
@@ -735,13 +877,16 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     log('[sdc] Shutting down...');
     clearInterval(usageInterval);
     clearInterval(apiUsageInterval);
+    clearInterval(sessionsListInterval);
     deregisterSession(sessionId);
 
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
     }
 
+    displayMonitor.stop();
     mdnsCleanup();
+    utilityProxy.cleanup();
     voiceManager.disconnectFromServer();
     journal.close();
     wsServer.close();

@@ -23,6 +23,7 @@ import dev.agentdeck.net.UsageUpdate
 @Composable
 fun EinkEngineColumn(
     usage: UsageUpdate,
+    messageCount: Long = 0,
     modifier: Modifier = Modifier,
 ) {
     val monoStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
@@ -66,6 +67,13 @@ fun EinkEngineColumn(
         if (usage.sevenDayPercent != null) {
             EinkTextGauge(label = "7d", percent = usage.sevenDayPercent, barLength = 10)
         }
+
+        // Message count
+        Text(
+            text = "Msg: $messageCount",
+            style = monoStyle,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
 
         Spacer(modifier = Modifier.height(4.dp))
 

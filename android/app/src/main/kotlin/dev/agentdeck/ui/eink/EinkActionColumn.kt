@@ -8,6 +8,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -16,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.TimelineEntry
+import kotlinx.coroutines.delay
 
 /**
  * CENTER column (45%) — "The Action"
@@ -40,6 +46,17 @@ fun EinkActionColumn(
         ) {
             when (state.agentState) {
                 AgentState.PROCESSING -> {
+                    // Tick counter animation (cycles ., .., ...)
+                    var tickCount by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(state.currentTool) {
+                        tickCount = 0
+                        while (true) {
+                            delay(1000)
+                            tickCount++
+                        }
+                    }
+                    val tickDots = ".".repeat((tickCount % 3) + 1)
+
                     // Terminal-style tool log (recent tool_request entries)
                     val recentTools = timelineEntries
                         .filter { it.type == "tool_request" }
@@ -47,7 +64,7 @@ fun EinkActionColumn(
 
                     if (recentTools.isEmpty() && state.currentTool != null) {
                         Text(
-                            text = "> ${state.currentTool}",
+                            text = "> ${state.currentTool} $tickDots",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -55,10 +72,11 @@ fun EinkActionColumn(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                     } else {
-                        recentTools.forEach { entry ->
+                        recentTools.forEachIndexed { index, entry ->
                             val toolName = entry.summary.removePrefix("Tool: ")
+                            val suffix = if (index == recentTools.lastIndex) " $tickDots" else ""
                             Text(
-                                text = "> $toolName",
+                                text = "> $toolName$suffix",
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
@@ -66,6 +84,17 @@ fun EinkActionColumn(
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
+                    }
+
+                    if (state.toolInput != null) {
+                        Text(
+                            text = "  \"${state.toolInput}\"",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                        )
                     }
 
                     if (state.toolProgress != null) {

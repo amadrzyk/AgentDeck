@@ -28,9 +28,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.BridgeConnection
@@ -39,9 +41,12 @@ import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.ui.deck.DeckAction
 import dev.agentdeck.ui.deck.DeckButton
 import dev.agentdeck.ui.deck.DeckButtonConfig
+import dev.agentdeck.ui.deck.EncoderStrip
 import dev.agentdeck.ui.deck.colorForOption
 import dev.agentdeck.ui.deck.computeDeckLayout
 import dev.agentdeck.ui.theme.AgentDeckColors
+import dev.agentdeck.voice.VoiceRecorder
+import kotlinx.coroutines.launch
 
 @Composable
 fun DeckScreen(
@@ -50,6 +55,9 @@ fun DeckScreen(
 ) {
     val state by stateHolder.state.collectAsState()
     val buttons = computeDeckLayout(state)
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val voiceRecorder = remember { VoiceRecorder(context) }
 
     // Track whether "MORE" was tapped to expand option list
     var showMoreOptions by remember { mutableStateOf(false) }
@@ -63,13 +71,73 @@ fun DeckScreen(
         showMoreOptions = false
     }
 
+    val isAwaiting = agentState == AgentState.AWAITING_OPTION ||
+            agentState == AgentState.AWAITING_PERMISSION ||
+            agentState == AgentState.AWAITING_DIFF
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // 2×4 button grid
+        // Encoder strip (mirrors SD+ LCD row)
+        EncoderStrip(
+            encoderStates = state.encoderStates,
+            takeoverActive = state.encoderTakeoverActive,
+            onRotate = { slot, ticks ->
+                val encoderType = state.encoderStates.find { it.slot == slot }?.encoderType
+                when (encoderType) {
+                    "utility" -> connection.sendUtility("adjust_volume", ticks * 5)
+                    "action" -> {
+                        if (isAwaiting) {
+                            val dir = if (ticks > 0) "down" else "up"
+                            connection.sendNavigateOption(dir)
+                        }
+                    }
+                    else -> {}
+                }
+            },
+            onPush = { slot ->
+                val encoderType = state.encoderStates.find { it.slot == slot }?.encoderType
+                when (encoderType) {
+                    "utility" -> connection.sendUtility("toggle_mute")
+                    "action" -> {
+                        if (isAwaiting) {
+                            // Select current option (index from cursorIndex)
+                            val idx = state.cursorIndex ?: 0
+                            connection.sendSelectOption(idx)
+                        }
+                    }
+                    "voice" -> {
+                        // Short tap on voice = cancel if recording
+                        if (voiceRecorder.recording) {
+                            voiceRecorder.cancel()
+                        }
+                    }
+                    else -> {}
+                }
+            },
+            onLongPress = { slot ->
+                val encoderType = state.encoderStates.find { it.slot == slot }?.encoderType
+                if (encoderType == "voice") {
+                    voiceRecorder.start()
+                }
+            },
+            onRelease = { slot ->
+                val encoderType = state.encoderStates.find { it.slot == slot }?.encoderType
+                if (encoderType == "voice" && voiceRecorder.recording) {
+                    scope.launch {
+                        val text = voiceRecorder.stopAndTranscribe(connection)
+                        if (text != null && agentState == AgentState.IDLE) {
+                            connection.sendPrompt(text)
+                        }
+                    }
+                }
+            },
+        )
+
+        // 2x4 button grid
         DeckButtonGrid(
             buttons = buttons,
             onAction = { action ->

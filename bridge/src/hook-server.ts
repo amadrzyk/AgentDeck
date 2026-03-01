@@ -1,9 +1,13 @@
 import express from 'express';
 import { createServer, type Server, type ServerResponse } from 'http';
 import { EventEmitter } from 'events';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { writeFileSync, unlinkSync } from 'fs';
 import { debug } from './logger.js';
 import { isLocalConnection, validateToken } from './auth.js';
 import type { BridgeEvent } from './types.js';
+import type { VoiceManager } from './voice.js';
 
 /** Minimal SSE client handle */
 interface SseClient {
@@ -15,6 +19,7 @@ export class HookServer extends EventEmitter {
   private app: express.Application;
   private server: Server;
   private diagHandler: ((tail?: number) => unknown) | null = null;
+  private voiceManager: VoiceManager | null = null;
 
   // SSE
   private sseClients: SseClient[] = [];
@@ -41,6 +46,11 @@ export class HookServer extends EventEmitter {
   /** Update metadata shown on /health and /status */
   setMeta(meta: { agentType?: string; projectName?: string; clientCount?: number }): void {
     Object.assign(this.meta, meta);
+  }
+
+  /** Set voice manager for /voice/transcribe endpoint */
+  setVoiceManager(vm: VoiceManager): void {
+    this.voiceManager = vm;
   }
 
   /** Broadcast a BridgeEvent to all SSE clients */
@@ -169,6 +179,40 @@ export class HookServer extends EventEmitter {
       // Respond quickly so the hook doesn't block Claude
       res.json({ received: true });
     });
+
+    // Voice transcription endpoint (accepts raw WAV body)
+    this.app.post('/voice/transcribe',
+      express.raw({ type: 'application/octet-stream', limit: '10mb' }),
+      async (req, res) => {
+        if (!this.checkAuth(req, res)) return;
+
+        if (!this.voiceManager) {
+          res.status(503).json({ error: 'Voice manager not available' });
+          return;
+        }
+
+        const body = req.body as Buffer;
+        if (!body || body.length < 100) {
+          res.status(400).json({ error: 'Empty or too short audio data' });
+          return;
+        }
+
+        debug('Hook', `POST /voice/transcribe (${body.length} bytes)`);
+
+        // Save to temp file
+        const tempFile = join(tmpdir(), `sdc-voice-remote-${Date.now()}.wav`);
+        try {
+          writeFileSync(tempFile, body);
+          const text = await this.voiceManager.transcribeFile(tempFile);
+          res.json({ text });
+        } catch (err) {
+          debug('Hook', `Transcription error: ${err}`);
+          res.status(500).json({ error: String(err) });
+        } finally {
+          try { unlinkSync(tempFile); } catch { /* ignore */ }
+        }
+      },
+    );
 
     // Catch-all for unknown routes
     this.app.use((req, res) => {

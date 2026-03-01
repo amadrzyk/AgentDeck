@@ -26,6 +26,10 @@ export {
 
 export {
   type ModelCatalogEntry,
+  type EncoderSlotState,
+  type EncoderStateEvent,
+  type DeckSlotConfig,
+  type DeckSlotMapEvent,
   type StateUpdateEvent,
   type PromptOptionsEvent,
   type UsageEvent,
@@ -41,6 +45,7 @@ export {
   type InterruptCommand,
   type VoiceCommand,
   type QueryUsageCommand,
+  type UtilityCommand,
   type PluginCommand,
   type HookEvent,
   BRIDGE_WS_PORT,

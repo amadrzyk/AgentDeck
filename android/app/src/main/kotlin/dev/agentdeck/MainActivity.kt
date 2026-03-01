@@ -7,8 +7,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -31,7 +31,7 @@ import dev.agentdeck.data.DisplayPreferences
 import dev.agentdeck.net.BridgeConnection
 import dev.agentdeck.net.ConnectionStatus
 import dev.agentdeck.state.AgentStateHolder
-import dev.agentdeck.ui.screen.DashboardScreen
+import dev.agentdeck.ui.monitor.MonitorScreen
 import dev.agentdeck.ui.screen.DeckScreen
 import dev.agentdeck.ui.screen.EinkMonitorScreen
 import dev.agentdeck.ui.screen.SettingsScreen
@@ -51,12 +51,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    data object Dashboard : Screen("dashboard", "Dashboard", Icons.Default.Dashboard)
+    data object Monitor : Screen("monitor", "Monitor", Icons.Default.Visibility)
     data object Deck : Screen("deck", "Deck", Icons.Default.GridView)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
-
-private val bottomNavScreens = listOf(Screen.Dashboard, Screen.Deck, Screen.Settings)
 
 class MainActivity : ComponentActivity() {
 
@@ -115,7 +113,7 @@ class MainActivity : ComponentActivity() {
                 if (isEink) {
                     EinkMonitorScreen(stateHolder, connection, displayPrefs)
                 } else {
-                    MainNavigation(stateHolder, connection, displayPrefs, isEink)
+                    MainNavigation(stateHolder, connection, displayPrefs)
                 }
             }
         }
@@ -130,11 +128,12 @@ fun MainNavigation(
     stateHolder: AgentStateHolder,
     connection: BridgeConnection,
     displayPrefs: DisplayPreferences,
-    isEink: Boolean,
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+
+    val bottomNavScreens = listOf(Screen.Monitor, Screen.Deck, Screen.Settings)
 
     // Auto-connect to saved bridge URL on launch
     LaunchedEffect(Unit) {
@@ -188,13 +187,12 @@ fun MainNavigation(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Dashboard.route,
+            startDestination = Screen.Monitor.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Dashboard.route) {
-                DashboardScreen(
+            composable(Screen.Monitor.route) {
+                MonitorScreen(
                     stateHolder = stateHolder,
-                    isEink = isEink,
                 )
             }
             composable(Screen.Deck.route) {
@@ -207,7 +205,7 @@ fun MainNavigation(
                 SettingsScreen(
                     connection = connection,
                     displayPrefs = displayPrefs,
-                    isEink = isEink,
+                    isEink = false,
                 )
             }
         }

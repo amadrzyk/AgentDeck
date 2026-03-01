@@ -52,6 +52,11 @@ import dev.agentdeck.ui.eink.EinkSettingsOverlay
 import dev.agentdeck.ui.eink.EinkTimelinePanel
 import dev.agentdeck.ui.eink.EinkUsageCompact
 import dev.agentdeck.ui.eink.compactStateMarker
+import dev.agentdeck.terrarium.renderer.EinkTerrariumView
+import dev.agentdeck.terrarium.toTerrariumState
+import dev.agentdeck.ui.eink.EinkEncoderMiniStrip
+import dev.agentdeck.ui.eink.EinkRefreshZone
+import dev.agentdeck.ui.eink.RefreshMode
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -150,33 +155,66 @@ fun EinkMonitorScreen(
                 onSettingsClick = { showSettings = true },
             )
         } else if (isLandscape) {
-            // 3-column console layout
+            // 3-column console layout with terrarium visualization
             Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.weight(1f)) {
-                    EinkAgentColumn(
-                        state = state,
-                        onSettingsClick = { showSettings = true },
-                        modifier = Modifier
-                            .weight(0.25f)
-                            .fillMaxHeight(),
-                    )
+                // Terrarium visualization band (top ~25%)
+                val terrariumState = state.toTerrariumState()
+                EinkTerrariumView(
+                    state = terrariumState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(0.25f),
+                )
+                HorizontalDivider(thickness = 2.dp, color = Color.Black)
+                // Data columns (bottom ~75%) with per-zone refresh
+                Row(modifier = Modifier.weight(0.75f)) {
+                    EinkRefreshZone(
+                        mode = RefreshMode.A2,
+                        debounceMs = 200,
+                        triggerKey = Triple(state.agentState, state.siblingSessions.size, state.workerSessionCount),
+                        modifier = Modifier.weight(0.25f).fillMaxHeight(),
+                    ) {
+                        EinkAgentColumn(
+                            state = state,
+                            onSettingsClick = { showSettings = true },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                     VerticalDivider(thickness = 2.dp, color = Color.Black)
-                    EinkActionColumn(
-                        state = state,
-                        timelineEntries = timelineEntries,
-                        onSelectOption = { index ->
-                            connection.sendSelectOption(index)
-                        },
-                        modifier = Modifier
-                            .weight(0.45f)
-                            .fillMaxHeight(),
-                    )
+                    EinkRefreshZone(
+                        mode = RefreshMode.A2,
+                        debounceMs = 300,
+                        triggerKey = Pair(state.agentState, timelineEntries.size),
+                        modifier = Modifier.weight(0.45f).fillMaxHeight(),
+                    ) {
+                        EinkActionColumn(
+                            state = state,
+                            timelineEntries = timelineEntries,
+                            onSelectOption = { index ->
+                                connection.sendSelectOption(index)
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                     VerticalDivider(thickness = 2.dp, color = Color.Black)
-                    EinkEngineColumn(
-                        usage = state.usage,
-                        modifier = Modifier
-                            .weight(0.30f)
-                            .fillMaxHeight(),
+                    EinkRefreshZone(
+                        mode = RefreshMode.DU,
+                        debounceMs = 2000,
+                        triggerKey = state.usage,
+                        modifier = Modifier.weight(0.30f).fillMaxHeight(),
+                    ) {
+                        EinkEngineColumn(
+                            usage = state.usage,
+                            messageCount = metrics.messageCount,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+                // Encoder mini status strip (above footer)
+                if (state.encoderStates.isNotEmpty()) {
+                    HorizontalDivider(thickness = 1.dp, color = Color.Black)
+                    EinkEncoderMiniStrip(
+                        encoderStates = state.encoderStates,
                     )
                 }
                 HorizontalDivider(thickness = 2.dp, color = Color.Black)
@@ -348,7 +386,7 @@ private fun EinkPortraitLayout(
     onSettingsClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Compact header: ~20% of screen
+        // Compact header: ~15% of screen
         EinkCompactHeader(
             agentState = state.agentState,
             projectName = state.projectName,
@@ -361,10 +399,20 @@ private fun EinkPortraitLayout(
 
         HorizontalDivider(thickness = 2.dp, color = Color.Black)
 
-        // Timeline: ~75% of screen
+        // Terrarium band (~15%)
+        val terrariumState = state.toTerrariumState()
+        EinkTerrariumView(
+            state = terrariumState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(0.15f),
+        )
+        HorizontalDivider(thickness = 1.dp, color = Color.Black)
+
+        // Timeline: ~65% of screen
         EinkTimelinePanel(
             entries = timelineEntries,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(0.65f),
         )
 
         // Compact footer

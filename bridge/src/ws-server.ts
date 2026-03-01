@@ -7,6 +7,7 @@ import { debug } from './logger.js';
 export class WsServer {
   private wss: WebSocketServer;
   private commandCallback: ((cmd: PluginCommand) => void) | null = null;
+  private rawMessageCallback: ((msg: Record<string, unknown>, sender: WebSocket) => boolean) | null = null;
   private onConnectCallback: ((ws: WebSocket) => void) | null = null;
   private onDisconnectCallback: (() => void) | null = null;
 
@@ -36,10 +37,14 @@ export class WsServer {
 
       ws.on('message', (data) => {
         try {
-          const msg = JSON.parse(data.toString()) as PluginCommand;
+          const msg = JSON.parse(data.toString()) as Record<string, unknown>;
           debug('WS', `recv cmd: ${msg.type}`);
+          // Allow raw message callback to intercept relay events (e.g. deck_slot_map)
+          if (this.rawMessageCallback && this.rawMessageCallback(msg, ws)) {
+            return; // handled
+          }
           if (this.commandCallback) {
-            this.commandCallback(msg);
+            this.commandCallback(msg as unknown as PluginCommand);
           }
         } catch (err) {
           debug('WS', `Failed to parse message: ${err}`);
@@ -72,6 +77,21 @@ export class WsServer {
 
   onCommand(callback: (cmd: PluginCommand) => void): void {
     this.commandCallback = callback;
+  }
+
+  /** Register a callback for raw messages before PluginCommand dispatch. Return true to consume. */
+  onRawMessage(callback: (msg: Record<string, unknown>, sender: WebSocket) => boolean): void {
+    this.rawMessageCallback = callback;
+  }
+
+  /** Broadcast to all clients except the sender */
+  broadcastExcept(event: BridgeEvent, except: WebSocket): void {
+    const payload = JSON.stringify(event);
+    for (const client of this.wss.clients) {
+      if (client !== except && client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    }
   }
 
   onClientConnect(callback: (ws: WebSocket) => void): void {

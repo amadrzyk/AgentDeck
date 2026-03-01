@@ -21,6 +21,8 @@ class DisplayPreferences(
         private val ORIENTATION_KEY = intPreferencesKey("orientation")
         private val KEEP_AWAKE_KEY = booleanPreferencesKey("keep_awake")
         private val LAST_BRIDGE_URL_KEY = stringPreferencesKey("last_bridge_url")
+        private val DISPLAY_SYNC_ENABLED_KEY = booleanPreferencesKey("display_sync_enabled")
+        private val IDLE_TIMEOUT_MINUTES_KEY = intPreferencesKey("idle_timeout_minutes")
     }
 
     val orientationFlow: Flow<Int> = context.dataStore.data.map { prefs ->
@@ -56,6 +58,26 @@ class DisplayPreferences(
             } else {
                 prefs.remove(LAST_BRIDGE_URL_KEY)
             }
+        }
+    }
+
+    val displaySyncEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[DISPLAY_SYNC_ENABLED_KEY] ?: true
+    }
+
+    suspend fun setDisplaySyncEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[DISPLAY_SYNC_ENABLED_KEY] = enabled
+        }
+    }
+
+    val idleTimeoutMinutesFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[IDLE_TIMEOUT_MINUTES_KEY] ?: 5
+    }
+
+    suspend fun setIdleTimeoutMinutes(minutes: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[IDLE_TIMEOUT_MINUTES_KEY] = minutes
         }
     }
 }

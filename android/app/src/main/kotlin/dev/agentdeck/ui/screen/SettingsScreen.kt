@@ -19,6 +19,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +52,8 @@ fun SettingsScreen(
     val currentUrl by connection.url.collectAsState()
     val lastError by connection.lastError.collectAsState()
     val keepAwake by displayPrefs.keepAwakeFlow.collectAsState(initial = true)
+    val displaySyncEnabled by displayPrefs.displaySyncEnabledFlow.collectAsState(initial = true)
+    val idleTimeoutMinutes by displayPrefs.idleTimeoutMinutesFlow.collectAsState(initial = 5)
     val coroutineScope = rememberCoroutineScope()
 
     var manualUrl by remember { mutableStateOf("") }
@@ -244,6 +247,51 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Sync with Host Display",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Switch(
+                        checked = displaySyncEnabled,
+                        onCheckedChange = {
+                            coroutineScope.launch { displayPrefs.setDisplaySyncEnabled(it) }
+                        },
+                    )
+                }
+                Text(
+                    text = "Dim display when host monitor sleeps, restore on wake",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                if (displaySyncEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Idle Timeout: ${idleTimeoutMinutes} min",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Slider(
+                        value = idleTimeoutMinutes.toFloat(),
+                        onValueChange = { value ->
+                            coroutineScope.launch { displayPrefs.setIdleTimeoutMinutes(value.toInt()) }
+                        },
+                        valueRange = 1f..30f,
+                        steps = 28,
+                    )
+                    Text(
+                        text = "Dim display after this period when bridge is disconnected",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 

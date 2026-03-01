@@ -250,6 +250,27 @@ export class VoiceManager extends EventEmitter {
     return this.recording;
   }
 
+  /** Transcribe a WAV file (used by /voice/transcribe endpoint) */
+  async transcribeFile(filePath: string): Promise<string> {
+    // Check audio RMS to detect silence
+    const rms = computeRms(filePath);
+    debug('Voice', `transcribeFile RMS: ${rms.toFixed(4)}`);
+    if (rms < 0.001) {
+      throw new Error('No audio detected — silent recording');
+    }
+
+    if (this.useServer && this.serverPort) {
+      try {
+        return await this.transcribeViaServer(filePath);
+      } catch (serverErr) {
+        debug('Voice', `Server transcription failed, falling back to whisper-cli: ${serverErr}`);
+        this.useServer = false;
+        return await this.transcribeWithCli(filePath);
+      }
+    }
+    return await this.transcribeWithCli(filePath);
+  }
+
   private async transcribeViaServer(audioFile: string): Promise<string> {
     const fileData = readFileSync(audioFile);
     const boundary = `----whisper${Date.now()}`;

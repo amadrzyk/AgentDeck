@@ -9,6 +9,7 @@
     <!-- Granted via adb on e-ink devices: allows setting stay_on_while_plugged_in -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application
         android:name=".AgentDeckApp"
         android:allowBackup="true"

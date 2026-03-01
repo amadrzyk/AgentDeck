@@ -71,6 +71,13 @@ fun EinkFooterBar(
         }
         Text(text = syncText, style = monoStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+        // Messages
+        Text(
+            text = "Msg: ${metrics.messageCount}",
+            style = monoStyle,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+
         // Total tokens
         val totalTok = usage.inputTokens + usage.outputTokens
         Text(

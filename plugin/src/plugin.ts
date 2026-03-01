@@ -9,6 +9,8 @@ import {
   State,
   PermissionMode,
   type BillingType,
+  type DeckSlotConfig,
+  type DeckSlotMapEvent,
 } from '@agentdeck/shared';
 
 import { ConnectionManager } from './connection-manager.js';
@@ -443,6 +445,83 @@ streamDeck.actions.registerAction(new ResponseDialAction());
 streamDeck.actions.registerAction(new VoiceDialAction());
 streamDeck.actions.registerAction(new UtilityDialAction());
 streamDeck.actions.registerAction(new ItermDialAction());
+
+// ---- Slot Map Reporting (Phase A7) ----
+
+// UUID suffix → actionType mapping
+const UUID_TO_ACTION_TYPE: Record<string, string> = {
+  'response-button': 'response-button',
+  'stop-button': 'stop-button',
+  'mode-button': 'mode-button',
+  'session-button': 'session-button',
+  'usage-button': 'usage-button',
+  'response-dial': 'option-dial',
+  'voice-dial': 'voice-dial',
+  'utility-dial': 'utility-dial',
+  'iterm-dial': 'iterm-dial',
+};
+
+interface SlotEntry {
+  slot: number;
+  controller: 'Keypad' | 'Encoder';
+  actionType: string;
+  settings?: Record<string, unknown>;
+}
+
+const appearedActions = new Map<string, SlotEntry>();
+let slotMapTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Global willAppear listener — tracks all actions without modifying individual action files
+streamDeck.actions.onWillAppear((ev) => {
+  const uuid = ev.action.manifestId;
+  const suffix = uuid.replace('bound.serendipity.agentdeck.', '');
+  const actionType = UUID_TO_ACTION_TYPE[suffix] || suffix;
+  const payload = ev.payload as any;
+  const controller = payload.controller || 'Keypad';
+  const column = payload.coordinates?.column ?? 0;
+
+  appearedActions.set(ev.action.id, {
+    slot: column,
+    controller,
+    actionType,
+    settings: payload.settings,
+  });
+
+  // Debounce: wait for all actions to appear before sending
+  if (slotMapTimer) clearTimeout(slotMapTimer);
+  slotMapTimer = setTimeout(sendSlotMap, 500);
+});
+
+function sendSlotMap(): void {
+  const buttons: DeckSlotConfig[] = [];
+  const encoders: DeckSlotConfig[] = [];
+
+  for (const entry of appearedActions.values()) {
+    const config: DeckSlotConfig = {
+      slot: entry.slot,
+      actionType: entry.actionType,
+      settings: entry.settings,
+    };
+    if (entry.controller === 'Encoder') {
+      encoders.push(config);
+    } else {
+      buttons.push(config);
+    }
+  }
+
+  // Sort by slot
+  buttons.sort((a, b) => a.slot - b.slot);
+  encoders.sort((a, b) => a.slot - b.slot);
+
+  const slotMap: DeckSlotMapEvent = {
+    type: 'deck_slot_map',
+    buttons,
+    encoders,
+  };
+
+  dinfo('Plugin', `Sending slot map: ${buttons.length} buttons, ${encoders.length} encoders`);
+  connMgr.send(slotMap as any);
+}
 
 // ---- Connect ----
 

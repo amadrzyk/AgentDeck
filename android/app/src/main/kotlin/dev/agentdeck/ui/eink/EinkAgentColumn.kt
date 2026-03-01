@@ -82,6 +82,61 @@ fun EinkAgentColumn(
             )
         }
 
+        // Suggested prompt (IDLE)
+        if (state.suggestedPrompt != null) {
+            Text(
+                text = "Suggested: ${state.suggestedPrompt}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+        }
+
+        // Sibling sessions
+        if (state.siblingSessions.isNotEmpty()) {
+            Text(
+                text = "Sessions: ${state.siblingSessions.size}",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            state.siblingSessions.forEach { session ->
+                val marker = if (session.alive) "\u25CF" else "\u25CB"
+                Text(
+                    text = "$marker ${session.projectName ?: "port:${session.port}"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        // Worker count
+        if (state.workerSessionCount != null && state.workerSessionCount > 0) {
+            Text(
+                text = "Workers: ${state.workerSessionCount}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        // OC session status
+        if (state.sessionStatus != null) {
+            val ss = state.sessionStatus
+            if (ss.contextTokens != null) {
+                Text(
+                    text = "Ctx: ${formatCount(ss.contextTokens)}",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (ss.uptime != null) {
+                Text(
+                    text = "Up: ${formatDuration(ss.uptime)}",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.weight(1f))
 
         // Settings gear
