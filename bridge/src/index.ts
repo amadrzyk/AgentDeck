@@ -44,8 +44,9 @@ import {
 import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
 import { OllamaProbe, type OllamaStatus } from './ollama-probe.js';
 import { probeGateway } from './gateway-probe.js';
-import { advertiseBridge } from './mdns.js';
+
 import { getOrCreateToken, getWsUrl } from './auth.js';
+import { buildEnrichedSessionsList } from './session-aggregator.js';
 import type { HookServer } from './hook-server.js';
 
 // Load prompt templates
@@ -313,12 +314,11 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   const displayMonitor = new DisplayMonitor();
   displayMonitor.start();
 
-  // 2c. mDNS service advertising (LAN discovery for Android/browser clients)
-  const mdnsCleanup = advertiseBridge(port, projectName, agentType);
-
-  // 2d. Auth token initialization + QR URL for pairing
-  getOrCreateToken(); // Ensure token exists on disk
+  // 2c. Auth token initialization (must be before mDNS so token is available)
+  const authToken = getOrCreateToken();
   const wsUrl = getWsUrl(port);
+
+  // mDNS is handled by daemon-server only (avoids name collisions in multi-session)
   log(`[sdc] Auth token ready. Pairing URL: ${wsUrl}`);
 
   // 2e. SSE broadcasting helper (only for ClaudeCode adapter which has HookServer)
@@ -835,38 +835,9 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     cachedGatewayAvailable = status.available;
   });
 
-  // 9c. Enrich sibling sessions with state from /health
-  async function enrichSessionsWithState(sessions: ReturnType<typeof listActiveSessions>): Promise<Array<{
-    id: string; port: number; projectName: string; agentType?: AgentType; alive: boolean; state?: string;
-  }>> {
-    return Promise.all(sessions.map(async (s) => {
-      const base = { id: s.id, port: s.port, projectName: s.projectName, agentType: s.agentType as AgentType | undefined, alive: true };
-      if (s.id === sessionId) return { ...base, state: stateMachine.getSnapshot().state };
-      try {
-        const res = await fetch(`http://127.0.0.1:${s.port}/health`, { signal: AbortSignal.timeout(2000) });
-        const data = await res.json() as { state?: string };
-        return { ...base, state: data.state };
-      } catch {
-        return base;
-      }
-    }));
-  }
-
+  // 9c. Build enriched sessions list (shared with daemon-server)
   async function buildSessionsList() {
-    const siblings = listActiveSessions();
-    const enriched = await enrichSessionsWithState(siblings);
-    // Inject virtual OpenClaw session if Gateway is available but no OC bridge running
-    if (cachedGatewayAvailable && !enriched.some(s => s.agentType === 'openclaw')) {
-      enriched.push({
-        id: 'gateway-openclaw',
-        port: 18789,
-        projectName: 'OpenClaw',
-        agentType: 'openclaw',
-        alive: true,
-        state: 'idle',
-      });
-    }
-    return enriched;
+    return buildEnrichedSessionsList(sessionId, stateMachine.getSnapshot().state, cachedGatewayAvailable);
   }
 
   // 9c2. Periodic sibling sessions broadcast (for multi-session terrarium)
@@ -968,7 +939,6 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     }
 
     displayMonitor.stop();
-    mdnsCleanup();
     utilityProxy.cleanup();
     voiceManager.disconnectFromServer();
     journal.close();
