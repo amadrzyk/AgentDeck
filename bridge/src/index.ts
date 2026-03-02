@@ -837,7 +837,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
 
   // 9c. Build enriched sessions list (shared with daemon-server)
   async function buildSessionsList() {
-    return buildEnrichedSessionsList(sessionId, stateMachine.getSnapshot().state, cachedGatewayAvailable);
+    return buildEnrichedSessionsList(sessionId, stateMachine.getSnapshot().state);
   }
 
   // 9c2. Periodic sibling sessions broadcast (for multi-session terrarium)

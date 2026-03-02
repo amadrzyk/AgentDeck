@@ -1,6 +1,4 @@
 import { listActive as listActiveSessions, type SessionEntry } from './session-registry.js';
-import { probeGateway } from './gateway-probe.js';
-import { debug } from './logger.js';
 import type { AgentType } from './types.js';
 
 export interface EnrichedSession {
@@ -41,25 +39,12 @@ export async function enrichSessionsWithState(
 }
 
 /**
- * Build an enriched sessions list including virtual OpenClaw session if Gateway is detected.
+ * Build an enriched sessions list for multi-session display.
  */
 export async function buildEnrichedSessionsList(
   ownSessionId: string,
   ownState: string,
-  gatewayAvailable: boolean,
 ): Promise<EnrichedSession[]> {
   const siblings = listActiveSessions().filter(s => s.agentType !== 'daemon');
-  const enriched = await enrichSessionsWithState(siblings, ownSessionId, ownState);
-  // Inject virtual OpenClaw session if Gateway is available but no OC bridge running
-  if (gatewayAvailable && !enriched.some(s => s.agentType === 'openclaw')) {
-    enriched.push({
-      id: 'gateway-openclaw',
-      port: 18789,
-      projectName: 'OpenClaw',
-      agentType: 'openclaw',
-      alive: true,
-      state: 'idle',
-    });
-  }
-  return enriched;
+  return enrichSessionsWithState(siblings, ownSessionId, ownState);
 }
