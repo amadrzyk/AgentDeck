@@ -1,15 +1,20 @@
 package dev.agentdeck.terrarium.creature
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.terrarium.TerrariumLayout
@@ -34,12 +39,17 @@ class OctopusCreature(
     private val centerXFraction: Float = TerrariumLayout.OCTOPUS_CENTER_X_FRACTION,
     private val centerYFraction: Float = TerrariumLayout.OCTOPUS_CENTER_Y_FRACTION,
     private val scaleFactor: Float = 1f,
+    phaseOffset: Float = 0f,
+    displayName: String? = null,
 ) : Creature {
 
     private var visualState by mutableStateOf(OctopusVisualState.FLOATING)
-    private var time by mutableFloatStateOf(0f)
+    private var time by mutableFloatStateOf(phaseOffset)
     private var transitionProgress by mutableFloatStateOf(1f)
     private var agentMark: AgentMark? by mutableStateOf(null)
+    private var nameTag: String? by mutableStateOf(displayName)
+    /** Whether to show name tag (only for multi-session). */
+    private var showNameTag by mutableStateOf(displayName != null)
 
     fun setState(newState: OctopusVisualState) {
         if (newState != visualState) {
@@ -50,6 +60,11 @@ class OctopusCreature(
 
     fun setMark(newMark: AgentMark?) {
         agentMark = newMark
+    }
+
+    fun setDisplayName(name: String?, show: Boolean = name != null) {
+        nameTag = name
+        showNameTag = show
     }
 
     override fun update(dt: Float) {
@@ -81,30 +96,22 @@ class OctopusCreature(
 
         val bodyAlpha = if (visualState == OctopusVisualState.SLEEPING) 0.4f else 1f
 
-        // THINKING: draw starburst behind pixel body
-        if (visualState == OctopusVisualState.THINKING) {
+        // WORKING: draw starburst behind pixel body
+        if (visualState == OctopusVisualState.WORKING) {
             drawStarburst(scope, centerX, effectiveCenterY, bodyRadius * 2.5f, bodyAlpha)
         }
 
         // Draw pixel body with animated tentacles
         drawPixelBody(scope, centerX, effectiveCenterY, bodyRadius, bodyAlpha)
 
-        // Holographic keyboard for TYPING state
-        if (visualState == OctopusVisualState.TYPING) {
-            val pixelW = bodyRadius * 2f / GRID_COLS
-            val gridH = GRID_ROWS * pixelW * PIXEL_ASPECT
-            val kbY = effectiveCenterY + gridH * 0.6f
-            drawHolographicKeyboard(scope, centerX, kbY, bodyRadius)
+        // ASKING: speech bubble with "?"
+        if (visualState == OctopusVisualState.ASKING) {
+            drawSpeechBubble(scope, centerX, effectiveCenterY, bodyRadius)
         }
 
-        // Option cards for PRESENTING state
-        if (visualState == OctopusVisualState.PRESENTING) {
-            drawOptionCards(scope, centerX, effectiveCenterY, bodyRadius)
-        }
-
-        // Document review for REVIEWING state
-        if (visualState == OctopusVisualState.REVIEWING) {
-            drawReviewDocs(scope, centerX, effectiveCenterY, bodyRadius)
+        // Name tag (multi-session only)
+        if (showNameTag && nameTag != null) {
+            drawNameTag(scope, centerX, effectiveCenterY, bodyRadius, nameTag!!)
         }
     }
 
@@ -115,12 +122,9 @@ class OctopusCreature(
         val phase = if (isLeft) PI.toFloat() else 0f
 
         val (speed, amplitude) = when (visualState) {
-            OctopusVisualState.TYPING -> TerrariumTiming.TYPING_SPEED to 0.35f
+            OctopusVisualState.WORKING -> 1.5f to 0.08f
             OctopusVisualState.FLOATING -> 2.0f to 0.15f
-            OctopusVisualState.THINKING -> 1.5f to 0.08f
-            OctopusVisualState.OFFERING,
-            OctopusVisualState.PRESENTING -> 1.5f to 0.10f
-            OctopusVisualState.REVIEWING -> 1.0f to 0.05f
+            OctopusVisualState.ASKING -> 1.5f to 0.10f
             OctopusVisualState.SLEEPING -> return 0f
         }
 
@@ -132,12 +136,9 @@ class OctopusCreature(
         val phase = if (isLeft) 0f else PI.toFloat()
 
         val (speed, amplitude) = when (visualState) {
-            OctopusVisualState.TYPING -> 4.0f to 0.20f
+            OctopusVisualState.WORKING -> 1.0f to 0.06f
             OctopusVisualState.FLOATING -> 1.5f to 0.12f
-            OctopusVisualState.THINKING -> 1.0f to 0.06f
-            OctopusVisualState.OFFERING,
-            OctopusVisualState.PRESENTING -> 1.5f to 0.08f
-            OctopusVisualState.REVIEWING -> 0.8f to 0.04f
+            OctopusVisualState.ASKING -> 1.5f to 0.08f
             OctopusVisualState.SLEEPING -> return 0f
         }
 
@@ -216,7 +217,7 @@ class OctopusCreature(
 
     private fun bodyColorForState(): Color {
         return when (visualState) {
-            OctopusVisualState.THINKING -> {
+            OctopusVisualState.WORKING -> {
                 val t = sin(time * TerrariumTiming.THINKING_PULSE_SPEED) * 0.5f + 0.5f
                 lerpColor(TerrariumColors.ClaudeBody, TerrariumColors.ClaudeBodyLight, t)
             }
@@ -248,106 +249,76 @@ class OctopusCreature(
         }
     }
 
-    private fun drawHolographicKeyboard(scope: DrawScope, cx: Float, kbY: Float, bodyRadius: Float) {
-        val kbWidth = bodyRadius * 4f
-        val kbHeight = bodyRadius * 1.5f
+    /** Speech bubble with "?" — shown during ASKING state. */
+    private fun drawSpeechBubble(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float) {
+        val pixelW = bodyRadius * 2f / GRID_COLS
+        val gridH = GRID_ROWS * pixelW * PIXEL_ASPECT
 
-        scope.drawRoundRect(
-            color = TerrariumColors.HoloBlue.copy(alpha = 0.15f),
-            topLeft = Offset(cx - kbWidth / 2, kbY),
-            size = Size(kbWidth, kbHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f),
+        // Position: upper-right of the octopus head
+        val bubbleX = cx + bodyRadius * 1.2f
+        val bubbleY = cy - gridH / 2f - bodyRadius * 0.6f
+        val bubbleR = bodyRadius * 0.7f
+
+        // Gentle pulse
+        val pulse = sin(time * 2.5f) * 0.08f + 1f
+        val r = bubbleR * pulse
+
+        // Bubble fill
+        scope.drawCircle(
+            color = Color.White.copy(alpha = 0.25f),
+            radius = r,
+            center = Offset(bubbleX, bubbleY),
+        )
+        // Bubble border
+        scope.drawCircle(
+            color = TerrariumColors.HUDText.copy(alpha = 0.5f),
+            radius = r,
+            center = Offset(bubbleX, bubbleY),
+            style = Stroke(width = bodyRadius * 0.04f),
         )
 
-        val rows = 3
-        val cols = 10
-        for (r in 0..rows) {
-            val y = kbY + (r.toFloat() / rows) * kbHeight
-            scope.drawLine(
-                color = TerrariumColors.HoloText.copy(alpha = 0.2f),
-                start = Offset(cx - kbWidth / 2, y),
-                end = Offset(cx + kbWidth / 2, y),
-                strokeWidth = 0.5f,
-            )
+        // Tail triangle pointing toward octopus head
+        val tailPath = Path().apply {
+            moveTo(bubbleX - r * 0.3f, bubbleY + r * 0.8f)
+            lineTo(cx + bodyRadius * 0.5f, cy - gridH / 2f)
+            lineTo(bubbleX - r * 0.05f, bubbleY + r * 0.95f)
+            close()
         }
-        for (c in 0..cols) {
-            val x = cx - kbWidth / 2 + (c.toFloat() / cols) * kbWidth
-            scope.drawLine(
-                color = TerrariumColors.HoloText.copy(alpha = 0.2f),
-                start = Offset(x, kbY),
-                end = Offset(x, kbY + kbHeight),
-                strokeWidth = 0.5f,
-            )
-        }
+        scope.drawPath(tailPath, color = Color.White.copy(alpha = 0.25f))
 
-        val activeCol = ((time * TerrariumTiming.TYPING_SPEED * 2f) % cols).toInt()
-        val activeRow = ((time * TerrariumTiming.TYPING_SPEED) % rows).toInt()
-        val keyW = kbWidth / cols
-        val keyH = kbHeight / rows
-        scope.drawRoundRect(
-            color = TerrariumColors.TetraNeon.copy(alpha = 0.4f),
-            topLeft = Offset(cx - kbWidth / 2 + activeCol * keyW, kbY + activeRow * keyH),
-            size = Size(keyW, keyH),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f),
+        // "?" text via nativeCanvas
+        val canvas = scope.drawContext.canvas.nativeCanvas
+        val textSize = r * 1.2f
+        canvas.drawText(
+            "?", bubbleX, bubbleY + textSize * 0.35f,
+            questionMarkPaint.apply { this.textSize = textSize },
         )
     }
 
-    private fun drawOptionCards(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float) {
-        val cardWidth = bodyRadius * 2f
-        val cardHeight = bodyRadius * 1.2f
-        val startY = cy - bodyRadius * 1.5f
+    /** Name tag hat above the octopus — only shown in multi-session mode. */
+    private fun drawNameTag(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float, name: String) {
+        val pixelW = bodyRadius * 2f / GRID_COLS
+        val gridH = GRID_ROWS * pixelW * PIXEL_ASPECT
+        val hatY = cy - gridH / 2f - bodyRadius * 0.4f
 
-        for (i in 0 until 3) {
-            val offsetX = (i - 1) * cardWidth * 1.2f
-            scope.drawRoundRect(
-                color = TerrariumColors.HoloBlue.copy(alpha = 0.2f),
-                topLeft = Offset(cx + offsetX - cardWidth / 2, startY),
-                size = Size(cardWidth, cardHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f),
-            )
-            scope.drawRoundRect(
-                color = TerrariumColors.HoloText.copy(alpha = 0.4f),
-                topLeft = Offset(cx + offsetX - cardWidth / 2, startY),
-                size = Size(cardWidth, cardHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f),
-                style = Stroke(width = 1f),
-            )
-        }
-    }
+        val hatWidth = bodyRadius * 1.8f
+        val hatHeight = bodyRadius * 0.5f
 
-    private fun drawReviewDocs(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float) {
-        val docWidth = bodyRadius * 2.5f
-        val docHeight = bodyRadius * 3f
-        val docY = cy - bodyRadius * 0.5f
+        // Hat background
+        scope.drawRoundRect(
+            color = TerrariumColors.ClaudeBody.copy(alpha = 0.6f),
+            topLeft = Offset(cx - hatWidth / 2, hatY - hatHeight),
+            size = Size(hatWidth, hatHeight),
+            cornerRadius = CornerRadius(4f, 4f),
+        )
 
-        for (side in listOf(-1f, 1f)) {
-            val docX = cx + side * docWidth * 0.7f - docWidth / 2
-
-            scope.drawRoundRect(
-                color = TerrariumColors.HoloBlue.copy(alpha = 0.12f),
-                topLeft = Offset(docX, docY),
-                size = Size(docWidth, docHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f),
-            )
-
-            for (line in 0 until 8) {
-                val lineY = docY + 8f + line * (docHeight / 9f)
-                val lineWidth = docWidth * (0.5f + (line * 17 % 5) * 0.1f)
-                scope.drawLine(
-                    color = TerrariumColors.HoloText.copy(alpha = 0.25f),
-                    start = Offset(docX + 6f, lineY),
-                    end = Offset(docX + 6f + lineWidth, lineY),
-                    strokeWidth = 1.5f,
-                )
-            }
-
-            val diffColor = if (side < 0) Color(0x60EF4444) else Color(0x6022C55E)
-            scope.drawRoundRect(
-                color = diffColor,
-                topLeft = Offset(docX, docY),
-                size = Size(3f, docHeight),
-            )
-        }
+        // Name text
+        val canvas = scope.drawContext.canvas.nativeCanvas
+        val fontSize = hatHeight * 0.6f
+        canvas.drawText(
+            name, cx, hatY - hatHeight * 0.25f,
+            nameTagPaint.apply { textSize = fontSize },
+        )
     }
 
     private fun lerpColor(a: Color, b: Color, t: Float): Color {
@@ -357,6 +328,20 @@ class OctopusCreature(
             blue = a.blue + (b.blue - a.blue) * t,
             alpha = a.alpha + (b.alpha - a.alpha) * t,
         )
+    }
+
+    private val questionMarkPaint = Paint().apply {
+        isAntiAlias = true
+        color = android.graphics.Color.argb(180, 226, 232, 240) // HUDText ~70%
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
+    }
+
+    private val nameTagPaint = Paint().apply {
+        isAntiAlias = true
+        color = android.graphics.Color.argb(220, 226, 232, 240) // HUDText ~86%
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
     companion object {

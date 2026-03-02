@@ -4,14 +4,62 @@ import android.graphics.Bitmap
 import android.graphics.Color
 
 /**
- * Floyd-Steinberg dithering engine — converts ARGB bitmap to 1-bit (pure black/white).
+ * Floyd-Steinberg dithering engine — converts ARGB bitmap to quantized grayscale.
  * Error diffusion weights: 7/16, 3/16, 5/16, 1/16.
  */
 object DitherEngine {
 
     /**
-     * Apply Floyd-Steinberg dithering in-place.
-     * Input: ARGB_8888 bitmap. Output: same bitmap with only #000000 and #FFFFFF pixels.
+     * Quantize to N gray levels with Floyd-Steinberg error diffusion.
+     * Input: ARGB_8888 bitmap. Output: same bitmap with [levels] distinct gray values.
+     * E.g. levels=16 → values 0, 17, 34, …, 255.
+     */
+    fun quantizeGray(bitmap: Bitmap, levels: Int = 16) {
+        val w = bitmap.width
+        val h = bitmap.height
+        val step = 255f / (levels - 1)
+
+        val lum = FloatArray(w * h)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val pixel = bitmap.getPixel(x, y)
+                val r = Color.red(pixel)
+                val g = Color.green(pixel)
+                val b = Color.blue(pixel)
+                lum[y * w + x] = 0.299f * r + 0.587f * g + 0.114f * b
+            }
+        }
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val idx = y * w + x
+                val oldVal = lum[idx]
+                val newVal = (Math.round(oldVal / step) * step).coerceIn(0f, 255f)
+                lum[idx] = newVal
+
+                val error = oldVal - newVal
+                if (x + 1 < w)
+                    lum[idx + 1] += error * 7f / 16f
+                if (y + 1 < h) {
+                    if (x - 1 >= 0)
+                        lum[(y + 1) * w + x - 1] += error * 3f / 16f
+                    lum[(y + 1) * w + x] += error * 5f / 16f
+                    if (x + 1 < w)
+                        lum[(y + 1) * w + x + 1] += error * 1f / 16f
+                }
+            }
+        }
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val v = lum[y * w + x].toInt().coerceIn(0, 255)
+                bitmap.setPixel(x, y, Color.rgb(v, v, v))
+            }
+        }
+    }
+
+    /**
+     * Apply Floyd-Steinberg dithering in-place (1-bit, pure black/white).
      */
     fun floydSteinberg(bitmap: Bitmap) {
         val w = bitmap.width
@@ -57,6 +105,25 @@ object DitherEngine {
             for (x in 0 until w) {
                 val v = if (lum[y * w + x] > 127.5f) 255 else 0
                 bitmap.setPixel(x, y, Color.rgb(v, v, v))
+            }
+        }
+    }
+
+    /**
+     * Snap each pixel to the nearest N-level gray without error diffusion.
+     * E-ink hardware with native grayscale support renders these levels directly,
+     * so dithering dot patterns are unnecessary and counterproductive.
+     */
+    fun snapToNearestGray(bitmap: Bitmap, levels: Int = 16) {
+        val w = bitmap.width
+        val h = bitmap.height
+        val step = 255f / (levels - 1)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val pixel = bitmap.getPixel(x, y)
+                val lum = 0.299f * Color.red(pixel) + 0.587f * Color.green(pixel) + 0.114f * Color.blue(pixel)
+                val snapped = (Math.round(lum / step) * step).toInt().coerceIn(0, 255)
+                bitmap.setPixel(x, y, Color.rgb(snapped, snapped, snapped))
             }
         }
     }

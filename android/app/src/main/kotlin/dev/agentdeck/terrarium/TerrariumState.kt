@@ -12,11 +12,8 @@ private const val TAG = "Terrarium"
 enum class OctopusVisualState {
     SLEEPING,    // Curled up at bottom, dim, eyes closed
     FLOATING,    // Gentle sine bob, tentacles wave
-    THINKING,    // Head hue rotation, tentacles curl inward
-    TYPING,      // Tentacles on holographic keyboard, rapid motions
-    OFFERING,    // 4 tentacles form O, 4 form X (permission)
-    PRESENTING,  // Tentacles hold rectangular "cards" (options)
-    REVIEWING,   // Tentacles hold two "documents" side by side
+    WORKING,     // Starburst animation — processing (tool use or thinking)
+    ASKING,      // Speech bubble + "?" — awaiting user input
 }
 
 enum class CrayfishVisualState {
@@ -49,6 +46,7 @@ data class AgentCreatureState(
     val visualState: OctopusVisualState,
     val isPrimary: Boolean,
     val layoutSlot: Int,
+    val displayName: String? = null,
 )
 
 /** Combined visual state for the entire terrarium scene. */
@@ -78,10 +76,10 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     val octopus = when (agentState) {
         AgentState.DISCONNECTED -> OctopusVisualState.SLEEPING
         AgentState.IDLE -> OctopusVisualState.FLOATING
-        AgentState.PROCESSING -> if (hasTool) OctopusVisualState.TYPING else OctopusVisualState.THINKING
-        AgentState.AWAITING_PERMISSION -> OctopusVisualState.OFFERING
-        AgentState.AWAITING_OPTION -> OctopusVisualState.PRESENTING
-        AgentState.AWAITING_DIFF -> OctopusVisualState.REVIEWING
+        AgentState.PROCESSING -> OctopusVisualState.WORKING
+        AgentState.AWAITING_PERMISSION,
+        AgentState.AWAITING_OPTION,
+        AgentState.AWAITING_DIFF -> OctopusVisualState.ASKING
     }
 
     // OpenClaw sibling state determines crayfish independently
@@ -143,6 +141,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             visualState = octopus,
             isPrimary = true,
             layoutSlot = 0,
+            displayName = projectName,
         )
     )
 
@@ -160,6 +159,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
                 visualState = mapSessionOctopusState(sibling.state),
                 isPrimary = false,
                 layoutSlot = slot++,
+                displayName = sibling.projectName,
             )
         )
     }
@@ -180,10 +180,8 @@ fun DashboardState.toTerrariumState(): TerrariumState {
 }
 
 private fun mapSessionOctopusState(state: String?): OctopusVisualState = when (state) {
-    "processing" -> OctopusVisualState.TYPING
-    "awaiting_permission" -> OctopusVisualState.OFFERING
-    "awaiting_option" -> OctopusVisualState.PRESENTING
-    "awaiting_diff" -> OctopusVisualState.REVIEWING
+    "processing" -> OctopusVisualState.WORKING
+    "awaiting_permission", "awaiting_option", "awaiting_diff" -> OctopusVisualState.ASKING
     "idle" -> OctopusVisualState.FLOATING
     else -> OctopusVisualState.FLOATING
 }

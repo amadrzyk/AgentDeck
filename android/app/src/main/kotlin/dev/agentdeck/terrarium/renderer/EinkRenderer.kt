@@ -26,8 +26,8 @@ import dev.agentdeck.terrarium.TerrariumTiming
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-/** E-ink animation frame interval (ms). 800ms is safe for Crema A2 ~120ms refresh. */
-private const val EINK_ANIM_FRAME_MS = 800L
+/** E-ink animation frame interval (ms). 600ms for snappier movement. */
+private const val EINK_ANIM_FRAME_MS = 600L
 
 // --- E-ink octopus pixel grid (12×9, matching OctopusCreature) ---
 
@@ -101,10 +101,10 @@ private val einkCrayfishRightAntennaPath: android.graphics.Path by lazy {
 
 /**
  * E-ink terrarium renderer — draws creatures into an offscreen bitmap,
- * applies Floyd-Steinberg dithering, then renders the 1-bit result.
+ * applies Floyd-Steinberg 1-bit dithering, then renders the result.
  *
- * Style: "Marine biologist's journal" — pixel blocks + SVG outlines, high contrast.
- * Supports slow 4-frame animation (800ms interval) for active states.
+ * Style: "Marine biologist's journal" — pixel blocks + SVG outlines, native 16-level grayscale.
+ * Supports slow 4-frame animation (600ms interval) for active states.
  */
 @Composable
 fun EinkTerrariumView(
@@ -167,42 +167,62 @@ private fun renderEinkFrame(
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { isAntiAlias = false }
 
-    // White background
-    canvas.drawColor(android.graphics.Color.WHITE)
+    // Water background — entire frame is the aquarium (no inner border)
+    canvas.drawColor(GRAY_WATER_BG)
 
-    // Tank border — rounded rectangle for aquarium glass feel
-    paint.color = android.graphics.Color.BLACK
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 3f
-    val tankRect = RectF(4f, 4f, width - 4f, height - 4f)
-    canvas.drawRoundRect(tankRect, 12f, 12f, paint)
-
-    // Water surface — double wave
+    // Water surface — air region above sine wave
     val surfaceY = height * 0.08f
-    paint.strokeWidth = 1.5f
-    canvas.drawLine(8f, surfaceY, width - 8f, surfaceY, paint)
+    val surfaceAmp = height * 0.012f
+    val surfaceFreq = (2.0 * kotlin.math.PI / (width * 0.5)).toFloat()
+    val phaseShift = animFrame * kotlin.math.PI.toFloat() / 2f
 
-    // Wave marks on surface
-    paint.strokeWidth = 1f
-    for (i in 0 until 8) {
-        val x = width * (0.05f + i * 0.12f)
-        canvas.drawArc(
-            RectF(x, surfaceY - 3f, x + 15f, surfaceY + 3f),
-            180f, 180f, false, paint,
-        )
+    // Fill above wave with air color (white region above water)
+    paint.style = Paint.Style.FILL
+    paint.color = GRAY_AIR
+    val airFillPath = android.graphics.Path().apply {
+        moveTo(0f, 0f)
+        var sx = 0f
+        while (sx <= width) {
+            val sy = surfaceY + kotlin.math.sin((surfaceFreq * sx + phaseShift).toDouble()).toFloat() * surfaceAmp
+            lineTo(sx, sy)
+            sx += 2f
+        }
+        lineTo(width.toFloat(), 0f)
+        close()
     }
+    canvas.drawPath(airFillPath, paint)
 
-    // Bubbles — scattered near surface
+    // Wave stroke for crisp boundary after dithering
+    paint.style = Paint.Style.STROKE
+    paint.color = GRAY_WAVE
+    paint.strokeWidth = 1.5f
+    val waveStrokePath = android.graphics.Path().apply {
+        var sx = 0f
+        moveTo(sx, surfaceY + kotlin.math.sin((surfaceFreq * sx + phaseShift).toDouble()).toFloat() * surfaceAmp)
+        sx += 2f
+        while (sx <= width) {
+            val sy = surfaceY + kotlin.math.sin((surfaceFreq * sx + phaseShift).toDouble()).toFloat() * surfaceAmp
+            lineTo(sx, sy)
+            sx += 2f
+        }
+    }
+    canvas.drawPath(waveStrokePath, paint)
+
+    // Bubbles — animated: rise upward + slight X wobble per frame
+    paint.color = GRAY_BUBBLE
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 0.8f
+    val bubbleBasePositions = floatArrayOf(0.15f, 0.35f, 0.55f, 0.75f)
     for (i in 0 until 4) {
-        val bx = width * (0.15f + i * 0.2f + (i % 2) * 0.05f)
-        val by = surfaceY + height * (0.05f + i * 0.08f)
+        val bx = width * (bubbleBasePositions[i] + (i % 2) * 0.05f) +
+            (if (animFrame % 2 == 0) 2f else -2f) * (i % 2 * 2 - 1)
+        val baseY = surfaceY + height * (0.05f + i * 0.08f)
+        val by = baseY - animFrame * height * 0.015f
         canvas.drawCircle(bx, by, 2f + i * 0.5f, paint)
     }
 
     // Environment
-    drawEinkSeaweed(canvas, paint, width, height)
+    drawEinkSeaweed(canvas, paint, width, height, animFrame)
     drawEinkRocks(canvas, paint, width, height)
     drawEinkGravel(canvas, paint, width, height)
 
@@ -223,16 +243,8 @@ private fun renderEinkFrame(
     drawEinkCrayfish(canvas, paint, width, height, state.crayfish, animFrame)
     drawEinkDataParticles(canvas, paint, width, height, state.tetra, state.agents.size)
 
-    // State label at bottom
-    paint.style = Paint.Style.FILL
-    paint.textSize = 14f
-    paint.color = android.graphics.Color.BLACK
-    val label = einkStateLabel(state)
-    val textWidth = paint.measureText(label)
-    canvas.drawText(label, (width - textWidth) / 2, height - 12f, paint)
-
-    // Apply Floyd-Steinberg dithering
-    DitherEngine.floydSteinberg(bitmap)
+    // Snap to native 16-level grayscale (no dithering — e-ink hardware renders gray natively)
+    DitherEngine.snapToNearestGray(bitmap)
 
     return bitmap
 }
@@ -242,7 +254,7 @@ private fun renderEinkFrame(
 private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int) {
     val bottomY = h * 0.82f
     paint.style = Paint.Style.FILL
-    paint.color = android.graphics.Color.BLACK
+    paint.color = GRAY_ROCK
 
     // Right rock cluster
     val rockPath = android.graphics.Path().apply {
@@ -265,6 +277,7 @@ private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int,
     canvas.drawPath(leftRock, paint)
 
     // Sand texture lines
+    paint.color = GRAY_GRAVEL
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 0.5f
     for (i in 0 until 4) {
@@ -273,20 +286,25 @@ private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int,
     }
 }
 
-private fun drawEinkSeaweed(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int) {
+private fun drawEinkSeaweed(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int, animFrame: Int = 0) {
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 1.2f
-    paint.color = android.graphics.Color.BLACK
+    paint.color = GRAY_SEAWEED
+
+    // Sway offset per frame: control points shift 1-2px horizontally (4-frame cycle)
+    val swayOffsets = floatArrayOf(0f, 1.5f, 0f, -1.5f)
+    val sway = swayOffsets[animFrame % 4]
 
     // Left wall: 2 wavy stems
     for (stem in 0 until 2) {
         val baseX = w * (0.04f + stem * 0.04f)
+        val stemSway = sway * (1f + stem * 0.5f) // second stem sways more
         val path = android.graphics.Path().apply {
             moveTo(baseX, h * 0.85f)
             for (seg in 0 until 4) {
                 val segY = h * (0.85f - (seg + 1) * 0.12f)
-                val cpX = baseX + (if (seg % 2 == 0) w * 0.02f else -w * 0.01f)
-                quadTo(cpX, segY + h * 0.06f, baseX + (seg % 2) * w * 0.01f, segY)
+                val cpX = baseX + (if (seg % 2 == 0) w * 0.02f else -w * 0.01f) + stemSway * (seg + 1) * 0.3f
+                quadTo(cpX, segY + h * 0.06f, baseX + (seg % 2) * w * 0.01f + stemSway * (seg + 1) * 0.15f, segY)
             }
         }
         canvas.drawPath(path, paint)
@@ -298,8 +316,8 @@ private fun drawEinkSeaweed(canvas: android.graphics.Canvas, paint: Paint, w: In
         moveTo(rightBaseX, h * 0.85f)
         for (seg in 0 until 3) {
             val segY = h * (0.85f - (seg + 1) * 0.14f)
-            val cpX = rightBaseX + (if (seg % 2 == 0) -w * 0.015f else w * 0.01f)
-            quadTo(cpX, segY + h * 0.07f, rightBaseX - (seg % 2) * w * 0.005f, segY)
+            val cpX = rightBaseX + (if (seg % 2 == 0) -w * 0.015f else w * 0.01f) - sway * (seg + 1) * 0.3f
+            quadTo(cpX, segY + h * 0.07f, rightBaseX - (seg % 2) * w * 0.005f - sway * (seg + 1) * 0.15f, segY)
         }
     }
     canvas.drawPath(rightPath, paint)
@@ -307,7 +325,7 @@ private fun drawEinkSeaweed(canvas: android.graphics.Canvas, paint: Paint, w: In
 
 private fun drawEinkGravel(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int) {
     val bottomY = h * 0.88f
-    paint.color = android.graphics.Color.BLACK
+    paint.color = GRAY_GRAVEL
 
     // Gravel: small dots along bottom
     paint.style = Paint.Style.FILL
@@ -318,6 +336,7 @@ private fun drawEinkGravel(canvas: android.graphics.Canvas, paint: Paint, w: Int
     }
 
     // Pebbles: small ovals
+    paint.color = GRAY_PEBBLE
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 0.8f
     canvas.drawOval(RectF(w * 0.20f, bottomY, w * 0.26f, bottomY + h * 0.04f), paint)
@@ -337,7 +356,7 @@ private fun drawEinkOctopus(
     scaleFactor: Float = 1f,
     animFrame: Int = 0,
 ) {
-    paint.color = android.graphics.Color.BLACK
+    paint.color = GRAY_CREATURE
 
     val cx = w * centerXFraction
     val cy = when (state) {
@@ -345,7 +364,7 @@ private fun drawEinkOctopus(
         else -> h * centerYFraction
     }
 
-    // Pixel block grid — 12×7, portrait-rectangle pixels (1:1.3 aspect)
+    // Pixel block grid — 14×5, portrait-rectangle pixels
     val bodyWidth = w * 0.14f * scaleFactor
     val pixelW = bodyWidth / EINK_OCTOPUS_COLS
     val pixelH = pixelW * EINK_PIXEL_ASPECT
@@ -354,17 +373,21 @@ private fun drawEinkOctopus(
     val startX = cx - gridW / 2f
     val startY = cy - gridH / 2f
 
-    // Animation (4-frame, left/right opposite phase)
+    // Animation (4-frame, left/right opposite phase) — amplified for e-ink visibility
     val isActive = state != OctopusVisualState.SLEEPING
     val leftTentacleStretch = if (isActive) when (animFrame % 4) {
-        1 -> pixelH * 0.4f
-        3 -> -pixelH * 0.4f
+        0 -> pixelH * 0.3f
+        1 -> pixelH * 0.8f
+        2 -> -pixelH * 0.3f
+        3 -> -pixelH * 0.7f
         else -> 0f
     } else 0f
     val rightTentacleStretch = -leftTentacleStretch
     val leftArmOffset = if (isActive) when (animFrame % 4) {
-        0 -> pixelH * 0.2f
-        2 -> -pixelH * 0.2f
+        0 -> pixelH * 0.4f
+        1 -> pixelH * 0.15f
+        2 -> -pixelH * 0.4f
+        3 -> -pixelH * 0.15f
         else -> 0f
     } else 0f
     val rightArmOffset = -leftArmOffset
@@ -386,7 +409,8 @@ private fun drawEinkOctopus(
             }
 
             when (cell) {
-                2 -> { // EYE
+                2 -> { // EYE — black for contrast on gray body
+                    paint.color = android.graphics.Color.BLACK
                     if (state == OctopusVisualState.SLEEPING) {
                         canvas.drawRect(
                             px + gap, py + pixelH * 0.4f,
@@ -398,6 +422,7 @@ private fun drawEinkOctopus(
                             px + pixelW - gap, py + pixelH - gap, paint,
                         )
                     }
+                    paint.color = GRAY_CREATURE
                 }
                 5 -> { // LEFT_LEG — stretch height, no position offset
                     val h = (pixelH + leftTentacleStretch - gap).coerceAtLeast(pixelH * 0.3f)
@@ -417,44 +442,27 @@ private fun drawEinkOctopus(
         }
     }
 
-    // State-specific decorations
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 1f * scaleFactor
-    when (state) {
-        OctopusVisualState.TYPING -> {
-            val kbW = gridW * 0.8f
-            val kbH = gridH * 0.25f
-            val kbY = startY + gridH + pixelH
-            canvas.drawRect(cx - kbW / 2, kbY, cx + kbW / 2, kbY + kbH, paint)
-            for (r in 1 until 3) {
-                val y = kbY + r * kbH / 3
-                canvas.drawLine(cx - kbW / 2, y, cx + kbW / 2, y, paint)
-            }
-        }
-        OctopusVisualState.OFFERING -> {
-            paint.strokeWidth = 2f * scaleFactor
-            val checkX = cx - gridW * 0.6f
-            val checkY = cy
-            canvas.drawLine(checkX - 6f, checkY, checkX, checkY + 6f, paint)
-            canvas.drawLine(checkX, checkY + 6f, checkX + 10f, checkY - 8f, paint)
-            val xX = cx + gridW * 0.6f
-            canvas.drawLine(xX - 6f, checkY - 6f, xX + 6f, checkY + 6f, paint)
-            canvas.drawLine(xX + 6f, checkY - 6f, xX - 6f, checkY + 6f, paint)
-        }
-        OctopusVisualState.REVIEWING -> {
-            val halfW = gridW / 2f
-            val halfH = gridH / 2f
-            for (side in listOf(-1f, 1f)) {
-                val docX = cx + side * halfW * 2f
-                val docY = cy - halfH * 0.5f
-                canvas.drawRect(docX - halfW * 0.8f, docY, docX + halfW * 0.8f, docY + halfH * 1.5f, paint)
-                for (l in 0 until 4) {
-                    val ly = docY + 4f + l * halfH * 0.35f
-                    canvas.drawLine(docX - halfW * 0.6f, ly, docX + halfW * 0.4f, ly, paint)
-                }
-            }
-        }
-        else -> {}
+    // ASKING: speech bubble with "?"
+    if (state == OctopusVisualState.ASKING) {
+        val bubbleR = gridW * 0.25f * scaleFactor
+        val bubbleX = cx + gridW * 0.6f
+        val bubbleY = startY - gridH * 0.3f
+
+        // Bubble circle
+        paint.color = GRAY_AIR
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+        paint.color = GRAY_CREATURE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f * scaleFactor
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+
+        // "?" text
+        paint.style = Paint.Style.FILL
+        paint.textSize = bubbleR * 1.4f
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("?", bubbleX, bubbleY + bubbleR * 0.45f, paint)
+        paint.textAlign = Paint.Align.LEFT
     }
 }
 
@@ -464,7 +472,7 @@ private fun drawEinkCrayfish(
     state: CrayfishVisualState,
     animFrame: Int = 0,
 ) {
-    paint.color = android.graphics.Color.BLACK
+    paint.color = GRAY_CREATURE
 
     val cx = w * 0.75f
     val cy = when (state) {
@@ -488,22 +496,22 @@ private fun drawEinkCrayfish(
     val offsetX = cx - EINK_SVG_VIEWBOX / 2f * scale
     val offsetY = cy - EINK_SVG_VIEWBOX / 2f * scale
 
-    // Claw animation based on animFrame and state
+    // Claw animation — amplified for e-ink visibility, all 4 frames non-zero
     val isAnimated = state != CrayfishVisualState.SITTING && state != CrayfishVisualState.DORMANT
     val clawAngle = if (isAnimated) when (state) {
         CrayfishVisualState.ROUTING -> when (animFrame % 4) {
-            1 -> 15f; 3 -> -10f; else -> 0f
+            0 -> 10f; 1 -> 30f; 2 -> -8f; 3 -> -20f; else -> 0f
         }
         CrayfishVisualState.OBSERVING -> when (animFrame % 4) {
-            1 -> 8f; 3 -> -5f; else -> 3f
+            0 -> 5f; 1 -> 15f; 2 -> -3f; 3 -> -10f; else -> 0f
         }
-        CrayfishVisualState.WAITING -> 12f  // claws open
+        CrayfishVisualState.WAITING -> 18f  // claws open wide
         else -> 0f
     } else 0f
 
-    // Antenna wiggle (in SVG coordinate units)
+    // Antenna wiggle — amplified, all 4 frames moving
     val antennaWiggle = if (isAnimated) when (animFrame % 4) {
-        1 -> 2f; 3 -> -2f; else -> 0f
+        0 -> 2f; 1 -> 5f; 2 -> -2f; 3 -> -5f; else -> 0f
     } else 0f
 
     canvas.save()
@@ -558,7 +566,7 @@ private fun drawEinkCrayfish(
     if (state == CrayfishVisualState.ROUTING) {
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.5f
-        paint.color = android.graphics.Color.BLACK
+        paint.color = GRAY_SIGNAL
         paint.strokeCap = Paint.Cap.BUTT
         for (i in 1..3) {
             val r = bodyWidth * 0.15f * i
@@ -579,7 +587,7 @@ private fun drawEinkDataParticles(
 ) {
     if (state == TetraVisualState.ABSENT) return
 
-    paint.color = android.graphics.Color.BLACK
+    paint.color = GRAY_PARTICLE
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 0.8f
 
@@ -633,33 +641,31 @@ private fun drawEinkDataParticles(
     }
 }
 
-private fun einkStateLabel(state: TerrariumState): String {
-    val creature = when (state.octopus) {
-        OctopusVisualState.SLEEPING -> "Dormant"
-        OctopusVisualState.FLOATING -> "Observing"
-        OctopusVisualState.THINKING -> "Contemplating"
-        OctopusVisualState.TYPING -> "Scribing"
-        OctopusVisualState.OFFERING -> "Presenting Choice"
-        OctopusVisualState.PRESENTING -> "Displaying Options"
-        OctopusVisualState.REVIEWING -> "Comparing Documents"
-    }
-    val tool = state.currentTool?.let { " — $it" } ?: ""
-    val agents = if (state.agents.size > 1) " [${state.agents.size}]" else ""
-    return "$creature$tool$agents"
-}
-
-/** Vendor-specific EPD refresh control. */
+/**
+ * Vendor-specific EPD refresh control.
+ *
+ * Rockchip RK3566 (Crema S, Xiaomi Reader, etc.):
+ *   Uses `android.os.EinkManager` system service with string-based mode constants.
+ *   Reference: KOReader's RK35xxEPDController.
+ *   EPD modes: "2"=FULL_GC16, "7"=PART_GC16, "12"=A2, "14"=DU
+ *
+ * Onyx Boox (Qualcomm):
+ *   Uses `com.onyx.android.sdk.device.BaseDevice` with UpdateMode enum.
+ */
 object EinkRefreshHelper {
+
+    // Rockchip EPD mode constants (string values for EinkManager.setMode)
+    private const val RK_EPD_FULL_GC16 = "2"
+    private const val RK_EPD_A2 = "12"
+    private const val RK_EPD_DU = "14"
+
+    /** Full GC16 refresh — 16-level grayscale, full flash. */
     fun requestFullRefresh(view: View) {
-        try {
-            // Crema: com.crema.ink.EinkDisplay.requestFullUpdate()
-            val cremaClass = Class.forName("com.crema.ink.EinkDisplay")
-            cremaClass.getMethod("requestFullUpdate", View::class.java).invoke(null, view)
-            return
-        } catch (_: Exception) {}
+        // Rockchip RK3566: EinkManager.sendOneFullFrame() forces GC16 full refresh
+        if (tryRockchipRefresh(view, RK_EPD_FULL_GC16, sendFullFrame = true)) return
 
         try {
-            // Onyx: com.onyx.android.sdk.device.Device.requestFullUpdate()
+            // Onyx: com.onyx.android.sdk.device.Device.requestScreenUpdate()
             val onyxClass = Class.forName("com.onyx.android.sdk.device.Device")
             onyxClass.getMethod("requestScreenUpdate", View::class.java).invoke(null, view)
             return
@@ -675,6 +681,8 @@ object EinkRefreshHelper {
 
     /** A2 mode — fastest binary refresh, ideal for state markers and timeline. */
     fun requestA2Refresh(view: View) {
+        if (tryRockchipRefresh(view, RK_EPD_A2)) return
+
         try {
             // Onyx: setViewDefaultUpdateMode with ANIMATION/A2
             val deviceClass = Class.forName("com.onyx.android.sdk.device.BaseDevice")
@@ -687,19 +695,14 @@ object EinkRefreshHelper {
             return
         } catch (_: Exception) {}
 
-        try {
-            // Crema: requestPartialUpdate for region
-            val cremaClass = Class.forName("com.crema.ink.EinkDisplay")
-            cremaClass.getMethod("requestPartialUpdate", View::class.java).invoke(null, view)
-            return
-        } catch (_: Exception) {}
-
         // Fallback
         view.invalidate()
     }
 
     /** DU mode — fast monochrome refresh, ideal for usage gauges and footer. */
     fun requestDURefresh(view: View) {
+        if (tryRockchipRefresh(view, RK_EPD_DU)) return
+
         try {
             // Onyx: setViewDefaultUpdateMode with DU
             val deviceClass = Class.forName("com.onyx.android.sdk.device.BaseDevice")
@@ -712,17 +715,56 @@ object EinkRefreshHelper {
             return
         } catch (_: Exception) {}
 
-        try {
-            // Crema: requestPartialUpdate
-            val cremaClass = Class.forName("com.crema.ink.EinkDisplay")
-            cremaClass.getMethod("requestPartialUpdate", View::class.java).invoke(null, view)
-            return
-        } catch (_: Exception) {}
-
         // Fallback
         view.invalidate()
+    }
+
+    /**
+     * Rockchip RK35xx EPD refresh via android.os.EinkManager system service.
+     * Sets display mode and optionally triggers a full GC16 frame.
+     */
+    @android.annotation.SuppressLint("WrongConstant")
+    private fun tryRockchipRefresh(view: View, mode: String, sendFullFrame: Boolean = false): Boolean {
+        return try {
+            val einkManagerClass = Class.forName("android.os.EinkManager")
+            val einkManager = view.context.getSystemService("eink") ?: return false
+
+            // Set EPD waveform mode
+            val setMode = einkManagerClass.getDeclaredMethod("setMode", String::class.java)
+            setMode.invoke(einkManager, mode)
+
+            if (sendFullFrame) {
+                // Force a single full-screen GC16 refresh (guaranteed grayscale)
+                val sendOneFullFrame = einkManagerClass.getDeclaredMethod("sendOneFullFrame")
+                sendOneFullFrame.invoke(einkManager)
+            }
+
+            view.invalidate()
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }
 
 private const val EINK_WIDTH = 600
 private const val EINK_HEIGHT = 300
+
+/**
+ * Native 16-level grayscale palette for e-ink hardware.
+ * Values mapped to hardware gray levels (0=black, 255=white, step ~17).
+ * Spread across the full range for visible tonal separation on e-ink.
+ */
+private const val GRAY_WATER_BG   = 0xFFDDDDDD.toInt()  // level 13 — water background (frame = water)
+private const val GRAY_CREATURE   = 0xFF222222.toInt()  // level 2 — octopus/crayfish body
+private const val GRAY_ROCK       = 0xFF333333.toInt()  // level 3 — rocks
+private const val GRAY_DECORATION = 0xFF444444.toInt()  // level 4 — keyboard, review docs
+private const val GRAY_SEAWEED    = 0xFF555555.toInt()  // level 5 — seaweed stems
+private const val GRAY_SIGNAL     = 0xFF555555.toInt()  // level 5 — signal arcs
+private const val GRAY_GRAVEL     = 0xFF666666.toInt()  // level 6 — gravel, sand
+private const val GRAY_WAVE       = 0xFF777777.toInt()  // level 7 — water surface stroke
+private const val GRAY_PEBBLE     = 0xFF888888.toInt()  // level 8 — pebbles
+private const val GRAY_PARTICLE   = 0xFF888888.toInt()  // level 8 — data particles
+private const val GRAY_BUBBLE     = 0xFFAAAAAA.toInt()  // level 10 — bubbles
+private const val GRAY_AIR        = 0xFFEEEEEE.toInt()  // level 14 — air above surface
+

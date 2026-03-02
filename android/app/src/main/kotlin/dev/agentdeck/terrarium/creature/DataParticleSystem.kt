@@ -27,7 +27,7 @@ import kotlin.random.Random
  * between agent positions via bezier curves.
  *
  * Behavior:
- * - STREAMING: particles emit from active (TYPING/THINKING) agents toward environment
+ * - STREAMING: particles emit from active (WORKING) agents toward environment
  * - CIRCLING: particles orbit slowly around active creatures
  * - HOVERING: particles cluster near option area
  * - ABSENT: no particles
@@ -168,8 +168,7 @@ class DataParticleSystem : Creature {
             for (i in agentStates.indices) {
                 if (i >= agentSlots.size) break
                 val state = agentStates[i]
-                if (state.visualState == OctopusVisualState.TYPING ||
-                    state.visualState == OctopusVisualState.THINKING) {
+                if (state.visualState == OctopusVisualState.WORKING) {
                     val slot = agentSlots[i]
                     scope.drawCircle(
                         color = ParticleType.TOOL_CALL.color.copy(alpha = glowAlpha),
@@ -192,8 +191,7 @@ class DataParticleSystem : Creature {
             TetraVisualState.STREAMING -> {
                 // Emit from an active agent toward environment
                 val activeIdx = agentStates.indexOfFirst {
-                    it.visualState == OctopusVisualState.TYPING ||
-                    it.visualState == OctopusVisualState.THINKING
+                    it.visualState == OctopusVisualState.WORKING
                 }
                 val srcSlot = if (activeIdx >= 0 && activeIdx < agentSlots.size) {
                     agentSlots[activeIdx]

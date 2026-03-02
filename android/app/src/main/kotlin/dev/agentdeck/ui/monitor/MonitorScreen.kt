@@ -129,8 +129,17 @@ fun MonitorScreen(
             // Layer 2: HUD overlay panels
             MonitorHUD(
                 dashState = dashState,
-                timelineEntries = timelineEntries,
                 metrics = metrics,
+            )
+
+            // Layer 3: Timeline over sand area
+            TimelineStrip(
+                entries = timelineEntries,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(dev.agentdeck.terrarium.TerrariumLayout.SAND_HEIGHT_FRACTION)
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
     }
@@ -290,19 +299,31 @@ private fun ColorTerrariumBackground(state: TerrariumState) {
 
     LaunchedEffect(state.agents.size) {
         val targetCount = state.agents.size.coerceAtLeast(1)
+        val isMulti = targetCount > 1
         while (octopuses.size < targetCount) {
-            val slot = octopusSlots.getOrElse(octopuses.size) { octopusSlots.last() }
-            octopuses.add(OctopusCreature(slot.centerXFraction, slot.centerYFraction, slot.scaleFactor))
+            val idx = octopuses.size
+            val slot = octopusSlots.getOrElse(idx) { octopusSlots.last() }
+            val agent = state.agents.getOrNull(idx)
+            octopuses.add(OctopusCreature(
+                slot.centerXFraction, slot.centerYFraction, slot.scaleFactor,
+                phaseOffset = idx * 1.7f,
+                displayName = if (isMulti) agent?.displayName else null,
+            ))
         }
         while (octopuses.size > targetCount) {
             octopuses.removeAt(octopuses.lastIndex)
         }
         for (i in octopuses.indices) {
             val slot = octopusSlots.getOrElse(i) { octopusSlots.last() }
-            octopuses[i] = OctopusCreature(slot.centerXFraction, slot.centerYFraction, slot.scaleFactor).also {
-                if (i < state.agents.size) {
-                    it.setState(state.agents[i].visualState)
-                    it.setMark(state.agents[i].mark)
+            val agent = state.agents.getOrNull(i)
+            octopuses[i] = OctopusCreature(
+                slot.centerXFraction, slot.centerYFraction, slot.scaleFactor,
+                phaseOffset = i * 1.7f,
+                displayName = if (isMulti) agent?.displayName else null,
+            ).also {
+                if (agent != null) {
+                    it.setState(agent.visualState)
+                    it.setMark(agent.mark)
                 }
             }
         }
@@ -327,15 +348,21 @@ private fun ColorTerrariumBackground(state: TerrariumState) {
 
     // Update visual states when terrarium state changes
     LaunchedEffect(state.octopus, state.agents) {
+        val isMulti = state.agents.size > 1
         if (octopuses.isNotEmpty()) {
             octopuses[0].setState(state.octopus)
             if (state.agents.isNotEmpty()) {
                 octopuses[0].setMark(state.agents[0].mark)
+                octopuses[0].setDisplayName(
+                    if (isMulti) state.agents[0].displayName else null,
+                    show = isMulti,
+                )
             }
             for (i in 1 until octopuses.size) {
                 if (i < state.agents.size) {
                     octopuses[i].setState(state.agents[i].visualState)
                     octopuses[i].setMark(state.agents[i].mark)
+                    octopuses[i].setDisplayName(state.agents[i].displayName, show = isMulti)
                 }
             }
         }
@@ -394,7 +421,6 @@ private fun ColorTerrariumBackground(state: TerrariumState) {
 @Composable
 private fun MonitorHUD(
     dashState: DashboardState,
-    timelineEntries: List<dev.agentdeck.state.TimelineEntry>,
     metrics: dev.agentdeck.state.MetricsSnapshot,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
@@ -447,14 +473,5 @@ private fun MonitorHUD(
                 .widthIn(max = 160.dp),
         )
 
-        // Bottom: Timeline strip (~18% height)
-        TimelineStrip(
-            entries = timelineEntries,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .fillMaxHeight(0.22f)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
     }
 }

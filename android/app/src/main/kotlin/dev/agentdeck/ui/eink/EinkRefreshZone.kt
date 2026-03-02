@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
@@ -45,6 +46,11 @@ fun EinkRefreshZone(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    // Keep a snapshot-backed reference to the latest content lambda so
+    // the inner ComposeView (created once in AndroidView.factory) always
+    // recomposes with the current state instead of the stale capture.
+    val currentContent by rememberUpdatedState(content)
+
     // Track the view reference for vendor API calls
     var viewRef by remember { mutableStateOf<View?>(null) }
     var lastTrigger by remember { mutableLongStateOf(0L) }
@@ -76,9 +82,12 @@ fun EinkRefreshZone(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
+                // Force software rendering so EPD controller sees grayscale
+                // in the standard framebuffer path (GPU layers may bypass it)
+                setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                 // Embed Compose content inside this View
                 val composeView = ComposeView(context).apply {
-                    setContent { content() }
+                    setContent { currentContent() }
                 }
                 addView(composeView)
                 viewRef = this

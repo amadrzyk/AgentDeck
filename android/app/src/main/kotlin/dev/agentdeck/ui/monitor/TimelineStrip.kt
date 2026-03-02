@@ -1,6 +1,5 @@
 package dev.agentdeck.ui.monitor
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,7 +45,6 @@ fun TimelineStrip(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(TerrariumColors.HUDBg, RoundedCornerShape(8.dp))
             .padding(8.dp),
     ) {
         Text(

@@ -62,7 +62,7 @@ object TerrariumColors {
 /** Layout and sizing constants. */
 object TerrariumLayout {
     // Scene proportions (fraction of canvas)
-    const val SAND_HEIGHT_FRACTION = 0.18f
+    const val SAND_HEIGHT_FRACTION = 0.28f
     const val ROCK_HEIGHT_FRACTION = 0.25f
     const val WATER_SURFACE_Y_FRACTION = 0.05f
 
@@ -75,7 +75,7 @@ object TerrariumLayout {
     // Crayfish sizing
     const val CRAYFISH_WIDTH_FRACTION = 0.14f
     const val CRAYFISH_CENTER_X_FRACTION = 0.78f
-    const val CRAYFISH_CENTER_Y_FRACTION = 0.75f
+    const val CRAYFISH_CENTER_Y_FRACTION = 0.65f
 
     // Tetra sizing
     const val TETRA_SIZE_FRACTION = 0.015f
@@ -110,6 +110,7 @@ object TerrariumTiming {
     const val ERROR_SPAWN_INTERVAL_MS = 100f
 
     // Environment
+    const val SURFACE_WAVE_SPEED = 0.4f
     const val CAUSTICS_SPEED = 1.5f
     const val KELP_SWAY_SPEED = 1.0f
     const val LED_PULSE_SPEED = 2.0f

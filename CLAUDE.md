@@ -67,7 +67,9 @@ Row(fillMaxSize): 좌측 에이전트 패널 | 우측 아쿠아리움+정보
 - 수조: 둥근 모서리, 수면 파도, 해초, 자갈, 거품 — 수족관 느낌
 - **Multi-agent visibility**: Bridge `/health`에서 sibling state 조회, Gateway TCP probe로 OpenClaw 감지, 가상 세션 삽입
 - **Crayfish 독립 상태**: sibling OpenClaw session의 state에서 ROUTING/SITTING 결정 (primary agentType 의존 제거)
-- **Refresh zones**: 좌측 A2(200ms), 수조 FULL(500ms), context+status A2(200ms), timeline A2(300ms), IDLE status DU(2000ms)
+- **Refresh zones**: 좌측 A2(200ms), 수조 FULL(500ms), context+status A2(200ms), timeline A2(300ms), IDLE status DU(2000ms). `LAYER_TYPE_SOFTWARE` on wrapper FrameLayout for EPD grayscale
+- **EPD vendor API**: Rockchip RK3566 (Crema S) — `android.os.EinkManager` system service, `setMode("2"=GC16/"12"=A2/"14"=DU)` + `sendOneFullFrame()`. Onyx — `BaseDevice.setViewDefaultUpdateMode()`. KOReader `RK35xxEPDController` 참고
+- **E-ink grayscale**: 네이티브 16-level 그레이, `DitherEngine.snapToNearestGray()` (에러 디퓨전 없음). 수조 내부 테두리 없음 — Compose `clip(RoundedCornerShape)` 만 사용
 
 ### Tablet (Lenovo) Monitor 레이아웃 — 수족관 + HUD 오버레이
 - 전체 화면: 컬러 수족관 배경 (60fps 애니메이션)

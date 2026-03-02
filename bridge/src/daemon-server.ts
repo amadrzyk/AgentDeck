@@ -190,7 +190,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       modelCatalog: cachedModelCatalog ?? undefined,
       pairingUrl: wsUrl,
       ollamaStatus: cachedOllamaStatus ?? undefined,
-      gatewayAvailable: cachedGatewayAvailable || undefined,
     };
     wsServer.broadcast(stateEvent);
 
@@ -258,7 +257,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       modelCatalog: cachedModelCatalog ?? undefined,
       pairingUrl: wsUrl,
       ollamaStatus: cachedOllamaStatus ?? undefined,
-      gatewayAvailable: cachedGatewayAvailable || undefined,
     };
     wsServer.sendTo(ws, stateEvent);
     wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage, oauthConnected));
@@ -271,7 +269,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     wsServer.sendTo(ws, connEvt);
 
     // Sessions list
-    buildEnrichedSessionsList(sessionId, snapshot.state, cachedGatewayAvailable).then((sessions) => {
+    buildEnrichedSessionsList(sessionId, snapshot.state, false).then((sessions) => {
       wsServer.sendTo(ws, { type: 'sessions_list', sessions } as BridgeEvent);
     });
 
@@ -360,7 +358,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const sessionsListInterval = setInterval(() => {
     if (wsServer.getClientCount() > 0) {
       const snapshot = stateMachine.getSnapshot();
-      buildEnrichedSessionsList(sessionId, snapshot.state, cachedGatewayAvailable).then((sessions) => {
+      buildEnrichedSessionsList(sessionId, snapshot.state, false).then((sessions) => {
         wsServer.broadcast({ type: 'sessions_list', sessions } as BridgeEvent);
       });
     }

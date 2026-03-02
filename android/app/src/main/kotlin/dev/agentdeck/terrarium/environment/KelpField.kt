@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import dev.agentdeck.terrarium.TerrariumColors
+import dev.agentdeck.terrarium.TerrariumLayout
 import dev.agentdeck.terrarium.TerrariumTiming
 import kotlin.math.PI
 import kotlin.math.sin
@@ -52,7 +53,7 @@ class KelpField {
 
     private fun drawStrand(scope: DrawScope, strand: KelpStrand, w: Float, h: Float) {
         val baseX = strand.baseX * w
-        val baseY = h * (1f - 0.02f) // just above bottom
+        val baseY = h * (1f - TerrariumLayout.SAND_HEIGHT_FRACTION) // sand top line (rock height)
         val topY = baseY - strand.height * h
         val segHeight = (baseY - topY) / strand.segments
 
