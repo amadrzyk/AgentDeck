@@ -2,6 +2,86 @@
 
 ---
 
+## 2026-03-02 — E-ink 네이티브 그레이스케일 복원
+
+### 문제
+Crema 디바이스가 16레벨 그레이를 네이티브 지원(시스템 앱 아이콘이 회색 표시)하나, 앱에서 그레이가 전혀 표시되지 않았음. 두 가지 근본 원인:
+
+1. **잘못된 EPD API**: `com.crema.ink.EinkDisplay` 클래스는 Crema에 존재하지 않음. 모든 reflection 호출이 silent fail → `view.invalidate()` 폴백 → 시스템 기본 EPD 모드(DU/binary) 사용 → 그레이 전부 흑백 변환
+2. **1-bit 디더링**: `DitherEngine.floydSteinberg()`가 모든 픽셀을 0 or 255로 강제 변환
+
+### 해결
+1. **Rockchip EinkManager API 발견**: KOReader의 `RK35xxEPDController` 참고. Crema(RK3566)는 `android.os.EinkManager` 시스템 서비스 사용:
+   - `context.getSystemService("eink")` → EinkManager 인스턴스
+   - `setMode("2")` = EPD_FULL_GC16 (16레벨 그레이), `"12"` = A2, `"14"` = DU
+   - `sendOneFullFrame()` = GC16 전체 화면 강제 리프레시
+2. **`snapToNearestGray()`**: 에러 디퓨전 없이 가장 가까운 N-level gray로 직접 스냅 (하드웨어가 네이티브로 표시하므로 도트 패턴 불필요)
+3. **LAYER_TYPE_SOFTWARE**: EinkRefreshZone의 FrameLayout에 소프트웨어 렌더링 강제 — GPU 하드웨어 레이어가 EPD 그레이스케일 경로를 우회할 수 있음
+4. **내부 수조 테두리 제거**: `drawRoundRect` 제거, Compose `clip(RoundedCornerShape)` 만으로 수조 경계
+
+### 핵심 설계 결정
+- **EPD 벤더 우선순위**: Rockchip EinkManager → Onyx BaseDevice → fallback invalidate (기존 `com.crema.ink.EinkDisplay` 제거)
+- **그레이 팔레트**: 하드웨어 16레벨에 정확히 매핑 — GRAY_CREATURE(0x22) ~ GRAY_AIR(0xEE) 11단계, 넓게 분포
+- **리서치 소스**: KOReader `android-luajit-launcher` → `device/epd/rockchip/RK35xxEPDController.kt`, Pine64 RK3566 EBC 역공학 wiki
+
+---
+
+## 2026-03-02 — macOS Display Sleep → Android 백라이트 완전 동기화
+
+### 문제
+Cmd+Shift+Power로 Mac 화면을 끄면 Android 디스플레이 백라이트가 제대로 꺼지지 않음:
+1. Bridge가 10초마다 `execFile('python3')`으로 `CGDisplayIsAsleep` 체크 — 최대 10초 지연
+2. LCD에서 `SCREEN_BRIGHTNESS=0`만 설정 — 최소 밝기일 뿐 백라이트 미해제, auto-brightness 모드에서는 무시됨
+3. E-ink `SCREEN_OFF_TIMEOUT` 15초 — 너무 느림
+
+### 해결
+1. **Persistent python3 process**: `execFile` → `spawn` + `readline`. Python 스크립트가 2초마다 루프하며 상태 변경 시에만 stdout 출력. 비정상 종료 시 5초 후 재시작 (최대 3회)
+2. **LCD 3단계 dim**: `SCREEN_BRIGHTNESS_MODE` 강제 manual → brightness 0 → `SCREEN_OFF_TIMEOUT` 2s (백라이트 완전 해제). Restore 순서: timeout 복원 → WAKEUP → brightness → mode
+3. **E-ink timeout**: 15s → 3s
+
+### 교훈
+- `SCREEN_BRIGHTNESS=0`은 "최소 밝기"이지 "백라이트 off"가 아님. 실제 꺼짐은 `SCREEN_OFF_TIMEOUT` 만료 후 시스템이 처리
+- Auto-brightness 모드에서는 `SCREEN_BRIGHTNESS` 설정이 무시될 수 있으므로 반드시 manual 모드로 전환 필요
+- 매번 프로세스 spawn하는 폴링은 persistent process + readline으로 대체하면 지연과 오버헤드 모두 개선
+
+---
+
+## 2026-03-02 — 문어 상태 장식 단순화 + 이름 모자 + 개별 타이밍
+
+### 문제
+문어 캐릭터의 상태별 장식(키보드, 체크/X마크, 옵션 카드, 문서 리뷰)이 과하고 직관적이지 않았음. 7가지 시각 상태가 불필요하게 세분화.
+
+### 해결
+- `OctopusVisualState` enum 7→4개로 축소: `SLEEPING`, `FLOATING`, `WORKING`(스타버스트), `ASKING`(말풍선 "?")
+- 복잡한 장식 3개 삭제 (`drawHolographicKeyboard`, `drawOptionCards`, `drawReviewDocs`)
+- WORKING: 기존 THINKING 스타버스트 애니메이션 재활용 (tool 유무 무관)
+- ASKING: 새 `drawSpeechBubble()` — 우상단 펄싱 말풍선 + "?" + 꼬리 삼각형
+- 멀티세션 개별 타이밍: `phaseOffset` 파라미터 (index * 1.7f) → `time` 초기값으로 설정
+- 이름 모자: `displayName`으로 projectName 표시 (멀티세션 2+ 시만, 단일 세션은 숨김)
+- E-ink도 동일 패턴 적용 (장식 제거 + 말풍선 추가)
+- `DataParticleSystem.kt` — TYPING/THINKING → WORKING 참조 업데이트
+
+### 핵심 설계 결정
+- "활동 중"은 tool 유무 관계없이 모두 WORKING(스타버스트) 하나로 통합 — 사용자가 processing 세부 구분을 시각적으로 필요로 하지 않음
+- 모든 awaiting_* 상태는 ASKING 하나로 통합 — "유저에게 뭔가 물어보는 중"이라는 하나의 의미
+- 개별 타이밍 구현은 `time` 초기값만 달리하는 가장 단순한 방식 선택
+
+---
+
+## 2026-03-02 — EinkRefreshZone stale content 버그 수정
+
+### 문제
+E-ink 좌측 에이전트 패널에 새 세션이 추가되어도 UI가 업데이트되지 않음. 데이터 파이프라인(Bridge → WS → DashboardState)은 정상이나, `EinkRefreshZone`의 inner `ComposeView`가 stale content를 표시.
+
+### 해결
+`EinkRefreshZone.kt`에서 `AndroidView.factory` 안의 `ComposeView.setContent { content() }`가 factory 생성 시점의 `content` 람다를 캡처하여 고정되는 것이 원인. `rememberUpdatedState(content)`로 snapshot-backed State를 만들어 inner ComposeView가 항상 최신 content를 읽도록 수정.
+
+### 교훈 / 핵심 설계 결정
+- **AndroidView.factory + ComposeView 패턴**: factory는 1회 실행이므로 캡처한 람다가 고정됨. Compose state를 전달하려면 `rememberUpdatedState`로 간접 참조해야 inner composition도 recompose됨
+- Compose snapshot system은 global — 별도 ComposeView의 composition도 같은 State 객체의 변경을 감지
+
+---
+
 ## 2026-03-02 — mDNS 광고를 daemon 전용으로 제한
 
 ### 문제

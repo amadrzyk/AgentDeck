@@ -1,39 +1,60 @@
 import { EventEmitter } from 'events';
-import { execFile } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
+import { createInterface } from 'readline';
 import { debug } from './logger.js';
 
-const POLL_INTERVAL_MS = 10_000;
-const EXEC_TIMEOUT_MS = 5_000;
+const POLL_INTERVAL_S = 2;
+const MAX_RESTARTS = 3;
+const RESTART_DELAY_MS = 5_000;
 
 const PYTHON_SCRIPT = `
-import ctypes, ctypes.util
+import ctypes, ctypes.util, time, sys
 cg = ctypes.CDLL(ctypes.util.find_library('CoreGraphics'))
 cg.CGMainDisplayID.restype = ctypes.c_uint32
 cg.CGDisplayIsAsleep.restype = ctypes.c_uint32
 cg.CGDisplayIsAsleep.argtypes = [ctypes.c_uint32]
-print(cg.CGDisplayIsAsleep(cg.CGMainDisplayID()))
+display = cg.CGMainDisplayID()
+prev = -1
+while True:
+    cur = cg.CGDisplayIsAsleep(display)
+    if cur != prev:
+        prev = cur
+        print(cur, flush=True)
+    time.sleep(${POLL_INTERVAL_S})
 `;
 
 /**
  * Monitors macOS display sleep state via CoreGraphics.
  * Emits 'display_state_changed' with boolean (true = on, false = asleep)
  * only when the state actually changes.
+ *
+ * Uses a persistent python3 process that checks every 2s and outputs
+ * only on state transitions (no per-poll process spawning).
  */
 export class DisplayMonitor extends EventEmitter {
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private proc: ChildProcess | null = null;
   private displayOn = true;
+  private running = false;
+  private restartCount = 0;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
 
   start(): void {
-    if (this.timer) return;
-    debug('display', 'DisplayMonitor started (10s poll)');
-    this.poll(); // immediate first check
-    this.timer = setInterval(() => this.poll(), POLL_INTERVAL_MS);
+    if (this.running) return;
+    this.running = true;
+    this.restartCount = 0;
+    debug('display', `DisplayMonitor started (${POLL_INTERVAL_S}s persistent poll)`);
+    this.spawnProcess();
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    this.running = false;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    if (this.proc) {
+      this.proc.kill('SIGTERM');
+      this.proc = null;
     }
   }
 
@@ -41,19 +62,57 @@ export class DisplayMonitor extends EventEmitter {
     return this.displayOn;
   }
 
-  private poll(): void {
-    execFile('python3', ['-c', PYTHON_SCRIPT], { timeout: EXEC_TIMEOUT_MS }, (err, stdout) => {
-      if (err) {
-        debug('display', `poll error: ${err.message}`);
-        return; // keep last known state
-      }
-      const trimmed = stdout.trim();
-      const nowOn = trimmed !== '1'; // "0" = awake, "1" = asleep
-      if (nowOn !== this.displayOn) {
-        this.displayOn = nowOn;
-        debug('display', `display state changed: ${nowOn ? 'ON' : 'ASLEEP'}`);
-        this.emit('display_state_changed', nowOn);
-      }
+  private spawnProcess(): void {
+    if (!this.running) return;
+
+    try {
+      this.proc = spawn('python3', ['-c', PYTHON_SCRIPT], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch (err) {
+      debug('display', `Failed to spawn python3: ${err}`);
+      this.scheduleRestart();
+      return;
+    }
+
+    if (this.proc.stdout) {
+      const rl = createInterface({ input: this.proc.stdout });
+      rl.on('line', (line) => {
+        const trimmed = line.trim();
+        if (trimmed !== '0' && trimmed !== '1') return;
+        const nowOn = trimmed !== '1'; // "0" = awake, "1" = asleep
+        if (nowOn !== this.displayOn) {
+          this.displayOn = nowOn;
+          debug('display', `display state changed: ${nowOn ? 'ON' : 'ASLEEP'}`);
+          this.emit('display_state_changed', nowOn);
+        }
+      });
+    }
+
+    this.proc.on('error', (err) => {
+      debug('display', `python3 process error: ${err.message}`);
+      this.proc = null;
+      this.scheduleRestart();
     });
+
+    this.proc.on('exit', (code) => {
+      debug('display', `python3 process exited (code=${code})`);
+      this.proc = null;
+      this.scheduleRestart();
+    });
+  }
+
+  private scheduleRestart(): void {
+    if (!this.running) return;
+    if (this.restartCount >= MAX_RESTARTS) {
+      debug('display', `Max restarts (${MAX_RESTARTS}) reached, giving up`);
+      return;
+    }
+    this.restartCount++;
+    debug('display', `Restarting python3 in ${RESTART_DELAY_MS / 1000}s (attempt ${this.restartCount}/${MAX_RESTARTS})`);
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      this.spawnProcess();
+    }, RESTART_DELAY_MS);
   }
 }
