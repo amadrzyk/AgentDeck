@@ -62,6 +62,7 @@ vi.mock('../gateway-client.js', async () => {
     send = vi.fn();
     isConnected() { return this._connected; }
     getCapabilities() { return this._connected ? caps : null; }
+    emitStateUpdate() {}
 
     // Test helpers
     _simulateConnect() {
@@ -154,19 +155,20 @@ describe('ConnectionManager', () => {
     expect(events).toContain('connected');
   });
 
-  it('pauses gateway when bridge connects later', () => {
+  it('activates bridge when bridge connects later (gateway stays warm)', () => {
     cm.start();
 
     // Gateway connects first
     getGateway(cm)._simulateConnect();
     expect(cm.isConnected()).toBe(true);
+    expect(cm.getActiveAgentType()).toBe('openclaw');
 
-    const pauseSpy = vi.spyOn(getGateway(cm), 'pause');
-
-    // Bridge connects — should take priority
+    // Bridge connects — should take priority but keep gateway warm
     getBridge(cm)._simulateConnect();
     expect(cm.isConnected()).toBe(true);
-    expect(pauseSpy).toHaveBeenCalled();
+    expect(cm.getActiveAgentType()).toBe('claude-code');
+    // Gateway stays connected (warm) for fast switching
+    expect(getGateway(cm).isConnected()).toBe(true);
   });
 
   it('falls back to gateway when bridge disconnects', () => {
@@ -291,18 +293,16 @@ describe('ConnectionManager', () => {
   });
 
   describe('activateBridge()', () => {
-    it('sets activeLink to bridge and pauses gateway', () => {
+    it('sets activeLink to bridge and emits active_agent_changed', () => {
       const events: string[] = [];
       cm.on('active_agent_changed', (type: string) => events.push(type));
 
       cm.start();
       getGateway(cm)._simulateConnect();
-      const pauseSpy = vi.spyOn(getGateway(cm), 'pause');
 
       cm.activateBridge();
 
       expect(cm.getActiveAgentType()).toBe('claude-code');
-      expect(pauseSpy).toHaveBeenCalled();
       expect(events).toContain('claude-code');
     });
   });
@@ -373,12 +373,12 @@ describe('ConnectionManager', () => {
       expect(cm.isGatewayAvailable()).toBe(true);
     });
 
-    it('returns true when gateway was previously connected (paused)', () => {
+    it('returns true when gateway stays warm after bridge connects', () => {
       cm.start();
-      getGateway(cm)._simulateConnect(); // sets gatewayEverConnected
-      getBridge(cm)._simulateConnect(); // pauses gateway
-      // Gateway is now paused (not connected), but was previously connected
-      expect(getGateway(cm).isConnected()).toBe(false);
+      getGateway(cm)._simulateConnect();
+      getBridge(cm)._simulateConnect(); // bridge takes priority, gateway stays warm
+      // Gateway is still connected (warm), bridge is active
+      expect(getGateway(cm).isConnected()).toBe(true);
       expect(cm.isGatewayAvailable()).toBe(true);
     });
 
