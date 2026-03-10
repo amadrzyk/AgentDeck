@@ -2,6 +2,90 @@
 
 ---
 
+## 2026-03-11 — Usage Percent Staleness Fix
+
+### 문제
+Android rate limit 게이지가 실제와 크게 다름 (7% 표시, 실제 33%). 실측: bridge 캐시가 3.4시간~15.5시간 전 데이터를 무기한 broadcast. API 429 실패 → `apiUsageStale=true` 마킹하지만 `cachedApiUsage` 값은 유지 → 시간이 갈수록 캐시 낙후. Daemon은 `usageStale` 필드 자체가 누락.
+
+### 해결
+**(1) Bridge 10분 TTL** (`bridge/src/index.ts`): 5초 broadcast tick에서 `lastApiFetchTime`이 10분 초과 시 `cachedApiUsage = null` 클리어. Android가 null 수신 → 게이지 숨김.
+
+**(2) Daemon fetchedAt 보존** (`bridge/src/daemon-server.ts`): `fetchUsageViaHttp` → `RelayedUsage { usage, fetchedAt }` 반환. Daemon의 `lastApiFetchTime`을 sibling의 원래 fetch 시각으로 설정 (자기 relay 시각이 아님). 동일 10분 TTL 적용.
+
+**(3) Daemon `usageStale` 필드 추가**: `buildUsageEvent`에 `stale?` 파라미터 추가, `apiUsageStale` 상태 변수 도입. Relay 실패 시 `apiUsageStale = true`, 성공 시 `false`.
+
+### 교훈 / 핵심 설계 결정
+- Stale 캐시 표시(! suffix)만으로는 불충분 — 값 자체가 오래되면 **클리어**해야 클라이언트가 올바르게 반응 (숨김 vs 오래된 값 표시)
+- Relay 체인에서 fetchedAt 보존이 중요 — daemon이 `Date.now()`를 사용하면 sibling의 오래된 캐시가 "방금 fetch"로 위장됨
+- Bridge/Daemon 양쪽에 동일 TTL 상수 적용으로 일관성 확보
+
+---
+
+## 2026-03-11 — Timeline 중복 + Generic 라벨 + Daemon 이중 실행
+
+### 문제
+Android timeline에 "Prompt sent", "Completed" 같은 generic 라벨 + 중복 엔트리. 근본 원인 3가지:
+1. Hook `prompt` 필드 미사용 → 모든 chat_start가 "Prompt sent"
+2. Bridge upsert (topic hint 보강 등) → Android에서 새 엔트리로 추가 → 중복
+3. Daemon 2개 중복 실행 → 같은 Gateway 이벤트 이중 relay → 중복
+
+### 해결
+**(1) Hook prompt 필드 활용** (`bridge/src/index.ts`): `emitChatStart()`에 hook body의 `prompt` 필드 (500자+detail) 전달. `last_assistant_message`로 topic hint 보강
+
+**(2) Upsert 프로토콜** (`shared/src/protocol.ts` → `plugin/src/plugin.ts` → Android):
+- `TimelineEventMsg.upsert?: boolean` 플래그 추가
+- Plugin: upsert 시 `updateEntryRaw()` (기존 엔트리 교체)
+- Android `TimelineStore.kt`: `upsertEntry()` + `updateLastOfType()`
+- `StateTimelineGenerator.kt`: prompt-aware chat_start/chat_end, 소급 업데이트
+
+**(3) Daemon singleton guard** (`session-registry.ts` + `daemon-server.ts` + `daemon.ts`):
+- `findExistingDaemon()`: session registry에서 `agentType='daemon'` + PID alive 체크
+- `startDaemon()` 진입부 + CLI `start` action 양쪽 guard
+- `process.exit(0)` — LaunchAgent KeepAlive 재시작 루프 방지
+
+### 교훈 / 핵심 설계 결정
+- `findAvailablePort()`가 포트 충돌을 "해결"하는 것이 오히려 문제 — daemon은 반드시 1개만 실행되어야 하므로 singleton guard가 port scanning보다 우선
+- Timeline enrichment는 source-rich, client-truncate 원칙 — bridge가 넉넉한 데이터 전달, 각 클라이언트(plugin/android)가 자체 truncation
+- Upsert 패턴: 기존 broadcast 인프라에 boolean 플래그 하나 추가로 중복 없는 업데이트 구현
+
+---
+
+## 2026-03-10 — USB 해제 후 WiFi 재연결 불가 문제
+
+### 문제
+태블릿 USB 해제 시 (1) WiFi mDNS 디스커버리 미작동 → 대체 연결 수단 없음 (2) localhost 재연결 무한 루프 (adb reverse 터널 깨져도 포기 안 함) (3) USB 재연결해도 adb reverse 터널 미복구 (bridge 시작 시 1회만 설정)
+
+### 해결
+- **MonitorScreen mDNS 활성 조건 수정**: `currentUrl == null` 조건 제거 → 미연결 상태면 항상 mDNS 실행 (E-ink은 이미 수정됨)
+- **ConnectionOverlay**: 재연결 중에도 WiFi 브리지 목록 + "Stop Reconnecting" 버튼 표시
+- **BridgeConnection localhost 5회 제한**: 127.0.0.1/localhost 대상 5회 실패 시 자동 포기, URL 클리어 → mDNS 디스커버리 전환
+- **adb reverse 30초 polling**: `startAdbReversePolling()` — USB 재연결 시 bridge 재시작 없이 터널 자동 복구
+
+### 교훈 / 핵심 설계 결정
+- mDNS 디스커버리 활성 조건은 "연결 안 됨"이면 충분 — URL 유무로 제한하면 재연결 루프 중 대체 수단 차단됨
+- localhost 재연결은 반드시 상한 필요 — adb reverse는 USB 물리적 연결에 의존하므로 무한 재시도 무의미
+
+---
+
+## 2026-03-10 — 태블릿 테라리움 애니메이션 부드러움 최적화
+
+### 문제
+태블릿 테라리움이 60fps `withFrameMillis` 루프로 돌지만 체감 버벅임. (1) `Color.copy(alpha)` GC 압력 (80 plankton + 30 food + 14 fish + 70 octopus cells = 매 프레임 200+ Color 객체 생성) (2) 느린 lerp (dt*2f → ~1.5s 수렴) + 긴 waypoint 간격 (3~5s) (3) Caustics BlendMode.Overlay GPU framebuffer readback
+
+### 해결
+**Phase 1 — 움직임 dynamics**: 옥토퍼스 lerp 2×→4× (수렴 ~0.75s), FLOATING 호흡 bob 추가 (`sin(0.8)*0.002`), swim lerp 1.5→3.0, waypoint 간격 3~5s→1.5~3s
+
+**Phase 2 — GC 감소**: 모든 `Color.copy(alpha=x)` → DrawScope `alpha` 파라미터로 교체 (PlanktonSystem, DataParticleSystem food+fish, OctopusCreature pixel+starburst+bubble+nametag, RockFormation). Name tag `measureText` 캐싱 (`CachedNameLayout`). Path 사전할당 (rock 6개, speech bubble tail)
+
+**Phase 3 — GPU**: Caustics LINE_COUNT 12→8, BlendMode.Overlay→Plus (alpha 85% 보정), lineTo step 4→6. Boids separation sqrt→inverse-distSq
+
+### 교훈 / 핵심 설계 결정
+- `DrawScope.drawRect/Circle/Path`의 `alpha` 파라미터는 `Color.copy(alpha)` 대비 GC-free. 핫 루프에서 항상 우선 사용
+- `BlendMode.Plus` (additive)는 `BlendMode.Overlay`보다 GPU 비용 훨씬 낮음 — Overlay는 destination read-back 필요. 낮은 alpha에서 시각 차이 미미
+- Boids separation에서 `sqrt` 제거 → inverse-distSq 사용 시 가까울수록 강한 반발력이라 오히려 자연스러움
+
+---
+
 ## 2026-03-10 — Usage API utilization 값 단위 불일치 수정
 
 ### 문제

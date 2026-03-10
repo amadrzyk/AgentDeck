@@ -32,6 +32,7 @@ import {
 import { UtilityProxy } from './utility-proxy.js';
 import { BridgeTimelineStore } from './timeline-store.js';
 import { BridgeLogStream } from './log-stream.js';
+import { extractTopicHint } from './timeline-summarizer.js';
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname, join } from 'path';
@@ -52,7 +53,7 @@ import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
 import { getOrCreateToken, getWsUrl } from './auth.js';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
 import type { HookServer } from './hook-server.js';
-import { setupAdbReverse, cleanupAdbReverse } from './adb-reverse.js';
+import { setupAdbReverse, cleanupAdbReverse, startAdbReversePolling } from './adb-reverse.js';
 
 // Load prompt templates
 interface PromptTemplate {
@@ -370,6 +371,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
 
   // 2d. Set up adb reverse for all connected Android devices (best-effort)
   setupAdbReverse(port);
+  const stopAdbPolling = startAdbReversePolling(port);
 
   // 2e. SSE broadcasting helper (only for ClaudeCode adapter which has HookServer)
   let hookServer: HookServer | null = null;
@@ -507,8 +509,8 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     });
   }
   if (bridgeTimeline) {
-    bridgeTimeline.onEntry((entry) => {
-      const evt: BridgeEvent = { type: 'timeline_event', entry };
+    bridgeTimeline.onEntry((entry, upsert) => {
+      const evt: BridgeEvent = { type: 'timeline_event', entry, ...(upsert ? { upsert: true } : {}) };
       wsServer.broadcast(evt);
       broadcastSse(evt);
     });
@@ -520,6 +522,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     let ccChatStart: number | null = null;
     let ccPendingChatStart = false;
     let ccPendingChatStartTimer: ReturnType<typeof setTimeout> | null = null;
+    let ccLastPromptText: string | null = null;
 
     const emitChatStart = (text: string) => {
       if (ccPendingChatStartTimer) {
@@ -527,10 +530,13 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
         ccPendingChatStartTimer = null;
       }
       ccPendingChatStart = false;
-      const snippet = text.length > 100 ? text.slice(0, 97) + '...' : text;
+      ccLastPromptText = text || null;
+      const snippet = text.length > 500 ? text.slice(0, 497) + '...' : text;
+      const detail = text.length > 100 ? (text.length > 1000 ? text.slice(0, 1000) + '...' : text) : undefined;
       bridgeTimeline.addEntry({
         ts: ccChatStart ?? Date.now(), type: 'chat_start',
         raw: snippet || 'Prompt sent',
+        ...(detail ? { detail } : {}),
         agentType: 'claude-code',
       });
     };
@@ -552,7 +558,11 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
             usageTracker.resetToolCounts();
             ccPendingChatStart = true;
             // Fallback: if PTY user_prompt doesn't arrive within 500ms, emit with hook text
-            const hookText = (evt.data?.text as string) || '';
+            debug('Timeline', `UserPromptSubmit keys: ${Object.keys(evt.data || {}).join(',')}`);
+            const hookText = (evt.data?.prompt as string)
+              || (evt.data?.text as string)
+              || (evt.data?.message as string)
+              || '';
             ccPendingChatStartTimer = setTimeout(() => {
               if (ccPendingChatStart) {
                 emitChatStart(hookText);
@@ -586,14 +596,29 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
             }
             const duration = ccChatStart ? Math.round((now - ccChatStart) / 1000) : null;
             const toolSummary = usageTracker.getToolSummary();
-            let summary = duration != null ? `Completed · ${duration}s` : 'Completed';
+            // Use last_assistant_message from Stop hook for topic extraction
+            const lastAssistantMsg = (evt.data?.last_assistant_message as string) || '';
+            // Priority: assistant response topic > prompt topic > "Completed"
+            const responseTopic = lastAssistantMsg ? extractTopicHint(lastAssistantMsg) : null;
+            const promptTopic = ccLastPromptText ? extractTopicHint(ccLastPromptText) : null;
+            const completedLabel = responseTopic || promptTopic || 'Completed';
+            let summary = duration != null ? `${completedLabel} · ${duration}s` : completedLabel;
             if (toolSummary) {
               summary += ` · ${toolSummary}`;
             }
+            // Include response snippet in detail, fallback to prompt context
+            let chatEndDetail: string | undefined;
+            if (lastAssistantMsg) {
+              chatEndDetail = lastAssistantMsg.length > 1000 ? lastAssistantMsg.slice(0, 1000) + '...' : lastAssistantMsg;
+            } else if (ccLastPromptText) {
+              chatEndDetail = `Prompt: ${ccLastPromptText.length > 200 ? ccLastPromptText.slice(0, 200) + '...' : ccLastPromptText}`;
+            }
             ccChatStart = null;
+            ccLastPromptText = null;
             bridgeTimeline.addEntry({
               ts: now, type: 'chat_end',
               raw: summary,
+              ...(chatEndDetail ? { detail: chatEndDetail } : {}),
               agentType: 'claude-code',
             });
             break;
@@ -1010,8 +1035,15 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   }
 
   // 9. Periodic usage update (so session timer ticks on Stream Deck)
+  const USAGE_STALE_TTL = 10 * 60 * 1000; // 10 minutes — clear stale cache after this
   const usageInterval = setInterval(() => {
     if (wsServer.getClientCount() > 0) {
+      // TTL: if cache is older than 10 minutes, clear it so Android hides gauges
+      if (cachedApiUsage && lastApiFetchTime > 0 && (Date.now() - lastApiFetchTime) > USAGE_STALE_TTL) {
+        debug('bridge', `API usage cache expired (${Math.round((Date.now() - lastApiFetchTime) / 1000)}s old), clearing`);
+        cachedApiUsage = null;
+        apiUsageStale = false;
+      }
       const snapshot = stateMachine.getSnapshot();
       wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
     }
@@ -1456,6 +1488,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     bridgeLogStream?.stop();
     journal.close();
     wsServer.close();
+    stopAdbPolling();
     cleanupAdbReverse(port);
 
     // Adapter handles killing the agent process and closing its HTTP server

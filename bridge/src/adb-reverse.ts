@@ -55,6 +55,40 @@ export function setupAdbReverse(port: number): void {
 }
 
 /**
+ * Periodically re-check adb reverse (handles USB re-plug).
+ * Returns a cleanup function to stop polling.
+ */
+export function startAdbReversePolling(port: number, intervalMs = 30_000): () => void {
+  if (!hasAdb()) return () => {};
+
+  const timer = setInterval(() => {
+    const devices = getConnectedDevices();
+    if (devices.length === 0) return;
+
+    for (const serial of devices) {
+      try {
+        // Check if reverse already exists — if not, set it up
+        const existing = execSync(`adb -s ${serial} reverse --list`, {
+          stdio: 'pipe',
+          timeout: 5000,
+        }).toString();
+        if (!existing.includes(`tcp:${port}`)) {
+          execSync(`adb -s ${serial} reverse tcp:${port} tcp:${port}`, {
+            stdio: 'pipe',
+            timeout: 5000,
+          });
+          log(`[sdc] adb reverse re-established tcp:${port} → ${serial}`);
+        }
+      } catch {
+        // ignore — device may be unauthorized or disconnected
+      }
+    }
+  }, intervalMs);
+
+  return () => clearInterval(timer);
+}
+
+/**
  * Remove `adb reverse` mappings on shutdown.
  */
 export function cleanupAdbReverse(port: number): void {

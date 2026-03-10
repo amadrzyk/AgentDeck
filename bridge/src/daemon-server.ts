@@ -17,6 +17,7 @@ import {
   deregister as deregisterSession,
   listActive as listActiveSessions,
   findAvailablePort,
+  findExistingDaemon,
 } from './session-registry.js';
 import {
   BRIDGE_WS_PORT,
@@ -38,8 +39,14 @@ function log(msg: string): void {
   process.stderr.write(msg + '\n');
 }
 
+/** Result from sibling relay including the original fetch timestamp */
+interface RelayedUsage {
+  usage: ApiUsageData;
+  fetchedAt: number;
+}
+
 /** Try to fetch usage via sibling bridge's GET /usage HTTP endpoint */
-async function fetchUsageViaHttp(siblings: { port: number }[]): Promise<ApiUsageData | null> {
+async function fetchUsageViaHttp(siblings: { port: number }[]): Promise<RelayedUsage | null> {
   for (const sibling of siblings) {
     try {
       const controller = new AbortController();
@@ -61,7 +68,7 @@ async function fetchUsageViaHttp(siblings: { port: number }[]): Promise<ApiUsage
       }
 
       debug('daemon', `Relayed usage via HTTP from :${sibling.port} (age ${Math.round(age / 1000)}s)`);
-      return data.usage;
+      return { usage: data.usage, fetchedAt: data.fetchedAt };
     } catch {
       // Sibling unreachable or /usage not available, try next
     }
@@ -118,19 +125,20 @@ async function fetchUsageViaWs(siblings: { port: number }[]): Promise<ApiUsageDa
  * 2. WS usage_update (works with any bridge version)
  * 3. Direct API only if NO siblings exist (single caller = no 429)
  */
-async function fetchUsageRelayed(selfPort: number): Promise<ApiUsageData | null> {
+async function fetchUsageRelayed(selfPort: number): Promise<RelayedUsage | null> {
   const sessions = listActiveSessions();
   const siblings = sessions.filter(
     (s) => s.port !== selfPort && s.agentType !== 'daemon',
   );
 
   if (siblings.length > 0) {
-    // Try HTTP first (faster), then WS fallback
+    // Try HTTP first (faster) — preserves sibling's fetchedAt
     const httpResult = await fetchUsageViaHttp(siblings);
     if (httpResult) return httpResult;
 
+    // WS fallback — no fetchedAt available, use current time
     const wsResult = await fetchUsageViaWs(siblings);
-    if (wsResult) return wsResult;
+    if (wsResult) return { usage: wsResult, fetchedAt: Date.now() };
 
     // Siblings exist but both methods failed — do NOT call API directly (avoid 429)
     debug('daemon', 'Siblings exist but relay failed — skipping direct API to avoid 429');
@@ -139,7 +147,8 @@ async function fetchUsageRelayed(selfPort: number): Promise<ApiUsageData | null>
 
   // No siblings — daemon is sole caller, safe to hit API directly
   debug('daemon', 'No siblings found, using direct API');
-  return fetchUsageFromApi();
+  const usage = await fetchUsageFromApi();
+  return usage ? { usage, fetchedAt: Date.now() } : null;
 }
 
 export interface DaemonOptions {
@@ -151,6 +160,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   if (opts.debug) {
     enableDebugLog('/tmp/agentdeck-debug.log');
     log('[agentdeck] Debug logging enabled → /tmp/agentdeck-debug.log');
+  }
+
+  // Singleton guard: prevent duplicate daemons
+  const existing = findExistingDaemon();
+  if (existing) {
+    log(`[agentdeck] Daemon already running on port ${existing.port} (PID ${existing.pid}). Use 'agentdeck stop' first.`);
+    process.exit(0);
   }
 
   const requestedPort = opts.port ?? BRIDGE_WS_PORT;
@@ -169,11 +185,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // State tracking
   let cachedApiUsage: ApiUsageData | null = null;
   let lastApiFetchTime = 0;
+  let apiUsageStale = false;
   let oauthConnected = hasOAuthToken();
   let cachedOllamaStatus: OllamaStatus | null = null;
   let cachedGatewayAvailable = false;
   let cachedGatewayHasError = false;
   let cachedModelCatalog: ModelCatalogEntry[] | null = null;
+  const USAGE_STALE_TTL = 10 * 60 * 1000; // 10 minutes
 
   // Core components (no PTY, no voice)
   const usageTracker = new UsageTracker();
@@ -342,7 +360,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       });
     }
 
-    const usageEvt = buildUsageEvent(snapshot, cachedApiUsage, oauthConnected);
+    const usageEvt = buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, apiUsageStale);
     wsServer.broadcast(usageEvt);
   });
 
@@ -374,16 +392,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
     // Daemon-specific commands
     if (cmd.type === 'query_usage') {
-      fetchUsageRelayed(port).then((apiUsage) => {
-        if (apiUsage) {
-          cachedApiUsage = apiUsage;
-          lastApiFetchTime = Date.now();
-          if (apiUsage.inferredBillingType) {
-            stateMachine.inferBillingType(apiUsage.inferredBillingType);
+      fetchUsageRelayed(port).then((result) => {
+        if (result) {
+          cachedApiUsage = result.usage;
+          lastApiFetchTime = result.fetchedAt;
+          apiUsageStale = false;
+          if (result.usage.inferredBillingType) {
+            stateMachine.inferBillingType(result.usage.inferredBillingType);
           }
+        } else {
+          if (cachedApiUsage) apiUsageStale = true;
         }
         const snapshot = stateMachine.getSnapshot();
-        wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected));
+        wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, apiUsageStale));
       });
     }
   });
@@ -410,7 +431,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       gatewayHasError: cachedGatewayHasError,
     };
     wsServer.sendTo(ws, stateEvent);
-    wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage, oauthConnected));
+    wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, apiUsageStale));
 
     const connEvt: BridgeEvent = {
       type: 'connection',
@@ -437,18 +458,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     const cacheAge = Date.now() - lastApiFetchTime;
     const cacheStale = lastApiFetchTime > 0 && cacheAge > 5 * 60 * 1000;
     if (!cachedApiUsage || cacheStale) {
-      fetchUsageRelayed(port).then((apiUsage) => {
-        if (apiUsage) {
-          cachedApiUsage = apiUsage;
-          lastApiFetchTime = Date.now();
+      fetchUsageRelayed(port).then((result) => {
+        if (result) {
+          cachedApiUsage = result.usage;
+          lastApiFetchTime = result.fetchedAt;
           oauthConnected = true;
-          if (apiUsage.inferredBillingType) {
-            stateMachine.inferBillingType(apiUsage.inferredBillingType);
+          apiUsageStale = false;
+          if (result.usage.inferredBillingType) {
+            stateMachine.inferBillingType(result.usage.inferredBillingType);
           }
           const snap2 = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snap2, cachedApiUsage, oauthConnected));
+          wsServer.broadcast(buildUsageEvent(snap2, cachedApiUsage, oauthConnected, apiUsageStale));
         } else {
           oauthConnected = hasOAuthToken();
+          if (cachedApiUsage) apiUsageStale = true;
         }
       });
     }
@@ -513,25 +536,33 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // Usage update (5s tick for session timer)
   const usageInterval = setInterval(() => {
     if (wsServer.getClientCount() > 0) {
+      // TTL: if cache is older than 10 minutes, clear it so Android hides gauges
+      if (cachedApiUsage && lastApiFetchTime > 0 && (Date.now() - lastApiFetchTime) > USAGE_STALE_TTL) {
+        debug('daemon', `API usage cache expired (${Math.round((Date.now() - lastApiFetchTime) / 1000)}s old), clearing`);
+        cachedApiUsage = null;
+        apiUsageStale = false;
+      }
       const snapshot = stateMachine.getSnapshot();
-      wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected));
+      wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, apiUsageStale));
     }
   }, 5000);
 
   // Initial API usage fetch (10s delay — relay from sibling bridge, fallback to direct API)
   const initialFetchTimer = setTimeout(() => {
-    fetchUsageRelayed(port).then((apiUsage) => {
-      if (apiUsage) {
-        cachedApiUsage = apiUsage;
-        lastApiFetchTime = Date.now();
+    fetchUsageRelayed(port).then((result) => {
+      if (result) {
+        cachedApiUsage = result.usage;
+        lastApiFetchTime = result.fetchedAt;
         oauthConnected = true;
-        if (apiUsage.inferredBillingType) {
-          stateMachine.inferBillingType(apiUsage.inferredBillingType);
+        apiUsageStale = false;
+        if (result.usage.inferredBillingType) {
+          stateMachine.inferBillingType(result.usage.inferredBillingType);
         }
         const snapshot = stateMachine.getSnapshot();
-        wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected));
+        wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, apiUsageStale));
       } else {
         oauthConnected = hasOAuthToken();
+        if (cachedApiUsage) apiUsageStale = true;
       }
     });
   }, 10_000);
@@ -539,18 +570,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // API usage refresh (90s — relay from sibling bridge, fallback to direct API)
   const apiUsageInterval = setInterval(() => {
     if (wsServer.getClientCount() > 0) {
-      fetchUsageRelayed(port).then((apiUsage) => {
-        if (apiUsage) {
-          cachedApiUsage = apiUsage;
-          lastApiFetchTime = Date.now();
+      fetchUsageRelayed(port).then((result) => {
+        if (result) {
+          cachedApiUsage = result.usage;
+          lastApiFetchTime = result.fetchedAt;
           oauthConnected = true;
-          if (apiUsage.inferredBillingType) {
-            stateMachine.inferBillingType(apiUsage.inferredBillingType);
+          apiUsageStale = false;
+          if (result.usage.inferredBillingType) {
+            stateMachine.inferBillingType(result.usage.inferredBillingType);
           }
           const snapshot = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected));
+          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, apiUsageStale));
         } else {
           oauthConnected = hasOAuthToken();
+          if (cachedApiUsage) apiUsageStale = true;
         }
       });
     }
@@ -649,7 +682,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
               gatewayAvailable: true,
               gatewayHasError: cachedGatewayHasError,
             } as BridgeEvent);
-            wsServer.broadcast(buildUsageEvent(snap, cachedApiUsage, oauthConnected));
+            wsServer.broadcast(buildUsageEvent(snap, cachedApiUsage, oauthConnected, apiUsageStale));
           } else {
             log('[agentdeck] OpenClaw Gateway disconnected');
           }
@@ -746,7 +779,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   log(`[agentdeck] Daemon running. Gateway probe active.`);
 }
 
-function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null, oauthStatus?: boolean): BridgeEvent {
+function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null, oauthStatus?: boolean, stale?: boolean): BridgeEvent {
   return {
     type: 'usage_update',
     sessionDurationSec: snapshot.sessionDurationSec,
@@ -768,5 +801,6 @@ function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null
     extraUsageUsedCredits: apiUsage?.extraUsageUsedCredits ?? undefined,
     extraUsageUtilization: apiUsage?.extraUsageUtilization ?? undefined,
     oauthConnected: oauthStatus,
+    usageStale: stale || undefined,
   };
 }
