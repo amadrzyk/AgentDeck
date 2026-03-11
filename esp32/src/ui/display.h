@@ -2,6 +2,15 @@
 
 #include <lvgl.h>
 
+/**
+ * Montserrat 12 + Korean fallback (Noto Sans KR 12).
+ * RAM copy of lv_font_montserrat_12 with fallback pointer set.
+ * Use &font_kr_12 instead of &lv_font_montserrat_12 for labels
+ * that may display Korean text (session names, timeline, etc.).
+ * Initialized in displayInit().
+ */
+extern lv_font_t font_kr_12;
+
 namespace UI {
 
 /**

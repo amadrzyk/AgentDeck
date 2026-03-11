@@ -274,6 +274,9 @@ public:
 static LGFX tft;
 static lv_display_t* disp = nullptr;
 
+// Montserrat 12 + Korean fallback (initialized in displayInit)
+lv_font_t font_kr_12;
+
 // LVGL flush callback
 static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px_map) {
     uint32_t w = (area->x2 - area->x1 + 1);
@@ -314,8 +317,11 @@ void displayInit() {
 
     lv_init();
 
-    // Set Korean font as fallback for montserrat_12 (used in HUD, timeline, name tags)
-    const_cast<lv_font_t&>(lv_font_montserrat_12).fallback = &font_noto_kr_12;
+    // Korean font fallback: create a RAM copy of montserrat_12 with fallback pointer set.
+    // Can't modify the built-in font directly (it's in flash .rodata).
+    // Instead, each UI file that needs Korean should use &font_kr_12 from display.h.
+    font_kr_12 = lv_font_montserrat_12;  // Copy struct to RAM
+    font_kr_12.fallback = &font_noto_kr_12;  // Set Korean fallback
 
     disp = lv_display_create(SCREEN_W, SCREEN_H);
     lv_display_set_flush_cb(disp, disp_flush);

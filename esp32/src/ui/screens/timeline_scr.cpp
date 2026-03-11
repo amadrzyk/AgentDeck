@@ -1,5 +1,6 @@
 #include "timeline_scr.h"
 #include "../theme.h"
+#include "../display.h"
 #include "../../state/agent_state.h"
 #include "config.h"
 #include <algorithm>
@@ -79,7 +80,7 @@ lv_obj_t* timelineCreate() {
 
     // Project name
     lblProject = lv_label_create(topBar);
-    lv_obj_set_style_text_font(lblProject, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lblProject, &font_kr_12, 0);
     lv_obj_set_style_text_color(lblProject, lv_color_hex(Theme::HUDText), 0);
     lv_obj_align(lblProject, LV_ALIGN_CENTER, 0, 0);
 
@@ -104,7 +105,7 @@ lv_obj_t* timelineCreate() {
     for (int i = 0; i < MAX_VISIBLE; i++) {
         entryLabels[i] = lv_label_create(listPanel);
         lv_obj_set_width(entryLabels[i], SCREEN_W - 8);
-        lv_obj_set_style_text_font(entryLabels[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(entryLabels[i], &font_kr_12, 0);
         lv_obj_set_style_text_color(entryLabels[i], lv_color_hex(Theme::HUDText), 0);
         lv_label_set_long_mode(entryLabels[i], LV_LABEL_LONG_CLIP);
         lv_label_set_text(entryLabels[i], "");

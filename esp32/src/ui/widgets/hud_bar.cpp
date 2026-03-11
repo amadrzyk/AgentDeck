@@ -1,5 +1,6 @@
 #include "hud_bar.h"
 #include "../theme.h"
+#include "../display.h"
 #include "../../state/agent_state.h"
 #include "config.h"
 
@@ -143,7 +144,7 @@ void init(lv_obj_t* parent) {
     // Session list (recolor enabled for colored dots)
     lblSessions = lv_label_create(panelLeft);
     lv_obj_set_style_text_color(lblSessions, lv_color_hex(Theme::HUDDim), 0);
-    lv_obj_set_style_text_font(lblSessions, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lblSessions, &font_kr_12, 0);
     lv_label_set_recolor(lblSessions, true);
     lv_label_set_text(lblSessions, "");
     lv_obj_set_width(lblSessions, 150);

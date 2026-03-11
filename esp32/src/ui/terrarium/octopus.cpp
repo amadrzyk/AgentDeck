@@ -2,6 +2,7 @@
 #include "draw.h"
 #include "renderer.h"
 #include "../theme.h"
+#include "../display.h"
 #include "config.h"
 #include "../../state/agent_state.h"
 #include <lvgl.h>
@@ -215,7 +216,7 @@ void render(uint16_t* buf, int w, int h, float time,
     // Name tag — LVGL text rendering directly on canvas
     // Use LVGL's text width calculation (handles Korean + Latin mixed text)
     lv_point_t txtSize;
-    lv_text_get_size(&txtSize, name, &lv_font_montserrat_12, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_text_get_size(&txtSize, name, &font_kr_12, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
     int textW = txtSize.x + 12;
     int tagH = 16;
     int tagX = cx - textW / 2;
@@ -255,7 +256,7 @@ void render(uint16_t* buf, int w, int h, float time,
         lv_draw_label_dsc_t labelDsc;
         lv_draw_label_dsc_init(&labelDsc);
         labelDsc.color = lv_color_hex(Theme::HUDText);
-        labelDsc.font = &lv_font_montserrat_12;
+        labelDsc.font = &font_kr_12;
         labelDsc.text = name;
         labelDsc.align = LV_TEXT_ALIGN_CENTER;
 
