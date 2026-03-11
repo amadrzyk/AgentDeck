@@ -15,6 +15,12 @@ export class BridgeTimelineStore {
   private listeners: EntryListener[] = [];
 
   addEntry(entry: TimelineEntry): void {
+    // Dedup: skip if same type + raw within 5 seconds
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      const e = this.entries[i];
+      if (entry.ts - e.ts > 5_000) break;
+      if (e.type === entry.type && e.raw === entry.raw) return;
+    }
     this.entries.push(entry);
     if (this.entries.length > MAX_ENTRIES) {
       this.entries.shift();

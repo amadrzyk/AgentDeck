@@ -27,6 +27,7 @@ import type { StateUpdateEvent, ModelCatalogEntry, OcSessionStatus } from '@agen
 import { augmentedPath, resolveOpenClawBin } from '@agentdeck/shared';
 import type { AgentLink } from './agent-link.js';
 import { timelineStore, type TimelineEntry } from './timeline-store.js';
+import { summarizeResponse } from './timeline-summarizer.js';
 import { logStream } from './log-stream.js';
 import { dlog, dinfo, dwarn, derr } from './log.js';
 
@@ -118,6 +119,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
   private chatToolNames: string[] = [];
   private lastPrompt: string | null = null;
   private accumulatedResponse = '';
+  private topicExtracted = false;
 
   // Model catalog (fetched via CLI)
   private modelCatalog: ModelCatalogEntry[] | null = null;
@@ -153,6 +155,13 @@ export class GatewayClient extends EventEmitter implements AgentLink {
   set receivingBridgeTimeline(v: boolean) {
     this._receivingBridgeTimeline = v;
     dlog(TAG, `receivingBridgeTimeline=${v}`);
+    if (v) {
+      // Bridge provides enriched timeline — stop local log parsing to prevent duplicates
+      logStream.stop();
+    } else if (this._connected) {
+      // Bridge disconnected — resume local log parsing
+      logStream.start();
+    }
   }
 
   // ===== AgentLink interface =====
@@ -576,6 +585,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
               this.chatStartTime = Date.now();
               this.chatToolCount = 0;
               this.chatToolNames = [];
+              this.topicExtracted = false;
               this.accumulatedResponse = deltaText || '';
               const prompt = this.lastPrompt
                 ? this.lastPrompt.length > 150 ? this.lastPrompt.slice(0, 147) + '...' : this.lastPrompt
@@ -594,7 +604,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
               }
 
               // Early topic extraction — upsert chat_start with topic from first response chunk
-              if (this.accumulatedResponse.length > 20 && this.accumulatedResponse.length < 200) {
+              if (!this.topicExtracted && this.accumulatedResponse.length > 20) {
                 if (!this.lastPrompt || this.lastPrompt === 'Prompt sent') {
                   const firstLine = this.accumulatedResponse.split('\n')[0].trim();
                   const topicHint = firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine;
@@ -603,6 +613,7 @@ export class GatewayClient extends EventEmitter implements AgentLink {
                     .replace(/^(\*\*|#{1,3}\s*)/g, '')
                     .trim();
                   if (cleaned && !this._receivingBridgeTimeline) {
+                    this.topicExtracted = true;
                     const idx = timelineStore.findLastIndex('chat_start');
                     if (idx >= 0) {
                       timelineStore.updateEntryRaw(idx, cleaned);
@@ -636,10 +647,30 @@ export class GatewayClient extends EventEmitter implements AgentLink {
             const parts: string[] = ['Completed'];
             if (elapsed > 0) parts.push(elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${elapsed % 60}s` : `${elapsed}s`);
             if (toolSummary) parts.push(toolSummary);
+            const chatEndTs = Date.now();
             this.addTimelineEntry({
-              ts: Date.now(), type: 'chat_end', raw: parts.join(' · '),
+              ts: chatEndTs, type: 'chat_end', raw: parts.join(' · '),
               ...(responseDetail ? { detail: responseDetail } : {}),
             });
+
+            // Async LLM summarization — upsert chat_end when ready
+            if (responseContent && responseContent.length > 30) {
+              const savedToolSummary = toolSummary;
+              const savedElapsed = elapsed;
+              const savedDetail = responseDetail;
+              summarizeResponse(responseContent).then((summary) => {
+                if (summary) {
+                  const enriched = [summary];
+                  if (savedElapsed > 0) enriched.push(savedElapsed >= 60 ? `${Math.floor(savedElapsed / 60)}m${savedElapsed % 60}s` : `${savedElapsed}s`);
+                  if (savedToolSummary) enriched.push(savedToolSummary);
+                  timelineStore.upsertEntry({
+                    ts: chatEndTs, type: 'chat_end',
+                    raw: enriched.join(' · '),
+                    ...(savedDetail ? { detail: savedDetail } : {}),
+                  });
+                }
+              }).catch(() => { /* summarization failure is non-fatal */ });
+            }
 
             this.currentRunId = null;
             this.lastPrompt = null;

@@ -54,6 +54,7 @@ import { getOrCreateToken, getWsUrl } from './auth.js';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
 import type { HookServer } from './hook-server.js';
 import { setupAdbReverse, cleanupAdbReverse, startAdbReversePolling } from './adb-reverse.js';
+import { startESP32Serial, broadcastESP32, stopESP32Serial } from './esp32-serial.js';
 
 // Load prompt templates
 interface PromptTemplate {
@@ -316,6 +317,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   let lastApiFetchTime = 0;
   let oauthConnected = hasOAuthToken();
   let apiUsageStale = false;
+  let previousBridgeState: State = State.IDLE;
 
   // Ollama status probe
   const ollamaProbe = new OllamaProbe();
@@ -383,8 +385,12 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   }
   const broadcastSse = (event: BridgeEvent) => hookServer?.broadcastSse(event);
 
+  // 2f. Start ESP32 serial bridge (USB JSON relay)
+  startESP32Serial();
+
   // 3. Attach WebSocket server to adapter's HTTP server
   const wsServer = new WsServer(adapter.getHttpServer());
+  wsServer.onBroadcast(broadcastESP32);
   log(`[sdc] WebSocket server ready on port ${port}`);
 
   // 3a. Display state broadcast (after wsServer is ready)
@@ -646,6 +652,27 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
 
   // 5. Wire StateMachine state changes → WsServer broadcast
   stateMachine.on('state_changed', (snapshot: StateSnapshot) => {
+    // PROCESSING→IDLE: immediately fetch fresh usage (rate limits likely changed)
+    const wasActive = previousBridgeState === State.PROCESSING;
+    previousBridgeState = snapshot.state;
+    if (wasActive && snapshot.state === State.IDLE && wsServer.getClientCount() > 0) {
+      if (Date.now() - lastApiFetchTime > 10_000) {
+        fetchUsageFromApi().then((apiUsage) => {
+          if (apiUsage) {
+            cachedApiUsage = apiUsage;
+            lastApiFetchTime = Date.now();
+            oauthConnected = true;
+            apiUsageStale = false;
+            if (apiUsage.inferredBillingType) {
+              stateMachine.inferBillingType(apiUsage.inferredBillingType);
+            }
+            const snap = stateMachine.getSnapshot();
+            wsServer.broadcast(buildUsageEvent(snap, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
+          }
+        });
+      }
+    }
+
     hookServer?.setMeta({ state: snapshot.state });
     journal.write('state_change', 'internal', { state: snapshot.state, permissionMode: snapshot.permissionMode, suggestedPrompt: snapshot.suggestedPrompt });
     // Compute promptType if options are present
@@ -1070,7 +1097,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
         }
       });
     }
-  }, 60_000);
+  }, 45_000);
 
   // 9b2. Periodic Ollama status probe (piggyback on state_update interval)
   const ollamaInterval = setInterval(() => {
@@ -1490,6 +1517,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     wsServer.close();
     stopAdbPolling();
     cleanupAdbReverse(port);
+    stopESP32Serial();
 
     // Adapter handles killing the agent process and closing its HTTP server
     adapter.shutdown().then(() => {

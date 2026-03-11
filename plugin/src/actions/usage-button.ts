@@ -407,14 +407,14 @@ export function updateUsageButton(
   inputTokens = usage.inputTokens;
   outputTokens = usage.outputTokens;
   if (usage.estimatedCostUsd != null) estimatedCostUsd = usage.estimatedCostUsd;
-  if (usage.fiveHourPercent != null) fiveHourPercent = usage.fiveHourPercent;
-  if (usage.fiveHourResetsAt) fiveHourResetsAt = usage.fiveHourResetsAt;
-  if (usage.sevenDayPercent != null) sevenDayPercent = usage.sevenDayPercent;
-  if (usage.sevenDayResetsAt) sevenDayResetsAt = usage.sevenDayResetsAt;
-  if (usage.extraUsageEnabled != null) extraUsageEnabled = usage.extraUsageEnabled;
-  if (usage.extraUsageMonthlyLimit != null) extraUsageMonthlyLimit = usage.extraUsageMonthlyLimit;
-  if (usage.extraUsageUsedCredits != null) extraUsageUsedCredits = usage.extraUsageUsedCredits;
-  if (usage.extraUsageUtilization != null) extraUsageUtilization = usage.extraUsageUtilization;
+  fiveHourPercent = usage.fiveHourPercent;
+  fiveHourResetsAt = usage.fiveHourResetsAt;
+  sevenDayPercent = usage.sevenDayPercent;
+  sevenDayResetsAt = usage.sevenDayResetsAt;
+  extraUsageEnabled = usage.extraUsageEnabled ?? false;
+  extraUsageMonthlyLimit = usage.extraUsageMonthlyLimit;
+  extraUsageUsedCredits = usage.extraUsageUsedCredits;
+  extraUsageUtilization = usage.extraUsageUtilization;
   refreshAll();
 }
 

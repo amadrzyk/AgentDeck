@@ -126,6 +126,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
   private chatToolNames: string[] = [];
   private lastPrompt: string | null = null;
   private accumulatedResponse = '';
+  private topicExtracted = false;
 
   // Device identity (loaded once on start)
   private deviceIdentity: DeviceIdentity | null = null;
@@ -664,6 +665,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               this.chatStartTime = Date.now();
               this.chatToolCount = 0;
               this.chatToolNames = [];
+              this.topicExtracted = false;
               this.accumulatedResponse = deltaText || '';
               const prompt = this.lastPrompt || 'Prompt sent';
               const promptRaw = prompt.length > 500 ? prompt.slice(0, 497) + '...' : prompt;
@@ -679,9 +681,10 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               }
 
               // Early topic extraction — upsert chat_start with topic hint
-              if (this.accumulatedResponse.length > 20 && this.accumulatedResponse.length < 200) {
+              if (!this.topicExtracted && this.accumulatedResponse.length > 20) {
                 const topicHint = extractTopicHint(this.accumulatedResponse);
                 if (topicHint && (!this.lastPrompt || this.lastPrompt === 'Prompt sent')) {
+                  this.topicExtracted = true;
                   this.emitTimelineUpsert({
                     ts: this.chatStartTime, type: 'chat_start',
                     raw: topicHint,

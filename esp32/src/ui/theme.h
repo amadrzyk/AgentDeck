@@ -1,0 +1,117 @@
+#pragma once
+
+#include <cstdint>
+
+// ===== RGB565 color macros =====
+// Convert 24-bit RGB to 16-bit RGB565
+#define RGB565(r, g, b) ((uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)))
+
+// ===== LVGL lv_color_hex equivalents =====
+
+namespace Theme {
+
+// --- Background layers ---
+constexpr uint32_t DeepSea       = 0x0A1628;
+constexpr uint32_t MidWater      = 0x0F2744;
+constexpr uint32_t ShallowWater  = 0x163B5C;
+
+// --- Sand & Rock ---
+constexpr uint32_t SandBase      = 0x2A1F14;
+constexpr uint32_t SandLight     = 0x3D2E1F;
+constexpr uint32_t RockDark      = 0x1A1A2E;
+constexpr uint32_t RockMid       = 0x2D2D44;
+constexpr uint32_t RockLight     = 0x3A3A55;
+
+// --- Kelp ---
+constexpr uint32_t KelpGreen     = 0x22C55E;
+constexpr uint32_t KelpDark      = 0x166534;
+
+// --- Octopus (Claude Code) ---
+constexpr uint32_t ClaudeBody      = 0xC07058;
+constexpr uint32_t ClaudeBodyLight = 0xD08870;
+constexpr uint32_t ClaudeBodyDark  = 0xA05840;
+constexpr uint32_t ClaudeEye       = 0x2D1F16;
+
+// --- Crayfish (OpenClaw) ---
+constexpr uint32_t CrayfishShell     = 0xFF4D4D;
+constexpr uint32_t CrayfishDark      = 0x991B1B;
+constexpr uint32_t CrayfishEye       = 0x00E5CC;
+constexpr uint32_t CrayfishBodyLight = 0xFF6B6B;
+
+// --- Neon Tetra ---
+constexpr uint32_t TetraNeon   = 0x00E5FF;
+constexpr uint32_t TetraBody   = 0x1E40AF;
+constexpr uint32_t TetraFin    = 0xFF6B6B;
+
+// --- Bubble ---
+constexpr uint32_t BubbleWhite = 0xFFFFFF;  // rendered with alpha
+
+// --- HUD ---
+constexpr uint32_t HUDBg       = 0x000000;  // rendered at ~50% alpha
+constexpr uint32_t HUDText     = 0xE2E8F0;
+constexpr uint32_t HUDDim      = 0x94A3B8;
+
+// --- Status colors ---
+constexpr uint32_t StatusGreen  = 0x22C55E;
+constexpr uint32_t StatusBlue   = 0x3B82F6;
+constexpr uint32_t StatusAmber  = 0xFBBF24;
+constexpr uint32_t StatusRed    = 0xEF4444;
+constexpr uint32_t StatusCyan   = 0x00E5FF;
+constexpr uint32_t StatusPurple = 0xA855F7;
+
+// --- Timeline type colors ---
+constexpr uint32_t TLChatStart   = 0x22C55E;  // green
+constexpr uint32_t TLToolReq     = 0x3B82F6;  // blue
+constexpr uint32_t TLToolOk      = 0x00E5FF;  // cyan
+constexpr uint32_t TLError       = 0xEF4444;  // red
+constexpr uint32_t TLChatEnd     = 0xFBBF24;  // amber
+constexpr uint32_t TLModelCall   = 0xA855F7;  // purple
+
+// --- Timeline background ---
+constexpr uint32_t TimelineBg    = 0x0A1628;
+
+// --- LED cable (omitted on ESP32 but kept for reference) ---
+constexpr uint32_t LEDGreen  = 0x22C55E;
+constexpr uint32_t LEDAmber  = 0xFBBF24;
+constexpr uint32_t LEDRed    = 0xEF4444;
+
+}  // namespace Theme
+
+// ===== Layout constants =====
+namespace Layout {
+
+// Sand/terrain
+constexpr float SandHeightFrac = 0.35f;
+
+// Octopus
+constexpr float OctBodyRadiusFrac = 0.055f;
+constexpr float OctHomeX          = 0.40f;
+constexpr float OctStandingY      = 0.59f;
+constexpr float OctSleepY         = 0.75f;
+constexpr float OctWorkingY       = 0.42f;
+constexpr float OctSwimMinX       = 0.20f;
+constexpr float OctSwimMaxX       = 0.68f;
+constexpr float OctSwimMinY       = 0.10f;
+constexpr float OctSwimMaxY       = 0.61f;
+
+// Crayfish
+constexpr float CfWidthFrac  = 0.11f;
+constexpr float CfHomeX      = 0.78f;
+constexpr float CfHomeY      = 0.58f;
+constexpr float CfSittingY   = 0.72f;
+constexpr float CfRoutingY   = 0.55f;
+
+// Tetra
+constexpr float TetraSize     = 0.015f;
+constexpr float TetraSwimMinX = 0.03f;
+constexpr float TetraSwimMaxX = 0.92f;
+constexpr float TetraSwimMinY = 0.08f;
+constexpr float TetraSwimMaxY = 0.61f;
+
+// Water surface
+constexpr float SurfaceY = 0.04f;
+
+// HUD
+constexpr uint8_t HudHeight = 24;
+
+}  // namespace Layout

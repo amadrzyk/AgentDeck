@@ -118,6 +118,12 @@ class TimelineStore {
 
   addEntry(entry: TimelineEntry): void {
     this.ensureLoaded();
+    // Dedup: skip if same type + raw within 5 seconds
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      const e = this.entries[i];
+      if (entry.ts - e.ts > 5_000) break;
+      if (e.type === entry.type && e.raw === entry.raw) return;
+    }
     this.entries.push(entry);
     if (this.entries.length > MAX_ENTRIES) {
       this.entries.shift();
@@ -130,6 +136,21 @@ class TimelineStore {
     }
     this.scheduleSave();
     this.notify();
+  }
+
+  /** Upsert: find existing entry with same ts+type (±1s) and replace, or add new */
+  upsertEntry(entry: TimelineEntry): void {
+    this.ensureLoaded();
+    const tolerance = 1000;
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      if (this.entries[i].type === entry.type && Math.abs(this.entries[i].ts - entry.ts) < tolerance) {
+        this.entries[i] = entry;
+        this.scheduleSave();
+        this.notify();
+        return;
+      }
+    }
+    this.addEntry(entry);
   }
 
   /** Update an existing entry's raw text (e.g. post-enrichment from history) */

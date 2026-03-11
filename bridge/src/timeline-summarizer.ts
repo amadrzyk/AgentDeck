@@ -21,6 +21,9 @@ const SYSTEM_PROMPT = `You are a timeline summarizer. Given an AI assistant's re
 
 let mlxAvailable: boolean | null = null;
 let ollamaAvailable: boolean | null = null;
+let mlxFailedAt = 0;
+let ollamaFailedAt = 0;
+const RETRY_INTERVAL_MS = 60_000; // retry failed providers after 60s
 
 /**
  * Summarize a chat response into a concise 1-line Korean summary.
@@ -33,8 +36,8 @@ export async function summarizeResponse(text: string): Promise<string | null> {
     ? text.slice(0, MAX_INPUT_CHARS) + '...'
     : text;
 
-  // Try MLX qwen first
-  if (mlxAvailable !== false) {
+  // Try MLX qwen first (retry after RETRY_INTERVAL_MS)
+  if (mlxAvailable !== false || (Date.now() - mlxFailedAt > RETRY_INTERVAL_MS)) {
     try {
       const result = await callMLX(input);
       if (result) {
@@ -43,12 +46,13 @@ export async function summarizeResponse(text: string): Promise<string | null> {
       }
     } catch {
       mlxAvailable = false;
+      mlxFailedAt = Date.now();
       debug('summarizer', 'MLX not available, trying Ollama');
     }
   }
 
-  // Try Ollama
-  if (ollamaAvailable !== false) {
+  // Try Ollama (retry after RETRY_INTERVAL_MS)
+  if (ollamaAvailable !== false || (Date.now() - ollamaFailedAt > RETRY_INTERVAL_MS)) {
     try {
       const result = await callOllama(input);
       if (result) {
@@ -57,6 +61,7 @@ export async function summarizeResponse(text: string): Promise<string | null> {
       }
     } catch {
       ollamaAvailable = false;
+      ollamaFailedAt = Date.now();
       debug('summarizer', 'Ollama not available, using heuristic');
     }
   }

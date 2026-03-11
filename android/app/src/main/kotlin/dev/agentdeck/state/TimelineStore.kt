@@ -73,7 +73,14 @@ class TimelineStore private constructor() {
     val entries: StateFlow<List<TimelineEntry>> = _entries.asStateFlow()
 
     fun addEntry(entry: TimelineEntry) {
-        _entries.value = (_entries.value + entry).takeLast(MAX_ENTRIES)
+        val list = _entries.value
+        // 5s dedup — skip if same type+summary within window
+        for (i in list.indices.reversed()) {
+            val e = list[i]
+            if (entry.timestamp - e.timestamp > 5000) break
+            if (e.type == entry.type && e.summary == entry.summary) return
+        }
+        _entries.value = (list + entry).takeLast(MAX_ENTRIES)
     }
 
     /** Update the most recent entry matching [type] using [transform]. */

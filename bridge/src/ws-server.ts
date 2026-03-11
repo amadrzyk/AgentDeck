@@ -87,6 +87,13 @@ export class WsServer {
     });
   }
 
+  private broadcastHooks: Array<(event: BridgeEvent) => void> = [];
+
+  /** Register a hook that gets called on every broadcast (e.g., ESP32 serial relay). */
+  onBroadcast(hook: (event: BridgeEvent) => void): void {
+    this.broadcastHooks.push(hook);
+  }
+
   broadcast(event: BridgeEvent): void {
     const payload = JSON.stringify(event);
     const clientCount = this.wss.clients.size;
@@ -95,6 +102,10 @@ export class WsServer {
       if (client.readyState === WebSocket.OPEN) {
         client.send(payload);
       }
+    }
+    // Relay to registered hooks (ESP32 serial, etc.)
+    for (const hook of this.broadcastHooks) {
+      try { hook(event); } catch { /* best-effort */ }
     }
   }
 

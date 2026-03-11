@@ -2,6 +2,87 @@
 
 ---
 
+## 2026-03-12 — Timeline 중복 표시 버그 (daemon upsert 누락)
+
+### 문제
+Android TimelineStrip에서 `chat_start` 이벤트가 동일 timestamp로 중복 표시. "Prompt sent" + "MoltBook 야간 스웜 작업 시작"처럼 원본+enriched 버전이 둘 다 나타남.
+
+### 해결
+**근본 원인**: `daemon-server.ts`가 adapter의 `evt.upsert` 플래그를 무시하고 항상 `addEntry()` 호출. `extractTopicHint()`가 chat_start를 enrichment할 때 upsert로 보내지만, daemon이 새 항목으로 추가 → raw가 다르므로 5s dedup도 통과 → WS broadcast에도 upsert 플래그 누락 → Android가 2개 항목 저장.
+
+3곳 수정:
+1. **daemon-server.ts timeline case**: `evt.upsert` 분기 추가 → `upsertEntry()`/`addEntry()` 분리
+2. **daemon-server.ts onEntry 리스너**: `(entry, upsert)` 시그니처 + broadcast에 `upsert: true` 포함
+3. **Android TimelineStore.addEntry()**: 5s 윈도우 type+summary dedup 안전장치 추가
+
+### 교훈
+- **코드 복제 시 분기 누락 위험**: `index.ts`(coding bridge)에는 upsert 분기가 있었으나 `daemon-server.ts`에는 누락. 동일 이벤트를 처리하는 두 경로가 있으면 반드시 양쪽 동기화 확인
+- **dedup은 다층 방어**: source(upsert) + store(5s dedup) + client(dedup) — 어느 한 층이 실패해도 다른 층에서 잡아야
+
+---
+
+## 2026-03-11 — ESP32 디바이스 조사 및 펌웨어 백업
+
+### 배경
+AgentDeck Dashboard의 ESP32 기기 확장을 위해 보유 3대 디바이스 조사 및 백업 수행.
+
+### 디바이스 조사 결과
+3대 모두 ESP32-S3 (QFN56 rev0.2), 8MB PSRAM, 16MB Flash, DIO, 40MHz:
+- **86 Box 4인치**: CH340 외장 USB, Arduino+IDF v5.1.1 (2023-11), LVGL BSP, OTA 미지원 (7MB factory 단일), 파일시스템 없음
+- **IPS 3.5인치**: Native USB JTAG, IDF v5.1.4 (2024-08), 듀얼 OTA (2MB×2), FAT 11MB, 멀티미디어/AIDA64
+- **AMOLED 1.8인치 원형**: Native USB JTAG, IDF v5.1.4 (2025-02), 듀얼 OTA (3MB×2), SPIFFS 9MB, AI 음성/시계
+
+### CH340 백업 문제 및 해결
+86 Box의 CH340 시리얼 칩이 16MB 연속 전송 시 반복적 데이터 손상 (`Corrupt data, expected 0x1000 bytes but received 0xNNN bytes`). 케이블 교체로도 해결 안 됨.
+- **해결**: 1MB 청크 16분할 + 실패 자동 재시도. 1차 성공률 56% (9/16), 재시도로 100% 달성
+- **교훈**: CH340 기반 ESP32-S3 보드는 장시간 연속 시리얼 전송에 취약. 청크 분할 백업이 필수
+
+### 백업 위치
+`~/Desktop/esp32-backups/` — 3개 `.bin` (각 16MB) + `DEVICE_INVENTORY.md`
+
+---
+
+## 2026-03-11 — OpenClaw Timeline 중복 & 노이즈 이벤트 수정
+
+### 문제
+1. **이벤트 중복**: Bridge 연결 중에도 plugin `logStream`이 독립 실행 → 같은 `openclaw logs` 출력을 bridge(relay)와 plugin(직접 파싱) 양쪽에서 추가하여 동일 이벤트 2회 표시
+2. **에러 노이즈**: `web_fetch timed out` 같은 일시적 네트워크 에러가 타임라인에 노출 (에이전트가 내부 재시도하는 에러)
+3. **"Prompt sent" 고착**: 외부 트리거 채팅(cron, 웹 UI)에서 토픽 추출 윈도우가 20~200자로 너무 좁아, 첫 delta가 200자 넘으면 추출 기회 0
+
+### 해결
+1. **logStream 자동 관리**: `receivingBridgeTimeline` setter에서 `logStream.stop()/start()` 호출 — bridge 연결 시 중복 소스 제거
+2. **timeline-store dedup 안전망**: plugin/bridge 양쪽 `addEntry()`에 5초 윈도우 type+raw 중복 검사
+3. **transient error 필터**: `shared/timeline.ts` `parseLogLine()`에서 web_fetch+timeout/ECONNREFUSED 패턴 필터
+4. **토픽 추출 개선**: `topicExtracted` 플래그 도입 + 200자 상한 제거. 한 번 추출 후 반복 덮어쓰기 방지, 큰 첫 delta에서도 추출 가능
+
+### 교훈
+- 다중 소스 파이프라인에서는 **소스 제거가 dedup보다 우선** — dedup은 안전망일 뿐
+- 토픽 추출 같은 one-shot 로직에는 반드시 완료 플래그 필요 (윈도우 상한보다 명시적)
+
+---
+
+## 2026-03-11 — Timeline "Completed" 고착 버그 수정
+
+### 문제
+AgentDeck 타임라인에서 `chat_end` 항목이 항상 "Completed"로만 표시됨. 한국어 LLM 요약이 동작하지 않음.
+
+### 원인
+1. MLX 서버 크래시 (CloudStorage 데드락 → `reload=True` 문제, 별도 수정 완료) 시 `timeline-summarizer.ts`에서 `mlxAvailable = false`가 영구 설정됨
+2. Ollama도 실패하면 `ollamaAvailable = false` → 두 LLM 모두 영구 스킵 → `summarizeResponse()` 항상 `null` 반환
+3. Plugin에는 bridge와 달리 요약기 자체가 없어, bridge 없이 단독 운영 시 요약 불가
+
+### 해결
+1. **Bridge `timeline-summarizer.ts`**: availability flag에 60초 TTL 추가 — 실패 후 60초 경과 시 재시도
+2. **Plugin `timeline-summarizer.ts`** (신규): plugin용 경량 MLX 요약기 추가
+3. **Plugin `gateway-client.ts`**: `chat_end` 후 비동기 LLM 요약 → `upsertEntry()`로 "Completed" 교체
+4. **Plugin `timeline-store.ts`**: `upsertEntry()` 메서드 추가 (ts+type ±1s 매칭)
+
+### 교훈
+- Boolean availability flag는 영구 disable 위험 — 반드시 TTL/retry 메커니즘 필요
+- Bridge와 plugin 양쪽에 동일 기능 필요 시, bridge 단독 의존은 SPOF — plugin도 독립 동작 가능해야 함
+
+---
+
 ## 2026-03-11 — Usage Percent Staleness Fix
 
 ### 문제

@@ -299,8 +299,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   bridgeLogStream.on('entry', (entry) => {
     bridgeTimeline.addEntry(entry);
   });
-  bridgeTimeline.onEntry((entry) => {
-    const evt: BridgeEvent = { type: 'timeline_event', entry };
+  bridgeTimeline.onEntry((entry, upsert) => {
+    const evt: BridgeEvent = { type: 'timeline_event', entry, ...(upsert ? { upsert: true } : {}) };
     wsServer.broadcast(evt);
   });
 
@@ -587,7 +587,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         }
       });
     }
-  }, 90_000);
+  }, 60_000);
 
   // Sessions list broadcast (10s)
   const sessionsListInterval = setInterval(() => {
@@ -643,7 +643,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           break;
         case 'timeline': {
           if (evt.entry) {
-            bridgeTimeline.addEntry(evt.entry);
+            if (evt.upsert) {
+              bridgeTimeline.upsertEntry(evt.entry);
+            } else {
+              bridgeTimeline.addEntry(evt.entry);
+            }
             if (evt.entry.type === 'tool_request') {
               bridgeLogStream.trackToolRequest(evt.entry.raw);
             }

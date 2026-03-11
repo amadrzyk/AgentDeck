@@ -138,6 +138,12 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
   // Skip diagnostic noise, but keep errors
   if (subsystem === 'diagnostic' && !/\b(error|fail|timed?\s*out)\b/i.test(message)) return null;
 
+  // Skip transient/retriable errors that agents handle internally
+  if (/\b(web_fetch|http_request|fetch)\b/i.test(message) &&
+      /\b(timed?\s*out|ECONNREFUSED|ECONNRESET|ETIMEDOUT|retry|retrying)\b/i.test(message)) {
+    return null;
+  }
+
   // --- Error patterns FIRST (before model/tool matching to avoid misclassification) ---
   if (obj.level === 'error' || /\b(error|fail(?:ed|ure)?|exception|timed?\s*out|ENOENT|EACCES)\b/i.test(message)) {
     // Extract meaningful error description from structured messages
