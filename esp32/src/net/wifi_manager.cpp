@@ -25,6 +25,9 @@ void wifiInit() {
         IPAddress ip = WiFi.localIP();
         snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
         Serial.printf("[WiFi] Connected: %s\n", ipBuf);
+        // Sync NTP so time(nullptr) works for reset time parsing
+        configTzTime("UTC", "pool.ntp.org", "time.google.com");
+        Serial.println("[WiFi] NTP sync started (UTC)");
         wifiWasConnected = true;
         portalActive = false;
     } else {
@@ -43,6 +46,8 @@ void wifiLoop() {
             IPAddress ip = WiFi.localIP();
             snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
             Serial.printf("[WiFi] Connected via portal: %s\n", ipBuf);
+            configTzTime("UTC", "pool.ntp.org", "time.google.com");
+            Serial.println("[WiFi] NTP sync started (UTC)");
             wifiWasConnected = true;
             portalActive = false;
         }

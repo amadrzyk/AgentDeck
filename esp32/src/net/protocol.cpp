@@ -95,17 +95,76 @@ static void handleUsageUpdate(JsonObject& obj) {
         ? obj["estimatedCostUsd"].as<float>() : -1.0f;
     g_state.usageStale = obj["usageStale"] | false;
 
-    // Reset times: accept pre-formatted "Xh Ym" from relay, or raw ISO fallback
+    // Reset times: pre-formatted "Xh Ym" (relay) or ISO 8601 (bridge WebSocket)
     auto storeResetTime = [](JsonObject& obj, const char* key, char* out, size_t outLen) {
         if (!obj[key].is<const char*>()) { out[0] = '\0'; return; }
         const char* val = obj[key].as<const char*>();
-        // Already formatted (starts with digit, no 'T' separator) — store directly
-        // ISO 8601 starts like "2026-..." — skip those (ESP32 has no accurate clock)
-        if (val[0] >= '0' && val[0] <= '9' && strchr(val, 'T') == nullptr) {
+
+        // Already formatted (no 'T' separator) — store directly
+        if (strchr(val, 'T') == nullptr) {
             strncpy(out, val, outLen - 1);
             out[outLen - 1] = '\0';
+            return;
+        }
+
+        // ISO 8601 — parse and compute relative time (needs NTP)
+        struct tm tm = {};
+        int tzH = 0, tzM = 0;
+        char tzSign = '+';
+        if (sscanf(val, "%d-%d-%dT%d:%d:%d",
+                   &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                   &tm.tm_hour, &tm.tm_min, &tm.tm_sec) >= 6) {
+            // Parse timezone offset (e.g. "+00:00", "+09:00")
+            const char* tz = strrchr(val, '+');
+            if (!tz) tz = strrchr(val, '-');
+            // Make sure it's not the date separator
+            if (tz && tz > val + 10) {
+                tzSign = *tz;
+                sscanf(tz + 1, "%d:%d", &tzH, &tzM);
+            }
+
+            tm.tm_year -= 1900;
+            tm.tm_mon -= 1;
+
+            // Convert to UTC epoch using timegm-equivalent
+            // (mktime uses local time, but we set TZ to UTC via configTzTime)
+            time_t resetEpoch = mktime(&tm);
+            // Apply timezone offset to get UTC
+            int offsetSec = (tzH * 3600 + tzM * 60) * (tzSign == '+' ? -1 : 1);
+            resetEpoch += offsetSec;
+
+            time_t now = time(nullptr);
+            // Check if NTP has synced (time > 2025-01-01)
+            if (now < 1735689600) {
+                // No NTP yet — can't compute relative time
+                out[0] = '\0';
+                return;
+            }
+
+            int diffSec = (int)(resetEpoch - now);
+            if (diffSec <= 0) {
+                strncpy(out, "now", outLen - 1);
+                out[outLen - 1] = '\0';
+                return;
+            }
+
+            int diffMin = diffSec / 60;
+            if (diffMin < 60) {
+                snprintf(out, outLen, "%dm", diffMin);
+            } else {
+                int h = diffMin / 60;
+                int m = diffMin % 60;
+                if (h < 24) {
+                    if (m > 0) snprintf(out, outLen, "%dh %dm", h, m);
+                    else snprintf(out, outLen, "%dh", h);
+                } else {
+                    int d = h / 24;
+                    int rh = h % 24;
+                    if (rh > 0) snprintf(out, outLen, "%dd %dh", d, rh);
+                    else snprintf(out, outLen, "%dd", d);
+                }
+            }
         } else {
-            // Raw ISO — can't compute relative time without NTP, show nothing
             out[0] = '\0';
         }
     };
