@@ -35,6 +35,8 @@ interface SerialConnection {
 
 let connections: SerialConnection[] = [];
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let stateProvider: (() => BridgeEvent | null) | null = null;
 
 // Events to forward (same subset as Android WS client receives)
 const FORWARDED_EVENTS = new Set([
@@ -119,6 +121,25 @@ function sendToConnection(conn: SerialConnection, json: string): void {
 }
 
 /**
+ * Register a callback that returns the current state_update event.
+ * Used to send periodic heartbeats so ESP32 gets data even without
+ * state changes (e.g., after reboot while bridge is idle).
+ */
+export function setESP32StateProvider(provider: () => BridgeEvent | null): void {
+  stateProvider = provider;
+}
+
+function sendHeartbeat(): void {
+  if (connections.length === 0 || !stateProvider) return;
+  const event = stateProvider();
+  if (!event) return;
+  const json = JSON.stringify(event);
+  for (const conn of connections) {
+    sendToConnection(conn, json);
+  }
+}
+
+/**
  * Start ESP32 serial bridge.
  * Detects USB serial ports and opens connections.
  * Call broadcast() to send events to all connected ESP32 devices.
@@ -129,6 +150,9 @@ export function startESP32Serial(): void {
 
   // Poll for new/disconnected devices every 10 seconds
   pollTimer = setInterval(pollForDevices, 10000);
+
+  // Heartbeat: send current state every 5 seconds so ESP32 stays in sync
+  heartbeatTimer = setInterval(sendHeartbeat, 5000);
 
   debug('ESP32', 'Serial bridge started');
 }
@@ -176,6 +200,10 @@ export function stopESP32Serial(): void {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
+  }
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
   }
   for (const conn of connections) {
     conn.connected = false;

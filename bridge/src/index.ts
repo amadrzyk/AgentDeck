@@ -48,13 +48,14 @@ import {
 } from './session-registry.js';
 import { fetchUsageFromApi, hasOAuthToken, didLastFetchFail, type ApiUsageData } from './usage-api.js';
 import { OllamaProbe, type OllamaStatus } from './ollama-probe.js';
+import { buildUsageEvent } from './usage-event.js';
 import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
 
 import { getOrCreateToken, getWsUrl } from './auth.js';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
 import type { HookServer } from './hook-server.js';
 import { setupAdbReverse, cleanupAdbReverse, startAdbReversePolling } from './adb-reverse.js';
-import { startESP32Serial, broadcastESP32, stopESP32Serial } from './esp32-serial.js';
+import { startESP32Serial, broadcastESP32, stopESP32Serial, setESP32StateProvider } from './esp32-serial.js';
 
 // Load prompt templates
 interface PromptTemplate {
@@ -386,7 +387,9 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   const broadcastSse = (event: BridgeEvent) => hookServer?.broadcastSse(event);
 
   // 2f. Start ESP32 serial bridge (USB JSON relay)
+  let lastStateEvent: BridgeEvent | null = null;
   startESP32Serial();
+  setESP32StateProvider(() => lastStateEvent);
 
   // 3. Attach WebSocket server to adapter's HTTP server
   const wsServer = new WsServer(adapter.getHttpServer());
@@ -718,6 +721,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
     };
     wsServer.broadcast(stateEvent);
     broadcastSse(stateEvent);
+    lastStateEvent = stateEvent;  // Cache for ESP32 heartbeat
 
     // Trigger sessions_list refresh on state change (debounced 2s)
     const now = Date.now();
@@ -1542,32 +1546,7 @@ async function startBridge(port: number, command: string, agentType: AgentType, 
   });
 }
 
-function buildUsageEvent(snapshot: StateSnapshot, apiUsage?: ApiUsageData | null, oauthStatus?: boolean, ollamaStatus?: OllamaStatus | null, stale?: boolean): BridgeEvent {
-  return {
-    type: 'usage_update',
-    sessionDurationSec: snapshot.sessionDurationSec,
-    inputTokens: snapshot.inputTokens,
-    outputTokens: snapshot.outputTokens,
-    toolCalls: snapshot.toolCalls,
-    estimatedCostUsd: snapshot.estimatedCostUsd ?? undefined,
-    sessionPercent: snapshot.sessionPercent ?? undefined,
-    costSpent: snapshot.costSpent ?? undefined,
-    costLimit: snapshot.costLimit ?? undefined,
-    resetTime: snapshot.resetTime ?? undefined,
-    resetDate: snapshot.resetDate ?? undefined,
-    fiveHourPercent: apiUsage?.fiveHourPercent ?? undefined,
-    fiveHourResetsAt: apiUsage?.fiveHourResetsAt ?? undefined,
-    sevenDayPercent: apiUsage?.sevenDayPercent ?? undefined,
-    sevenDayResetsAt: apiUsage?.sevenDayResetsAt ?? undefined,
-    extraUsageEnabled: apiUsage?.extraUsageEnabled ?? undefined,
-    extraUsageMonthlyLimit: apiUsage?.extraUsageMonthlyLimit ?? undefined,
-    extraUsageUsedCredits: apiUsage?.extraUsageUsedCredits ?? undefined,
-    extraUsageUtilization: apiUsage?.extraUsageUtilization ?? undefined,
-    oauthConnected: oauthStatus,
-    ollamaStatus: ollamaStatus ?? undefined,
-    usageStale: stale || undefined,
-  };
-}
+// buildUsageEvent is imported from ./usage-event.js
 
 function handleVoiceCommand(
   action: 'start' | 'stop' | 'cancel',
