@@ -137,7 +137,7 @@ class BridgeConnection private constructor() {
                 val event = parseBridgeMessage(text)
                 if (event != null) {
                     if (event is BridgeEvent.State) {
-                        Log.d("Terrarium", "WS raw state_update: agentType=${event.data.agentType}, state=${event.data.state}")
+                        Log.d("Terrarium", "WS raw state_update: agentType=${event.data.agentType}, state=${event.data.state}, gwAvail=${event.data.gatewayAvailable}, gwErr=${event.data.gatewayHasError}")
                     }
                     onEvent?.invoke(event)
                 } else {

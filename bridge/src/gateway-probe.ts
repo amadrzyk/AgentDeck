@@ -4,7 +4,7 @@ import { debug } from './logger.js';
 
 const GATEWAY_PORT = 18789;
 const PROBE_TIMEOUT = 2000;
-const DOCTOR_TIMEOUT = 5000;
+const DOCTOR_TIMEOUT = 15000;
 
 export interface GatewayStatus {
   available: boolean;

@@ -144,6 +144,49 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
     return null;
   }
 
+  // Skip web_fetch/browser tool failures (404, generic fetch, tab errors) — agents handle internally
+  if (/\bweb_fetch failed\b/i.test(message) && /\b(404|403)\b/.test(message)) {
+    return null;
+  }
+  if (/\bweb_fetch failed:\s*fetch failed\b/i.test(message)) {
+    return null;
+  }
+  if (/\bbrowser failed:\s*tab not found\b/i.test(message)) {
+    return null;
+  }
+
+  // Skip tool errors that agents retry internally (edit mismatch, EISDIR, ENOENT on memory)
+  if (/\bedit failed:\s*Could not find the exact text\b/i.test(message)) {
+    return null;
+  }
+  if (/\bread failed\b/i.test(message) && /\bEISDIR\b/.test(message)) {
+    return null;
+  }
+  if (/\bread failed\b/i.test(message) && /\bENOENT\b/.test(message) &&
+      /workspace\/memory\//i.test(message)) {
+    return null;
+  }
+
+  // Skip failover cascade noise — the initial timeout/error is already shown
+  if (/\bProfile\s+\S+\s+timed out\b/i.test(message) ||
+      /\bFailoverError:\s+LLM request timed out\b/i.test(message)) {
+    return null;
+  }
+
+  // Skip transient network_error and 500 errors from embedded runs (auto-recovered)
+  if (/\bUnhandled stop reason:\s*network_error\b/i.test(message)) {
+    return null;
+  }
+  if (/\bembedded run agent end\b/i.test(message) && /\berror=500\b/.test(message)) {
+    return null;
+  }
+
+  // Skip WhatsApp auto-reconnect attempts (self-recovering)
+  if (/\bWeb connection closed\b/i.test(message) &&
+      /\bRetry \d+\/\d+\b/i.test(message)) {
+    return null;
+  }
+
   // --- Error patterns FIRST (before model/tool matching to avoid misclassification) ---
   if (obj.level === 'error' || /\b(error|fail(?:ed|ure)?|exception|timed?\s*out|ENOENT|EACCES)\b/i.test(message)) {
     // Extract meaningful error description from structured messages

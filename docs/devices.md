@@ -1,0 +1,146 @@
+# AgentDeck Dashboard Devices
+
+7종 대시보드 디바이스 + 프로토콜 종합 레퍼런스.
+
+## Device Matrix
+
+| Device | Transport | Port | Auth | Discovery | Direction | Events |
+|--------|-----------|------|------|-----------|-----------|--------|
+| **Stream Deck+** | WebSocket JSON | 9120–9139 | Token (local bypass) | Session file scan | Bidirectional | All 13 |
+| **Android** | WebSocket + HTTP | 9120–9139 | Token (local bypass) | mDNS / ADB / QR | Bidirectional | All 13 |
+| **Apple** | WebSocket + HTTP | 9120–9139 | Token | mDNS / QR | Bidirectional | All 13 |
+| **ESP32** | USB Serial JSON | CDC/UART 115200 | None | Port scan 10s | Push only | 6 |
+| **Pixoo64** | HTTP REST (Divoom) | LAN:80 | None | Cloud API / manual | Push only | 4 |
+| **SSE** | HTTP SSE | 9120 | Token | Manual URL | Push only | All 13 |
+| **Gateway** | WebSocket Custom | 18789 | Ed25519 | Hardcoded | Bidirectional | N/A (adapter) |
+
+## Broadcast Architecture
+
+```
+Adapter (ClaudeCode / OpenClaw)
+  │
+  ▼
+StateMachine → BridgeEvent
+  │
+  ▼
+WsServer.broadcast(event)  ──→  WebSocket clients (Plugin, Android, Apple)
+  │
+  ├── onBroadcast hooks:
+  │   ├── broadcastESP32()  ──→  USB Serial JSON lines
+  │   └── broadcastPixoo()  ──→  HTTP REST push
+  │
+  └── explicit calls:
+      └── broadcastSse()    ──→  SSE event stream
+```
+
+All devices receive the same `BridgeEvent` JSON — only the transport differs.
+ESP32 and Pixoo filter via `FORWARDED_EVENTS` sets (defined in `shared/src/protocol.ts`).
+
+## Event Forwarding
+
+Shared constants in `shared/src/protocol.ts`:
+
+| Constant | Events | Used by |
+|----------|--------|---------|
+| `DISPLAY_FORWARDED_EVENTS` | `state_update`, `usage_update`, `sessions_list`, `connection` | Pixoo64 |
+| `SERIAL_FORWARDED_EVENTS` | Above + `timeline_event`, `timeline_history` | ESP32 |
+
+WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
+
+## Device Details
+
+### Stream Deck+ (Plugin)
+
+- **Transport**: WebSocket to bridge port (9120–9139)
+- **Connection**: `ConnectionManager` manages Bridge > Gateway priority
+- **Auth**: `~/.agentdeck/auth-token` (32-char hex), local connections bypass
+- **Protocol**: Full `BridgeEvent` / `PluginCommand` bidirectional
+- **Capability gating**: Actions check `AgentCapabilities` for feature availability
+- **When bridge unavailable**: Plugin connects directly to OpenClaw Gateway via `GatewayClient`
+
+### Android (Tablet / E-ink)
+
+- **Transport**: OkHttp WebSocket + HTTP endpoints
+- **Discovery**: NSD mDNS (`_agentdeck._tcp`) → ADB reverse tunnel → QR pairing
+- **Auth**: Token from mDNS TXT record or QR code
+- **Special endpoints**:
+  - `POST /voice/transcribe` — WAV upload → whisper transcription
+  - `GET /health` — Bridge health check
+  - `GET /usage` — Usage data relay
+- **ADB reverse**: Bridge polls USB devices every 30s, auto-sets `adb reverse tcp:9120`
+- **Reconnect**: localhost 5 failures → clear URL → fall back to mDNS discovery
+
+### Apple (iPhone / iPad / macOS)
+
+- **Transport**: URLSessionWebSocketTask + HTTP endpoints
+- **Discovery**: NWBrowser (Network.framework) mDNS (`_agentdeck._tcp`) → QR pairing (VisionKit)
+- **Auth**: Token from mDNS TXT record or QR code
+- **Special endpoints**:
+  - `POST /voice/transcribe` — WAV upload → whisper transcription (AVAudioEngine 16kHz mono)
+- **Platform**: SwiftUI Multiplatform — single Xcode project, iOS + macOS native targets (no Mac Catalyst)
+- **Deployment target**: iOS 17.0 / iPadOS 17.0 / macOS 14.0 (`@Observable` requirement)
+- **State**: `@Observable` (Observation framework) — equivalent to Android's MutableStateFlow
+- **Terrarium**: Canvas + TimelineView(.animation) 60fps, Metal backend automatic
+- **Layout**:
+  - iPhone (compact): Vertical stack HUD, pull-up Engine sheet
+  - iPad (regular): Same as Android tablet — terrarium background + 4-corner HUD overlay
+  - macOS: Separate WindowGroup, external monitor fullscreen, LSUIElement menu bar mode
+- **Distribution**: App Store (`dev.agentdeck.dashboard`), TestFlight beta
+- **Source**: `apple/` (pnpm workspace 외부, `android/`와 동일 레벨)
+- **Status**: In progress (Phase 1–6 구현 중)
+
+### ESP32 Touch Display
+
+- **Transport**: USB Serial (CH340/CP210x), 115200 baud, newline-delimited JSON
+- **Discovery**: Port scan every 10s (`/dev/cu.usbserial-*` macOS, `/dev/ttyUSB*` Linux)
+- **Heartbeat**: Full state re-push every 5s via `setESP32StateProvider()`
+- **Events**: 6 types (`SERIAL_FORWARDED_EVENTS`)
+- **Direction**: Push only — no commands from ESP32
+- **Boards**: IPS 3.5" (480×320), 86 Box 4" (480×480), Round AMOLED (240×240)
+
+### Pixoo64 LED Matrix
+
+- **Transport**: HTTP REST to Divoom device LAN IP (port 80)
+- **Discovery**: Divoom Cloud API (`app.divoom-gz.com`) or manual IP in `~/.agentdeck/pixoo.json`
+- **Events**: 4 types (`DISPLAY_FORWARDED_EVENTS`)
+- **Rendering**: State → 64×64 RGB pixel buffer → Divoom HTTP API
+- **Heartbeat**: Current frame re-push every 10s
+- **Animation**: Idle animation at 600ms/frame (4 frames), PROCESSING state animation
+- **Config**: `~/.agentdeck/pixoo.json` — `{ devices: [{ ip, name? }] }`
+- **Source**: `bridge/src/pixoo/` (6 files: client, bridge, renderer, sprites, font, settings)
+
+### SSE (Server-Sent Events)
+
+- **Transport**: HTTP SSE at `GET /sse` on bridge port
+- **Auth**: Token query parameter (local bypass)
+- **Format**: `event: {type}\ndata: {json}\n\n`
+- **Caching**: Bridge caches last `state_update` and `usage_update` for late-connecting clients
+- **Events**: All 13 types (no filtering)
+- **Use case**: Browser dashboards, monitoring scripts, external integrations
+
+### OpenClaw Gateway (Adapter)
+
+- **Transport**: WebSocket with custom framing `{ type: "req"/"res"/"event", ... }`
+- **Port**: 18789 (default)
+- **Auth**: Ed25519 device key handshake (`~/.openclaw/identity/`)
+- **Protocol**: `chat.send`, `chat.abort`, `exec.approval.resolve`, `sessions.list`
+- **Events**: `chat`, `exec.approval.*`, `presence`, `tick`, `shutdown`
+- **Note**: Not a dashboard device — it's an upstream agent adapter. Both bridge (`OpenClawAdapter`) and plugin (`GatewayClient`) implement the protocol independently (plugin needs standalone operation).
+
+## Heartbeat Mechanisms
+
+| Device | Method | Interval |
+|--------|--------|----------|
+| WebSocket | `ws.ping()` | 15s |
+| ESP32 | Full state JSON re-push | 5s |
+| Pixoo64 | Current frame re-render | 10s |
+| ADB tunnel | `adb devices` poll + re-setup | 30s |
+| SSE | No heartbeat (HTTP keep-alive) | — |
+
+## Adding a New Device
+
+1. Create `bridge/src/{device}.ts` with start/stop/broadcast functions
+2. Filter events using `DISPLAY_FORWARDED_EVENTS` or `SERIAL_FORWARDED_EVENTS` from `shared/src/protocol.ts` (or define a new set if needed)
+3. Register broadcast hook: `wsServer.onBroadcast(broadcastNewDevice)` in `bridge/src/index.ts`
+4. Add discovery/polling if needed
+5. Update this document

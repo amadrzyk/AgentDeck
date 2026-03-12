@@ -11,6 +11,7 @@ Stream Deck+ controller for Claude Code CLI — a bidirectional local control sy
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package: `npx @agentdeck/setup` one-command installer
 - **android/** — Jetpack Compose launcher app: e-ink monitoring + interactive Deck control (CremaS, Onyx, Kobo, tablets)
+- **apple/** — SwiftUI Multiplatform app: iPhone/iPad/macOS dashboard + Deck control (App Store distribution)
 
 ## Build
 
