@@ -90,16 +90,16 @@ function installStreamDeckCli() {
   ok('Stream Deck CLI installed');
 }
 
-// ─── 4. Install Bridge (sdc) ─────────────────────────────────────────
+// ─── 4. Install Bridge (agentdeck CLI) ──────────────────────────────
 
 function installBridge() {
   info('Installing AgentDeck bridge (@agentdeck/bridge)...');
   execSync('npm install -g @agentdeck/bridge', { stdio: 'inherit' });
 
-  if (which('sdc')) {
-    ok('sdc CLI installed');
+  if (which('agentdeck') || which('sdc')) {
+    ok('agentdeck CLI installed');
   } else {
-    fail('sdc CLI not found after install — check npm global path');
+    fail('agentdeck CLI not found after install — check npm global path');
     process.exit(1);
   }
 }
@@ -254,12 +254,12 @@ function success() {
   console.log('  Next steps:');
   console.log('  1. Restart Stream Deck app');
   console.log('  2. Add AgentDeck actions to your Stream Deck profile');
-  console.log("  3. Run 'sdc' in terminal to start the bridge");
+  console.log("  3. Run 'agentdeck claude' in terminal to start the bridge");
   console.log('');
   console.log('  Usage:');
-  console.log('    sdc              Start bridge + Claude');
-  console.log('    sdc status       Check status');
-  console.log('    sdc stop         Stop bridge');
+  console.log('    agentdeck claude   Start bridge + Claude');
+  console.log('    agentdeck status   Check status');
+  console.log('    agentdeck stop     Stop bridge');
   console.log('');
 }
 

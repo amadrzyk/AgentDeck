@@ -1,92 +1,78 @@
+/**
+ * AgentDeck Daemon — lightweight monitoring server.
+ *
+ * No PTY, no voice, no utility. Provides:
+ * - WS server for display clients
+ * - mDNS advertisement
+ * - OpenClaw Gateway proxy
+ * - Usage relay (sibling HTTP → WS → direct API)
+ * - Pixoo + ADB device modules
+ *
+ * Exports `startDaemon()` called by cli.ts.
+ */
+
 import { createServer, type Server } from 'http';
-import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
-import { UsageTracker } from './usage-tracker.js';
-import { StateMachine } from './state-machine.js';
-import { WsServer } from './ws-server.js';
-import { OllamaProbe, type OllamaStatus } from './ollama-probe.js';
-import { buildUsageEvent } from './usage-event.js';
-import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
-import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
-import { advertiseBridge } from './mdns.js';
-import { getOrCreateToken, getWsUrl } from './auth.js';
-import { isLocalConnection, validateToken } from './auth.js';
-import { buildEnrichedSessionsList } from './session-aggregator.js';
+import { BridgeCore } from './bridge-core.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
+import { BridgeLogStream } from './log-stream.js';
 import {
-  register as registerSession,
-  deregister as deregisterSession,
   listActive as listActiveSessions,
   findAvailablePort,
   findExistingDaemon,
 } from './session-registry.js';
+import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
+import { isLocalConnection, validateToken } from './auth.js';
+import { enableDebugLog, debug } from './logger.js';
+import {
+  initModules,
+  stopModules,
+  createDefaultModules,
+} from './modules/index.js';
 import {
   BRIDGE_WS_PORT,
   OPENCLAW_CAPABILITIES,
   State,
   type BridgeEvent,
-  type StateSnapshot,
   type AdapterEvent,
-  type PluginCommand,
   type ModelCatalogEntry,
 } from './types.js';
-import { DisplayMonitor } from './display-monitor.js';
-import { BridgeTimelineStore } from './timeline-store.js';
-import { BridgeLogStream } from './log-stream.js';
-import { setupAdbReverse, cleanupAdbReverse } from './adb-reverse.js';
-import { startPixooBridge, broadcastPixoo, stopPixooBridge } from './pixoo/pixoo-bridge.js';
-import { loadPixooDevices } from './pixoo/pixoo-settings.js';
-import { enableDebugLog, debug } from './logger.js';
 
 function log(msg: string): void {
   process.stderr.write(msg + '\n');
 }
 
-/** Result from sibling relay including the original fetch timestamp */
+// ===== Usage relay (3-tier) =====
+
 interface RelayedUsage {
   usage: ApiUsageData;
   fetchedAt: number;
 }
 
-/** Try to fetch usage via sibling bridge's GET /usage HTTP endpoint */
 async function fetchUsageViaHttp(siblings: { port: number }[]): Promise<RelayedUsage | null> {
   for (const sibling of siblings) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch(`http://127.0.0.1:${sibling.port}/usage`, {
-        signal: controller.signal,
-      });
+      const res = await fetch(`http://127.0.0.1:${sibling.port}/usage`, { signal: controller.signal });
       clearTimeout(timeout);
-
       if (!res.ok) continue;
       const data = await res.json() as { status: string; usage: ApiUsageData | null; fetchedAt: number };
       if (!data.usage) continue;
-
-      // Only accept data fetched within the last 5 minutes
       const age = Date.now() - data.fetchedAt;
-      if (age > 5 * 60 * 1000) {
-        debug('daemon', `Sibling :${sibling.port} HTTP usage too stale (${Math.round(age / 1000)}s)`);
-        continue;
-      }
-
-      debug('daemon', `Relayed usage via HTTP from :${sibling.port} (age ${Math.round(age / 1000)}s)`);
+      if (age > 5 * 60 * 1000) continue;
       return { usage: data.usage, fetchedAt: data.fetchedAt };
-    } catch {
-      // Sibling unreachable or /usage not available, try next
-    }
+    } catch { /* try next */ }
   }
   return null;
 }
 
-/** Connect to sibling bridge WS, grab first usage_update event, extract API fields */
 async function fetchUsageViaWs(siblings: { port: number }[]): Promise<ApiUsageData | null> {
   for (const sibling of siblings) {
     try {
       const usage = await new Promise<ApiUsageData | null>((resolve, reject) => {
         const ws = new WebSocket(`ws://127.0.0.1:${sibling.port}`);
         const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 3000);
-
         ws.on('message', (raw: Buffer | string) => {
           try {
             const evt = JSON.parse(raw.toString());
@@ -105,118 +91,68 @@ async function fetchUsageViaWs(siblings: { port: number }[]): Promise<ApiUsageDa
                 inferredBillingType: null,
               });
             }
-          } catch { /* ignore parse errors */ }
+          } catch { /* ignore */ }
         });
         ws.on('error', () => { clearTimeout(timer); reject(new Error('ws error')); });
         ws.on('close', () => { clearTimeout(timer); reject(new Error('ws closed')); });
       });
-
-      if (usage) {
-        debug('daemon', `Relayed usage via WS from :${sibling.port}`);
-        return usage;
-      }
-    } catch {
-      // WS connect/timeout failed, try next
-    }
+      if (usage) return usage;
+    } catch { /* try next */ }
   }
   return null;
 }
 
-/**
- * Relay usage from sibling bridge.
- * 1. HTTP /usage (fast, needs new bridge code)
- * 2. WS usage_update (works with any bridge version)
- * 3. Direct API only if NO siblings exist (single caller = no 429)
- */
-async function fetchUsageRelayed(selfPort: number): Promise<RelayedUsage | null> {
+async function fetchUsageRelayed(selfPort: number): Promise<ApiUsageData | null> {
   const sessions = listActiveSessions();
-  const siblings = sessions.filter(
-    (s) => s.port !== selfPort && s.agentType !== 'daemon',
-  );
+  const siblings = sessions.filter(s => s.port !== selfPort && s.agentType !== 'daemon');
 
   if (siblings.length > 0) {
-    // Try HTTP first (faster) — preserves sibling's fetchedAt
     const httpResult = await fetchUsageViaHttp(siblings);
-    if (httpResult) return httpResult;
-
-    // WS fallback — no fetchedAt available, use current time
+    if (httpResult) return httpResult.usage;
     const wsResult = await fetchUsageViaWs(siblings);
-    if (wsResult) return { usage: wsResult, fetchedAt: Date.now() };
-
-    // Siblings exist but both methods failed — do NOT call API directly (avoid 429)
-    debug('daemon', 'Siblings exist but relay failed — skipping direct API to avoid 429');
+    if (wsResult) return wsResult;
+    debug('daemon', 'Siblings exist but relay failed — skipping direct API');
     return null;
   }
 
-  // No siblings — daemon is sole caller, safe to hit API directly
-  debug('daemon', 'No siblings found, using direct API');
-  const usage = await fetchUsageFromApi();
-  return usage ? { usage, fetchedAt: Date.now() } : null;
+  debug('daemon', 'No siblings, using direct API');
+  return fetchUsageFromApi();
 }
+
+// ===== Daemon options =====
 
 export interface DaemonOptions {
   port?: number;
   debug?: boolean;
 }
 
+// ===== startDaemon =====
+
 export async function startDaemon(opts: DaemonOptions): Promise<void> {
   if (opts.debug) {
     enableDebugLog('/tmp/agentdeck-debug.log');
-    log('[agentdeck] Debug logging enabled → /tmp/agentdeck-debug.log');
+    log('[agentdeck] Debug logging enabled');
   }
 
-  // Singleton guard: prevent duplicate daemons
+  // Singleton guard
   const existing = findExistingDaemon();
   if (existing) {
-    log(`[agentdeck] Daemon already running on port ${existing.port} (PID ${existing.pid}). Use 'agentdeck stop' first.`);
+    log(`[agentdeck] Daemon already running on port ${existing.port} (PID ${existing.pid}).`);
     process.exit(0);
   }
 
   const requestedPort = opts.port ?? BRIDGE_WS_PORT;
-  const port = requestedPort === BRIDGE_WS_PORT
-    ? await findAvailablePort()
-    : requestedPort;
+  const port = requestedPort === BRIDGE_WS_PORT ? await findAvailablePort() : requestedPort;
   if (port !== requestedPort) {
     log(`[agentdeck] Port ${requestedPort} in use, using ${port}`);
   }
 
-  const sessionId = randomUUID();
-  const projectName = 'AgentDeck';
-
   log(`[agentdeck] Starting daemon on port ${port}...`);
 
-  // State tracking
-  let cachedApiUsage: ApiUsageData | null = null;
-  let lastApiFetchTime = 0;
-  let apiUsageStale = false;
-  let oauthConnected = hasOAuthToken();
-  let cachedOllamaStatus: OllamaStatus | null = null;
-  let cachedGatewayAvailable = false;
-  let cachedGatewayHasError = false;
-  let cachedModelCatalog: ModelCatalogEntry[] | null = null;
-  const USAGE_STALE_TTL = 10 * 60 * 1000; // 10 minutes
-
-  // Core components (no PTY, no voice)
-  const usageTracker = new UsageTracker();
-  const stateMachine = new StateMachine(usageTracker);
-  const ollamaProbe = new OllamaProbe();
-  const displayMonitor = new DisplayMonitor();
-
-  // Timeline components (for Android rich timeline relay)
-  const bridgeTimeline = new BridgeTimelineStore();
-  const bridgeLogStream = new BridgeLogStream();
-
-  // Gateway adapter (dynamically created when Gateway is detected)
-  let gatewayAdapter: OpenClawAdapter | null = null;
-  let gatewayConnecting = false;
-
-  // HTTP server
+  // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
-    // Token auth for remote requests
     const remoteIp = req.socket.remoteAddress || '';
-    const needsAuth = !isLocalConnection(remoteIp);
-
-    if (needsAuth) {
+    if (!isLocalConnection(remoteIp)) {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
       const token = url.searchParams.get('token') || '';
       if (!validateToken(token)) {
@@ -227,481 +163,137 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
 
     if (req.method === 'GET' && req.url === '/health') {
-      const snap = stateMachine.getSnapshot();
+      const snap = core.stateMachine.getSnapshot();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        status: 'ok',
-        mode: 'daemon',
-        state: snap.state,
+        status: 'ok', mode: 'daemon', state: snap.state,
         gateway: gatewayAdapter?.isAlive() ? 'connected' : 'disconnected',
-        uptime: process.uptime(),
-        port,
+        uptime: process.uptime(), port,
       }));
       return;
     }
-
     if (req.method === 'GET' && req.url === '/status') {
-      const snap = stateMachine.getSnapshot();
+      const snap = core.stateMachine.getSnapshot();
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(`<html><body>
         <h2>AgentDeck Daemon</h2>
         <p>State: ${snap.state}</p>
         <p>Gateway: ${gatewayAdapter?.isAlive() ? 'connected' : 'disconnected'}</p>
         <p>Uptime: ${Math.floor(process.uptime())}s</p>
-        <p>Clients: ${wsServer?.getClientCount() ?? 0}</p>
+        <p>Clients: ${core.wsServer.getClientCount()}</p>
       </body></html>`);
       return;
     }
-
     if (req.method === 'GET' && req.url === '/sse') {
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      });
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
       res.write(`event: connected\ndata: {}\n\n`);
-      // SSE clients get state updates via WS broadcast (simplified — daemon uses WS primarily)
-      req.on('close', () => { /* client disconnected */ });
+      req.on('close', () => {});
       return;
     }
-
     if (req.method === 'POST' && req.url === '/shutdown') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'shutting_down' }));
-      shutdown();
+      core.shutdown();
       return;
     }
-
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
   });
 
-  // Start HTTP server
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        reject(new Error(`Port ${port} is already in use.`));
-      } else {
-        reject(err);
-      }
+      reject(err.code === 'EADDRINUSE' ? new Error(`Port ${port} already in use.`) : err);
     });
-    httpServer.listen(port, '0.0.0.0', () => {
-      debug('daemon', `HTTP server listening on 0.0.0.0:${port}`);
-      resolve();
-    });
+    httpServer.listen(port, '0.0.0.0', () => resolve());
   });
 
-  // WebSocket server
-  const wsServer = new WsServer(httpServer);
+  // ===== BridgeCore =====
+  const core = new BridgeCore({
+    port,
+    projectName: 'AgentDeck',
+    httpServer,
+  });
+
+  // Timeline
+  const bridgeLogStream = new BridgeLogStream();
+  core.wireTimeline(bridgeLogStream);
+  core.wireDisplayMonitor();
+
+  // mDNS + device modules
+  const deviceModules = createDefaultModules('daemon' as any);
+  const startedModules = await initModules(
+    deviceModules,
+    { mdns: true, adb: 'auto', serial: false, pixoo: 'auto' },
+    { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
+  );
+
   log(`[agentdeck] WebSocket server ready on port ${port}`);
-
-  // Pixoo64 LED matrix bridge
-  const pixooDevices = loadPixooDevices();
-  startPixooBridge(pixooDevices);
-  wsServer.onBroadcast(broadcastPixoo);
-
-  // Set up adb reverse for USB-connected Android devices
-  setupAdbReverse(port);
-
-  // Wire log stream → timeline store → WS broadcast
-  bridgeLogStream.on('entry', (entry) => {
-    bridgeTimeline.addEntry(entry);
-  });
-  bridgeTimeline.onEntry((entry, upsert) => {
-    const evt: BridgeEvent = { type: 'timeline_event', entry, ...(upsert ? { upsert: true } : {}) };
-    wsServer.broadcast(evt);
-  });
-
-  // Auth token + mDNS
-  const authToken = getOrCreateToken();
-  const wsUrl = getWsUrl(port);
-  const mdnsCleanup = advertiseBridge(port, projectName, 'daemon' as any, authToken);
-  log(`[agentdeck] Pairing URL: ${wsUrl}`);
+  log(`[agentdeck] Pairing URL: ${core.wsUrl}`);
 
   // Register session
-  registerSession({
-    id: sessionId,
-    port,
-    pid: process.pid,
-    projectName,
-    agentType: 'daemon',
-    startedAt: new Date().toISOString(),
-  });
+  core.registerSession('daemon' as any);
 
-  // Debounce tracker for sessions_list on state_changed
-  let lastSessionsListBroadcast = 0;
-
-  // Display monitor → WS broadcast
-  displayMonitor.start();
-  displayMonitor.on('display_state_changed', (displayOn: boolean) => {
-    const evt: BridgeEvent = { type: 'display_state', displayOn };
-    wsServer.broadcast(evt);
-  });
-
-  // Wire StateMachine → WS broadcast
-  stateMachine.on('state_changed', (snapshot: StateSnapshot) => {
-    const gwAlive = gatewayAdapter?.isAlive() ?? false;
-    const stateEvent: BridgeEvent = {
-      type: 'state_update',
-      state: snapshot.state,
-      permissionMode: snapshot.permissionMode,
-      agentType: gwAlive ? 'openclaw' : 'daemon' as any,
-      agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
-      projectName: snapshot.projectName ?? projectName,
-      modelName: snapshot.modelName ?? undefined,
-      billingType: snapshot.billingType,
-      options: snapshot.options.length > 0 ? snapshot.options : undefined,
-      modelCatalog: cachedModelCatalog ?? undefined,
-      pairingUrl: wsUrl,
-      ollamaStatus: cachedOllamaStatus ?? undefined,
-      gatewayAvailable: cachedGatewayAvailable,
-      gatewayHasError: cachedGatewayHasError,
-    };
-    wsServer.broadcast(stateEvent);
-
-    // Trigger sessions_list refresh on state change (debounced 2s)
-    const now = Date.now();
-    if (now - lastSessionsListBroadcast > 2000 && wsServer.getClientCount() > 0) {
-      lastSessionsListBroadcast = now;
-      buildEnrichedSessionsList(sessionId, snapshot.state).then((sessions) => {
-        wsServer.broadcast({ type: 'sessions_list', sessions } as BridgeEvent);
-      });
-    }
-
-    const usageEvt = buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale);
-    wsServer.broadcast(usageEvt);
-  });
-
-  // Handle commands from WS clients
-  wsServer.onCommand((cmd: PluginCommand) => {
-    debug('daemon', `cmd: ${cmd.type}`);
-
-    // Forward commands to gateway adapter if alive
-    if (gatewayAdapter?.isAlive() && gatewayAdapter.handleCommand(cmd)) {
-      switch (cmd.type) {
-        case 'respond':
-          stateMachine.handleUserAction('respond');
-          break;
-        case 'interrupt':
-          stateMachine.handleUserAction('interrupt');
-          break;
-        case 'escape':
-          stateMachine.handleUserAction('interrupt');
-          break;
-        case 'select_option':
-          stateMachine.handleUserAction('select_option');
-          break;
-        case 'send_prompt':
-          stateMachine.handleUserAction('send_prompt');
-          break;
-      }
-      return;
-    }
-
-    // Daemon-specific commands
-    if (cmd.type === 'query_usage') {
-      fetchUsageRelayed(port).then((result) => {
-        if (result) {
-          cachedApiUsage = result.usage;
-          lastApiFetchTime = result.fetchedAt;
-          apiUsageStale = false;
-          if (result.usage.inferredBillingType) {
-            stateMachine.inferBillingType(result.usage.inferredBillingType);
-          }
-        } else {
-          if (cachedApiUsage) apiUsageStale = true;
-        }
-        const snapshot = stateMachine.getSnapshot();
-        wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
-      });
-    }
-  });
-
-  // Client connect → send initial state
-  wsServer.onClientConnect((ws) => {
-    const snapshot = stateMachine.getSnapshot();
-    const gwAlive = gatewayAdapter?.isAlive() ?? false;
-
-    const stateEvent: BridgeEvent = {
-      type: 'state_update',
-      state: snapshot.state,
-      permissionMode: snapshot.permissionMode,
-      agentType: gwAlive ? 'openclaw' : 'daemon' as any,
-      agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
-      projectName: snapshot.projectName ?? projectName,
-      modelName: snapshot.modelName ?? undefined,
-      billingType: snapshot.billingType,
-      options: snapshot.options.length > 0 ? snapshot.options : undefined,
-      modelCatalog: cachedModelCatalog ?? undefined,
-      pairingUrl: wsUrl,
-      ollamaStatus: cachedOllamaStatus ?? undefined,
-      gatewayAvailable: cachedGatewayAvailable,
-      gatewayHasError: cachedGatewayHasError,
-    };
-    wsServer.sendTo(ws, stateEvent);
-    wsServer.sendTo(ws, buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
-
-    const connEvt: BridgeEvent = {
-      type: 'connection',
-      status: gatewayAdapter?.isAlive() ? 'connected' : 'disconnected',
-      sessionId,
-    };
-    wsServer.sendTo(ws, connEvt);
-
-    // Display state
-    wsServer.sendTo(ws, { type: 'display_state', displayOn: displayMonitor.isDisplayOn() } as BridgeEvent);
-
-    // Send timeline history to new client
-    const history = bridgeTimeline.getHistory();
-    if (history.length > 0) {
-      wsServer.sendTo(ws, { type: 'timeline_history', entries: history } as BridgeEvent);
-    }
-
-    // Sessions list
-    buildEnrichedSessionsList(sessionId, snapshot.state).then((sessions) => {
-      wsServer.sendTo(ws, { type: 'sessions_list', sessions } as BridgeEvent);
-    });
-
-    // Fetch API usage on connect if stale
-    const cacheAge = Date.now() - lastApiFetchTime;
-    const cacheStale = lastApiFetchTime > 0 && cacheAge > 5 * 60 * 1000;
-    if (!cachedApiUsage || cacheStale) {
-      fetchUsageRelayed(port).then((result) => {
-        if (result) {
-          cachedApiUsage = result.usage;
-          lastApiFetchTime = result.fetchedAt;
-          oauthConnected = true;
-          apiUsageStale = false;
-          if (result.usage.inferredBillingType) {
-            stateMachine.inferBillingType(result.usage.inferredBillingType);
-          }
-          const snap2 = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snap2, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
-        } else {
-          oauthConnected = hasOAuthToken();
-          if (cachedApiUsage) apiUsageStale = true;
-        }
-      });
-    }
-  });
-
-  // ===== Probes =====
-
-  // Ollama probe (5s)
-  const ollamaInterval = setInterval(() => {
-    ollamaProbe.getStatus().then((status) => {
-      cachedOllamaStatus = status;
-    });
-  }, 5000);
-  ollamaProbe.getStatus().then((status) => { cachedOllamaStatus = status; });
-
-  // Gateway probe (5s) — dynamic adapter creation
-  const gatewayInterval = setInterval(async () => {
-    const status = await probeGateway();
-    const wasAvailable = cachedGatewayAvailable;
-    cachedGatewayAvailable = status.available;
-
-    if (status.available && !wasAvailable && !gatewayAdapter && !gatewayConnecting) {
-      // Gateway appeared — create adapter
-      connectGatewayAdapter();
-    } else if (!status.available && wasAvailable && gatewayAdapter) {
-      // Gateway disappeared — only cleanup if adapter is also dead
-      // (it may have already reconnected on its own before probe detected the gap)
-      if (!gatewayAdapter.isAlive()) {
-        disconnectGatewayAdapter();
-      }
-    }
-    // Broadcast availability change to clients (even if adapter state didn't change)
-    if (status.available !== wasAvailable) {
-      stateMachine.emit('state_changed', stateMachine.getSnapshot());
-    }
-  }, 5000);
-  // Initial probe
-  probeGateway().then((status) => {
-    cachedGatewayAvailable = status.available;
-    if (status.available) {
-      connectGatewayAdapter();
-    }
-    // Broadcast gateway availability to already-connected clients
-    stateMachine.emit('state_changed', stateMachine.getSnapshot());
-  });
-
-  // Gateway health check (30s cadence)
-  function updateGatewayHealth() {
-    checkGatewayHealth().then((hasError) => {
-      const changed = hasError !== cachedGatewayHasError;
-      cachedGatewayHasError = hasError;
-      if (changed) {
-        // Re-broadcast current state with updated gatewayHasError
-        stateMachine.emit('state_changed', stateMachine.getSnapshot());
-      }
-    });
-  }
-  const healthInterval = setInterval(() => {
-    if (!cachedGatewayAvailable) return;
-    updateGatewayHealth();
-  }, 30_000);
-  setTimeout(updateGatewayHealth, 5000);
-
-  // Usage update (5s tick for session timer)
-  const usageInterval = setInterval(() => {
-    if (wsServer.getClientCount() > 0) {
-      // TTL: if cache is older than 10 minutes, clear it so Android hides gauges
-      if (cachedApiUsage && lastApiFetchTime > 0 && (Date.now() - lastApiFetchTime) > USAGE_STALE_TTL) {
-        debug('daemon', `API usage cache expired (${Math.round((Date.now() - lastApiFetchTime) / 1000)}s old), clearing`);
-        cachedApiUsage = null;
-        apiUsageStale = false;
-      }
-      const snapshot = stateMachine.getSnapshot();
-      wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
-    }
-  }, 5000);
-
-  // Initial API usage fetch (10s delay — relay from sibling bridge, fallback to direct API)
-  const initialFetchTimer = setTimeout(() => {
-    fetchUsageRelayed(port).then((result) => {
-      if (result) {
-        cachedApiUsage = result.usage;
-        lastApiFetchTime = result.fetchedAt;
-        oauthConnected = true;
-        apiUsageStale = false;
-        if (result.usage.inferredBillingType) {
-          stateMachine.inferBillingType(result.usage.inferredBillingType);
-        }
-        const snapshot = stateMachine.getSnapshot();
-        wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
-      } else {
-        oauthConnected = hasOAuthToken();
-        if (cachedApiUsage) apiUsageStale = true;
-      }
-    });
-  }, 10_000);
-
-  // API usage refresh (90s — relay from sibling bridge, fallback to direct API)
-  const apiUsageInterval = setInterval(() => {
-    if (wsServer.getClientCount() > 0) {
-      fetchUsageRelayed(port).then((result) => {
-        if (result) {
-          cachedApiUsage = result.usage;
-          lastApiFetchTime = result.fetchedAt;
-          oauthConnected = true;
-          apiUsageStale = false;
-          if (result.usage.inferredBillingType) {
-            stateMachine.inferBillingType(result.usage.inferredBillingType);
-          }
-          const snapshot = stateMachine.getSnapshot();
-          wsServer.broadcast(buildUsageEvent(snapshot, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
-        } else {
-          oauthConnected = hasOAuthToken();
-          if (cachedApiUsage) apiUsageStale = true;
-        }
-      });
-    }
-  }, 60_000);
-
-  // Sessions list broadcast (10s)
-  const sessionsListInterval = setInterval(() => {
-    if (wsServer.getClientCount() > 0) {
-      const snapshot = stateMachine.getSnapshot();
-      buildEnrichedSessionsList(sessionId, snapshot.state).then((sessions) => {
-        wsServer.broadcast({ type: 'sessions_list', sessions } as BridgeEvent);
-      });
-    }
-  }, 10_000);
-
-  // ===== Gateway Adapter Lifecycle =====
+  // ===== Gateway adapter lifecycle =====
+  let gatewayAdapter: OpenClawAdapter | null = null;
+  let gatewayConnecting = false;
 
   function connectGatewayAdapter(): void {
     if (gatewayAdapter || gatewayConnecting) return;
     gatewayConnecting = true;
-
     log('[agentdeck] OpenClaw Gateway detected, connecting...');
+
     const adapter = new OpenClawAdapter({ autoReconnect: false });
 
-    // Wire adapter events → StateMachine
     adapter.on('event', (evt: AdapterEvent) => {
       switch (evt.source) {
         case 'hook':
-          if (evt.event === 'SessionStart') {
-            stateMachine.handleHookEvent('SessionStart', {});
-          } else if (evt.event === 'SessionEnd') {
-            stateMachine.handleHookEvent('SessionEnd', {});
-          }
+          if (evt.event === 'SessionStart') core.stateMachine.handleHookEvent('SessionStart', {});
+          else if (evt.event === 'SessionEnd') core.stateMachine.handleHookEvent('SessionEnd', {});
           break;
         case 'parser':
-          stateMachine.handleParserEvent(evt.event, evt.data);
+          core.stateMachine.handleParserEvent(evt.event, evt.data);
           break;
         case 'metadata':
           if (evt.event === 'model_catalog') {
             const models = evt.data?.models as ModelCatalogEntry[] | undefined;
             if (models) {
-              cachedModelCatalog = models;
-              debug('daemon', `Model catalog updated: ${models.length} models`);
-              const snap = stateMachine.getSnapshot();
-              wsServer.broadcast({
-                type: 'state_update',
-                state: snap.state,
-                permissionMode: snap.permissionMode,
-                agentType: 'openclaw',
-                modelCatalog: cachedModelCatalog,
+              core.cachedModelCatalog = models;
+              const snap = core.stateMachine.getSnapshot();
+              core.broadcast({
+                type: 'state_update', state: snap.state, permissionMode: snap.permissionMode,
+                agentType: 'openclaw', modelCatalog: core.cachedModelCatalog,
               } as BridgeEvent);
             }
           }
           break;
         case 'activity':
-          stateMachine.onPtyActivity();
+          core.stateMachine.onPtyActivity();
           break;
-        case 'timeline': {
+        case 'timeline':
           if (evt.entry) {
-            if (evt.upsert) {
-              bridgeTimeline.upsertEntry(evt.entry);
-            } else {
-              bridgeTimeline.addEntry(evt.entry);
-            }
-            if (evt.entry.type === 'tool_request') {
-              bridgeLogStream.trackToolRequest(evt.entry.raw);
-            }
+            if (evt.upsert) core.bridgeTimeline.upsertEntry(evt.entry);
+            else core.bridgeTimeline.addEntry(evt.entry);
+            if (evt.entry.type === 'tool_request') bridgeLogStream.trackToolRequest(evt.entry.raw);
           }
           break;
-        }
-
         case 'connection': {
-          const connEvt: BridgeEvent = { type: 'connection', status: evt.status };
-          wsServer.broadcast(connEvt);
-
-          // Start/stop log stream on gateway connect/disconnect
+          core.broadcast({ type: 'connection', status: evt.status } as BridgeEvent);
           if (evt.status === 'connected') {
             bridgeLogStream.start();
-          } else if (evt.status === 'disconnected') {
-            bridgeLogStream.stop();
-          }
-
-          if (evt.status === 'connected') {
             log('[agentdeck] OpenClaw Gateway connected');
-            // Transition to IDLE if still DISCONNECTED (daemon has no PTY to trigger this)
-            if (stateMachine.getSnapshot().state === 'disconnected') {
-              stateMachine.handleHookEvent('SessionStart', {});
+            if (core.stateMachine.getSnapshot().state === 'disconnected') {
+              core.stateMachine.handleHookEvent('SessionStart', {});
             }
-            // Force full state_update — StateMachine may not transition if already IDLE
-            const snap = stateMachine.getSnapshot();
-            wsServer.broadcast({
-              type: 'state_update',
-              state: snap.state,
-              permissionMode: snap.permissionMode,
+            // Force full state broadcast
+            const snap = core.stateMachine.getSnapshot();
+            core.wsServer.broadcast(core.buildStateEvent({
               agentType: 'openclaw',
               agentCapabilities: OPENCLAW_CAPABILITIES,
-              projectName: snap.projectName ?? projectName,
-              modelName: snap.modelName ?? undefined,
-              billingType: snap.billingType,
-              options: snap.options.length > 0 ? snap.options : undefined,
-              modelCatalog: cachedModelCatalog ?? undefined,
-              pairingUrl: wsUrl,
-              ollamaStatus: cachedOllamaStatus ?? undefined,
-              gatewayAvailable: true,
-              gatewayHasError: cachedGatewayHasError,
-            } as BridgeEvent);
-            wsServer.broadcast(buildUsageEvent(snap, cachedApiUsage, oauthConnected, cachedOllamaStatus, apiUsageStale));
+              snapshot: snap,
+            }));
+            core.broadcastUsage();
           } else {
+            bridgeLogStream.stop();
             log('[agentdeck] OpenClaw Gateway disconnected');
           }
           break;
@@ -709,95 +301,118 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       }
     });
 
-    adapter.on('exit', () => {
-      disconnectGatewayAdapter();
-    });
+    adapter.on('exit', () => disconnectGatewayAdapter());
 
-    // Start adapter with external server (no new HTTP server)
-    adapter.start({ port, externalServer: httpServer }).then(() => {
+    adapter.start({ port, externalServer: httpServer } as any).then(() => {
       gatewayAdapter = adapter;
       gatewayConnecting = false;
-      debug('daemon', 'OpenClaw adapter started');
     }).catch((err) => {
       log(`[agentdeck] Failed to connect to Gateway: ${err}`);
       gatewayConnecting = false;
-      // Adapter failed but gateway is still available — broadcast SITTING (not DORMANT)
-      stateMachine.emit('state_changed', stateMachine.getSnapshot());
+      core.stateMachine.emit('state_changed', core.stateMachine.getSnapshot());
     });
   }
 
   function disconnectGatewayAdapter(): void {
     if (!gatewayAdapter) return;
-    log('[agentdeck] OpenClaw Gateway lost, cleaning up adapter...');
-
+    log('[agentdeck] OpenClaw Gateway lost, cleaning up...');
     const wasAlive = gatewayAdapter.isAlive();
     gatewayAdapter.shutdown().catch(() => {});
     gatewayAdapter = null;
-    cachedModelCatalog = null;
-
-    // Only emit SessionEnd if adapter was still alive (hasn't already emitted its own via ws.close)
-    if (wasAlive) {
-      stateMachine.handleHookEvent('SessionEnd', {});
-    }
-    // Always broadcast disconnected to ensure clients are notified
-    wsServer.broadcast({ type: 'connection', status: 'disconnected' } as BridgeEvent);
+    core.cachedModelCatalog = null;
+    if (wasAlive) core.stateMachine.handleHookEvent('SessionEnd', {});
+    core.broadcast({ type: 'connection', status: 'disconnected' } as BridgeEvent);
   }
 
-  // ===== Shutdown =====
+  // ===== State changed → broadcast =====
+  core.stateMachine.on('state_changed', (snapshot) => {
+    const gwAlive = gatewayAdapter?.isAlive() ?? false;
+    core.wsServer.broadcast(core.buildStateEvent({
+      agentType: gwAlive ? 'openclaw' : 'daemon' as any,
+      agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
+      snapshot,
+    }));
+    core.maybeBroadcastSessionsList();
+    core.broadcastUsage();
+  });
 
-  let shutdownInProgress = false;
-
-  function shutdown(): void {
-    if (shutdownInProgress) return;
-    shutdownInProgress = true;
-
-    log('[agentdeck] Shutting down...');
-    clearInterval(usageInterval);
-    clearTimeout(initialFetchTimer);
-    clearInterval(apiUsageInterval);
-    clearInterval(ollamaInterval);
-    clearInterval(gatewayInterval);
-    clearInterval(healthInterval);
-    clearInterval(sessionsListInterval);
-    bridgeLogStream.stop();
-    displayMonitor.stop();
-    stopPixooBridge();
-    deregisterSession(sessionId);
-    cleanupAdbReverse(port);
-    mdnsCleanup();
-
-    if (gatewayAdapter) {
-      gatewayAdapter.shutdown().catch(() => {});
-      gatewayAdapter = null;
-    }
-
-    wsServer.close();
-    httpServer.close(() => {
-      process.exit(0);
-    });
-
-    setTimeout(() => {
-      process.exit(1);
-    }, 3000);
-  }
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-  process.on('uncaughtException', (err) => {
-    // mDNS "Service name already in use" is non-critical — don't crash
-    if (err?.message?.includes('already in use on the network')) {
-      log(`[agentdeck] mDNS conflict (ignored): ${err.message}`);
+  // ===== Commands from WS clients =====
+  core.wsServer.onCommand((cmd) => {
+    debug('daemon', `cmd: ${cmd.type}`);
+    if (gatewayAdapter?.isAlive() && gatewayAdapter.handleCommand(cmd)) {
+      switch (cmd.type) {
+        case 'respond': core.stateMachine.handleUserAction('respond'); break;
+        case 'interrupt': core.stateMachine.handleUserAction('interrupt'); break;
+        case 'escape': core.stateMachine.handleUserAction('interrupt'); break;
+        case 'select_option': core.stateMachine.handleUserAction('select_option'); break;
+        case 'send_prompt': core.stateMachine.handleUserAction('send_prompt'); break;
+      }
       return;
     }
-    log(`[agentdeck] Uncaught exception: ${err}`);
-    shutdown();
+    if (cmd.type === 'query_usage') {
+      fetchUsageRelayed(port).then((usage) => {
+        if (usage) core.updateApiUsage(usage);
+        else if (core.cachedApiUsage) core.apiUsageStale = true;
+      });
+    }
   });
-  process.on('unhandledRejection', (reason) => {
-    log(`[agentdeck] Unhandled rejection: ${reason}`);
-    shutdown();
+
+  // ===== Client connect =====
+  core.wsServer.onClientConnect((ws) => {
+    const gwAlive = gatewayAdapter?.isAlive() ?? false;
+    core.sendInitialState(ws, {
+      agentType: gwAlive ? 'openclaw' : 'daemon' as any,
+      agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
+      isAlive: gwAlive,
+    });
+
+    // Fetch usage on connect if stale
+    const cacheAge = Date.now() - core.lastApiFetchTime;
+    if (!core.cachedApiUsage || (core.lastApiFetchTime > 0 && cacheAge > 5 * 60 * 1000)) {
+      fetchUsageRelayed(port).then((usage) => {
+        if (usage) core.updateApiUsage(usage);
+        else {
+          core.oauthConnected = hasOAuthToken();
+          if (core.cachedApiUsage) core.apiUsageStale = true;
+        }
+      });
+    }
   });
+
+  // ===== Probes & polling =====
+  core.startOllamaProbe();
+  core.startGatewayProbe(5000,
+    () => connectGatewayAdapter(),
+    () => { if (gatewayAdapter && !gatewayAdapter.isAlive()) disconnectGatewayAdapter(); },
+  );
+  core.startGatewayHealthCheck();
+  core.startUsageTick();
+  core.startApiUsagePolling(60_000, () => fetchUsageRelayed(port));
+  core.startSessionsListPolling();
+
+  // Initial usage fetch (delayed 10s)
+  core.addTimeout(setTimeout(() => {
+    fetchUsageRelayed(port).then((usage) => {
+      if (usage) core.updateApiUsage(usage);
+      else {
+        core.oauthConnected = hasOAuthToken();
+        if (core.cachedApiUsage) core.apiUsageStale = true;
+      }
+    });
+  }, 10_000));
+
+  // ===== Shutdown =====
+  core.onShutdown(async () => {
+    bridgeLogStream.stop();
+    if (gatewayAdapter) {
+      await gatewayAdapter.shutdown().catch(() => {});
+      gatewayAdapter = null;
+    }
+    await stopModules(startedModules);
+    httpServer.close(() => process.exit(0));
+  });
+
+  core.registerProcessHandlers('agentdeck');
 
   log(`[agentdeck] Daemon running. Gateway probe active.`);
 }
-
-// buildUsageEvent is imported from ./usage-event.js

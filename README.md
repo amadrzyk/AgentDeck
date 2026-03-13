@@ -141,7 +141,7 @@ The `pnpm setup` command:
 4. Generates icon assets (16 PNGs)
 5. Installs Claude Code hooks
 6. Links the Stream Deck plugin
-7. Links the `sdc` CLI globally
+7. Links the `agentdeck` / `sdc` CLI globally
 8. Checks optional dependencies (sox, whisper.cpp)
 
 After setup, **restart the Stream Deck app**, then run:
@@ -200,7 +200,7 @@ See **[Voice Setup Guide](docs/voice-setup.md)** for full instructions including
 ### Start
 
 ```bash
-sdc
+agentdeck claude
 ```
 
 This starts the bridge on port 9120 (HTTP + WebSocket), spawns Claude Code inside a PTY, and proxies your terminal transparently. Use Claude exactly as before — the Stream Deck adds a parallel control channel.
@@ -210,11 +210,17 @@ This starts the bridge on port 9120 (HTTP + WebSocket), spawns Claude Code insid
 ### CLI Commands
 
 ```bash
-sdc status           # check bridge/session state
-sdc stop             # end session
-sdc --port 9200      # custom port
-sdc --command 'claude --model opus'  # custom Claude command
+agentdeck status             # check bridge/session state
+agentdeck stop               # end session
+agentdeck claude -p 9200     # custom port
+agentdeck claude -c 'claude --model opus'  # custom Claude command
+agentdeck monitor            # hook-only bridge (no PTY)
+agentdeck daemon start       # start monitoring daemon
+agentdeck devices            # show connected devices
+agentdeck qr                 # show pairing QR code
 ```
+
+`sdc` is an alias for `agentdeck` — both work identically.
 
 ---
 
@@ -318,7 +324,7 @@ The Android app connects to the same bridge server over your local network, givi
 The app finds your bridge automatically:
 
 1. **mDNS** — the bridge advertises `_agentdeck._tcp` on your local network; the app discovers it within seconds
-2. **QR pairing** — run `sdc qr` on your Mac, scan with the app's camera (CameraX + ML Kit)
+2. **QR pairing** — run `agentdeck qr` on your Mac, scan with the app's camera (CameraX + ML Kit)
 3. **Manual** — enter the bridge IP and port in Settings
 
 Once connected, the app receives real-time state updates over WebSocket and can send commands back to the bridge.
@@ -359,7 +365,7 @@ The four Quick Action buttons (slots 3-6) are configurable via the Stream Deck P
 | 5 | COMMIT | `/commit` |
 | 6 | CLEAR | `/clear` |
 
-Slot 3 also shows **START** when disconnected (spawns a new `sdc` session).
+Slot 3 also shows **START** when disconnected (spawns a new `agentdeck claude` session).
 
 ### Prompt Templates
 
@@ -396,7 +402,7 @@ Edit `config/prompt-templates.json` to customize the prompts cycled by the **Act
 | Hooks not firing | Hooks not installed or stale | `node hooks/dist/install.js` (re-installs all 7 hooks) |
 | Need to remove hooks | Uninstalling AgentDeck | `node hooks/dist/install.js uninstall` |
 | Plugin loads but buttons blank | Plugin needs rebuild | `pnpm build && pnpm generate-icons`, restart Stream Deck app |
-| Android app can't find bridge | mDNS blocked on network | Use QR pairing (`sdc qr`) or enter IP manually in Settings |
+| Android app can't find bridge | mDNS blocked on network | Use QR pairing (`agentdeck qr`) or enter IP manually in Settings |
 | Android shows "Not Connected" | Bridge not reachable | Verify same LAN; for USB: `adb reverse tcp:9120 tcp:9120` then connect to 127.0.0.1:9120 |
 | E-ink ghosting on Crema | Missing full GC16 refresh | State transitions trigger full refresh automatically; force refresh by toggling bridge connection |
 

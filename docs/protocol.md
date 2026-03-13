@@ -49,8 +49,8 @@ Internal reference for the AgentDeck state machine, WebSocket protocol, and proj
 ```
 
 **Multi-surface control (macOS host + Stream Deck + Android)**
-- The macOS bridge (`sdc`) listens on `0.0.0.0:9120`; local clients are auto-trusted, LAN clients must present the auth token stored at `~/.agentdeck/auth-token`.
-- Stream Deck plugin connects locally; Android tablet/e-ink app connects over the same WebSocket (pair via `sdc qr`) and mirrors encoder LCDs and buttons.
+- The macOS bridge (`agentdeck` / `sdc`) listens on `0.0.0.0:9120`; local clients are auto-trusted, LAN clients must present the auth token stored at `~/.agentdeck/auth-token`.
+- Stream Deck plugin connects locally; Android tablet/e-ink app connects over the same WebSocket (pair via `agentdeck qr`) and mirrors encoder LCDs and buttons.
 - Bridge computes encoder state and relays the Stream Deck slot map. If the plugin is absent, Android falls back to the v3 default layout while staying fully controllable.
 - Voice from Android uploads WAV to `POST /voice/transcribe`; utility actions (volume/brightness/media/timer) go through the bridge's macOS `osascript` proxy, so either surface can monitor and steer the agent independently or simultaneously.
 
@@ -64,7 +64,7 @@ The bridge combines hook events and PTY output parsing to maintain 6 states:
                     +----------------+
          +---------|  DISCONNECTED  |<---- SessionEnd hook / PTY closed
          |         +----------------+
-         | sdc start
+         | agentdeck claude
          v
     +-----------+  Stop hook / idle detected
     |   IDLE    |<----------------------------------+
@@ -181,8 +181,10 @@ AgentDeck/
 │
 ├── bridge/                       # Bridge server (PTY + Hook + WS + Voice)
 │   └── src/
-│       ├── index.ts              # sdc CLI entry (commander)
-│       ├── pty-manager.ts        # node-pty wrapper: spawn, proxy, interrupt
+│       ├── cli.ts                # Unified CLI entry (commander): claude/monitor/daemon/status/...
+│       ├── index.ts              # startSession() — session lifecycle (PTY or monitor)
+│       ├── bridge-core.ts        # BridgeCore — shared infra (SM, WS, Usage, modules)
+│       ├── pty-manager.ts        # node-pty wrapper (dynamic import): spawn, proxy, interrupt
 │       ├── output-parser.ts      # ANSI parsing + pattern matching
 │       ├── hook-server.ts        # HTTP POST receiver (Claude Code hooks) + SSE + voice endpoint
 │       ├── state-machine.ts      # Hook + PTY event → state management
@@ -198,12 +200,22 @@ AgentDeck/
 │       ├── ollama-probe.ts       # Ollama process status + running models (5s polling)
 │       ├── model-catalog.ts      # OAuth model catalog fetch
 │       ├── gateway-probe.ts      # OpenClaw Gateway TCP probe + doctor health check
-│       ├── daemon-server.ts      # Daemon monitoring server (multi-session aggregation)
+│       ├── daemon.ts             # Legacy daemon entry (backward compat)
+│       ├── daemon-server.ts      # startDaemon() — daemon lifecycle (multi-session aggregation)
 │       ├── display-monitor.ts    # Display sleep sync (LCD backlight, screen wake)
 │       ├── adapters/
 │       │   ├── index.ts              # createAdapter() factory
-│       │   ├── claude-code.ts        # ClaudeCodeAdapter (PTY + Parser + HookServer)
+│       │   ├── pty-adapter.ts        # PtyAdapter abstract base (PTY + HookServer common)
+│       │   ├── claude-code.ts        # ClaudeCodeAdapter extends PtyAdapter (OutputParser + mode switch)
+│       │   ├── monitor.ts            # MonitorAdapter (hook-only, no PTY)
 │       │   └── openclaw.ts           # OpenClawAdapter (Gateway WebSocket)
+│       ├── modules/
+│       │   ├── types.ts              # DeviceModule interface, BridgeContext, ModuleConfigs
+│       │   ├── index.ts              # Module registry: createDefaultModules, initModules, stopModules
+│       │   ├── mdns-module.ts        # mDNS advertisement module
+│       │   ├── adb-module.ts         # ADB reverse tunnel module (auto-detect)
+│       │   ├── serial-module.ts      # ESP32 serial module (auto-detect)
+│       │   └── pixoo-module.ts       # Pixoo64 LED matrix module (auto-detect)
 │       ├── check-deps.ts         # Runtime dependency check
 │       ├── logger.ts             # Structured logging
 │       └── types.ts              # Bridge-local types + shared re-exports

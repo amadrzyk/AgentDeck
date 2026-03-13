@@ -1,13 +1,33 @@
-import * as pty from 'node-pty';
 import { EventEmitter } from 'events';
 import { debug } from './logger.js';
 
-export class PtyManager extends EventEmitter {
-  private ptyProcess: pty.IPty | null = null;
+/** Minimal interface matching node-pty's IPty */
+interface IPty {
+  pid: number;
+  onData: (callback: (data: string) => void) => void;
+  onExit: (callback: (e: { exitCode: number; signal?: number }) => void) => void;
+  write: (data: string) => void;
+  resize: (cols: number, rows: number) => void;
+  kill: () => void;
+}
 
-  spawn(command = 'claude', extraEnv?: Record<string, string>): void {
+export class PtyManager extends EventEmitter {
+  private ptyProcess: IPty | null = null;
+
+  async spawn(command = 'claude', extraEnv?: Record<string, string>): Promise<void> {
     if (this.ptyProcess) {
       throw new Error('PTY process already running');
+    }
+
+    // Dynamic import — node-pty is optionalDependency
+    let pty: typeof import('node-pty');
+    try {
+      pty = await import('node-pty');
+    } catch {
+      throw new Error(
+        'node-pty is not installed. Install it with: npm install node-pty\n' +
+        'If you don\'t need PTY (e.g. daemon/monitor mode), this dependency is optional.',
+      );
     }
 
     const shell = process.env.SHELL || '/bin/zsh';
@@ -18,7 +38,7 @@ export class PtyManager extends EventEmitter {
 
     const env = { ...(process.env as Record<string, string>), ...extraEnv };
 
-    this.ptyProcess = pty.spawn(shell, ['-l', '-c', command], {
+    const proc = pty.spawn(shell, ['-l', '-c', command], {
       name: 'xterm-256color',
       cols,
       rows,
@@ -26,17 +46,18 @@ export class PtyManager extends EventEmitter {
       env,
       handleFlowControl: true,
     });
+    this.ptyProcess = proc;
 
-    debug('PTY', `spawned pid=${this.ptyProcess.pid}`);
+    debug('PTY', `spawned pid=${proc.pid}`);
 
-    this.ptyProcess.onData((data: string) => {
+    proc.onData((data: string) => {
       this.emit('data', data);
     });
 
-    this.ptyProcess.onExit(({ exitCode, signal }) => {
-      debug('PTY', `exit: code=${exitCode} signal=${signal}`);
+    proc.onExit(({ exitCode, signal }) => {
+      debug('PTY', `exit: code=${exitCode} signal=${signal ?? 0}`);
       this.ptyProcess = null;
-      this.emit('exit', exitCode, signal);
+      this.emit('exit', exitCode, signal ?? 0);
     });
   }
 

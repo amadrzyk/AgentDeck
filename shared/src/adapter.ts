@@ -5,7 +5,7 @@ import type { TimelineEntry } from './timeline.js';
 
 // ===== Agent Types =====
 
-export type AgentType = 'claude-code' | 'openclaw' | 'codex-cli';
+export type AgentType = 'claude-code' | 'openclaw' | 'codex-cli' | 'monitor';
 
 export interface AgentCapabilities {
   type: AgentType;
@@ -195,6 +195,19 @@ export const OPENCLAW_CAPABILITIES: AgentCapabilities = {
   hasSuggestedPrompts: false,
   hasApiUsage: false,
   hasModelCatalog: true,
+};
+
+export const MONITOR_CAPABILITIES: AgentCapabilities = {
+  type: 'monitor',
+  displayName: 'Monitor',
+  hasTerminal: false,
+  hasModeSwitching: false,
+  hasDiffReview: false,
+  hasOptionLists: false,
+  hasNavigablePrompts: false,
+  hasSuggestedPrompts: false,
+  hasApiUsage: true,
+  hasModelCatalog: false,
 };
 
 /** Default OpenClaw Gateway port */

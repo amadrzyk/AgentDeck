@@ -22,6 +22,7 @@ export {
   type AdapterTimelineEvent,
   CLAUDE_CODE_CAPABILITIES,
   OPENCLAW_CAPABILITIES,
+  MONITOR_CAPABILITIES,
   OPENCLAW_GATEWAY_PORT,
 } from '@agentdeck/shared';
 

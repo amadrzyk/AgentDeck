@@ -4,9 +4,9 @@ Stream Deck+ controller for Claude Code CLI — a bidirectional local control sy
 
 ## Architecture
 
-- **bridge/** — Node.js server: PTY manager, output parser, hook HTTP server, state machine, WebSocket server, voice (whisper.cpp), usage API client, mDNS discovery, auth token, SSE broadcast
+- **bridge/** — Node.js server: BridgeCore (shared infra), PtyAdapter hierarchy, device modules, output parser, hook HTTP server, state machine, WebSocket server, voice (whisper.cpp), usage API client, mDNS discovery, auth token, SSE broadcast
 - **plugin/** — Stream Deck SDK v2 plugin: actions for buttons/encoders, bridge WebSocket client
-- **shared/** — TypeScript types shared between bridge and plugin (protocol, states, timeline)
+- **shared/** — TypeScript types shared between bridge and plugin (protocol, states, timeline, adapter interfaces)
 - **hooks/** — Claude Code hook installer for `~/.claude/settings.local.json`
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package: `npx @agentdeck/setup` one-command installer
@@ -105,19 +105,47 @@ pnpm test                # run unit tests (vitest)
 cd plugin && streamdeck link   # link plugin to Stream Deck app
 ```
 
-## Run
+## CLI
+
+Both `agentdeck` and `sdc` are aliases for the same CLI (`bridge/src/cli.ts`).
 
 ```bash
-sdc                # start bridge + spawn claude + attach terminal
-sdc status         # check bridge status
-sdc stop           # stop bridge and session
+# Session commands (agent name = top-level command)
+agentdeck claude             # Claude Code session (PTY + bridge)
+agentdeck claude --local     # No device modules (WS only)
+agentdeck monitor            # Hook-only bridge (no PTY — run `claude` separately)
+
+# Daemon (singleton infrastructure)
+agentdeck daemon start       # Start monitoring daemon (foreground)
+agentdeck daemon stop        # Stop daemon
+agentdeck daemon status      # Daemon status
+agentdeck daemon install     # Register LaunchAgent
+agentdeck daemon uninstall   # Remove LaunchAgent
+
+# Session management
+agentdeck status             # All sessions + daemon status
+agentdeck stop [session]     # Stop a session
+agentdeck attach [session]   # Attach terminal to session
+
+# Utilities
+agentdeck devices            # Connected devices
+agentdeck qr                 # Pairing QR code
+agentdeck diag               # Diagnostic dump
+agentdeck pixoo {scan|add|list|remove|test}
+agentdeck wifi-setup         # ESP32 WiFi setup
 ```
+
+**Module flags**: `--local` (all off), `--no-mdns`, `--no-adb`, `--no-serial`, `--no-pixoo`
 
 ## Key Design Decisions
 
 - **pnpm workspaces** for monorepo management
 - **ES modules** throughout (type: "module")
 - **Node16 module resolution** in TypeScript
+- **BridgeCore** (`bridge/src/bridge-core.ts`): Shared infrastructure class used by both `startSession()` (index.ts) and `startDaemon()` (daemon-server.ts). Contains StateMachine, WsServer, UsageTracker, DisplayMonitor, OllamaProbe, state caches, and common event wiring. Eliminates ~600 lines of duplication
+- **PtyAdapter hierarchy** (`bridge/src/adapters/pty-adapter.ts`): Abstract base class for PTY-based agents. Subclasses implement `getDefaultCommand()`, `wireOutputParser()`, `feedParser()`, `handleAgentCommand()`. `ClaudeCodeAdapter` extends PtyAdapter with OutputParser + Shift+Tab mode switching. `MonitorAdapter` is hook-only (no PTY)
+- **Device module system** (`bridge/src/modules/`): Pluggable `DeviceModule` interface with auto-detect. Modules: mdns (always), adb/serial/pixoo (`'auto'` — detect at startup). CLI flags: `--local` (all off), `--no-{module}`
+- **node-pty optional**: `optionalDependencies` + dynamic `await import('node-pty')` in PtyManager. Daemon/monitor modes never load the native module
 - **Port 9120–9139** for multi-session (base 9120, auto-increment, max 20). `AGENTDECK_PORT` env var injected into Claude process so hooks POST to correct bridge. **Whisper-server** uses fixed singleton port **9100** (`~/.agentdeck/whisper-server.json` info file for discovery, last session exit kills server)
 - **Shift+Tab** (`\x1b[Z`) for Claude Code mode switching (100ms debounce)
 - **sox/rec** for audio capture, **whisper-server** for transcription (싱글톤 포트 9100, 세션 간 공유, `detached` 프로세스). 미설치 시 **whisper-cli** 폴백. GPU 메모리 ~1.8GB (세션 수 무관, 1 인스턴스)
@@ -137,14 +165,14 @@ sdc stop           # stop bridge and session
 - **OC Timeline panel**: OpenClaw 모드에서 E2+E3 합체 400px 와이드 캔버스로 이벤트 타임라인 표시. 배경 `#000000` (LCD 네이티브 블랙 — 투명 효과). Fisheye 렌더링 (font size 15→10px, opacity 1.0→0.3 보간), grouped entries (연속 중복 60s 윈도우 내 병합), detail mode (push 토글). `timeline-store.ts` 싱글톤, `timeline-renderer.ts` SVG 렌더러. 이벤트 `~/.agentdeck/timeline.json` 디스크 영속, 재연결 시 `events.history` RPC로 오프라인 이벤트 복구. OC Response 버튼: GATEWAY (웹 UI) + GO ON (continue) 프리셋. **시각 3계층**: (1) `typeColor()` 이벤트 타입별 컬러 코딩 (green/blue/amber/red/cyan/purple), 하단 2px 활동 밀도 바 (2) `log-stream.ts` — `openclaw logs --follow --json` 파싱으로 model_call/model_response/memory_recall/tool_exec 이벤트 추가, WS tool_request와 dedup (3) Usage 버튼 `oc-usage` 페이지 (`openclaw status --usage --json` 60s 폴링). **Bridge→Android relay**: `shared/src/timeline.ts`에 `TimelineEntry` 타입 + `parseLogLine()` 공유. Bridge OpenClaw 모드에서 `BridgeTimelineStore` + `BridgeLogStream` → `timeline_event`/`timeline_history` BridgeEvent로 WS broadcast. Adapter가 chat tracking (prompt/duration/tools) → rich `chat_start`/`chat_end`/`tool_request`/`chat_response` 이벤트 생성. Android `StateTimelineGenerator`는 bridge timeline 수신 시 로컬 생성 억제 (`receivingBridgeTimeline` 플래그). **Timeline enrichment pipeline**: (1) Gateway `chat` delta에서 `message.content[].text` 추출 (`extractMessageText()`) → `accumulatedResponse` 축적 (2) 20~200자 축적 시 `extractTopicHint()` → `chat_start` 업데이트 (프롬프트 없는 cron/웹 작업용) (3) Final에서 `chat_response` (응답 전문) + `chat_end` (도구/시간 요약) 생성 (4) async `summarizeResponse()` → MLX qwen (port 8800, `/no_think`) → Ollama fallback → 한국어 1줄 요약으로 `chat_end` enrichment. Bridge와 plugin 양쪽에 요약기 존재 (plugin은 bridge 없이도 단독 동작). LLM 실패 시 60s TTL 후 재시도 (영구 disable 방지). **Plugin `receivingBridgeTimeline`**: bridge 연결 시 plugin gateway-client 로컬 timeline 생성 억제, bridge 단절 시 자동 복구. ConnectionManager `FORWARDED_EVENTS`에 `timeline_event`/`timeline_history` 포함
 - **Encoder takeover race guard**: `takeoverGeneration` counter in `plugin.ts` — exit/enter `.then()` 콜백이 실행 시점에 이미 새 전환이 발생했으면 스킵. PROCESSING→PERMISSION 빠른 전환 시 exit 콜백이 enter 이후 layout을 덮어쓰는 레이스 방지
 - **Button label intelligence**: 3-tier 라벨 축약 시스템 — (1) CJK-aware 픽셀 기반 줄바꿈 (`text-utils.ts`) (2) 로컬 휴리스틱 약어 (`abbreviateLabel`) (3) `claude -p --model haiku` CLI 폴백 (`label-summarizer.ts`). 1-2단계 즉시(0ms), 3단계 1-3초(캐시 200개). 약어된 버튼 우하단 `~` 표시. CJK 문자 1em, Latin 0.55em 폭 계산. Wide canvas는 충분한 가로폭이라 변경 불필요
-- **Version compatibility check**: `sdc` 시작 시 Claude Code 버전 → npm registry (3s) → GitHub raw JSON fallback (3s) 순으로 호환성 조회. `bridge/package.json`의 `compatibleClaudeCode` semver range로 판정. 비호환 시 자동 `npm install -g @agentdeck/bridge@latest` + 재시작 안내. `~/.agentdeck/compatibility.json` 상태 캐시 (1시간 throttle). `--no-update-check`로 비활성화. **절대 startup을 block하지 않음** — 모든 실패 케이스는 경고 후 진행
+- **Version compatibility check**: `agentdeck claude` 시작 시 Claude Code 버전 → npm registry (3s) → GitHub raw JSON fallback (3s) 순으로 호환성 조회. `bridge/package.json`의 `compatibleClaudeCode` semver range로 판정. 비호환 시 자동 `npm install -g @agentdeck/bridge@latest` + 재시작 안내. `~/.agentdeck/compatibility.json` 상태 캐시 (1시간 throttle). `--no-update-check`로 비활성화. **절대 startup을 block하지 않음** — 모든 실패 케이스는 경고 후 진행
 - **npm packages**: `@agentdeck/shared`, `@agentdeck/bridge`, `@agentdeck/setup` — public npm packages (MIT license)
 - **Gateway health check**: `checkGatewayHealth()` in `gateway-probe.ts` — `openclaw doctor --json` 30초 간격 폴링. warn/error 감지 시 `gatewayHasError: true`를 `state_update`에 포함. Android 가재가 SICK 상태로 전환 (탈색, 기울기, 늘어진 집게). Gateway 미접속 시 폴링 스킵
-- **Daemon singleton guard**: `findExistingDaemon()` in `session-registry.ts` — `agentType='daemon'` 검색 + PID alive 체크. `daemon-server.ts` `startDaemon()` 진입부 + `daemon.ts` CLI `start` action 양쪽에서 체크. 기존 daemon 있으면 `process.exit(0)` (LaunchAgent KeepAlive 재시작 루프 방지). 이중 daemon으로 인한 Gateway 이벤트 중복 relay, mDNS 충돌, timeline 중복 방지
+- **Daemon singleton guard**: `findExistingDaemon()` in `session-registry.ts` — `agentType='daemon'` 검색 + PID alive 체크. `daemon-server.ts` `startDaemon()` 진입부 + `cli.ts` `daemon start` action 양쪽에서 체크. 기존 daemon 있으면 `process.exit(0)` (LaunchAgent KeepAlive 재시작 루프 방지). 이중 daemon으로 인한 Gateway 이벤트 중복 relay, mDNS 충돌, timeline 중복 방지
 - **Daemon usage relay**: Daemon `fetchUsageRelayed()` — (1) sibling bridge `GET /usage` HTTP 중계 (2) WS 연결로 `usage_update` 이벤트 수신 (3) sibling 없을 때만 직접 API. Sibling 있으면 직접 API 호출 안 함 (429 방지). Bridge `hook-server.ts` `GET /usage` 엔드포인트 (no auth, local only)
 - **Multi-surface monitoring**: mDNS (`_agentdeck._tcp`), auth token (`~/.agentdeck/auth-token`), SSE (`/sse`), remote WS token validation. `0.0.0.0` binding for LAN access
 - **Android launcher**: `android/` — Jetpack Compose, minSdk 29, CATEGORY_HOME, NSD mDNS discovery, QR pairing (CameraX + ML Kit), e-ink detection (Crema/Onyx/Kobo). **3-tab nav**: Dashboard (terrarium bg + HUD overlay panels, connection overlay when disconnected) / Deck (encoder strip + 2×4 button grid + context area) / Settings. MonitorService: CPU wake lock + system stay-on + screen wake on state change (e-ink). **Deck encoder strip**: 4-panel LCD mirroring (Utility/Action/Session/Voice), touch gestures (swipe=rotate, tap=push, long-press=record). **Deck button grid**: Bridge `button_state` 프로토콜 우선, 로컬 fallback. CompactStatusBar(36dp) 상단 + 직사각형 버튼(80dp) + 넓은 ContextArea. 터치 피드백(scale 0.95+alpha 0.85), AWAITING시 전체 옵션 리스트 항상 표시, PROCESSING시 LinearProgressIndicator, IDLE시 suggestedPrompt AssistChip. **Voice**: Android AudioRecord → WAV → HTTP POST `/voice/transcribe` → whisper. **Utility proxy**: `bridge/src/utility-proxy.ts` — osascript macOS volume/brightness/media control via Android remote. **Slot map**: Plugin reports SD+ profile layout → Bridge caches → Android mirrors dynamically
-- **Setup-required UI**: Plugin detects `sdc` not installed → INSTALL button → `npx @agentdeck/setup` via iTerm
+- **Setup-required UI**: Plugin detects `agentdeck` not installed → INSTALL button → `npx @agentdeck/setup` via iTerm
 
 ## v3 Layout (0.3.0)
 
