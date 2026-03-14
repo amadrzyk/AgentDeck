@@ -1,5 +1,6 @@
 import type { BridgeEvent, StateSnapshot } from './types.js';
 import type { ApiUsageData } from './usage-api.js';
+import { getTokenStatus } from './usage-api.js';
 import type { OllamaStatus } from './ollama-probe.js';
 
 /**
@@ -36,5 +37,6 @@ export function buildUsageEvent(
     oauthConnected: oauthStatus,
     ollamaStatus: ollamaStatus ?? undefined,
     usageStale: stale || undefined,
+    tokenStatus: getTokenStatus() !== 'unknown' ? getTokenStatus() : undefined,
   };
 }

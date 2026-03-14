@@ -45,7 +45,7 @@ import {
 import { loadWifiConfig } from './wifi-config.js';
 import { getAdbDeviceCount } from './adb-reverse.js';
 import { esp32ConnectionCount, getESP32Ports } from './esp32-serial.js';
-import { getPixooDeviceDetails } from './pixoo/pixoo-bridge.js';
+import { getPixooDeviceDetails, getLastFrame, renderPreviewFrame } from './pixoo/pixoo-bridge.js';
 import {
   BRIDGE_WS_PORT,
   State,
@@ -230,17 +230,31 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     hookServer.setMeta({ agentType, projectName });
     hookServer.setVoiceManager(voiceManager);
     hookServer.onApiUsage(() => ({ usage: core.cachedApiUsage, fetchedAt: core.lastApiFetchTime }));
+    hookServer.pairingToken = core.authToken;
   } else if (adapter instanceof MonitorAdapter) {
     hookServer = adapter.getHookServer();
     hookServer.setMeta({ agentType, projectName });
     hookServer.setVoiceManager(voiceManager);
     hookServer.onApiUsage(() => ({ usage: core.cachedApiUsage, fetchedAt: core.lastApiFetchTime }));
+    hookServer.pairingToken = core.authToken;
   }
   const broadcastSse = (event: BridgeEvent) => hookServer?.broadcastSse(event);
   core.setSseBroadcast(broadcastSse);
 
   // ===== Display monitor =====
   core.wireDisplayMonitor();
+
+  // Register process handlers early (before module init) so uncaughtException
+  // handler is active before mDNS module starts — suppresses "already in use" errors
+  core.registerProcessHandlers('sdc');
+
+  // Override unhandledRejection to not shutdown (index.ts original behavior)
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', (reason) => {
+    log(`[sdc] Unhandled rejection: ${reason}`);
+    debug('Bridge', `Unhandled rejection stack: ${reason instanceof Error ? reason.stack : reason}`);
+    // Don't shutdown — non-fatal
+  });
 
   // ===== Device modules =====
   const moduleConfigs: ModuleConfigs = opts.modules ?? {
@@ -299,6 +313,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       { type: 'adb', count: getAdbDeviceCount() },
     ],
   }));
+
+  // Pixoo live preview frame getter for GET /pixoo/frame
+  hookServer?.setPixooFrameGetter(() => getLastFrame() ?? renderPreviewFrame());
 
   // ===== Diagnostics =====
   adapter.onDiag((tail) => createDiagDump(core.stateMachine, core.wsServer, journal, ptyRingBuffer, tail));
@@ -398,13 +415,10 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     }
   });
 
-  // Adapter exit
+  // Adapter exit — always shutdown (shutdownInProgress guard prevents double-shutdown)
   adapter.on('exit', () => {
     log('[sdc] Agent process exited');
-    if (previousBridgeState === State.IDLE && core.stateMachine.getSnapshot().state === State.DISCONNECTED) {
-      log('[sdc] Agent exited before initialization — shutting down');
-      shutdown();
-    }
+    shutdown();
   });
 
   // Default idle button config
@@ -638,7 +652,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   // ===== Polling =====
   core.startUsageTick();
-  core.startApiUsagePolling(45_000);
+  core.startApiUsagePolling(90_000);
   core.startOllamaProbe();
   core.startGatewayProbe(800);
   core.startGatewayHealthCheck();
@@ -884,6 +898,8 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     log('[sdc] Shutting down...');
 
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    process.stdin.pause();
+    process.stdin.removeAllListeners();
 
     utilityProxy.cleanup();
     voiceManager.disconnectFromServer();
@@ -899,15 +915,6 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     core.shutdown();
   }
 
-  core.registerProcessHandlers('sdc');
-
-  // Override unhandledRejection to not shutdown (index.ts original behavior)
-  process.removeAllListeners('unhandledRejection');
-  process.on('unhandledRejection', (reason) => {
-    log(`[sdc] Unhandled rejection: ${reason}`);
-    debug('Bridge', `Unhandled rejection stack: ${reason instanceof Error ? reason.stack : reason}`);
-    // Don't shutdown — non-fatal
-  });
 }
 
 // ===== Claude Code timeline wiring =====

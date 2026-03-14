@@ -6,6 +6,9 @@ import streamDeck, {
   WillDisappearEvent,
 } from '@elgato/streamdeck';
 import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import { State, augmentedPath, resolveOpenClawBin, getLanIp, OPENCLAW_GATEWAY_PORT, BRIDGE_HTTP_PORT, type BillingType, type AgentCapabilities, type ModelCatalogEntry } from '@agentdeck/shared';
 import type { AgentLink } from '../agent-link.js';
 import { renderButton, svgToDataUrl } from '../renderers/button-renderer.js';
@@ -115,8 +118,85 @@ let overrideConfig: ButtonConfig | null = null;
 
 const actionIds: string[] = [];
 
+// ---- Shared file cache (written by bridge, read by plugin) ----
+const USAGE_CACHE_FILE = join(homedir(), '.agentdeck', 'usage-cache.json');
+const FILE_CACHE_TTL_MS = 120_000; // 120s — same as bridge
+
+interface UsageCacheFile {
+  data: {
+    fiveHourPercent: number | null;
+    fiveHourResetsAt: string | null;
+    sevenDayPercent: number | null;
+    sevenDayResetsAt: string | null;
+    extraUsageEnabled: boolean;
+    extraUsageMonthlyLimit: number | null;
+    extraUsageUsedCredits: number | null;
+    extraUsageUtilization: number | null;
+    inferredBillingType: 'subscription' | 'api' | null;
+  };
+  fetchedAt: number;
+}
+
+function readUsageFileCache(): UsageCacheFile | null {
+  try {
+    const raw = readFileSync(USAGE_CACHE_FILE, 'utf-8');
+    const cache = JSON.parse(raw) as UsageCacheFile;
+    if (cache?.data && typeof cache.fetchedAt === 'number') return cache;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function applyUsageCacheData(d: UsageCacheFile['data']): void {
+  const hasRateLimits = d.fiveHourPercent != null || d.sevenDayPercent != null;
+  if (hasRateLimits && billingType === 'unknown') billingType = 'subscription';
+  else if (!hasRateLimits && billingType === 'unknown') billingType = 'api';
+
+  if (d.fiveHourPercent != null) fiveHourPercent = d.fiveHourPercent;
+  if (d.fiveHourResetsAt) fiveHourResetsAt = d.fiveHourResetsAt;
+  if (d.sevenDayPercent != null) sevenDayPercent = d.sevenDayPercent;
+  if (d.sevenDayResetsAt) sevenDayResetsAt = d.sevenDayResetsAt;
+  if (d.extraUsageEnabled != null) extraUsageEnabled = d.extraUsageEnabled;
+  if (d.extraUsageMonthlyLimit != null) extraUsageMonthlyLimit = d.extraUsageMonthlyLimit;
+  if (d.extraUsageUsedCredits != null) extraUsageUsedCredits = d.extraUsageUsedCredits;
+  if (d.extraUsageUtilization != null) extraUsageUtilization = d.extraUsageUtilization;
+}
+
+// ---- Parsing helpers (handle multiple API response shapes) ----
+function parseStandaloneUtilization(limitObj: unknown): { utilization: number | null; resetsAt: string | null } {
+  if (limitObj == null) return { utilization: null, resetsAt: null };
+  if (typeof limitObj === 'number') return { utilization: limitObj, resetsAt: null };
+  if (typeof limitObj === 'object') {
+    const obj = limitObj as Record<string, unknown>;
+    const util = typeof obj.utilization === 'number' ? obj.utilization
+      : typeof obj.percentage === 'number' ? obj.percentage
+      : typeof obj.percent === 'number' ? obj.percent
+      : typeof obj.usage === 'number' ? obj.usage
+      : null;
+    const reset = typeof obj.resets_at === 'string' ? obj.resets_at
+      : typeof obj.resetsAt === 'string' ? obj.resetsAt
+      : typeof obj.reset_at === 'string' ? obj.reset_at
+      : typeof obj.expires_at === 'string' ? obj.expires_at
+      : null;
+    return { utilization: util, resetsAt: reset };
+  }
+  return { utilization: null, resetsAt: null };
+}
+
 // ---- Standalone OAuth usage fetch (works without bridge) ----
 async function fetchStandaloneUsage(): Promise<void> {
+  // 1. Check shared file cache first (written by bridge)
+  const fileCache = readUsageFileCache();
+  if (fileCache && (Date.now() - fileCache.fetchedAt) < FILE_CACHE_TTL_MS) {
+    dlog('UsaBut', `file cache hit (age ${Math.round((Date.now() - fileCache.fetchedAt) / 1000)}s)`);
+    applyUsageCacheData(fileCache.data);
+    usageStale = false;
+    refreshAll();
+    return;
+  }
+
+  // 2. Fall back to direct API call
   try {
     const raw = execSync('security find-generic-password -s "Claude Code-credentials" -w', {
       encoding: 'utf-8',
@@ -125,7 +205,11 @@ async function fetchStandaloneUsage(): Promise<void> {
     const creds = JSON.parse(raw) as Record<string, unknown>;
     const oauthCreds = creds?.claudeAiOauth as Record<string, unknown> | undefined;
     const token = oauthCreds?.accessToken as string | undefined;
-    if (!token) return;
+    if (!token) {
+      // No token — use stale cache if available
+      if (fileCache) { applyUsageCacheData(fileCache.data); usageStale = true; refreshAll(); }
+      return;
+    }
 
     const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
       headers: {
@@ -135,34 +219,55 @@ async function fetchStandaloneUsage(): Promise<void> {
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return;
+
+    if (!res.ok) {
+      // Use stale file cache on failure (429, etc.)
+      if (fileCache) { applyUsageCacheData(fileCache.data); usageStale = true; refreshAll(); }
+      return;
+    }
 
     const data = await res.json() as Record<string, unknown>;
-    if ((data as Record<string, unknown>).error) return;
 
-    const fiveHour = data.five_hour as Record<string, unknown> | undefined;
-    const sevenDay = data.seven_day as Record<string, unknown> | undefined;
+    // DEBUG: log raw response keys for diagnosis
+    dlog('UsaBut', `standalone raw keys: ${JSON.stringify(Object.keys(data))}`);
+    if (data.five_hour) {
+      dlog('UsaBut', `five_hour type=${typeof data.five_hour} keys=${JSON.stringify(
+        typeof data.five_hour === 'object' ? Object.keys(data.five_hour as object) : data.five_hour
+      )}`);
+    }
+
+    if ((data as Record<string, unknown>).error) {
+      if (fileCache) { applyUsageCacheData(fileCache.data); usageStale = true; refreshAll(); }
+      return;
+    }
+
+    const fiveHour = data.five_hour;
+    const sevenDay = data.seven_day;
     const extra = data.extra_usage as Record<string, unknown> | undefined;
 
     const hasRateLimits = fiveHour != null || sevenDay != null;
     if (hasRateLimits && billingType === 'unknown') billingType = 'subscription';
     else if (!hasRateLimits && billingType === 'unknown') billingType = 'api';
 
-    if (fiveHour?.utilization != null) fiveHourPercent = fiveHour.utilization as number;
-    if (fiveHour?.resets_at) fiveHourResetsAt = fiveHour.resets_at as string;
-    if (sevenDay?.utilization != null) sevenDayPercent = sevenDay.utilization as number;
-    if (sevenDay?.resets_at) sevenDayResetsAt = sevenDay.resets_at as string;
+    const fh = parseStandaloneUtilization(fiveHour);
+    const sd = parseStandaloneUtilization(sevenDay);
+    if (fh.utilization != null) fiveHourPercent = fh.utilization;
+    if (fh.resetsAt) fiveHourResetsAt = fh.resetsAt;
+    if (sd.utilization != null) sevenDayPercent = sd.utilization;
+    if (sd.resetsAt) sevenDayResetsAt = sd.resetsAt;
     if (extra?.enabled != null) extraUsageEnabled = !!(extra.enabled);
     if (extra?.monthly_limit != null) extraUsageMonthlyLimit = extra.monthly_limit as number;
     if (extra?.used_credits != null) extraUsageUsedCredits = extra.used_credits as number;
-    if (extra?.utilization != null) extraUsageUtilization = extra.utilization as number;
+    const eu = parseStandaloneUtilization(extra);
+    if (eu.utilization != null) extraUsageUtilization = eu.utilization;
 
     usageStale = false;
     dlog('UsaBut', `standalone fetch: 5h=${fiveHourPercent ?? '-'}% 7d=${sevenDayPercent ?? '-'}% billing=${billingType}`);
     refreshAll();
   } catch {
-    // Network error — mark stale if we have cached data
-    if (fiveHourPercent != null || sevenDayPercent != null) usageStale = true;
+    // Network error — use stale file cache
+    if (fileCache) { applyUsageCacheData(fileCache.data); usageStale = true; refreshAll(); }
+    else if (fiveHourPercent != null || sevenDayPercent != null) usageStale = true;
   }
 }
 
@@ -265,11 +370,11 @@ function stopOcUsagePoll(): void {
 
 function startStandalonePoll(): void {
   if (standaloneInterval) return;
-  // Fetch immediately, then every 60 seconds (OAuth usage only)
+  // Fetch immediately, then every 120 seconds (OAuth usage only)
   void fetchStandaloneUsage();
   standaloneInterval = setInterval(() => {
     void fetchStandaloneUsage();
-  }, 60_000);
+  }, 120_000);
 }
 
 function stopStandalonePoll(): void {

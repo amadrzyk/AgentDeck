@@ -22,6 +22,7 @@ export class HookServer extends EventEmitter {
   private voiceManager: VoiceManager | null = null;
   private apiUsageGetter: (() => { usage: unknown; fetchedAt: number }) | null = null;
   private deviceInfoGetter: (() => unknown) | null = null;
+  private pixooFrameGetter: (() => Uint8Array) | null = null;
 
   // SSE
   private sseClients: SseClient[] = [];
@@ -29,6 +30,7 @@ export class HookServer extends EventEmitter {
   private sseIdCounter = 0;
   private lastStateEvent: BridgeEvent | null = null;
   private lastUsageEvent: BridgeEvent | null = null;
+  pairingToken: string | null = null;
 
   // Metadata for status page / health
   private meta: { agentType?: string; projectName?: string; clientCount?: number; state?: string } = {};
@@ -64,6 +66,11 @@ export class HookServer extends EventEmitter {
   /** Register a getter for connected device info (exposed via GET /devices) */
   setDeviceInfoGetter(getter: () => unknown): void {
     this.deviceInfoGetter = getter;
+  }
+
+  /** Register a getter that returns the current Pixoo 64×64 RGB frame (12,288 bytes). */
+  setPixooFrameGetter(getter: () => Uint8Array): void {
+    this.pixooFrameGetter = getter;
   }
 
   /** Broadcast a BridgeEvent to all SSE clients */
@@ -112,6 +119,7 @@ export class HookServer extends EventEmitter {
         state: this.meta.state,
         wsClients: this.meta.clientCount ?? 0,
         sseClients: this.sseClients.length,
+        pairingToken: this.pairingToken,
       });
     });
 
@@ -247,6 +255,28 @@ export class HookServer extends EventEmitter {
       },
     );
 
+    // Pixoo live preview — serves BMP of current frame
+    this.app.get('/pixoo/frame', (_req, res) => {
+      if (!this.pixooFrameGetter) {
+        res.status(503).json({ error: 'Pixoo renderer not available' });
+        return;
+      }
+      const rgb = this.pixooFrameGetter();
+      const bmp = rgbToBmp(rgb, 64, 64);
+      res.set({
+        'Content-Type': 'image/bmp',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.send(bmp);
+    });
+
+    // Pixoo live preview HTML page
+    this.app.get('/pixoo', (_req, res) => {
+      debug('Hook', 'GET /pixoo');
+      res.type('html').send(pixooLiveHtml(this.meta));
+    });
+
     // Catch-all for unknown routes
     this.app.use((req, res) => {
       debug('Hook', `404: ${req.method} ${req.url}`);
@@ -290,9 +320,13 @@ export class HookServer extends EventEmitter {
 
     return new Promise((resolve) => {
       debug('Hook', 'closing server');
+      // Destroy all active connections so server.close() resolves immediately
+      this.server.closeAllConnections();
       this.server.close(() => {
         resolve();
       });
+      // Fallback: resolve after 1s even if server.close() hangs
+      setTimeout(resolve, 1000);
     });
   }
 }
@@ -370,4 +404,178 @@ es.addEventListener('usage_update',e=>{
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
+}
+
+// ─── BMP Generator (24-bit uncompressed) ────────────────────────────────────
+
+/** Convert raw RGB buffer to 24-bit BMP. Rows flipped + BGR byte order. */
+function rgbToBmp(rgb: Uint8Array, w: number, h: number): Buffer {
+  const rowBytes = w * 3;
+  // BMP rows must be padded to 4-byte boundary
+  const rowPad = (4 - (rowBytes % 4)) % 4;
+  const paddedRow = rowBytes + rowPad;
+  const imageSize = paddedRow * h;
+  const fileSize = 54 + imageSize;
+  const buf = Buffer.alloc(fileSize);
+
+  // File header (14 bytes)
+  buf[0] = 0x42; buf[1] = 0x4D; // "BM"
+  buf.writeUInt32LE(fileSize, 2);
+  buf.writeUInt32LE(54, 10); // pixel data offset
+
+  // Info header (40 bytes)
+  buf.writeUInt32LE(40, 14);
+  buf.writeInt32LE(w, 18);
+  buf.writeInt32LE(h, 22);
+  buf.writeUInt16LE(1, 26);  // planes
+  buf.writeUInt16LE(24, 28); // bpp
+  buf.writeUInt32LE(imageSize, 34);
+
+  // Pixel data (bottom-to-top, BGR)
+  for (let y = 0; y < h; y++) {
+    const srcRow = (h - 1 - y) * w * 3;
+    const dstRow = 54 + y * paddedRow;
+    for (let x = 0; x < w; x++) {
+      const si = srcRow + x * 3;
+      const di = dstRow + x * 3;
+      buf[di] = rgb[si + 2];     // B
+      buf[di + 1] = rgb[si + 1]; // G
+      buf[di + 2] = rgb[si];     // R
+    }
+  }
+
+  return buf;
+}
+
+// ─── Pixoo Live Preview HTML ────────────────────────────────────────────────
+
+function pixooLiveHtml(
+  meta: { agentType?: string; projectName?: string },
+): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pixoo Live — ${meta.projectName || 'AgentDeck'}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:20px}
+h1{font-size:14px;color:#64748b;letter-spacing:1px;text-transform:uppercase}
+.frame-box{position:relative;border-radius:12px;overflow:hidden;
+  box-shadow:0 0 40px rgba(59,130,246,0.15),0 0 80px rgba(59,130,246,0.05)}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.hud{display:flex;gap:20px;font-size:12px;color:#64748b}
+.hud .val{color:#94a3b8;font-weight:600}
+.state-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.controls{display:flex;gap:8px}
+.controls button{background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:6px;
+  padding:4px 12px;font-size:11px;cursor:pointer;transition:all 0.15s}
+.controls button:hover{background:#334155;color:#e2e8f0}
+.controls button.active{background:#3b82f6;color:#fff;border-color:#3b82f6}
+.paused canvas{opacity:0.4}
+</style>
+</head>
+<body>
+<h1>Pixoo 64×64 Live Preview</h1>
+<div class="frame-box" id="framebox">
+  <canvas id="cv" width="512" height="512"></canvas>
+</div>
+<div class="hud">
+  <span><span class="state-dot" id="dot"></span><span class="val" id="state">—</span></span>
+  <span>FPS <span class="val" id="fps">0</span></span>
+  <span>Frame <span class="val" id="fnum">0</span></span>
+  <span>Scale <span class="val" id="scaleLabel">8×</span></span>
+</div>
+<div class="controls">
+  <button id="btnPause">Pause</button>
+  <button id="btn4" data-s="4">4×</button>
+  <button id="btn8" data-s="8" class="active">8×</button>
+  <button id="btn12" data-s="12">12×</button>
+</div>
+
+<script>
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d');
+const dot=document.getElementById('dot');
+const $state=document.getElementById('state');
+const $fps=document.getElementById('fps');
+const $fnum=document.getElementById('fnum');
+const $scale=document.getElementById('scaleLabel');
+const framebox=document.getElementById('framebox');
+
+let scale=8, paused=false, frameNum=0;
+let lastTime=performance.now(), frameCount=0, displayFps=0;
+
+// Scale buttons
+document.querySelectorAll('.controls button[data-s]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    scale=parseInt(btn.dataset.s);
+    cv.width=64*scale; cv.height=64*scale;
+    $scale.textContent=scale+'×';
+    document.querySelectorAll('.controls button[data-s]').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// Pause
+document.getElementById('btnPause').addEventListener('click',function(){
+  paused=!paused;
+  this.textContent=paused?'Resume':'Pause';
+  framebox.classList.toggle('paused',paused);
+});
+
+// State colors
+const stateColors={IDLE:'#22c55e',PROCESSING:'#3b82f6',
+  AWAITING_OPTION:'#f59e0b',AWAITING_PERMISSION:'#f59e0b',AWAITING_DIFF:'#f59e0b',
+  DISCONNECTED:'#ef4444'};
+
+// SSE for state info
+const es=new EventSource('/sse');
+es.addEventListener('state_update',e=>{
+  const d=JSON.parse(e.data);
+  const s=d.state||'IDLE';
+  $state.textContent=s;
+  dot.style.background=stateColors[s]||'#64748b';
+});
+
+// Frame polling
+const img=new Image();
+img.onload=function(){
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(img,0,0,cv.width,cv.height);
+  frameNum++;
+  $fnum.textContent=frameNum;
+
+  // FPS calc
+  frameCount++;
+  const now=performance.now();
+  if(now-lastTime>=1000){
+    displayFps=frameCount;
+    frameCount=0;
+    lastTime=now;
+    $fps.textContent=displayFps;
+  }
+
+  if(!paused) scheduleNext();
+};
+img.onerror=function(){
+  // Retry after delay on error
+  setTimeout(()=>{ if(!paused) fetchFrame(); }, 2000);
+};
+
+function fetchFrame(){
+  img.src='/pixoo/frame?t='+Date.now();
+}
+
+function scheduleNext(){
+  setTimeout(fetchFrame, 800);
+}
+
+// Start
+fetchFrame();
+</script>
+</body>
+</html>`;
 }

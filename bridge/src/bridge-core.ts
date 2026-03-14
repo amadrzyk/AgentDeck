@@ -10,7 +10,7 @@ import { BridgeTimelineStore } from './timeline-store.js';
 import type { BridgeLogStream } from './log-stream.js';
 import { buildUsageEvent } from './usage-event.js';
 import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
-import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
+import { fetchUsageFromApi, hasOAuthToken, getTokenStatus, type ApiUsageData } from './usage-api.js';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
 import {
   register as registerSession,
@@ -231,6 +231,11 @@ export class BridgeCore {
     const usage = await fetchUsageFromApi();
     if (usage) {
       this.updateApiUsage(usage);
+      // Token status check — if expired, mark stale even though we got cached data
+      const tokenStatus = getTokenStatus();
+      if (tokenStatus === 'expired' || tokenStatus === 'missing') {
+        this.apiUsageStale = true;
+      }
       return true;
     }
     this.oauthConnected = hasOAuthToken();
@@ -493,15 +498,18 @@ export class BridgeCore {
     // Stop display monitor
     this.displayMonitor.stop();
 
-    // Run shutdown callbacks
-    for (const cb of this.shutdownCallbacks) {
-      try { await cb(); } catch { /* continue cleanup */ }
-    }
+    // Run shutdown callbacks (best-effort, 2s total budget)
+    const callbacksDone = Promise.all(
+      this.shutdownCallbacks.map(cb =>
+        Promise.resolve().then(cb).catch(() => {}),
+      ),
+    );
+    await Promise.race([callbacksDone, new Promise(r => setTimeout(r, 2000))]);
 
     // Close WS
     this.wsServer.close();
 
-    // Force exit after 3s
-    setTimeout(() => process.exit(1), 3000);
+    // Exit immediately — all cleanup is done or timed out
+    process.exit(0);
   }
 }

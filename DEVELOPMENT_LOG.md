@@ -2,6 +2,43 @@
 
 ---
 
+## 2026-03-14 — Usage API 파싱 실패 + Bridge 종료 hang (2차)
+
+### 문제
+1. **Usage LIMITS 미표시**: `usage-cache.json`에 `inferredBillingType: "subscription"`이지만 `fiveHourPercent: null`. API 응답의 `five_hour` 객체는 존재하나 `utilization` 필드가 없거나 구조 변경됨. 429 과다 발생 (bridge 60s + daemon 60s + plugin 60s + Claude Code 자체)
+2. **Bridge 종료 hang (2차)**: 이전 세션에서 `adapter.on('exit')` → `shutdown()` 호출 추가했지만, `hookServer.close()`가 열린 SSE/HTTP 연결 대기로 여전히 hang
+
+### 해결
+1. **Usage 파싱 resilient**: `parseUtilization()` / `parseResetsAt()` 헬퍼 — `utilization`/`percentage`/`percent`/`usage` + `resets_at`/`resetsAt`/`reset_at`/`expires_at` 다중 필드명 탐색. Raw 응답을 `~/.agentdeck/usage-raw-debug.json`에 덤프하여 실제 구조 확인 가능
+2. **429 감소**: 폴 인터벌 60s → 120s, cache TTL 60s → 120s, Retry-After 헤더 존중
+3. **종료 hang 해결**: `hookServer.close()` 전에 `server.closeAllConnections()` 호출, stdin `pause()` + `removeAllListeners()`, `BridgeCore.shutdown()` — shutdown callbacks에 2초 budget 후 즉시 `process.exit(0)`
+
+### 교훈 / 핵심 설계 결정
+- **API 응답 방어적 파싱**: 외부 API 필드명은 언제든 바뀔 수 있음. 여러 가능한 필드명을 탐색하고 raw 응답 덤프를 항상 남길 것
+- **HTTP server.close() 교착**: `server.close()` 콜백은 모든 활성 연결이 닫힐 때까지 호출 안 됨. SSE 같은 장기 연결이 있으면 영원히 대기. 반드시 `closeAllConnections()` 선행 필요
+- **다중 폴러 429**: 같은 OAuth 토큰으로 bridge+daemon+plugin이 각자 폴링하면 429 폭발. 공유 파일 캐시(120s TTL)로 실제 API 호출 최소화
+
+---
+
+## 2026-03-13 — macOS 앱 WebSocket 연결 실패 (isLocalConnection 자기 IP 미인식)
+
+### 문제
+macOS Apple 앱이 같은 머신의 bridge/daemon에 연결 실패. URLSession이 "Socket is not connected" (errno 57) 보고. 실제 원인은 WS 서버의 4001 close (Unauthorized).
+
+머신에 두 IP (`192.168.0.102`, `192.168.0.107`)가 있고, `isLocalConnection()`이 `127.0.0.1`/`::1`만 localhost로 인식. 앱이 LAN IP로 토큰 없이 연결하면 "remote" 취급 → 4001 거부.
+
+### 해결
+1. `bridge/src/auth.ts` — `isLocalConnection()`에 `os.networkInterfaces()` 순회 추가. 머신 자체 IP (IPv4 + `::ffff:` 매핑) 모두 local로 인식
+2. `Info.plist` — `NSAppTransportSecurity` / `NSAllowsLocalNetworking` 추가 (ws:// 연결 ATS 예외)
+3. 이전 세션에서 추가한 `onReconnectAttempt` 콜백 + `LocalSessionDiscovery.readSessionsNow()` — reconnect 실패 시 sessions.json에서 로컬 브리지 자동 발견
+
+### 교훈 / 핵심 설계 결정
+- **URLSession 4001 → errno 57**: WebSocket 서버가 upgrade 단계에서 4001로 닫으면 URLSession은 "Socket is not connected"로 보고. 실제 원인 파악 어려움 — WS 서버 로그를 먼저 확인할 것
+- **듀얼 NIC 환경**: macOS에서 유선+무선 동시 사용 시 IP가 여러 개. localhost 판별은 반드시 `networkInterfaces()` 순회 필요
+- **sessions.json 기반 로컬 디스커버리**: macOS 앱은 같은 머신이므로 mDNS 대신 `~/.agentdeck/sessions.json` 직접 읽기가 더 확실 (Phase 1에서 구현)
+
+---
+
 ## 2026-03-13 — ESP32 IPS 3.5" (JC3248W535) AXS15231B QSPI 드라이버 구현
 
 ### 문제
