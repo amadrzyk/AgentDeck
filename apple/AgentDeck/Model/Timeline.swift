@@ -89,3 +89,16 @@ func typeIcon(for type: TimelineEntryType) -> String {
     case .memoryRecall: "◇"
     }
 }
+
+/// Status-aware icon for tool_request entries (Android-matching)
+func typeIcon(for type: TimelineEntryType, status: String?) -> String {
+    if type == .toolRequest, let status {
+        switch status {
+        case "approved": return "✓"
+        case "denied": return "✗"
+        case "pending": return "⚠"
+        default: break
+        }
+    }
+    return typeIcon(for: type)
+}

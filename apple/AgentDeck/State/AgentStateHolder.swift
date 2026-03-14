@@ -82,8 +82,12 @@ final class AgentStateHolder: @unchecked Sendable {
     // MARK: - Connection Waterfall
 
     func startConnectionWaterfall() {
-        guard waterfallStage == .idle else { return }
+        guard waterfallStage == .idle else {
+            print("[Waterfall] already in stage \(waterfallStage), skipping")
+            return
+        }
         isAutoConnecting = true
+        print("[Waterfall] starting waterfall")
 
         #if os(macOS)
         // Stage 1: Check sessions.json (macOS only)
@@ -110,6 +114,7 @@ final class AgentStateHolder: @unchecked Sendable {
 
     private func trySavedUrl() {
         if let url = savedUrl {
+            print("[Waterfall] trying saved URL: \(url)")
             waterfallStage = .savedUrl
             connectTo(url: url)
 
@@ -117,16 +122,19 @@ final class AgentStateHolder: @unchecked Sendable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 guard let self, self.waterfallStage == .savedUrl else { return }
                 if !self.state.bridgeConnected {
+                    print("[Waterfall] saved URL timeout, falling through to mDNS")
                     self.connection.disconnect(reconnect: false)
                     self.startMdnsDiscovery()
                 }
             }
         } else {
+            print("[Waterfall] no saved URL, going to mDNS")
             startMdnsDiscovery()
         }
     }
 
     private func startMdnsDiscovery() {
+        print("[Waterfall] starting mDNS discovery")
         waterfallStage = .mdns
         discovery.startSearching()
 
@@ -134,6 +142,68 @@ final class AgentStateHolder: @unchecked Sendable {
         // Keep local discovery running alongside mDNS on macOS
         localDiscovery.startPolling()
         #endif
+
+        // Poll for discovered bridges and auto-connect to the first one
+        startAutoConnectPolling()
+    }
+
+    private var autoConnectTimer: Timer?
+    private var autoConnectPollCount = 0
+
+    private func startAutoConnectPolling() {
+        autoConnectPollCount = 0
+        autoConnectTimer?.invalidate()
+        autoConnectTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            guard let self else { timer.invalidate(); return }
+            guard self.waterfallStage == .mdns else {
+                print("[AutoConnect] timer stopped: stage=\(self.waterfallStage)")
+                timer.invalidate()
+                self.autoConnectTimer = nil
+                return
+            }
+            guard !self.state.bridgeConnected else {
+                print("[AutoConnect] timer stopped: already connected")
+                timer.invalidate()
+                self.autoConnectTimer = nil
+                return
+            }
+
+            // Skip if already trying to connect
+            if self.connection.status != .disconnected {
+                print("[AutoConnect] skipping: connection status=\(self.connection.status)")
+                return
+            }
+
+            print("[AutoConnect] poll: bridges=\(self.discovery.bridges.count), searching=\(self.discovery.isSearching)")
+
+            #if os(macOS)
+            // Prefer local sessions on macOS
+            if let local = self.localDiscovery.sessions.first {
+                print("[AutoConnect] connecting to local session: \(local.wsUrl)")
+                timer.invalidate()
+                self.autoConnectTimer = nil
+                self.connectTo(local)
+                return
+            }
+            #endif
+
+            if let bridge = self.discovery.bridges.first {
+                print("[AutoConnect] connecting to bridge: \(bridge.wsUrl)")
+                timer.invalidate()
+                self.autoConnectTimer = nil
+                self.connectTo(bridge)
+            }
+
+            // After 10 seconds with no mDNS results, stop polling
+            // (user can still manually enter URL via ConnectionOverlay)
+            self.autoConnectPollCount += 1
+            if self.autoConnectPollCount >= 20 {  // 20 × 0.5s = 10s
+                print("[AutoConnect] giving up after 10s with no bridges found")
+                timer.invalidate()
+                self.autoConnectTimer = nil
+                self.isAutoConnecting = false
+            }
+        }
     }
 
     // MARK: - Event Handler
@@ -158,14 +228,12 @@ final class AgentStateHolder: @unchecked Sendable {
             state.options = e.options
             state.promptType = PromptType(rawValue: e.promptType)
             state.question = e.question
-        case .buttonState(let e):
-            state.buttonStates = e.buttons
-        case .encoderState(let e):
-            state.encoderStates = e.encoders
-            state.encoderTakeoverActive = e.takeoverActive ?? false
-        case .deckSlotMap(let e):
-            if let buttons = e.buttons { state.buttonSlotMap = buttons }
-            if let encoders = e.encoders { state.encoderSlotMap = encoders }
+        case .buttonState:
+            break  // Deck UI removed
+        case .encoderState:
+            break  // Deck UI removed
+        case .deckSlotMap:
+            break  // Deck UI removed
         case .userPrompt:
             break  // handled by voice/deck UI
         case .timelineEvent(let e):

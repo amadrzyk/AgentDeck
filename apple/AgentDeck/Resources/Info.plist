@@ -22,6 +22,21 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_agentdeck._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>AgentDeck uses the camera to scan QR codes for bridge pairing.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AgentDeck discovers and connects to local bridge servers on your network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>AgentDeck needs microphone access for voice commands to your AI coding agent.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -39,16 +54,6 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>AgentDeck needs microphone access for voice commands to your AI coding agent.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>AgentDeck uses the camera to scan QR codes for bridge pairing.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>AgentDeck discovers and connects to local bridge servers on your network.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_agentdeck._tcp</string>
 	</array>
 </dict>
 </plist>

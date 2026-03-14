@@ -1,159 +1,123 @@
-// MonitorScreen.swift — Dashboard: terrarium background + HUD overlay
-// Phase 3 full implementation, Phase 1 placeholder
+// MonitorScreen.swift — Single screen: terrarium + HUD + settings gear
 
 import SwiftUI
 
 struct MonitorScreen: View {
     @Environment(AgentStateHolder.self) private var stateHolder
 
+    @State private var terrariumState = TerrariumState()
+    @State private var showSettingsSheet = false
+
+    private let sandFraction: CGFloat = 0.35
+
     var body: some View {
-        ZStack {
-            // Background
-            Color(red: 0.06, green: 0.09, blue: 0.16) // #0f172a
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                // Layer 1: Terrarium background (60fps animated aquarium)
+                TerrariumView(terrariumState: terrariumState)
+                    .ignoresSafeArea()
 
-            // TODO: Phase 2 — TerrariumView here
-            // TODO: Phase 3 — HUD overlay panels
+                // Layer 2: Connection overlay or HUD + Timeline
+                if !stateHolder.state.bridgeConnected {
+                    ConnectionOverlay()
+                } else {
+                    MonitorHUD()
 
-            if stateHolder.connection.status == .disconnected && !stateHolder.state.bridgeConnected {
-                ConnectionOverlay()
-            } else {
-                VStack(spacing: 16) {
-                    // Status header
-                    statusHeader
-
-                    // Tool info (when processing)
-                    if stateHolder.state.state == .processing,
-                       let tool = stateHolder.state.currentTool {
-                        toolInfo(tool)
-                    }
-
-                    // Options (when awaiting)
-                    if stateHolder.state.state.isAwaiting {
-                        optionsList
-                    }
-
-                    Spacer()
-
-                    // Usage footer
-                    usageFooter
-                }
-                .padding()
-            }
-        }
-    }
-
-    // MARK: - Status Header
-
-    private var statusHeader: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text(stateHolder.state.projectName ?? "AgentDeck")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                Spacer()
-                StatusBadge(state: stateHolder.state.state)
-            }
-
-            HStack {
-                if let model = stateHolder.state.modelName {
-                    Text(model)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let effort = stateHolder.state.effortLevel, effort != "medium" {
-                    Text("(\(effort))")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                Spacer()
-                Text(stateHolder.state.permissionMode.rawValue)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    // MARK: - Tool Info
-
-    private func toolInfo(_ tool: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(tool)
-                .font(.headline)
-                .foregroundStyle(.cyan)
-            if let input = stateHolder.state.toolInput {
-                Text(input)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    // MARK: - Options List
-
-    private var optionsList: some View {
-        VStack(spacing: 8) {
-            if let question = stateHolder.state.question {
-                Text(question)
-                    .font(.subheadline)
-                    .foregroundStyle(.white)
-            }
-
-            ForEach(stateHolder.state.options) { option in
-                Button {
-                    stateHolder.sendCommand(.selectOption(index: option.index))
-                } label: {
-                    HStack {
-                        Text(option.label)
-                            .foregroundStyle(.white)
+                    // Timeline in sand area
+                    VStack {
                         Spacer()
-                        if option.recommended == true {
-                            Image(systemName: "star.fill")
-                                .foregroundStyle(.yellow)
-                                .font(.caption)
+                        TimelineStripView()
+                            .frame(height: geo.size.height * sandFraction)
+                    }
+
+                    // Options overlay (when awaiting)
+                    if stateHolder.state.state.isAwaiting {
+                        optionsOverlay
+                    }
+                }
+
+                // Layer 3: Settings gear icon (always visible)
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            showSettingsSheet = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.title2)
+                                .foregroundStyle(.white.opacity(0.6))
+                                .padding(16)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        option.selected == true
-                            ? Color.blue.opacity(0.3)
-                            : Color.white.opacity(0.1),
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
                 }
             }
         }
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .sheet(isPresented: $showSettingsSheet) {
+            SettingsScreen()
+        }
+        .onChange(of: stateHolder.state.state) {
+            updateTerrariumState()
+        }
+        .onChange(of: stateHolder.state.siblingSessions.count) {
+            updateTerrariumState()
+        }
+        .onChange(of: stateHolder.state.gatewayAvailable) {
+            updateTerrariumState()
+        }
+        .onAppear {
+            updateTerrariumState()
+        }
     }
 
-    // MARK: - Usage Footer
+    private func updateTerrariumState() {
+        terrariumState = stateHolder.state.toTerrariumState(previous: terrariumState)
+    }
 
-    private var usageFooter: some View {
-        HStack(spacing: 16) {
-            if let pct = stateHolder.state.fiveHourPercent {
-                GaugeBar(label: "5h", percent: pct)
-            }
-            if let pct = stateHolder.state.sevenDayPercent {
-                GaugeBar(label: "7d", percent: pct)
-            }
+    // MARK: - Options Overlay
+
+    private var optionsOverlay: some View {
+        VStack {
             Spacer()
-            VStack(alignment: .trailing) {
-                Text("In: \(SessionMetrics.formatCount(stateHolder.state.inputTokens))")
-                    .font(.caption2)
-                Text("Out: \(SessionMetrics.formatCount(stateHolder.state.outputTokens))")
-                    .font(.caption2)
+
+            VStack(spacing: 8) {
+                if let question = stateHolder.state.question {
+                    Text(question)
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                }
+
+                ForEach(stateHolder.state.options) { option in
+                    Button {
+                        stateHolder.sendCommand(.selectOption(index: option.index))
+                    } label: {
+                        HStack {
+                            Text(option.label)
+                                .foregroundStyle(.white)
+                            Spacer()
+                            if option.recommended == true {
+                                Image(systemName: "star.fill")
+                                    .foregroundStyle(.yellow)
+                                    .font(.caption)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            option.selected == true
+                                ? Color.blue.opacity(0.3)
+                                : Color.white.opacity(0.1),
+                            in: RoundedRectangle(cornerRadius: 6)
+                        )
+                    }
+                }
             }
-            .foregroundStyle(.secondary)
+            .padding()
+            .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+            .padding()
+
+            Spacer()
+                .frame(height: 60)
         }
-        .padding()
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 }

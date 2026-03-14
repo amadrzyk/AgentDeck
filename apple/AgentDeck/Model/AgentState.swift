@@ -144,10 +144,4 @@ struct DashboardState: Sendable {
     // Multi-session
     var siblingSessions: [SessionInfo] = []
 
-    // Encoder / Button (for Deck tab)
-    var encoderStates: [EncoderSlotState] = []
-    var encoderTakeoverActive = false
-    var buttonStates: [ButtonSlotState] = []
-    var buttonSlotMap: [DeckSlotConfig] = []
-    var encoderSlotMap: [DeckSlotConfig] = []
 }

@@ -74,6 +74,8 @@ final class BridgeConnection: @unchecked Sendable {
             self.hasReceivedMessage = false
         }
 
+        print("[BridgeConnection] connecting to \(urlString)")
+
         let session = URLSession(configuration: .default)
         self.urlSession = session
         let task = session.webSocketTask(with: wsUrl)
@@ -142,6 +144,7 @@ final class BridgeConnection: @unchecked Sendable {
                 // First successful message = connection confirmed
                 if !self.hasReceivedMessage {
                     self.hasReceivedMessage = true
+                    print("[BridgeConnection] first message received — connected!")
                     DispatchQueue.main.async {
                         self.status = .connected
                         self.backoffMs = Self.initialBackoffMs
@@ -171,7 +174,7 @@ final class BridgeConnection: @unchecked Sendable {
                 self.receiveLoop()
 
             case .failure(let error):
-                print("[BridgeConnection] Receive error: \(error)")
+                print("[BridgeConnection] Receive error: \(error.localizedDescription)")
                 self.handleDisconnect(error: error)
             }
         }
