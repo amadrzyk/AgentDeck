@@ -661,6 +661,19 @@ program
     log(`WiFi config saved: SSID="${ssid}" \u2192 ~/.agentdeck/wifi-config.json`);
   });
 
+// ===== TUI Dashboard =====
+
+program
+  .command('dashboard')
+  .alias('dash')
+  .description('TUI monitoring dashboard with terrarium animation')
+  .option('-p, --port <port>', 'Bridge port (auto-discover if omitted)')
+  .option('-s, --session <id>', 'Specific session ID')
+  .action(async (opts) => {
+    const { startDashboard } = await import('./tui/dashboard.js');
+    await startDashboard(opts);
+  });
+
 // ===== Backward compat: `agentdeck start` → `agentdeck daemon start` =====
 
 program

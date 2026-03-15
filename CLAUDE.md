@@ -127,6 +127,9 @@ agentdeck status             # All sessions + daemon status
 agentdeck stop [session]     # Stop a session
 agentdeck attach [session]   # Attach terminal to session
 
+# Monitoring
+agentdeck dashboard          # TUI monitoring dashboard with terrarium (alias: dash)
+
 # Utilities
 agentdeck devices            # Connected devices
 agentdeck qr                 # Pairing QR code
@@ -139,6 +142,7 @@ agentdeck wifi-setup         # ESP32 WiFi setup
 
 ## Key Design Decisions
 
+- **TUI Dashboard** (`bridge/src/tui/`): `agentdeck dashboard` — zero-dependency TUI monitoring via raw ANSI escape codes. WS client connects to running Bridge/Daemon (same pattern as Android/iOS apps). Files: `ansi.ts` (ANSI helpers), `gauge.ts` (Unicode block gauge), `screen.ts` (alternate buffer, raw stdin), `terrarium.ts` (braille aquarium animation), `renderer.ts` (adaptive layout), `dashboard.ts` (WS client + state + render loop). Three responsive layouts: wide (120+), standard (80-119), narrow (60-79). Terrarium: braille octopus (14×5→7×2), crayfish (16×8→8×2), neon tetra schools (5+5, boids), environment (waves, bubbles, seaweed, sand). Half-block pixel font logo (4×6→4×3). Status split: LIMITS|MODELS (E-ink style). Local timeline generation from `state_update` events (`receivingBridgeTimeline` flag for bridge event dedup). 10fps terrarium, 4fps panels
 - **pnpm workspaces** for monorepo management
 - **ES modules** throughout (type: "module")
 - **Node16 module resolution** in TypeScript
@@ -170,7 +174,7 @@ agentdeck wifi-setup         # ESP32 WiFi setup
 - **Gateway health check**: `checkGatewayHealth()` in `gateway-probe.ts` — `openclaw doctor --json` 30초 간격 폴링. warn/error 감지 시 `gatewayHasError: true`를 `state_update`에 포함. Android 가재가 SICK 상태로 전환 (탈색, 기울기, 늘어진 집게). Gateway 미접속 시 폴링 스킵
 - **Daemon singleton guard**: `findExistingDaemon()` in `session-registry.ts` — `agentType='daemon'` 검색 + PID alive 체크. `daemon-server.ts` `startDaemon()` 진입부 + `cli.ts` `daemon start` action 양쪽에서 체크. 기존 daemon 있으면 `process.exit(0)` (LaunchAgent KeepAlive 재시작 루프 방지). 이중 daemon으로 인한 Gateway 이벤트 중복 relay, mDNS 충돌, timeline 중복 방지
 - **Daemon usage relay**: Daemon `fetchUsageRelayed()` — (1) sibling bridge `GET /usage` HTTP 중계 (2) WS 연결로 `usage_update` 이벤트 수신 (3) sibling 없을 때만 직접 API. Sibling 있으면 직접 API 호출 안 함 (429 방지). Bridge `hook-server.ts` `GET /usage` 엔드포인트 (no auth, local only)
-- **Multi-surface monitoring**: mDNS (`_agentdeck._tcp`), auth token (`~/.agentdeck/auth-token`), SSE (`/sse`), remote WS token validation. `0.0.0.0` binding for LAN access. `isLocalConnection()` recognizes localhost + machine's own IPs via `os.networkInterfaces()` — same-machine clients (macOS app, localhost) bypass token auth
+- **Multi-surface monitoring**: mDNS (`_agentdeck._tcp`), auth token (`~/.agentdeck/auth-token`), SSE (`/sse`), remote WS token validation. `0.0.0.0` binding for LAN access. `isLocalConnection()` recognizes localhost + machine's own IPs via `os.networkInterfaces()` — same-machine clients (macOS app, localhost) bypass token auth. **Daemon-preference discovery**: All clients (Apple/Android/ESP32) prefer `agentType == "daemon"` when auto-connecting via mDNS — daemon aggregates all session states in real-time, while session bridges only poll siblings every 10 seconds. TXT record `agent` field distinguishes daemon from session bridges
 - **Android launcher**: `android/` — Jetpack Compose, minSdk 29, CATEGORY_HOME, NSD mDNS discovery, QR pairing (CameraX + ML Kit), e-ink detection (Crema/Onyx/Kobo). **3-tab nav**: Dashboard (terrarium bg + HUD overlay panels, connection overlay when disconnected) / Deck (encoder strip + 2×4 button grid + context area) / Settings. MonitorService: CPU wake lock + system stay-on + screen wake on state change (e-ink). **Deck encoder strip**: 4-panel LCD mirroring (Utility/Action/Session/Voice), touch gestures (swipe=rotate, tap=push, long-press=record). **Deck button grid**: Bridge `button_state` 프로토콜 우선, 로컬 fallback. CompactStatusBar(36dp) 상단 + 직사각형 버튼(80dp) + 넓은 ContextArea. 터치 피드백(scale 0.95+alpha 0.85), AWAITING시 전체 옵션 리스트 항상 표시, PROCESSING시 LinearProgressIndicator, IDLE시 suggestedPrompt AssistChip. **Voice**: Android AudioRecord → WAV → HTTP POST `/voice/transcribe` → whisper. **Utility proxy**: `bridge/src/utility-proxy.ts` — osascript macOS volume/brightness/media control via Android remote. **Slot map**: Plugin reports SD+ profile layout → Bridge caches → Android mirrors dynamically
 - **Setup-required UI**: Plugin detects `agentdeck` not installed → INSTALL button → `npx @agentdeck/setup` via iTerm
 
