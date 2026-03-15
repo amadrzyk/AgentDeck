@@ -1,4 +1,4 @@
-// MonitorHUD.swift — Semi-transparent HUD overlay on terrarium
+// MonitorHUD.swift — Semi-transparent HUD overlay (matches Android MonitorHUD)
 
 import SwiftUI
 
@@ -10,36 +10,27 @@ struct MonitorHUD: View {
             let isLandscape = geo.size.width > geo.size.height
 
             if isLandscape {
-                // iPad landscape: 3-panel layout
+                // iPad landscape: matches Android Box layout
                 ZStack(alignment: .topLeading) {
-                    // Top-left: Session list
+                    // Top-left: Session list (max 220dp)
                     SessionListPanel()
-                        .frame(width: geo.size.width * 0.22, height: geo.size.height * 0.6)
-                        .padding(8)
+                        .frame(maxWidth: min(geo.size.width * 0.22, 220))
+                        .padding(.leading, 12)
+                        .padding(.top, 12)
 
-                    // Top-right: Tank status
+                    // Top-right: Tank status (max 280dp)
                     HStack {
                         Spacer()
                         TankStatusPanel()
-                            .frame(width: geo.size.width * 0.32)
-                            .padding(8)
-                    }
-
-                    // Activity (processing or idle)
-                    if stateHolder.state.state == .processing || stateHolder.state.state == .idle {
-                        VStack {
-                            Spacer()
-                            ActivityPanel()
-                                .frame(maxWidth: geo.size.width * 0.5)
-                                .padding(.bottom, geo.size.height * 0.38)
-                        }
-                        .frame(maxWidth: .infinity)
+                            .frame(maxWidth: min(geo.size.width * 0.32, 280))
+                            .padding(.trailing, 12)
+                            .padding(.top, 12)
                     }
                 }
             } else {
                 // iPhone portrait: vertical stack
                 VStack(spacing: 0) {
-                    HStack(spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
                         SessionListPanel()
                             .frame(maxWidth: .infinity)
                         TankStatusPanel()
@@ -47,12 +38,6 @@ struct MonitorHUD: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
-
-                    if stateHolder.state.state == .processing || stateHolder.state.state == .idle {
-                        ActivityPanel()
-                            .padding(.horizontal, 8)
-                            .padding(.top, 4)
-                    }
 
                     Spacer()
                 }

@@ -67,35 +67,46 @@ extension DashboardState {
     func toTerrariumState(previous: TerrariumState? = nil) -> TerrariumState {
         var result = TerrariumState()
 
-        // Primary session creature
-        let primaryState = mapToOctopusState(state)
-        let slots = CreatureLayout.layoutOctopuses(
-            count: max(1, 1 + siblingSessions.filter { $0.agentType != "daemon" }.count)
-        )
+        // Primary session creature (skip daemon and openclaw — they're not octopuses)
+        let primaryIsOctopus = state != .disconnected
+            && agentType != "daemon"
+            && agentType != "openclaw"
+
+        // Octopus siblings (exclude daemon + openclaw)
+        let siblings = siblingSessions.filter {
+            $0.agentType != "daemon" && $0.agentType != "openclaw"
+        }
+
+        let octopusCount = (primaryIsOctopus ? 1 : 0) + siblings.count
+        let slots = CreatureLayout.layoutOctopuses(count: max(1, octopusCount))
 
         var creatures: [AgentCreatureState] = []
-        let slot = slots.first ?? CreatureSlot(x: 0.4, y: 0.45, scale: 1.0)
+        var slotIdx = 0
 
-        // Detect ASKING exit for pop burst
-        let wasAsking = previous?.creatures.first?.state == .asking
-        let exitedAsking = wasAsking && primaryState != .asking
+        if primaryIsOctopus {
+            let primaryState = mapToOctopusState(state)
+            let slot = slots.first ?? CreatureSlot(x: 0.4, y: 0.45, scale: 1.0)
 
-        creatures.append(AgentCreatureState(
-            id: sessionId ?? "primary",
-            projectName: projectName,
-            modelName: modelName,
-            state: primaryState,
-            homeX: slot.x,
-            homeY: slot.y,
-            scale: slot.scale,
-            exitedAsking: exitedAsking
-        ))
+            // Detect ASKING exit for pop burst
+            let wasAsking = previous?.creatures.first?.state == .asking
+            let exitedAsking = wasAsking && primaryState != .asking
 
-        // Sibling sessions
-        let siblings = siblingSessions.filter { $0.agentType != "daemon" }
+            creatures.append(AgentCreatureState(
+                id: sessionId ?? "primary",
+                projectName: projectName,
+                modelName: modelName,
+                state: primaryState,
+                homeX: slot.x,
+                homeY: slot.y,
+                scale: slot.scale,
+                exitedAsking: exitedAsking
+            ))
+            slotIdx = 1
+        }
+        // Sibling octopuses
         for (i, sibling) in siblings.enumerated() {
-            let slotIdx = min(i + 1, slots.count - 1)
-            let s = slots[slotIdx]
+            let idx = min(slotIdx + i, slots.count - 1)
+            let s = slots[idx]
             let sibState = mapSiblingState(sibling.state)
             creatures.append(AgentCreatureState(
                 id: sibling.id,

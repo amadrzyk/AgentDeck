@@ -71,34 +71,4 @@ func groupConsecutive(_ entries: [TimelineEntry], windowSeconds: Double = 60) ->
     return result
 }
 
-// MARK: - Type Display
-
-func typeIcon(for type: TimelineEntryType) -> String {
-    switch type {
-    case .chatStart: "▶"
-    case .chatEnd: "■"
-    case .chatResponse: "◆"
-    case .toolRequest: "⚡"
-    case .toolResolved: "✓"
-    case .toolExec: "⚡"
-    case .error: "✗"
-    case .scheduled: "◇"
-    case .userAction: "►"
-    case .modelCall: "▶"
-    case .modelResponse: "◆"
-    case .memoryRecall: "◇"
-    }
-}
-
-/// Status-aware icon for tool_request entries (Android-matching)
-func typeIcon(for type: TimelineEntryType, status: String?) -> String {
-    if type == .toolRequest, let status {
-        switch status {
-        case "approved": return "✓"
-        case "denied": return "✗"
-        case "pending": return "⚠"
-        default: break
-        }
-    }
-    return typeIcon(for: type)
-}
+// Type display functions moved to TimelineStripView.swift (timelineTypeIcon, timelineTypeColor)

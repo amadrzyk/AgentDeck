@@ -1,4 +1,4 @@
-// TankStatusPanel.swift — Rate limits + models panel (Android EnginePanel style)
+// TankStatusPanel.swift — Rate limits + models panel (matches Android EnginePanel.kt)
 
 import SwiftUI
 
@@ -6,109 +6,106 @@ struct TankStatusPanel: View {
     @Environment(AgentStateHolder.self) private var stateHolder
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Header
-            Text("∿ TANK STATUS")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(.secondary)
+        let staleSuffix = stateHolder.state.usageStale == true ? " !" : ""
 
-            // Water Gauges
+        VStack(alignment: .leading, spacing: 4) {
+            // Header (13sp bold mono)
+            Text("∿ TANK STATUS")
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext)
+
+            // Water Gauges: 5h + 7d side by side
             if stateHolder.state.fiveHourPercent != nil || stateHolder.state.sevenDayPercent != nil {
-                HStack(spacing: 8) {
+                HStack {
+                    Spacer()
                     if let pct = stateHolder.state.fiveHourPercent {
-                        WaterGauge(label: "5h", percent: pct,
+                        WaterGauge(label: "5h\(staleSuffix)", percent: pct,
                                    resetTime: formatResetTime(stateHolder.state.fiveHourResetsAt))
                     }
                     if let pct = stateHolder.state.sevenDayPercent {
-                        WaterGauge(label: "7d", percent: pct,
+                        WaterGauge(label: "7d\(staleSuffix)", percent: pct,
                                    resetTime: formatResetTime(stateHolder.state.sevenDayResetsAt))
                     }
+                    Spacer()
                 }
             }
 
-            Divider().opacity(0.3)
-
             // MODEL section
-            VStack(alignment: .leading, spacing: 3) {
-                Text("MODEL")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
+            if stateHolder.state.modelName != nil || !stateHolder.state.modelCatalog.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("MODEL")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
 
-                // Current model
-                if let model = stateHolder.state.modelName {
-                    Text(model)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                }
+                    if let model = stateHolder.state.modelName {
+                        Text(model)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(TerrariumHUD.text)
+                    }
 
-                // Other models from catalog
-                let otherModels = stateHolder.state.modelCatalog
-                    .filter { $0.name != stateHolder.state.modelName }
-                    .map(\.name)
-                if !otherModels.isEmpty {
-                    Text(otherModels.joined(separator: " · "))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(1)
+                    let otherModels = stateHolder.state.modelCatalog
+                        .filter { $0.available && $0.name != stateHolder.state.modelName }
+                        .map(\.name)
+                    if !otherModels.isEmpty {
+                        Text(otherModels.joined(separator: " · "))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(TerrariumHUD.subtext)
+                    }
                 }
             }
 
             // OLLAMA section
-            if let ollama = stateHolder.state.ollamaStatus, ollama.available {
-                Divider().opacity(0.3)
-
-                VStack(alignment: .leading, spacing: 3) {
+            if let ollama = stateHolder.state.ollamaStatus, ollama.available, !ollama.models.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("OLLAMA")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
 
                     ForEach(ollama.models, id: \.name) { model in
-                        HStack(spacing: 4) {
+                        let vram = model.sizeVram > 0 ? model.sizeVram : model.size
+                        let vramText = vram > 0 ? " \(formatBytes(vram))" : ""
+                        HStack(spacing: 3) {
                             Circle()
-                                .fill(.green)
-                                .frame(width: 5, height: 5)
-                            Text(model.name)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.8))
-                            Text(formatBytes(model.sizeVram > 0 ? model.sizeVram : model.size))
-                                .font(.system(size: 8, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                                .fill(TerrariumHUD.ledGreen)
+                                .frame(width: 6, height: 6)
+                            Text("\(model.name)\(vramText)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(TerrariumHUD.text)
                         }
                     }
                 }
             }
 
-            // Connection dots
-            HStack(spacing: 12) {
-                // OAuth
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(stateHolder.state.oauthConnected == true ? .green : .red.opacity(0.4))
-                        .frame(width: 6, height: 6)
-                    Text("OAuth")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
+            // Connection dots (7dp, matches Android)
+            HStack(spacing: 8) {
+                if let oauth = stateHolder.state.oauthConnected {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(oauth ? TerrariumHUD.ledGreen : TerrariumHUD.ledRed.opacity(0.6))
+                            .frame(width: 7, height: 7)
+                        Text("OAuth")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(TerrariumHUD.subtext)
+                    }
                 }
 
-                // Ollama
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Circle()
                         .fill(stateHolder.state.ollamaStatus?.available == true
-                              ? .green : .gray.opacity(0.4))
-                        .frame(width: 6, height: 6)
+                              ? TerrariumHUD.ledGreen : TerrariumHUD.subtext.opacity(0.4))
+                        .frame(width: 7, height: 7)
                     Text("Ollama")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
                 }
             }
         }
         .padding(10)
-        .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
-// MARK: - Water Gauge
+// MARK: - Water Gauge (76×76, label on top, matches Android)
 
 struct WaterGauge: View {
     let label: String
@@ -116,54 +113,47 @@ struct WaterGauge: View {
     var resetTime: String? = nil
 
     private var fillColor: Color {
-        if percent >= 90 { return .red }
-        if percent >= 70 { return .orange }
-        return .green
+        if percent >= 90 { return TerrariumHUD.ledRed }
+        if percent >= 70 { return TerrariumHUD.ledAmber }
+        return TerrariumHUD.ledGreen
     }
 
     var body: some View {
-        VStack(spacing: 3) {
-            // Glass container
-            ZStack {
+        VStack(spacing: 2) {
+            // Label on top (12sp bold mono — matches Android)
+            Text(label)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext)
+
+            // Glass container (76×76)
+            ZStack(alignment: .center) {
                 // Container bg
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 64, height: 64)
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 76, height: 76)
 
                 // Water fill (bottom-up)
-                GeometryReader { _ in
-                    VStack(spacing: 0) {
-                        Spacer()
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(fillColor.opacity(0.5))
-                            .frame(height: 56 * min(percent / 100, 1))
-                    }
+                VStack(spacing: 0) {
+                    Spacer()
+                    Rectangle()
+                        .fill(fillColor.opacity(0.5))
+                        .frame(height: 68 * min(percent / 100, 1))
                 }
-                .frame(width: 56, height: 56)
+                .frame(width: 68, height: 68)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
 
-                // Percent text
-                VStack(spacing: 0) {
-                    Text("\(Int(percent))")
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
-                    Text("%")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                }
+                // Percent text (18sp bold mono + %)
+                Text("\(Int(percent))%")
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.text)
             }
-            .frame(width: 64, height: 64)
+            .frame(width: 76, height: 76)
 
-            // Label
-            Text(label)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            // Reset time
+            // Reset time (11sp)
             if let reset = resetTime {
-                Text("↻ \(reset)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary.opacity(0.7))
+                Text("⟲ \(reset)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
             }
         }
     }

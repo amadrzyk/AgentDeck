@@ -146,7 +146,8 @@ final class BridgeDiscovery: @unchecked Sendable {
                     // Fetch token from bridge /health endpoint
                     self?.fetchTokenFromBridge(host: resolvedHost, port: port) { fetchedToken in
                         print("[Discovery] resolved \(name) to \(resolvedHost):\(port) token=\(fetchedToken != nil ? "fetched" : "nil")")
-                        DispatchQueue.main.async {
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self else { return }
                             let bridge = DiscoveredBridge(
                                 name: name,
                                 host: resolvedHost,
@@ -155,14 +156,15 @@ final class BridgeDiscovery: @unchecked Sendable {
                                 project: project,
                                 agentType: agent
                             )
-                            if !(self?.bridges.contains(where: { $0.id == bridge.id }) ?? true) {
-                                self?.bridges.append(bridge)
+                            if !self.bridges.contains(where: { $0.id == bridge.id }) {
+                                self.bridges.append(bridge)
                             }
                         }
                     }
                 } else {
                     print("[Discovery] resolved \(name) to \(resolvedHost):\(port) token=yes")
-                    DispatchQueue.main.async {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
                         let bridge = DiscoveredBridge(
                             name: name,
                             host: resolvedHost,
@@ -171,8 +173,8 @@ final class BridgeDiscovery: @unchecked Sendable {
                             project: project,
                             agentType: agent
                         )
-                        if !(self?.bridges.contains(where: { $0.id == bridge.id }) ?? true) {
-                            self?.bridges.append(bridge)
+                        if !self.bridges.contains(where: { $0.id == bridge.id }) {
+                            self.bridges.append(bridge)
                         }
                     }
                 }

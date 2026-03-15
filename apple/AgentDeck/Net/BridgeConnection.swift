@@ -10,9 +10,9 @@ final class BridgeConnection: @unchecked Sendable {
 
     private static let initialBackoffMs = 1000
     private static let maxBackoffMs = 8000
-    private static let maxReconnectAttempts = 10
-    private static let pingIntervalSec: TimeInterval = 30
-    private static let readTimeoutSec: TimeInterval = 45
+    private static let maxReconnectAttempts = 20
+    private static let pingIntervalSec: TimeInterval = 15
+    private static let healthCheckTimeoutSec: TimeInterval = 3
 
     // MARK: - Observable State
 
@@ -25,6 +25,9 @@ final class BridgeConnection: @unchecked Sendable {
     // MARK: - Event callback
 
     var onEvent: ((BridgeEvent) -> Void)?
+
+    /// Called when WebSocket disconnects (before reconnect attempts)
+    var onDisconnect: (() -> Void)?
 
     /// Called when reconnect gives up — state holder can restart discovery
     var onReconnectExhausted: (() -> Void)?
@@ -43,6 +46,10 @@ final class BridgeConnection: @unchecked Sendable {
     private var reconnectWork: DispatchWorkItem?
     private let queue = DispatchQueue(label: "dev.agentdeck.bridge", qos: .userInitiated)
     private var hasReceivedMessage = false
+    /// Incremented on disconnect(reconnect: false) to invalidate pending reconnect work
+    private var connectionGeneration = 0
+    /// Guard against concurrent handleDisconnect calls (ping callback + receive loop race)
+    private var isHandlingDisconnect = false
 
     enum ConnectionStatus: Sendable {
         case disconnected
@@ -59,7 +66,14 @@ final class BridgeConnection: @unchecked Sendable {
     }
 
     private func connectInternal(_ urlString: String) {
-        disconnect(reconnect: false)
+        // Clean up previous socket without resetting reconnect state
+        let wasReconnecting = isReconnecting
+        let savedAttempt = reconnectAttempt
+        stopPingTimer()
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
 
         guard let wsUrl = URL(string: urlString) else {
             DispatchQueue.main.async { self.lastError = "Invalid URL: \(urlString)" }
@@ -70,13 +84,26 @@ final class BridgeConnection: @unchecked Sendable {
             self.url = urlString
             self.status = .connecting
             self.lastError = nil
-            self.shouldReconnect = true
             self.hasReceivedMessage = false
+            // Only enable shouldReconnect for fresh connections.
+            // Reconnect-originated calls already have it set; re-setting it
+            // would undo a concurrent disconnect(reconnect: false) call.
+            if !wasReconnecting {
+                self.shouldReconnect = true
+            }
+            // Preserve reconnecting state across reconnect attempts
+            if wasReconnecting {
+                self.isReconnecting = true
+                self.reconnectAttempt = savedAttempt
+            }
         }
 
         print("[BridgeConnection] connecting to \(urlString)")
 
-        let session = URLSession(configuration: .default)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.waitsForConnectivity = false
+        let session = URLSession(configuration: config)
         self.urlSession = session
         let task = session.webSocketTask(with: wsUrl)
 
@@ -105,6 +132,8 @@ final class BridgeConnection: @unchecked Sendable {
         urlSession = nil
 
         if !reconnect {
+            // Bump generation so any in-flight reconnect work on queue sees stale gen
+            connectionGeneration += 1
             DispatchQueue.main.async {
                 self.status = .disconnected
                 self.isReconnecting = false
@@ -182,10 +211,10 @@ final class BridgeConnection: @unchecked Sendable {
 
     // MARK: - Ping
 
-    private func startPingTimer() {
+    func startPingTimer() {
         stopPingTimer()
         DispatchQueue.main.async {
-            self.pingTimer = Timer.scheduledTimer(withTimeInterval: Self.pingIntervalSec, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: Self.pingIntervalSec, repeats: true) { [weak self] _ in
                 self?.webSocket?.sendPing { error in
                     if let error {
                         print("[BridgeConnection] Ping failed: \(error)")
@@ -193,19 +222,68 @@ final class BridgeConnection: @unchecked Sendable {
                     }
                 }
             }
+            RunLoop.main.add(timer, forMode: .common)
+            self.pingTimer = timer
         }
     }
 
-    private func stopPingTimer() {
+    func stopPingTimer() {
         DispatchQueue.main.async {
             self.pingTimer?.invalidate()
             self.pingTimer = nil
         }
     }
 
+    // MARK: - Health Check & Force Reconnect
+
+    /// Send an immediate ping with a short timeout to check if the socket is alive.
+    func forceHealthCheck(completion: @escaping (Bool) -> Void) {
+        guard let ws = webSocket else {
+            completion(false)
+            return
+        }
+
+        var completed = false
+        let lock = NSLock()
+
+        ws.sendPing { error in
+            lock.lock()
+            guard !completed else { lock.unlock(); return }
+            completed = true
+            lock.unlock()
+            DispatchQueue.main.async { completion(error == nil) }
+        }
+
+        // Timeout
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.healthCheckTimeoutSec) {
+            lock.lock()
+            guard !completed else { lock.unlock(); return }
+            completed = true
+            lock.unlock()
+            print("[BridgeConnection] health check timed out")
+            DispatchQueue.main.async { completion(false) }
+        }
+    }
+
+    /// Tear down the socket without triggering reconnect. Caller is responsible for restarting.
+    func forceDisconnectAndRestart() {
+        disconnect(reconnect: false)
+    }
+
+    /// Reset reconnect counter (e.g. after foreground return).
+    func resetReconnectCount() {
+        reconnectAttempt = 0
+        backoffMs = Self.initialBackoffMs
+    }
+
     // MARK: - Reconnect
 
     private func handleDisconnect(error: Error? = nil) {
+        // Guard against concurrent calls (ping callback + receive loop race)
+        guard !isHandlingDisconnect else { return }
+        isHandlingDisconnect = true
+        defer { isHandlingDisconnect = false }
+
         stopPingTimer()
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
@@ -213,12 +291,17 @@ final class BridgeConnection: @unchecked Sendable {
         let wasConnected = hasReceivedMessage
         hasReceivedMessage = false
 
+        // Notify state holder immediately so UI shows disconnect
+        if wasConnected {
+            DispatchQueue.main.async { self.onDisconnect?() }
+        }
+
         // Check for auth rejection (4001)
         if let urlError = error as? URLError,
            urlError.code == .userAuthenticationRequired {
             DispatchQueue.main.async {
                 self.status = .disconnected
-                self.lastError = "Unauthorized — pair with token or use local connection"
+                self.lastError = "Unauthorized — check pairing token"
                 self.shouldReconnect = false
                 self.isReconnecting = false
             }
@@ -242,8 +325,8 @@ final class BridgeConnection: @unchecked Sendable {
                 self.isReconnecting = false
                 self.shouldReconnect = false
                 self.lastError = wasConnected
-                    ? "Bridge disconnected — searching for bridges..."
-                    : "Connection failed — searching for bridges..."
+                    ? "Bridge disconnected"
+                    : "Connection failed"
                 self.onReconnectExhausted?()
             }
             return
@@ -267,8 +350,10 @@ final class BridgeConnection: @unchecked Sendable {
         let delay = Double(backoffMs) / 1000.0
         backoffMs = min(backoffMs * 2, Self.maxBackoffMs)
 
+        let gen = connectionGeneration
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.shouldReconnect, let url = self.url else { return }
+            guard let self, self.connectionGeneration == gen,
+                  self.shouldReconnect, let url = self.url else { return }
             self.connectInternal(url)
         }
         reconnectWork = work

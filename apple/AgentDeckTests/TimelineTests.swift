@@ -147,9 +147,9 @@ final class TimelineTests: XCTestCase {
     // MARK: - Type Icons
 
     func testTypeIcons() {
-        XCTAssertEqual(typeIcon(for: .chatStart), "▶")
-        XCTAssertEqual(typeIcon(for: .chatEnd), "■")
-        XCTAssertEqual(typeIcon(for: .error), "✗")
-        XCTAssertEqual(typeIcon(for: .toolRequest), "⚡")
+        XCTAssertEqual(timelineTypeIcon(for: .chatStart), "▶")
+        XCTAssertEqual(timelineTypeIcon(for: .chatEnd), "■")
+        XCTAssertEqual(timelineTypeIcon(for: .error), "✗")
+        XCTAssertEqual(timelineTypeIcon(for: .toolRequest), "⚠")
     }
 }

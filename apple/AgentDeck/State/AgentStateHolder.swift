@@ -15,6 +15,10 @@ final class AgentStateHolder: @unchecked Sendable {
     let connection = BridgeConnection()
     let discovery = BridgeDiscovery()
     let timelineStore = TimelineStore()
+    private(set) var timelineGenerator: StateTimelineGenerator!
+
+    /// Bump to trigger SwiftUI re-render for nested timelineStore changes
+    private(set) var timelineVersion: Int = 0
 
     #if os(macOS)
     let localDiscovery = LocalSessionDiscovery()
@@ -35,6 +39,10 @@ final class AgentStateHolder: @unchecked Sendable {
         }
     }
 
+    // MARK: - Lifecycle
+
+    private var backgroundEnteredAt: Date?
+
     // MARK: - Connection Waterfall State
 
     private(set) var isAutoConnecting = false
@@ -50,8 +58,15 @@ final class AgentStateHolder: @unchecked Sendable {
     // MARK: - Init
 
     init() {
+        timelineGenerator = StateTimelineGenerator(store: timelineStore)
         connection.onEvent = { [weak self] event in
             self?.handleEvent(event)
+        }
+        connection.onDisconnect = { [weak self] in
+            guard let self else { return }
+            if self.state.bridgeConnected {
+                self.resetToDisconnected()
+            }
         }
         connection.onReconnectExhausted = { [weak self] in
             guard let self else { return }
@@ -77,6 +92,60 @@ final class AgentStateHolder: @unchecked Sendable {
             return false
         }
         #endif
+    }
+
+    // MARK: - Lifecycle Handlers
+
+    func handleBackgroundEntry() {
+        backgroundEnteredAt = Date()
+        connection.stopPingTimer()
+        print("[Lifecycle] entered background")
+    }
+
+    func handleForegroundReturn() {
+        let suspendDuration: TimeInterval
+        if let enteredAt = backgroundEnteredAt {
+            suspendDuration = Date().timeIntervalSince(enteredAt)
+        } else {
+            suspendDuration = 0
+        }
+        backgroundEnteredAt = nil
+        print("[Lifecycle] foreground return, suspend=\(String(format: "%.1f", suspendDuration))s, connected=\(state.bridgeConnected)")
+
+        if !state.bridgeConnected {
+            // Not connected — restart discovery
+            restartWaterfall()
+        } else if suspendDuration > 20 {
+            // Long suspend — socket is certainly dead (server terminates after ~30s)
+            print("[Lifecycle] long suspend (\(Int(suspendDuration))s) — force reconnect")
+            connection.forceDisconnectAndRestart()
+            restartWaterfall()
+        } else if suspendDuration > 5 {
+            // Medium suspend — check if socket is still alive
+            print("[Lifecycle] medium suspend (\(Int(suspendDuration))s) — health check")
+            connection.forceHealthCheck { [weak self] alive in
+                guard let self else { return }
+                if !alive {
+                    print("[Lifecycle] health check failed — reconnecting")
+                    self.connection.forceDisconnectAndRestart()
+                    self.restartWaterfall()
+                } else {
+                    print("[Lifecycle] health check passed")
+                    self.connection.startPingTimer()
+                }
+            }
+            return  // Don't restart ping timer yet — health check callback will
+        } else {
+            // Short suspend — just restart ping timer
+            connection.startPingTimer()
+        }
+    }
+
+    private func restartWaterfall() {
+        // Force reset waterfall stage so startConnectionWaterfall() can enter
+        waterfallStage = .idle
+        connection.resetReconnectCount()
+        startConnectionWaterfall()
     }
 
     // MARK: - Connection Waterfall
@@ -187,8 +256,11 @@ final class AgentStateHolder: @unchecked Sendable {
             }
             #endif
 
-            if let bridge = self.discovery.bridges.first {
-                print("[AutoConnect] connecting to bridge: \(bridge.wsUrl)")
+            // Prefer daemon bridge for consistent state (daemon aggregates all sessions)
+            let bridge = self.discovery.bridges.first(where: { $0.agentType == "daemon" })
+                ?? self.discovery.bridges.first
+            if let bridge {
+                print("[AutoConnect] connecting to bridge: \(bridge.wsUrl) (agent=\(bridge.agentType ?? "?"))")
                 timer.invalidate()
                 self.autoConnectTimer = nil
                 self.connectTo(bridge)
@@ -237,9 +309,13 @@ final class AgentStateHolder: @unchecked Sendable {
         case .userPrompt:
             break  // handled by voice/deck UI
         case .timelineEvent(let e):
+            timelineGenerator.receivingBridgeTimeline = true
             timelineStore.addEntry(e.entry, upsert: e.upsert ?? false)
+            timelineVersion += 1
         case .timelineHistory(let e):
+            timelineGenerator.receivingBridgeTimeline = true
             timelineStore.mergeHistory(e.entries)
+            timelineVersion += 1
         }
 
         // Cache state for offline display
@@ -276,6 +352,16 @@ final class AgentStateHolder: @unchecked Sendable {
         if let os = e.ollamaStatus { state.ollamaStatus = os }
         state.gatewayAvailable = e.gatewayAvailable ?? state.gatewayAvailable
         state.gatewayHasError = e.gatewayHasError ?? state.gatewayHasError
+
+        // Local timeline generation (when bridge doesn't provide rich timeline)
+        timelineGenerator.onStateUpdate(
+            newState: state.state,
+            agentType: e.agentType,
+            currentTool: e.currentTool,
+            toolInput: e.toolInput,
+            question: e.question
+        )
+        timelineVersion += 1
 
         // Clear tool info on idle
         if state.state == .idle {
@@ -340,6 +426,8 @@ final class AgentStateHolder: @unchecked Sendable {
     }
 
     private func resetToDisconnected() {
+        timelineGenerator.onDisconnected()
+        timelineVersion += 1
         // Preserve lastKnownState for offline display
         state.bridgeConnected = false
         state.state = .disconnected

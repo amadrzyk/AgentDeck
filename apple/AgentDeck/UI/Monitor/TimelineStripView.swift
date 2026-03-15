@@ -1,150 +1,197 @@
-// TimelineStripView.swift — Event timeline with color coding + density bar
+// TimelineStripView.swift — Event timeline (matches Android TimelineStrip.kt)
 
 import SwiftUI
 
 struct TimelineStripView: View {
     @Environment(AgentStateHolder.self) private var stateHolder
 
-    @State private var selectedEntry: GroupedEntry?
+    @State private var focusedIndex: Int = -1
 
-    var body: some View {
-        HStack(spacing: 0) {
-            // Compact log (65%)
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(stateHolder.timelineStore.grouped) { group in
-                                timelineRow(group)
-                                    .id(group.id)
-                                    .onTapGesture {
-                                        selectedEntry = group
-                                    }
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                    }
-                    .onChange(of: stateHolder.timelineStore.grouped.count) {
-                        if let last = stateHolder.timelineStore.grouped.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
-                }
-
-                // Activity density bar
-                densityBar
-            }
-            .frame(maxWidth: .infinity)
-
-            // Detail panel (35%)
-            if let selected = selectedEntry {
-                detailPanel(selected)
-                    .frame(maxWidth: .infinity)
-            } else {
-                Color.clear
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.bottom, 8)
+    /// Read grouped entries — triggers re-render via timelineVersion observation
+    private var grouped: [GroupedEntry] {
+        stateHolder.timelineStore.grouped
     }
 
-    // MARK: - Timeline Row
+    /// Accessed in body to register SwiftUI observation on timeline changes
+    private var timelineVersion: Int { stateHolder.timelineVersion }
 
-    private func timelineRow(_ group: GroupedEntry) -> some View {
-        HStack(spacing: 4) {
-            Text(typeIcon(for: group.entry.type, status: group.entry.status))
-                .font(.system(size: 10))
-                .foregroundStyle(typeColor(for: group.entry.type))
+    private var focusedGroup: GroupedEntry? {
+        if grouped.isEmpty { return nil }
+        if focusedIndex < 0 || focusedIndex >= grouped.count {
+            return grouped.last
+        }
+        return grouped[focusedIndex]
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                // Main content: two-pane row (65/35 split)
+                HStack(spacing: 0) {
+                    // Left pane: compact log scroll (65%)
+                    VStack(spacing: 0) {
+                        // Header — timelineVersion read forces @Observable re-evaluation
+                        Text("TIMELINE")
+                            .id(timelineVersion)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(TerrariumHUD.subtext)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 4)
+                            .padding(.bottom, 2)
+
+                        if grouped.isEmpty {
+                            Text("No events yet")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(TerrariumHUD.subtext)
+                                .padding(.horizontal, 8)
+                        } else {
+                            ScrollViewReader { proxy in
+                                ScrollView {
+                                    LazyVStack(alignment: .leading, spacing: 1) {
+                                        ForEach(Array(grouped.enumerated()), id: \.element.id) { index, group in
+                                            compactLogRow(group, index: index)
+                                                .id(group.id)
+                                                .onTapGesture { focusedIndex = index }
+                                        }
+                                    }
+                                    .padding(.horizontal, 4)
+                                }
+                                .onChange(of: grouped.count) {
+                                    if let last = grouped.last, focusedIndex < 0 {
+                                        proxy.scrollTo(last.id, anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(width: geo.size.width * 0.65)
+
+                    // Vertical divider (1dp, matches Android)
+                    Rectangle()
+                        .fill(TerrariumHUD.subtext.opacity(0.3))
+                        .frame(width: 1)
+                        .padding(.vertical, 8)
+
+                    // Right pane: detail panel (35%)
+                    detailPane(focusedGroup)
+                        .frame(maxWidth: .infinity)
+                }
+
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Compact Log Row
+
+    private func compactLogRow(_ group: GroupedEntry, index: Int) -> some View {
+        let isSelected = index == focusedIndex ||
+            (focusedIndex < 0 && index == grouped.count - 1)
+        let isChatEnd = group.entry.type == .chatEnd
+        let icon = timelineTypeIcon(for: group.entry.type, status: group.entry.status)
+        let iconColor = timelineTypeColor(for: group.entry.type)
+        let countSuffix = group.count > 1 ? " ×\(group.count)" : ""
+
+        return HStack(spacing: 4) {
+            // Selected indicator bar
+            if isSelected {
+                Rectangle()
+                    .fill(iconColor)
+                    .frame(width: 2, height: 14)
+            }
 
             Text(formatTime(group.entry.date))
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            Text(group.entry.raw)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.8))
-                .lineLimit(1)
+                .foregroundStyle(TerrariumHUD.subtext.opacity(isChatEnd ? 0.4 : 0.5))
 
-            if group.count > 1 {
-                Text("×\(group.count)")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
+            Text(icon)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(iconColor.opacity(isChatEnd ? 0.6 : 1))
+
+            Text(group.entry.raw + countSuffix)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(isChatEnd ? TerrariumHUD.text.opacity(0.6) : TerrariumHUD.text)
+                .lineLimit(1)
 
             Spacer()
         }
+        .padding(.horizontal, 4)
         .padding(.vertical, 1)
         .background(
-            selectedEntry?.id == group.id
-                ? typeColor(for: group.entry.type).opacity(0.1)
-                : Color.clear
+            isSelected ? Color.white.opacity(0.08) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 2)
         )
     }
 
-    // MARK: - Detail Panel
+    // MARK: - Detail Pane
 
-    private func detailPanel(_ group: GroupedEntry) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(typeIcon(for: group.entry.type))
-                Text(group.entry.type.rawValue)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(typeColor(for: group.entry.type))
-            }
+    private func detailPane(_ group: GroupedEntry?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let group {
+                let icon = timelineTypeIcon(for: group.entry.type, status: group.entry.status)
+                let iconColor = timelineTypeColor(for: group.entry.type)
+                let countSuffix = group.count > 1 ? " (×\(group.count))" : ""
 
-            Text(group.entry.raw)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white)
+                // Header: type badge chip + timestamp
+                HStack(spacing: 6) {
+                    // Type badge chip (colored bg)
+                    Text(" \(icon) \(formatType(group.entry.type)) ")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(iconColor.opacity(0.7), in: RoundedRectangle(cornerRadius: 3))
 
-            if let detail = group.entry.detail {
-                Text(detail)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .lineLimit(6)
-            }
+                    Spacer()
 
-            if let status = group.entry.status {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(status == "approved" ? .green : status == "denied" ? .red : .orange)
-                        .frame(width: 6, height: 6)
-                    Text(status)
+                    Text(formatTimeSeconds(group.entry.date))
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(TerrariumHUD.subtext)
                 }
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+
+                // Agent tag
+                let agentTag = agentTag(group.entry.agentType)
+                if !agentTag.isEmpty {
+                    Text(agentTag + countSuffix)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
+                        .padding(.horizontal, 8)
+                }
+
+                Spacer().frame(height: 4)
+
+                // Summary (11sp bold)
+                Text(group.entry.raw)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.text)
+                    .padding(.horizontal, 8)
+
+                // Detail text
+                if let detail = group.entry.detail, detail != group.entry.raw {
+                    Spacer().frame(height: 4)
+                    ScrollView {
+                        Text(detail)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(TerrariumHUD.subtext.opacity(0.8))
+                    }
+                    .padding(.horizontal, 8)
+                }
+
+                Spacer()
+            } else {
+                Spacer()
+                Text("No events")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.5))
+                    .frame(maxWidth: .infinity)
+                Spacer()
             }
         }
-        .padding(8)
-    }
-
-    // MARK: - Density Bar
-
-    private var densityBar: some View {
-        Canvas { context, size in
-            let entries = stateHolder.timelineStore.entries
-            let now = Date().timeIntervalSince1970 * 1000
-            let window: Double = 30000  // 30 seconds
-
-            // Count events in small bins
-            let bins = 30
-            let binWidth = size.width / CGFloat(bins)
-
-            for i in 0..<bins {
-                let binStart = now - window + Double(i) / Double(bins) * window
-                let binEnd = binStart + window / Double(bins)
-                let count = entries.filter { $0.ts >= binStart && $0.ts < binEnd }.count
-
-                if count > 0 {
-                    let alpha = min(1.0, Double(count) / 3.0) * 0.6
-                    let rect = CGRect(x: CGFloat(i) * binWidth, y: 0,
-                                      width: binWidth, height: size.height)
-                    context.fill(Path(rect), with: .color(.cyan.opacity(alpha)))
-                }
-            }
-        }
-        .frame(height: 3)
+        .background(Color.black.opacity(0.19), in: RoundedRectangle(cornerRadius: 4))
     }
 
     // MARK: - Helpers
@@ -154,18 +201,74 @@ struct TimelineStripView: View {
         fmt.dateFormat = "HH:mm"
         return fmt.string(from: date)
     }
+
+    private func formatTimeSeconds(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "HH:mm:ss"
+        return fmt.string(from: date)
+    }
+
+    private func agentTag(_ agentType: String?) -> String {
+        switch agentType {
+        case "claude-code": "Claude"
+        case "openclaw": "OpenClaw"
+        case nil: ""
+        default: "Agent"
+        }
+    }
+
+    private func formatType(_ type: TimelineEntryType) -> String {
+        switch type {
+        case .toolRequest: "TOOL"
+        case .toolResolved: "DONE"
+        case .toolExec: "EXEC"
+        case .modelCall: "MODEL"
+        case .modelResponse: "RESP"
+        case .chatStart: "CHAT"
+        case .chatEnd: "END"
+        case .chatResponse: "REPLY"
+        case .memoryRecall: "MEM"
+        case .error: "ERR"
+        case .scheduled: "SCHED"
+        case .userAction: "USER"
+        }
+    }
 }
 
-// MARK: - Type Color
+// MARK: - Timeline Type Color & Icon (matches Android typeColor/typeIcon)
 
-func typeColor(for type: TimelineEntryType) -> Color {
+func timelineTypeColor(for type: TimelineEntryType) -> Color {
     switch type {
-    case .chatStart, .chatEnd, .chatResponse: .green
-    case .toolRequest, .toolResolved, .toolExec: .cyan
-    case .modelCall, .modelResponse: .orange
-    case .error: .red
-    case .scheduled: .purple
-    case .userAction: .blue
-    case .memoryRecall: .teal
+    case .chatStart, .chatEnd, .chatResponse: TerrariumHUD.text
+    case .toolRequest, .toolResolved, .toolExec: TerrariumHUD.ledGreen
+    case .modelCall, .modelResponse: TerrariumHUD.tetraNeon
+    case .error: TerrariumHUD.ledRed
+    case .scheduled: TerrariumHUD.subtext
+    case .userAction: Color(red: 0.231, green: 0.51, blue: 0.965) // Blue
+    case .memoryRecall: TerrariumHUD.claudeBody
+    }
+}
+
+func timelineTypeIcon(for type: TimelineEntryType, status: String? = nil) -> String {
+    if type == .toolRequest, let status {
+        switch status {
+        case "approved": return "✓"
+        case "denied": return "✗"
+        default: return "⚠"
+        }
+    }
+    return switch type {
+    case .toolRequest: "⚠"
+    case .toolResolved: "✓"
+    case .toolExec: "▸"
+    case .modelCall: "◆"
+    case .modelResponse: "◇"
+    case .chatStart: "▶"
+    case .chatEnd: "■"
+    case .chatResponse: "◇"
+    case .memoryRecall: "⦻"
+    case .error: "✗"
+    case .scheduled: "⏰"
+    case .userAction: "☞"
     }
 }

@@ -1,17 +1,31 @@
-// SessionListPanel.swift — Agent session list panel
+// SessionListPanel.swift — Agent session list panel (matches Android SessionListPanel.kt)
 
 import SwiftUI
+
+// MARK: - Terrarium HUD Colors (matching Android TerrariumColors)
+
+enum TerrariumHUD {
+    static let bg = Color.black.opacity(0.5)                       // 0x80000000
+    static let text = Color(red: 0.886, green: 0.91, blue: 0.941) // #E2E8F0
+    static let subtext = Color(red: 0.58, green: 0.64, blue: 0.72) // #94A3B8
+    static let ledGreen = Color(red: 0.133, green: 0.773, blue: 0.369)  // #22C55E
+    static let ledAmber = Color(red: 0.984, green: 0.749, blue: 0.141)  // #FBBF24
+    static let ledRed = Color(red: 0.937, green: 0.267, blue: 0.267)    // #EF4444
+    static let tetraNeon = Color(red: 0, green: 0.898, blue: 1)         // #00E5FF
+    static let claudeBody = Color(red: 0.753, green: 0.439, blue: 0.345) // #C07058
+}
 
 struct SessionListPanel: View {
     @Environment(AgentStateHolder.self) private var stateHolder
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Branded logo with neon cyan underline
-            VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
+            // Brand logo (matches AgentDeckLogo TabletLogo)
+            VStack(spacing: 3) {
                 Text("AgentDeck")
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(TerrariumHUD.text)
+                    .frame(maxWidth: .infinity)
 
                 // Neon cyan underline bar (glow + crisp)
                 Canvas { context, size in
@@ -21,110 +35,151 @@ struct SessionListPanel: View {
                     // Glow layer
                     let glowRect = CGRect(x: x, y: 0, width: barWidth, height: 3)
                     context.fill(Path(roundedRect: glowRect, cornerRadius: 1.5),
-                                 with: .color(.cyan.opacity(0.3)))
-                    context.addFilter(.blur(radius: 3))
+                                 with: .color(TerrariumHUD.tetraNeon.opacity(0.3)))
 
                     // Crisp bar
-                    let barRect = CGRect(x: x, y: 0.5, width: barWidth, height: 2)
+                    let barRect = CGRect(x: x, y: 3, width: barWidth, height: 2)
                     context.fill(Path(roundedRect: barRect, cornerRadius: 1),
-                                 with: .color(.cyan))
+                                 with: .color(TerrariumHUD.tetraNeon))
                 }
-                .frame(height: 4)
+                .frame(height: 5)
             }
-            .padding(.bottom, 4)
 
-            // Primary session
-            sessionRow(
-                icon: agentIcon(for: stateHolder.state.agentType),
-                project: displayProject(
-                    stateHolder.state.projectName ?? "—",
-                    agentType: stateHolder.state.agentType,
-                    sessionIndex: primarySessionIndex
-                ),
-                model: stateHolder.state.modelName,
-                effortLevel: stateHolder.state.effortLevel,
-                permissionMode: stateHolder.state.permissionMode,
-                state: stateHolder.state.state,
-                workerCount: stateHolder.state.workerSessionCount
-            )
+            Spacer().frame(height: 4)
 
-            // Sibling sessions
-            let siblings = stateHolder.state.siblingSessions.filter { $0.agentType != "daemon" }
-            ForEach(siblings) { sibling in
-                sessionRow(
-                    icon: agentIcon(for: sibling.agentType),
-                    project: displayProject(
-                        sibling.projectName ?? sibling.id,
-                        agentType: sibling.agentType,
-                        sessionIndex: siblingIndex(sibling, in: siblings)
-                    ),
-                    model: nil,
-                    effortLevel: nil,
-                    permissionMode: nil,
-                    state: AgentConnectionState(rawValue: sibling.state ?? "") ?? .disconnected,
-                    workerCount: nil
-                )
+            // Permission mode badge (non-default only)
+            if stateHolder.state.permissionMode != .default {
+                Text("mode:\(stateHolder.state.permissionMode.rawValue)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 4))
+            }
+
+            Spacer().frame(height: 2)
+
+            // Build unified entry list
+            let entries = buildEntries()
+            let nameCounts = Dictionary(grouping: entries, by: { "\($0.projectName)|\($0.agentType ?? "")" })
+                .mapValues(\.count)
+            var counters: [String: Int] = [:]
+
+            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                let key = "\(entry.projectName)|\(entry.agentType ?? "")"
+                let needsSuffix = (nameCounts[key] ?? 1) > 1
+                let suffix: String = {
+                    if needsSuffix {
+                        let idx = (counters[key] ?? 0) + 1
+                        counters[key] = idx
+                        return " #\(idx)"
+                    }
+                    return ""
+                }()
+
+                sessionRow(entry: entry, suffix: suffix)
+            }
+
+            // Worker count
+            if let count = stateHolder.state.workerSessionCount, count > 0 {
+                Text("Workers: \(count)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.text)
             }
         }
-        .padding(10)
-        .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .padding(8)
+        .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    // MARK: - Session Row
+    // MARK: - Entry Builder
 
-    private func sessionRow(icon: String, project: String, model: String?,
-                            effortLevel: String?, permissionMode: PermissionMode?,
-                            state: AgentConnectionState, workerCount: Int?) -> some View {
+    private struct SessionEntry {
+        let projectName: String
+        let agentType: String?
+        let modelName: String?
+        let effortLevel: String?
+        let state: AgentConnectionState
+        let isPrimary: Bool
+    }
+
+    private func buildEntries() -> [SessionEntry] {
+        var entries: [SessionEntry] = []
+
+        // Primary (skip daemon)
+        if stateHolder.state.agentType != "daemon" {
+            entries.append(SessionEntry(
+                projectName: stateHolder.state.projectName ?? "Agent",
+                agentType: stateHolder.state.agentType,
+                modelName: stateHolder.state.modelName,
+                effortLevel: stateHolder.state.effortLevel,
+                state: stateHolder.state.state,
+                isPrimary: true
+            ))
+        }
+
+        // Siblings (skip self, daemon, and virtual gateway duplicate)
+        // When daemon broadcasts agentType=openclaw as primary, it also injects
+        // a virtual "openclaw-gateway" sibling — skip it to avoid showing OpenClaw twice
+        for sibling in stateHolder.state.siblingSessions {
+            if sibling.id == stateHolder.state.sessionId { continue }
+            if sibling.agentType == "daemon" { continue }
+            if sibling.agentType == stateHolder.state.agentType &&
+               entries.contains(where: { $0.agentType == sibling.agentType }) { continue }
+            entries.append(SessionEntry(
+                projectName: sibling.projectName ?? "Agent",
+                agentType: sibling.agentType,
+                modelName: nil,
+                effortLevel: nil,
+                state: AgentConnectionState(rawValue: sibling.state ?? "") ?? .disconnected,
+                isPrimary: false
+            ))
+        }
+
+        return entries
+    }
+
+    // MARK: - Session Row (matches Android CompactLogRow style)
+
+    private func sessionRow(entry: SessionEntry, suffix: String) -> some View {
         HStack(spacing: 6) {
-            Text(icon)
-                .font(.system(size: 14))
+            // State color dot (6dp)
+            Circle()
+                .fill(stateColor(entry.state))
+                .frame(width: 6, height: 6)
+                .padding(.top, 4)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(project)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white)
+                // Icon + session name
+                Text("\(agentIcon(for: entry.agentType)) \(entry.projectName)\(suffix)")
+                    .font(.system(size: 12, weight: entry.isPrimary ? .bold : .regular))
+                    .foregroundStyle(TerrariumHUD.text)
+                    .lineLimit(2)
+
+                // Model · effort · state (subline)
+                let subLine = buildSubLine(entry: entry)
+                Text(subLine)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext)
                     .lineLimit(1)
-
-                if let model {
-                    HStack(spacing: 4) {
-                        Text(model)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-
-                        // Effort level (skip "medium" default)
-                        if let effort = effortLevel,
-                           effort != "medium" {
-                            Text(effort)
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-
-                // Permission mode badge
-                if let mode = permissionMode, mode != .default {
-                    Text("mode:\(mode.rawValue)")
-                        .font(.system(size: 8, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(.white.opacity(0.1), in: Capsule())
-                }
-
-                // Worker count
-                if let count = workerCount, count > 0 {
-                    Text("Workers: \(count)")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
             }
 
             Spacer()
-
-            StatusBadge(state: state)
-                .scaleEffect(0.8)
         }
+    }
+
+    private func buildSubLine(entry: SessionEntry) -> String {
+        let stateMarker = compactStateMarker(entry.state)
+        var parts: [String] = []
+        if let model = entry.modelName {
+            parts.append(model)
+        }
+        if let effort = entry.effortLevel, effort != "medium" {
+            parts.append(effort)
+        }
+        if !parts.isEmpty {
+            return parts.joined(separator: " · ") + " · " + stateMarker
+        }
+        return stateMarker
     }
 
     // MARK: - Helpers
@@ -132,38 +187,28 @@ struct SessionListPanel: View {
     private func agentIcon(for agentType: String?) -> String {
         switch agentType {
         case "openclaw": "🦞"
-        case "claude-code", .none: "🐙"
+        case "claude-code": "🐙"
         default: "●"
         }
     }
 
-    /// Compute #N suffix for primary session when duplicates exist
-    private var primarySessionIndex: Int? {
-        let siblings = stateHolder.state.siblingSessions.filter { $0.agentType != "daemon" }
-        let sameType = siblings.filter {
-            $0.agentType == stateHolder.state.agentType &&
-            $0.projectName == stateHolder.state.projectName
+    private func compactStateMarker(_ state: AgentConnectionState) -> String {
+        switch state {
+        case .idle: "● IDLE"
+        case .processing: "◉ PROC"
+        case .awaitingPermission: "⚠ PERM"
+        case .awaitingOption: "◇ SEL"
+        case .awaitingDiff: "□ DIFF"
+        case .disconnected: "○ OFF"
         }
-        return sameType.count > 0 ? 1 : nil
     }
 
-    /// Compute #N suffix for sibling in list
-    private func siblingIndex(_ sibling: SessionInfo, in siblings: [SessionInfo]) -> Int? {
-        let matching = siblings.filter {
-            $0.agentType == sibling.agentType && $0.projectName == sibling.projectName
+    private func stateColor(_ state: AgentConnectionState) -> Color {
+        switch state {
+        case .idle: TerrariumHUD.ledGreen
+        case .processing: Color(red: 0.231, green: 0.51, blue: 0.965) // #3B82F6
+        case .awaitingPermission, .awaitingOption, .awaitingDiff: TerrariumHUD.ledAmber
+        case .disconnected: TerrariumHUD.subtext
         }
-        guard matching.count > 1,
-              let idx = matching.firstIndex(where: { $0.id == sibling.id }) else { return nil }
-        // Offset by 2 since primary is #1
-        let hasPrimaryDup = sibling.agentType == stateHolder.state.agentType &&
-                            sibling.projectName == stateHolder.state.projectName
-        return hasPrimaryDup ? idx + 2 : idx + 1
-    }
-
-    private func displayProject(_ name: String, agentType: String?, sessionIndex: Int?) -> String {
-        if let idx = sessionIndex {
-            return "\(name) #\(idx)"
-        }
-        return name
     }
 }

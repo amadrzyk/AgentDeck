@@ -1,4 +1,4 @@
-// ActivityPanel.swift — Current tool activity / suggested prompt
+// ActivityPanel.swift — Current activity panel (matches Android ActivityPanel.kt)
 
 import SwiftUI
 
@@ -6,48 +6,66 @@ struct ActivityPanel: View {
     @Environment(AgentStateHolder.self) private var stateHolder
 
     var body: some View {
-        HStack(spacing: 8) {
-            if stateHolder.state.state == .processing {
-                // Pulsing dot
-                Circle()
-                    .fill(.cyan)
-                    .frame(width: 8, height: 8)
-                    .opacity(0.6)
+        VStack(alignment: .leading, spacing: 4) {
+            // Header (matches Android "ACTIVITY" 10sp bold mono)
+            Text("ACTIVITY")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(TerrariumHUD.subtext)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    if let tool = stateHolder.state.currentTool {
-                        Text(tool)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.cyan)
-                    }
-                    if let input = stateHolder.state.toolInput {
-                        Text(input)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(2)
-                    }
+            switch stateHolder.state.state {
+            case .processing:
+                if let tool = stateHolder.state.currentTool {
+                    Text("> \(tool)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.tetraNeon)
+                        .lineLimit(1)
                 }
-            } else if stateHolder.state.state == .idle {
+                if let input = stateHolder.state.toolInput {
+                    Text("  \"\(input)\"")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
+                        .lineLimit(2)
+                }
+                if let progress = stateHolder.state.toolProgress {
+                    Text("  (\(progress))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
+                }
+
+            case .idle:
                 if let prompt = stateHolder.state.suggestedPrompt {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Suggested:")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        Text(prompt)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(2)
-                    }
+                    Text("Suggested:")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
+                    Text(prompt)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.text)
+                        .lineLimit(2)
                 } else {
                     Text("Waiting for prompt...")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
                 }
-            }
 
-            Spacer()
+            case .awaitingPermission, .awaitingOption, .awaitingDiff:
+                if let question = stateHolder.state.question {
+                    Text(question)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.text)
+                        .lineLimit(3)
+                } else {
+                    Text("Awaiting input...")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
+                }
+
+            case .disconnected:
+                Text("No connection")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
         }
         .padding(8)
-        .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .background(TerrariumHUD.bg, in: RoundedRectangle(cornerRadius: 8))
     }
 }

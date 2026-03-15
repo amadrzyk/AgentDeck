@@ -7,7 +7,7 @@ final class WaterEffect {
     private var time: Float = 0
     private var envState: EnvironmentVisualState = .calm
 
-    private static let lineCount = 8
+    private static let lineCount = 5
 
     func setState(_ state: EnvironmentVisualState) {
         envState = state
@@ -30,9 +30,14 @@ final class WaterEffect {
         case .alert: 0.10
         }
 
+        // Use additive blending (matching Android BlendMode.Plus)
+        // This creates a lighter, more ethereal caustic effect instead of opaque overlay
+        var additive = context
+        additive.blendMode = .plusLighter
+
         // Two overlapping caustic layers with different phases
-        drawCausticLayer(context: &context, w: w, h: h, alpha: alpha, phase: 0)
-        drawCausticLayer(context: &context, w: w, h: h, alpha: alpha * 0.6, phase: Float.pi * 0.7)
+        drawCausticLayer(context: &additive, w: w, h: h, alpha: alpha, phase: 0)
+        drawCausticLayer(context: &additive, w: w, h: h, alpha: alpha * 0.05, phase: Float.pi * 0.7)
     }
 
     private func drawCausticLayer(context: inout GraphicsContext, w: Float, h: Float,
@@ -42,8 +47,8 @@ final class WaterEffect {
         let waveLen1 = w * 0.4
         let waveLen2 = w * 0.32
         let amp = spacing * 0.35
-        let strokeW = CGFloat(w * 0.008)
-        let reducedAlpha = alpha * 0.85
+        let strokeW = CGFloat(w * 0.004)
+        let reducedAlpha = alpha * 0.04
 
         let freq1 = twoPi / waveLen1
         let freq2 = twoPi / waveLen2

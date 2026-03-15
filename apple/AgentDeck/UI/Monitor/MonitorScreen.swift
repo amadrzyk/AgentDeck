@@ -1,4 +1,4 @@
-// MonitorScreen.swift — Single screen: terrarium + HUD + settings gear
+// MonitorScreen.swift — Single screen: terrarium + HUD + timeline + settings gear
 
 import SwiftUI
 
@@ -9,6 +9,13 @@ struct MonitorScreen: View {
     @State private var showSettingsSheet = false
 
     private let sandFraction: CGFloat = 0.35
+
+    /// Content-based key for sibling state changes (triggers terrarium update)
+    private var siblingStatesKey: String {
+        stateHolder.state.siblingSessions
+            .map { "\($0.id):\($0.state ?? "")" }
+            .joined(separator: ",")
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -21,6 +28,7 @@ struct MonitorScreen: View {
                 if !stateHolder.state.bridgeConnected {
                     ConnectionOverlay()
                 } else {
+                    // HUD panels (session list + tank status)
                     MonitorHUD()
 
                     // Timeline in sand area
@@ -36,19 +44,40 @@ struct MonitorScreen: View {
                     }
                 }
 
-                // Layer 3: Settings gear icon (always visible)
+                // Layer 3: Settings gear + rotation toggle (always visible)
                 VStack {
                     Spacer()
                     HStack {
                         Spacer()
+                        #if os(iOS)
+                        Button {
+                            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+                            let geometryPreferences: UIWindowScene.GeometryPreferences.iOS
+                            if scene.interfaceOrientation.isLandscape {
+                                geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .portrait)
+                            } else {
+                                geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .landscapeRight)
+                            }
+                            scene.requestGeometryUpdate(geometryPreferences)
+                        } label: {
+                            Image(systemName: "rectangle.portrait.rotate")
+                                .font(.title3)
+                                .foregroundStyle(.white.opacity(0.35))
+                                .padding(.vertical, 16)
+                                .padding(.trailing, 4)
+                        }
+                        .buttonStyle(.plain)
+                        #endif
                         Button {
                             showSettingsSheet = true
                         } label: {
                             Image(systemName: "gearshape")
                                 .font(.title2)
                                 .foregroundStyle(.white.opacity(0.6))
-                                .padding(16)
+                                .padding(.vertical, 16)
+                                .padding(.trailing, 24)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -62,7 +91,13 @@ struct MonitorScreen: View {
         .onChange(of: stateHolder.state.siblingSessions.count) {
             updateTerrariumState()
         }
+        .onChange(of: siblingStatesKey) {
+            updateTerrariumState()
+        }
         .onChange(of: stateHolder.state.gatewayAvailable) {
+            updateTerrariumState()
+        }
+        .onChange(of: stateHolder.state.gatewayHasError) {
             updateTerrariumState()
         }
         .onAppear {
