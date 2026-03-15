@@ -67,6 +67,8 @@ final class AgentStateHolder: @unchecked Sendable {
             if self.state.bridgeConnected {
                 self.resetToDisconnected()
             }
+            // Start mDNS discovery during reconnect so we can find new bridges
+            self.discovery.startSearching()
         }
         connection.onReconnectExhausted = { [weak self] in
             guard let self else { return }
@@ -75,13 +77,15 @@ final class AgentStateHolder: @unchecked Sendable {
             self.startConnectionWaterfall()
         }
 
-        #if os(macOS)
-        // On each reconnect attempt, check sessions.json for a local bridge.
-        // If found, abort stale-URL reconnect and connect locally instead.
+        // On each reconnect attempt, check for available bridges.
+        // If found, abort stale-URL reconnect and connect to the new bridge.
         connection.onReconnectAttempt = { [weak self] in
             guard let self else { return false }
-            let bridges = self.localDiscovery.readSessionsNow()
-            if let bridge = bridges.first {
+
+            #if os(macOS)
+            // macOS: prefer local sessions.json first
+            let localBridges = self.localDiscovery.readSessionsNow()
+            if let bridge = localBridges.first {
                 DispatchQueue.main.async {
                     self.savedUrl = nil
                     self.waterfallStage = .idle
@@ -89,9 +93,22 @@ final class AgentStateHolder: @unchecked Sendable {
                 }
                 return true  // abort reconnect
             }
+            #endif
+
+            // All platforms: check mDNS discovered bridges
+            let bridge = self.discovery.bridges.first(where: { $0.agentType == "daemon" })
+                ?? self.discovery.bridges.first
+            if let bridge, bridge.wsUrl != self.connection.url {
+                DispatchQueue.main.async {
+                    self.savedUrl = nil
+                    self.waterfallStage = .idle
+                    self.connectTo(bridge)
+                }
+                return true  // abort reconnect
+            }
+
             return false
         }
-        #endif
     }
 
     // MARK: - Lifecycle Handlers
