@@ -19,6 +19,17 @@ Thumbs.db
 
 # Temp
 *.tmp
+test-*.js
+
+# Media (use docs/media/ for committed images)
+/screenshot*.png
+/IMG_*
+/*.gif
+/*.mov
+/*.webp
+
+# Runtime
+compatibility.json
 
 # Android signing
 android/signing.properties
