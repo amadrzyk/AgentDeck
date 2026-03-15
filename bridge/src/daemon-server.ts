@@ -299,19 +299,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   let gatewayAdapter: OpenClawAdapter | null = null;
   let gatewayConnecting = false;
 
-  // Inject OpenClaw virtual session into sessions_list when Gateway is connected
-  // so ESP32/Android clients show the session in their agent list
+  // Inject OpenClaw virtual session into sessions_list when Gateway is reachable.
+  // Uses adapter WS connection when available, falls back to TCP probe so that
+  // the session list stays consistent with the terrarium (which uses TCP probe).
   core.setSessionsEnricher((sessions) => {
-    if (!gatewayAdapter?.isAlive()) return sessions;
+    const adapterAlive = gatewayAdapter?.isAlive() ?? false;
+    if (!adapterAlive && !core.cachedGatewayAvailable) return sessions;
     if (sessions.some(s => s.agentType === 'openclaw')) return sessions;
     const snap = core.stateMachine.getSnapshot();
     return [...sessions, {
       id: 'openclaw-gateway',
       port: 18789,
-      projectName: snap.projectName ?? 'OpenClaw',
+      projectName: adapterAlive ? (snap.projectName ?? 'OpenClaw') : 'OpenClaw',
       agentType: 'openclaw' as const,
       alive: true,
-      state: snap.state,
+      state: adapterAlive ? snap.state : 'idle',
     }];
   });
 

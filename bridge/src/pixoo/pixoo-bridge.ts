@@ -213,26 +213,31 @@ export function getPixooDeviceDetails(): Array<{
 function doStreamPush(): void {
   if (devices.length === 0) return;
   if (pushing) return;
-  
+
   const elapsed = Date.now() - lastPushTime;
   if (elapsed < HTTP_STREAM_INTERVAL_MS * 0.8) return;
-  
+
   pushing = true;
   lastPushTime = Date.now();
 
-  const frame = renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
-  const ts = new Date().toISOString().slice(11, 19);
-  process.stderr.write(`[Pixoo] ${ts} pushing to ${devices.length} dev(s)\n`);
+  try {
+    const frame = renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
+    const ts = new Date().toISOString().slice(11, 19);
+    process.stderr.write(`[Pixoo] ${ts} pushing to ${devices.length} dev(s)\n`);
 
-  const promises = devices.map(dev =>
-    pushFrame(dev.ip, frame).then(ok => {
-      process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ${ok ? 'OK' : 'FAIL'}\n`);
-    }).catch((err: any) => {
-      process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ERROR ${err?.message}\n`);
-    })
-  );
-  
-  Promise.all(promises).then(() => { pushing = false; });
+    const promises = devices.map(dev =>
+      pushFrame(dev.ip, frame).then(ok => {
+        process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ${ok ? 'OK' : 'FAIL'}\n`);
+      }).catch((err: any) => {
+        process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ERROR ${err?.message}\n`);
+      })
+    );
+
+    Promise.all(promises).then(() => { pushing = false; });
+  } catch (err: any) {
+    pushing = false;
+    process.stderr.write(`[Pixoo] renderFrame error: ${err?.message}\n`);
+  }
 }
 
 /**

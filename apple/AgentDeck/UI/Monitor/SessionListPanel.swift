@@ -111,8 +111,8 @@ struct SessionListPanel: View {
         for sibling in stateHolder.state.siblingSessions {
             if sibling.id == stateHolder.state.sessionId { continue }
             if sibling.agentType == "daemon" { continue }
-            if sibling.agentType == stateHolder.state.agentType &&
-               entries.contains(where: { $0.agentType == sibling.agentType }) { continue }
+            if sibling.id == "openclaw-gateway" &&
+               entries.contains(where: { $0.agentType == "openclaw" }) { continue }
             entries.append(SessionEntry(
                 projectName: sibling.projectName ?? "Agent",
                 agentType: sibling.agentType,

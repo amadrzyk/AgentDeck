@@ -2,13 +2,12 @@
 
 **Stop Chatting. Start Steering.**
 
-AgentDeck turns your Elgato Stream Deck+ into a physical control surface for AI coding agents like Claude Code and OpenClaw.
+AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **11 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, and terminals.
 
-> Control sessions. Interrupt runs. Switch modes. Monitor usage.
-> Steer your AI — without leaving your keyboard flow.
+> One bridge. 11 surfaces. Steer your AI — without leaving your keyboard flow.
 
 <p align="center">
-  <img src="docs/media/hero.jpg" width="720" alt="AgentDeck — Stream Deck+ controlling Claude Code with ACCEPT mode and voice recording">
+  <img src="docs/media/desk-setup.jpg" width="720" alt="AgentDeck — 11 surfaces running simultaneously: Stream Deck+, Android tablet, Crema S E-ink, iPhone, iPad, macOS, ESP32 Round AMOLED, ESP32 IPS LCD, ESP32 B86 Box, Pixoo64 LED, TUI terminal">
 </p>
 
 <p align="center">
@@ -27,6 +26,7 @@ AgentDeck turns your Elgato Stream Deck+ into a physical control surface for AI 
 | **Hardware** | Elgato Stream Deck+ (8 keys, 4 encoders, LCD touch strip) |
 | **Terminal** | iTerm2 (required for session management and voice paste) |
 | **Android** | *(Optional)* Android 10+ tablet or e-ink reader for remote dashboard |
+| **Apple** | *(Optional)* iOS 17+ / iPadOS 17+ / macOS 14+ for SwiftUI dashboard |
 | **TUI** | *(Optional)* Any terminal with truecolor support for `agentdeck dashboard` |
 
 ---
@@ -40,7 +40,10 @@ AgentDeck turns your Elgato Stream Deck+ into a physical control surface for AI 
 - [Usage](#usage)
 - [Stream Deck+ Layout (v3)](#stream-deck-layout-v3)
 - [Android Dashboard](#android-dashboard)
+- [Apple Dashboard](#apple-dashboard)
 - [TUI Dashboard](#tui-dashboard)
+- [ESP32 Display](#esp32-display)
+- [Pixoo64 LED Matrix](#pixoo64-led-matrix)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Uninstall](#uninstall)
@@ -58,26 +61,20 @@ AgentDeck turns your Elgato Stream Deck+ into a physical control surface for AI 
 
 ## What is AgentDeck?
 
-AgentDeck is not a chat app, a plugin, or a shortcut collection.
+A **control surface** — like an audio mixing console, but for AI coding agents. It reads your agent's state in real-time and dynamically reconfigures buttons and encoders to match what's happening right now.
 
-It's a **control surface** — like an audio mixing console or a video color panel, but for AI coding agents. It reads your agent's state in real-time and dynamically reconfigures buttons and encoders to match what's happening right now.
+- **Respond instantly** — YES / NO / ALWAYS buttons appear with semantic colors for permission prompts
+- **Interrupt** — STOP button sends Ctrl+C to a runaway agent
+- **Switch modes** — cycle Plan / Accept Edits / Default
+- **Navigate options** — encoder scrolls and selects multi-choice prompts on a wide-canvas LCD
+- **Voice input** — push-to-talk → whisper.cpp → auto-send (offline, <2s on M-series)
+- **Monitor usage** — animated water-gauge dashboard with rate limit countdowns
+- **Quick actions** — GO ON / REVIEW / COMMIT / CLEAR; encoder cycles custom prompts
+- **System utilities** — volume, mic, media, timer from the Utility encoder
+- **Terminal sessions** — iTerm dial switches sessions, auto-attaches tmux
+- **Works from anywhere** — all 11 surfaces can monitor and control the agent independently
 
-| What it does | How |
-|---|---|
-| **Respond instantly** to permission prompts | YES / NO / ALWAYS buttons appear with semantic colors (green/red/blue) |
-| **Interrupt** a runaway agent | STOP button sends Ctrl+C |
-| **Switch modes** on the fly | Mode button cycles Plan / Accept Edits / Default |
-| **Navigate options** physically | Encoder scrolls and selects multi-choice prompts; wide-canvas LCD shows all options |
-| **Speak to your agent** | Push-to-talk voice → whisper.cpp transcription → auto-send. Works offline |
-| **See suggestions** | Claude Code ghost text (autocomplete) appears on the Action encoder LCD |
-| **Monitor usage** | Animated water-gauge dashboard with 5h / 7d / extra / session pages |
-| **Run quick actions** | GO ON / REVIEW / COMMIT / CLEAR buttons; encoder cycles custom prompts |
-| **Control system utilities** | Volume, mic, media playback, timer — all from the Utility encoder |
-| **Manage terminal sessions** | iTerm dial switches sessions, auto-attaches detached tmux, auto-switches on tab focus |
-| **Stay in flow** | Hardware augments your keyboard — never interrupts it |
-| **Control from anywhere** | Commands work even when the terminal is in the background — no need to switch windows |
-
-The bridge stays transparent: if it's off, Claude Code works exactly as before.
+The bridge is transparent: if it's off, Claude Code works exactly as before.
 
 ### Supported Agents
 
@@ -86,16 +83,21 @@ The bridge stays transparent: if it's off, Claude Code works exactly as before.
 | **Claude Code** | Supported (primary) |
 | **OpenClaw** | Experimental — Gateway WebSocket, timeline panel, log stream |
 
-### Supported Surfaces
+### Supported Surfaces — 11 Types
 
-| Surface | Status |
-|---------|--------|
-| **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip |
-| **Android Tablet** | Color terrarium + HUD overlay (60fps) |
-| **Android E-ink** | B&W aquarium + partial refresh (A2/DU/FULL) |
-| **Pixoo64** | 64×64 LED pixel art terrarium — creature close-up, water zone colors, usage HUD |
-| **ESP32** | Round AMOLED / IPS LCD — compact terrarium + status display |
-| **TUI (Terminal)** | Unicode braille terrarium + ANSI dashboard — SSH/remote friendly |
+| # | Surface | Description | |
+|---|---------|-------------|---|
+| 1 | **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip | |
+| 2 | **Android Tablet** | Color terrarium + HUD overlay (60fps) | <img src="docs/media/tablet-terrarium.jpg" width="200"> |
+| 3 | **Crema S E-ink** | B&W aquarium + 16-level grayscale + partial refresh | <img src="docs/media/eink-crema-timeline.png" width="200"> |
+| 4 | **iPhone** | SwiftUI app — mobile agent monitoring | <img src="docs/media/all-surfaces.jpg" width="200"> |
+| 5 | **iPad** | SwiftUI app — terrarium second screen | |
+| 6 | **macOS** | SwiftUI app — desktop monitoring window | |
+| 7 | **ESP32 Round AMOLED** | 1.8" circular 466×466 — compact WiFi display | <img src="docs/media/esp32-displays.jpg" width="200"> |
+| 8 | **ESP32 IPS LCD** | 3.5" rectangular 480×320 | |
+| 9 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 | |
+| 10 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium | <img src="docs/media/pixoo64.jpg" width="200"> |
+| 11 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote | <img src="docs/media/tui-dashboard.png" width="200"> |
 
 ### Architecture
 
@@ -104,14 +106,15 @@ Stream Deck Plugin ◄──── WebSocket ────► Bridge Server (Node
                                           ├── PTY Manager → claude CLI
 User's Terminal ◄──── stdio proxy ──────► ├── Output Parser → State Machine
 Claude Code Hooks ──── HTTP POST ──────► ├── Hook Server + SSE
-                                          ├── WS Server → Plugin / Android / TUI
+                                          ├── WS Server → Plugin / Android / Apple / TUI
 Android Dashboard ◄── WebSocket + mDNS ► ├── Voice (whisper.cpp)
+Apple Dashboard   ◄── WebSocket + mDNS ► ├── (iOS/iPad/macOS)
 Pixoo64 LED       ◄── HTTP push ────────► ├── Pixoo Module (pixel art renderer)
 ESP32 Display     ◄── WebSocket ────────► ├── Serial Module (UART/WiFi)
 TUI Dashboard     ◄── WebSocket ────────► └── (agentdeck dashboard)
 ```
 
-The bridge spawns Claude Code in a PTY, parses output + hook events into a state machine, and broadcasts state to all connected surfaces over WebSocket. Local clients are auto-trusted; LAN clients authenticate with a token from `~/.agentdeck/auth-token`. Both Stream Deck and Android can monitor and control the agent independently or simultaneously.
+The bridge spawns Claude Code in a PTY, parses output + hook events into a state machine, and broadcasts state to all 11 surfaces over WebSocket. Local clients are auto-trusted; LAN clients authenticate with a token from `~/.agentdeck/auth-token`. All surfaces can monitor and control the agent independently or simultaneously.
 
 ---
 
@@ -311,15 +314,6 @@ The Android app connects to the same bridge server over your local network, givi
 - Semi-transparent HUD panels overlay agent status, rate limits, timeline
 - Identical information to e-ink, expressed through color and motion
 
-### Displayed Information
-
-- **Agent status**: type, session name, model, state (IDLE / PROCESSING / AWAITING)
-- **Rate limits**: 5h and 7d usage gauges with reset countdown timers
-- **Models**: OAuth-connected models + locally running Ollama models
-- **Event timeline**: tool calls, model calls, state changes — timestamped log
-- **Connection**: bridge status, billing type, uptime
-- **Gateway health**: OpenClaw doctor warnings/errors — crayfish creature visually reflects system health
-
 ### Three-Tab Navigation
 
 | Tab | Content |
@@ -342,6 +336,36 @@ See **[Android Reference](docs/android.md)** for device support, build/signing i
 
 ---
 
+## Apple Dashboard
+
+Monitor and control your AI agents from iPhone, iPad, or Mac — a native SwiftUI experience.
+
+<p align="center">
+  <img src="docs/media/all-surfaces.jpg" width="720" alt="Apple dashboard — iPhone and iPad showing terrarium + HUD alongside other surfaces">
+</p>
+
+The Apple app is a SwiftUI multiplatform app that connects to the same bridge server, providing the full AgentDeck experience on Apple devices.
+
+### Three-Tab Navigation
+
+| Tab | Content |
+|-----|---------|
+| **Monitor** | Terrarium background + HUD overlay — agent status, rate limits, timeline |
+| **Deck** | Stream Deck+ mirror — encoder panels + button grid with touch gestures |
+| **Settings** | Bridge connection, display preferences |
+
+### Connect to Bridge
+
+- **mDNS** — automatic discovery of `_agentdeck._tcp` services on your local network
+- **QR pairing** — scan with the in-app camera (`agentdeck qr` on your Mac)
+- **Manual** — enter bridge IP and port
+
+### iOS Foreground Recovery
+
+The app handles iOS background/foreground transitions gracefully — WebSocket reconnects immediately on foregrounding, state syncs within milliseconds, and the terrarium animation resumes without flicker.
+
+---
+
 ## TUI Dashboard
 
 Monitor your agents directly in the terminal — no additional hardware or apps required.
@@ -350,52 +374,67 @@ Monitor your agents directly in the terminal — no additional hardware or apps 
 agentdeck dashboard     # or: agentdeck dash
 ```
 
-The TUI dashboard connects to a running Bridge or Daemon as a WebSocket client (same protocol as the Android app) and renders a real-time monitoring interface using raw ANSI escape codes. Zero additional dependencies.
+<p align="center">
+  <img src="docs/media/tui-dashboard.png" width="720" alt="TUI Dashboard — Unicode Braille terrarium with octopus and neon tetra, rate limit gauges, timeline, pixel font logo">
+</p>
 
+The TUI connects to a running Bridge or Daemon over WebSocket and renders a real-time monitoring interface using raw ANSI escape codes. Zero additional dependencies.
+
+- **Braille terrarium** — octopus, crayfish, neon tetra schools in a truecolor water gradient. State-driven: idle = floor, processing = swimming with starburst, awaiting = "?" bubble
+- **Adaptive layout** — wide (120+ cols), standard (80-119), narrow (60-79). Terrarium hides when too small
+- **Status + Timeline** — rate limit gauges, OAuth/Ollama models, tool calls, activity density bar
+- **Auto-discovery** — finds Daemon or active session automatically; 3s auto-reconnect
+- **SSH friendly** — works over any SSH connection with truecolor support; pipes output JSON
+
+---
+
+## ESP32 Display
+
+Compact WiFi-connected displays for always-on agent monitoring.
+
+<p align="center">
+  <img src="docs/media/esp32-displays.jpg" width="480" alt="ESP32 Round AMOLED and IPS LCD displays showing terrarium">
+</p>
+
+### Supported Boards
+
+| Board | Screen | Resolution |
+|-------|--------|------------|
+| **Round AMOLED** | 1.8" circular AMOLED | 466×466 |
+| **IPS LCD** | 3.5" rectangular IPS | 480×320 |
+| **B86 Box** | 4" wall-mount touch panel | 480×480 |
+
+### Setup
+
+```bash
+agentdeck wifi-setup    # Serial WiFi provisioning (connects ESP32 to your network)
 ```
-┌─ AGENTS ──────────────┬─ TERRARIUM ● ──────────────────────────────────────────┐
-│                        │  ∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈~∿∿≈  │
-│ ▄▀▀▄ ▄▀▀▀ █▀▀▀ ...    │     °       ><>    ><>              °                 │
-│ █▀▀█ █ ▀█ █▀▀  ...    │       ⣿⣿⡇              ><>     ·          ⣿⣿⣿⣿⣿     │
-│ ▀  ▀  ▀▀  ▀▀▀▀ ...    │      ⣿⣿⣿⣿   °               ><>       ⣿⣿⣿⣿⣿⣿⣿⣿    │
-│  █▀▀▄ █▀▀▀ ...         │     ⣿⣿⣿⣿⣿⣿       ·                  ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿  │
-│  █  █ █▀▀  ...         │  ╱│  ╲│╱  │╲  ░░▒░░░░▒▒░░░░░░░▒░░░░░░░▒▒░░░░▒░░░░  │
-│  ▀▀▀  ▀▀▀▀ ...         ├───────────────────────┬──────────────────────────────┤
-│                        │ LIMITS                 │ MODELS                       │
-│ 🐙 my-project          │ 5h [██████░░░░] 62%    │ ● opus-4                     │
-│    ● PROCESSING        │    ↻1h23m              │ Ollama:                      │
-│                        │ 7d [████░░░░░░] 41%    │   qwen2.5:7b 4.5G            │
-│ Tokens: 42k/18k       │    ↻2d5h               │                              │
-│ Cost: $0.47            ├───────────────────────┴──────────────────────────────┤
-│ Up: 1h32m              │ TIMELINE                                             │
-│                        │ 10:32 ▶ Fix the header component                     │
-│                        │ 10:32 ◆ Read Header.tsx                              │
-│                        │ 10:33 ◆ Edit Header.tsx                              │
-│                        │ 10:33 ■ Completed · opus-4                           │
-│                        │ ░░░░░▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ activity  │
-└────────────────────────┴──────────────────────────────────────────────────────┘
- q quit
+
+Once provisioned, the ESP32 connects to the bridge over WiFi WebSocket and displays a compact terrarium with agent status. PlatformIO firmware in `esp32/`.
+
+---
+
+## Pixoo64 LED Matrix
+
+64×64 RGB LED pixel art terrarium on a Divoom Pixoo64.
+
+<p align="center">
+  <img src="docs/media/pixoo64.jpg" width="360" alt="Pixoo64 LED matrix showing pixel art creature">
+</p>
+
+The Pixoo module renders dot-art creatures, water zone colors reflecting agent state, and a compact usage HUD — all pushed over HTTP to the device's local API.
+
+### CLI
+
+```bash
+agentdeck pixoo scan     # Discover Pixoo devices on LAN
+agentdeck pixoo add      # Add a discovered device
+agentdeck pixoo list     # List configured devices
+agentdeck pixoo remove   # Remove a device
+agentdeck pixoo test     # Send test pattern
 ```
 
-### Features
-
-- **Terrarium animation** — Unicode Braille octopus (🐙), crayfish (🦞), neon tetra schools swimming in a truecolor water gradient. Creatures reflect agent state: idle = resting on floor, processing = swimming with starburst particles, awaiting = mid-water with "?" bubble
-- **Pixel font logo** — "AGENT DECK" rendered in half-block characters (▀▄█)
-- **Adaptive layout** — wide (120+ cols, left/right split), standard (80-119, top/bottom), narrow (60-79, text only). Terrarium hidden when terminal is too small
-- **Status panel** — LIMITS (rate limit gauges) │ MODELS (OAuth + Ollama) — matching the E-ink layout
-- **Timeline** — tool calls, state transitions, activity density bar. Generated locally from `state_update` events
-- **Auto-discovery** — finds the running Daemon (preferred) or first active session automatically
-- **Auto-reconnect** — 3-second reconnect on disconnect, `[STALE]` indicator for cached data
-- **Non-TTY mode** — when piped, outputs a JSON snapshot instead of the TUI
-
-### When to Use
-
-| Scenario | Recommended surface |
-|----------|-------------------|
-| Primary control | Stream Deck+ (hardware buttons + encoders) |
-| Secondary monitor | Android tablet/e-ink (always-on display) |
-| SSH / remote server | **TUI Dashboard** (no hardware needed) |
-| Quick status check | **TUI Dashboard** or `agentdeck status` |
+> **Note:** The Pixoo's built-in HTTP server can crash under frequent requests. AgentDeck throttles updates automatically. Use `--no-pixoo` to disable if needed.
 
 ---
 
@@ -409,6 +448,7 @@ AgentDeck/
 ├── hooks/         # Claude Code hook installer
 ├── setup/         # npm setup package (@agentdeck/setup)
 ├── android/       # Jetpack Compose dashboard (e-ink + tablet, terrarium, deck mirror)
+├── apple/         # SwiftUI multiplatform app (iOS/iPad/macOS dashboard + deck mirror)
 ├── esp32/         # ESP32 firmware (round AMOLED / IPS LCD, PlatformIO)
 ├── config/        # Prompt templates + default settings
 ├── scripts/       # Install, uninstall, package, icon generation
@@ -543,10 +583,23 @@ Stream Deck plugin logs: Stream Deck app → Settings → Logs.
 
 ## Roadmap
 
+### Achieved
+
+- [x] Android tablet + e-ink dashboard (Jetpack Compose)
+- [x] Apple iOS/iPad/macOS dashboard (SwiftUI multiplatform)
+- [x] ESP32 compact displays (Round AMOLED, IPS LCD, B86 Box)
+- [x] TUI terminal dashboard (Unicode Braille + ANSI)
+- [x] Pixoo64 LED matrix pixel art
+- [x] Multi-agent visualization (Claude Code + OpenClaw creatures)
+- [x] Daemon mode with multi-session aggregation
+
+### Planned
+
+- Additional agent integrations (Opencode, Codex CLI)
+- Windows/Linux platform support
 - Project-specific layout presets
 - Custom button icon support
-- Windows/Linux platform support
-- Additional agent integrations (Opencode, Codex CLI)
+- App Store distribution (Apple)
 
 ---
 
