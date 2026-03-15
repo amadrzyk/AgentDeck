@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/media/agentdeck-icon.png" width="160" alt="AgentDeck icon — aquarium dome with octopus and crayfish on a Stream Deck control surface">
+</p>
+
 # AgentDeck
 
 **Stop Chatting. Start Steering.**
@@ -85,19 +89,33 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 
 ### Supported Surfaces — 11 Types
 
-| # | Surface | Description | |
-|---|---------|-------------|---|
-| 1 | **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip | |
-| 2 | **Android Tablet** | Color terrarium + HUD overlay (60fps) | <img src="docs/media/tablet-terrarium.jpg" width="200"> |
-| 3 | **Crema S E-ink** | B&W aquarium + 16-level grayscale + partial refresh | <img src="docs/media/eink-crema-timeline.png" width="200"> |
-| 4 | **iPhone** | SwiftUI app — mobile agent monitoring | <img src="docs/media/all-surfaces.jpg" width="200"> |
-| 5 | **iPad** | SwiftUI app — terrarium second screen | |
-| 6 | **macOS** | SwiftUI app — desktop monitoring window | |
-| 7 | **ESP32 Round AMOLED** | 1.8" circular 466×466 — compact WiFi display | <img src="docs/media/esp32-displays.jpg" width="200"> |
-| 8 | **ESP32 IPS LCD** | 3.5" rectangular 480×320 | |
-| 9 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 | |
-| 10 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium | <img src="docs/media/pixoo64.jpg" width="200"> |
-| 11 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote | <img src="docs/media/tui-dashboard.png" width="200"> |
+| # | Surface | Description |
+|---|---------|-------------|
+| 1 | **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip |
+| 2 | **Android Tablet** | Color terrarium + HUD overlay (60fps) |
+| 3 | **Crema S E-ink** | B&W aquarium + 16-level grayscale + partial refresh |
+| 4 | **iPhone** | SwiftUI app — mobile agent monitoring |
+| 5 | **iPad** | SwiftUI app — terrarium second screen |
+| 6 | **macOS** | SwiftUI app — desktop monitoring window |
+| 7 | **ESP32 Round AMOLED** | 1.8" circular 466×466 — compact WiFi display |
+| 8 | **ESP32 IPS LCD** | 3.5" rectangular 480×320 |
+| 9 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 |
+| 10 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium |
+| 11 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
+
+<p align="center">
+  <img src="docs/media/ipad-iphone-closeup.jpg" width="360" alt="iPad and iPhone showing terrarium with pixel art creatures">
+  &nbsp;&nbsp;
+  <img src="docs/media/esp32-pixoo-closeup.jpg" width="360" alt="ESP32 Round AMOLED, IPS LCD, B86 Box, and Pixoo64 LED matrix">
+</p>
+<p align="center"><em>Left: iPad + iPhone (SwiftUI) &nbsp;|&nbsp; Right: ESP32 3 types + Pixoo64 LED</em></p>
+
+<p align="center">
+  <img src="docs/media/eink-esp32-combo.jpg" width="360" alt="Crema S E-ink reader with grayscale aquarium next to ESP32 Round AMOLED">
+  &nbsp;&nbsp;
+  <img src="docs/media/tui-dashboard.png" width="360" alt="TUI Dashboard in terminal — braille octopus, rate limit gauges, timeline">
+</p>
+<p align="center"><em>Left: E-ink (Crema S) + ESP32 Round AMOLED &nbsp;|&nbsp; Right: TUI terminal dashboard</em></p>
 
 ### Architecture
 
@@ -293,11 +311,16 @@ See **[Stream Deck+ Layout Reference](docs/streamdeck-layout.md)** for per-state
 Monitor and control your AI agents from any Android device — no Stream Deck required.
 
 <p align="center">
-  <img src="docs/media/android-tablet.png" width="360" alt="Android tablet — color terrarium with HUD overlay showing agent status">
-  &nbsp;&nbsp;
-  <img src="docs/media/android-eink.png" width="360" alt="Android e-ink — B&W aquarium dashboard on Crema S">
+  <img src="docs/media/tablet-fullui.jpg" width="720" alt="Android tablet — full terrarium UI with octopus creatures, crayfish, HUD panels, and timeline">
 </p>
-<p align="center"><em>Left: Tablet mode (color terrarium + HUD) &nbsp;|&nbsp; Right: E-ink mode (Crema S, B&W aquarium)</em></p>
+<p align="center"><em>Tablet mode — color terrarium with multi-session octopi, crayfish, neon tetra, and HUD overlay</em></p>
+
+<p align="center">
+  <img src="docs/media/android-eink.png" width="360" alt="Android e-ink — B&W aquarium dashboard on Crema S">
+  &nbsp;&nbsp;
+  <img src="docs/media/eink-crema-timeline.png" width="360" alt="Crema S E-ink — grayscale aquarium with timeline and rate limits">
+</p>
+<p align="center"><em>E-ink mode (Crema S) — 16-level grayscale aquarium with agent list, rate limits, and event timeline</em></p>
 
 The Android app connects to the same bridge server over your local network, giving you a second screen for agent monitoring and a full mirror of the Stream Deck controls.
 
@@ -341,7 +364,7 @@ See **[Android Reference](docs/android.md)** for device support, build/signing i
 Monitor and control your AI agents from iPhone, iPad, or Mac — a native SwiftUI experience.
 
 <p align="center">
-  <img src="docs/media/all-surfaces.jpg" width="720" alt="Apple dashboard — iPhone and iPad showing terrarium + HUD alongside other surfaces">
+  <img src="docs/media/ipad-iphone-closeup.jpg" width="720" alt="Apple dashboard — iPad and iPhone showing terrarium with pixel art creatures and HUD overlay">
 </p>
 
 The Apple app is a SwiftUI multiplatform app that connects to the same bridge server, providing the full AgentDeck experience on Apple devices.
@@ -393,8 +416,11 @@ The TUI connects to a running Bridge or Daemon over WebSocket and renders a real
 Compact WiFi-connected displays for always-on agent monitoring.
 
 <p align="center">
-  <img src="docs/media/esp32-displays.jpg" width="480" alt="ESP32 Round AMOLED and IPS LCD displays showing terrarium">
+  <img src="docs/media/esp32-round-amoled.jpg" width="360" alt="ESP32 Round AMOLED — circular terrarium with octopus and crayfish">
+  &nbsp;&nbsp;
+  <img src="docs/media/esp32-displays.jpg" width="360" alt="ESP32 Round AMOLED and IPS LCD side by side">
 </p>
+<p align="center"><em>Left: Round AMOLED close-up (1.8" circular) &nbsp;|&nbsp; Right: Round AMOLED + IPS LCD side by side</em></p>
 
 ### Supported Boards
 
