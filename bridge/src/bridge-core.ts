@@ -85,6 +85,12 @@ export class BridgeCore {
   private shutdownCallbacks: (() => void | Promise<void>)[] = [];
   private sseBroadcast?: (evt: BridgeEvent) => void;
 
+  /** Optional callback to enrich sessions_list (e.g., daemon injects Gateway virtual session) */
+  private sessionsEnricher?: (sessions: import('./session-aggregator.js').EnrichedSession[]) => import('./session-aggregator.js').EnrichedSession[];
+
+  /** External client count provider (e.g., ESP32 serial connections) */
+  private externalClientCount: () => number = () => 0;
+
   private static readonly USAGE_STALE_TTL = 10 * 60 * 1000; // 10 minutes
 
   constructor(opts: BridgeCoreOptions) {
@@ -308,7 +314,7 @@ export class BridgeCore {
    */
   startUsageTick(intervalMs = 5000): void {
     this.addInterval(setInterval(() => {
-      if (this.wsServer.getClientCount() === 0) return;
+      if (!this.hasClients()) return;
       // TTL: clear stale cache
       if (this.cachedApiUsage && this.lastApiFetchTime > 0 &&
           (Date.now() - this.lastApiFetchTime) > BridgeCore.USAGE_STALE_TTL) {
@@ -327,7 +333,7 @@ export class BridgeCore {
   startApiUsagePolling(intervalMs: number, fetchFn?: () => Promise<ApiUsageData | null>): void {
     const fetch = fetchFn ?? (() => fetchUsageFromApi());
     this.addInterval(setInterval(() => {
-      if (this.wsServer.getClientCount() === 0) return;
+      if (!this.hasClients()) return;
       fetch().then((usage) => {
         if (usage) {
           this.updateApiUsage(usage);
@@ -342,22 +348,39 @@ export class BridgeCore {
   /** Start periodic sessions_list broadcast */
   startSessionsListPolling(intervalMs = 10_000): void {
     this.addInterval(setInterval(() => {
-      if (this.wsServer.getClientCount() === 0) return;
+      if (!this.hasClients()) return;
       this.broadcastSessionsList().catch(() => {});
     }, intervalMs));
+  }
+
+  /** Register a callback to enrich the sessions list before broadcast */
+  setSessionsEnricher(fn: (sessions: import('./session-aggregator.js').EnrichedSession[]) => import('./session-aggregator.js').EnrichedSession[]): void {
+    this.sessionsEnricher = fn;
+  }
+
+  /** Register a provider for non-WS client count (e.g., ESP32 serial connections).
+   *  Used to keep sessions_list polling alive even without WebSocket clients. */
+  setExternalClientCountProvider(fn: () => number): void {
+    this.externalClientCount = fn;
+  }
+
+  /** Check if any client (WS or external serial) is connected */
+  private hasClients(): boolean {
+    return this.wsServer.getClientCount() > 0 || this.externalClientCount() > 0;
   }
 
   /** Broadcast enriched sessions list (debounced 2s from state_changed) */
   async broadcastSessionsList(): Promise<void> {
     const snapshot = this.stateMachine.getSnapshot();
-    const sessions = await buildEnrichedSessionsList(this.sessionId, snapshot.state);
+    let sessions = await buildEnrichedSessionsList(this.sessionId, snapshot.state);
+    if (this.sessionsEnricher) sessions = this.sessionsEnricher(sessions);
     this.wsServer.broadcast({ type: 'sessions_list', sessions } as BridgeEvent);
   }
 
   /** Debounced sessions list broadcast (for state_changed handler) */
   maybeBroadcastSessionsList(): void {
     const now = Date.now();
-    if (now - this.lastSessionsListBroadcast > 2000 && this.wsServer.getClientCount() > 0) {
+    if (now - this.lastSessionsListBroadcast > 2000 && this.hasClients()) {
       this.lastSessionsListBroadcast = now;
       this.broadcastSessionsList().catch(() => {});
     }
@@ -412,7 +435,8 @@ export class BridgeCore {
 
     // Sessions list
     buildEnrichedSessionsList(this.sessionId, snapshot.state).then((sessions) => {
-      this.wsServer.sendTo(ws, { type: 'sessions_list', sessions } as BridgeEvent);
+      const enriched = this.sessionsEnricher ? this.sessionsEnricher(sessions) : sessions;
+      this.wsServer.sendTo(ws, { type: 'sessions_list', sessions: enriched } as BridgeEvent);
     }).catch(() => {});
 
     // Extra events from caller

@@ -1,5 +1,5 @@
 import type { DeviceModule, BridgeContext } from './types.js';
-import { startPixooBridge, stopPixooBridge, broadcastPixoo } from '../pixoo/pixoo-bridge.js';
+import { startPixooBridge, stopPixooBridge, broadcastPixoo, setPixooBroadcast } from '../pixoo/pixoo-bridge.js';
 import { loadPixooDevices } from '../pixoo/pixoo-settings.js';
 
 export class PixooModule implements DeviceModule {
@@ -15,6 +15,7 @@ export class PixooModule implements DeviceModule {
 
   async start(ctx: BridgeContext): Promise<void> {
     const devices = loadPixooDevices();
+    setPixooBroadcast((event) => ctx.wsServer.broadcast(event));
     startPixooBridge(devices);
     ctx.wsServer.onBroadcast(broadcastPixoo);
   }

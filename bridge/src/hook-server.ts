@@ -8,6 +8,7 @@ import { debug } from './logger.js';
 import { isLocalConnection, validateToken } from './auth.js';
 import type { BridgeEvent } from './types.js';
 import type { VoiceManager } from './voice.js';
+import { onFrameRendered, offFrameRendered, setPreviewFps, getPreviewFps } from './pixoo/pixoo-bridge.js';
 
 /** Minimal SSE client handle */
 interface SseClient {
@@ -23,6 +24,7 @@ export class HookServer extends EventEmitter {
   private apiUsageGetter: (() => { usage: unknown; fetchedAt: number }) | null = null;
   private deviceInfoGetter: (() => unknown) | null = null;
   private pixooFrameGetter: (() => Uint8Array) | null = null;
+  private pixooStreamListener: ((frame: Uint8Array) => void) | null = null;
 
   // SSE
   private sseClients: SseClient[] = [];
@@ -255,6 +257,42 @@ export class HookServer extends EventEmitter {
       },
     );
 
+    // Pixoo live preview — SSE frame stream
+    this.app.get('/pixoo/stream', (req, res) => {
+      if (!this.pixooFrameGetter) {
+        res.status(503).json({ error: 'Pixoo renderer not available' });
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      });
+
+      const listener = (frame: Uint8Array) => {
+        const bmp = rgbToBmp(frame, 64, 64);
+        const b64 = bmp.toString('base64');
+        try { res.write(`event: frame\ndata: ${b64}\n\n`); } catch { /* client gone */ }
+      };
+      onFrameRendered(listener);
+
+      // Send current frame immediately
+      const current = this.pixooFrameGetter!();
+      listener(current);
+
+      // Heartbeat
+      const heartbeat = setInterval(() => {
+        try { res.write(':heartbeat\n\n'); } catch { /* */ }
+      }, 30_000);
+
+      req.on('close', () => {
+        offFrameRendered(listener);
+        clearInterval(heartbeat);
+      });
+    });
+
     // Pixoo live preview — serves BMP of current frame
     this.app.get('/pixoo/frame', (_req, res) => {
       if (!this.pixooFrameGetter) {
@@ -274,7 +312,19 @@ export class HookServer extends EventEmitter {
     // Pixoo live preview HTML page
     this.app.get('/pixoo', (_req, res) => {
       debug('Hook', 'GET /pixoo');
-      res.type('html').send(pixooLiveHtml(this.meta));
+      res.type('html').send(pixooLiveHtml(this.meta, getPreviewFps()));
+    });
+
+    // Pixoo preview FPS control
+    this.app.post('/pixoo/preview-fps', (req, res) => {
+      const fps = Number(req.body?.fps);
+      if (!isFinite(fps) || fps < 1 || fps > 10) {
+        res.status(400).json({ error: 'fps must be 1–10' });
+        return;
+      }
+      setPreviewFps(fps);
+      debug('Hook', `Preview FPS set to ${fps}`);
+      res.json({ fps: getPreviewFps() });
     });
 
     // Catch-all for unknown routes
@@ -409,7 +459,7 @@ function esc(s: string): string {
 // ─── BMP Generator (24-bit uncompressed) ────────────────────────────────────
 
 /** Convert raw RGB buffer to 24-bit BMP. Rows flipped + BGR byte order. */
-function rgbToBmp(rgb: Uint8Array, w: number, h: number): Buffer {
+export function rgbToBmp(rgb: Uint8Array, w: number, h: number): Buffer {
   const rowBytes = w * 3;
   // BMP rows must be padded to 4-byte boundary
   const rowPad = (4 - (rowBytes % 4)) % 4;
@@ -449,8 +499,9 @@ function rgbToBmp(rgb: Uint8Array, w: number, h: number): Buffer {
 
 // ─── Pixoo Live Preview HTML ────────────────────────────────────────────────
 
-function pixooLiveHtml(
+export function pixooLiveHtml(
   meta: { agentType?: string; projectName?: string },
+  initialFps: number = 10,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -469,11 +520,12 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
 .hud{display:flex;gap:20px;font-size:12px;color:#64748b}
 .hud .val{color:#94a3b8;font-weight:600}
 .state-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
-.controls{display:flex;gap:8px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .controls button{background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:6px;
   padding:4px 12px;font-size:11px;cursor:pointer;transition:all 0.15s}
 .controls button:hover{background:#334155;color:#e2e8f0}
 .controls button.active{background:#3b82f6;color:#fff;border-color:#3b82f6}
+.sep{width:1px;background:#334155;margin:0 4px}
 .paused canvas{opacity:0.4}
 </style>
 </head>
@@ -487,12 +539,19 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
   <span>FPS <span class="val" id="fps">0</span></span>
   <span>Frame <span class="val" id="fnum">0</span></span>
   <span>Scale <span class="val" id="scaleLabel">8×</span></span>
+  <span>Preview <span class="val" id="previewFpsLabel">${initialFps}</span> FPS</span>
 </div>
 <div class="controls">
   <button id="btnPause">Pause</button>
+  <div class="sep"></div>
   <button id="btn4" data-s="4">4×</button>
   <button id="btn8" data-s="8" class="active">8×</button>
   <button id="btn12" data-s="12">12×</button>
+  <div class="sep"></div>
+  <button class="fps-btn${initialFps===1?' active':''}" data-fps="1">1 FPS</button>
+  <button class="fps-btn${initialFps===2?' active':''}" data-fps="2">2 FPS</button>
+  <button class="fps-btn${initialFps===5?' active':''}" data-fps="5">5 FPS</button>
+  <button class="fps-btn${initialFps===10?' active':''}" data-fps="10">10 FPS</button>
 </div>
 
 <script>
@@ -503,6 +562,7 @@ const $state=document.getElementById('state');
 const $fps=document.getElementById('fps');
 const $fnum=document.getElementById('fnum');
 const $scale=document.getElementById('scaleLabel');
+const $previewFpsLabel=document.getElementById('previewFpsLabel');
 const framebox=document.getElementById('framebox');
 
 let scale=8, paused=false, frameNum=0;
@@ -526,6 +586,30 @@ document.getElementById('btnPause').addEventListener('click',function(){
   framebox.classList.toggle('paused',paused);
 });
 
+// FPS buttons
+function setActiveFpsBtn(fps){
+  document.querySelectorAll('.fps-btn').forEach(b=>{
+    b.classList.toggle('active', parseInt(b.dataset.fps)===fps);
+  });
+  $previewFpsLabel.textContent=fps;
+}
+document.querySelectorAll('.fps-btn').forEach(btn=>{
+  btn.addEventListener('click',async()=>{
+    const fps=parseInt(btn.dataset.fps);
+    try{
+      const r=await fetch('/pixoo/preview-fps',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({fps})
+      });
+      const d=await r.json();
+      setActiveFpsBtn(d.fps||fps);
+    }catch(e){
+      console.error('FPS change failed',e);
+    }
+  });
+});
+
 // State colors
 const stateColors={IDLE:'#22c55e',PROCESSING:'#3b82f6',
   AWAITING_OPTION:'#f59e0b',AWAITING_PERMISSION:'#f59e0b',AWAITING_DIFF:'#f59e0b',
@@ -540,41 +624,29 @@ es.addEventListener('state_update',e=>{
   dot.style.background=stateColors[s]||'#64748b';
 });
 
-// Frame polling
-const img=new Image();
-img.onload=function(){
-  ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(img,0,0,cv.width,cv.height);
-  frameNum++;
-  $fnum.textContent=frameNum;
+// SSE frame stream
+const stream=new EventSource('/pixoo/stream');
+stream.addEventListener('frame',function(e){
+  if(paused) return;
+  const img=new Image();
+  img.onload=function(){
+    ctx.imageSmoothingEnabled=false;
+    ctx.drawImage(img,0,0,cv.width,cv.height);
+    frameNum++;
+    $fnum.textContent=frameNum;
 
-  // FPS calc
-  frameCount++;
-  const now=performance.now();
-  if(now-lastTime>=1000){
-    displayFps=frameCount;
-    frameCount=0;
-    lastTime=now;
-    $fps.textContent=displayFps;
-  }
-
-  if(!paused) scheduleNext();
-};
-img.onerror=function(){
-  // Retry after delay on error
-  setTimeout(()=>{ if(!paused) fetchFrame(); }, 2000);
-};
-
-function fetchFrame(){
-  img.src='/pixoo/frame?t='+Date.now();
-}
-
-function scheduleNext(){
-  setTimeout(fetchFrame, 800);
-}
-
-// Start
-fetchFrame();
+    // FPS calc
+    frameCount++;
+    const now=performance.now();
+    if(now-lastTime>=1000){
+      displayFps=frameCount;
+      frameCount=0;
+      lastTime=now;
+      $fps.textContent=displayFps;
+    }
+  };
+  img.src='data:image/bmp;base64,'+e.data;
+});
 </script>
 </body>
 </html>`;

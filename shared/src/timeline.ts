@@ -25,6 +25,15 @@ export interface TimelineEntry {
 function extractReadableMessage(message: string): string {
   let cleaned = message;
 
+  // If entire message is a JSON object, extract error field
+  if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed.error) cleaned = String(parsed.error);
+      else cleaned = JSON.stringify(parsed).slice(0, 200);
+    } catch { /* not valid JSON, continue with regex strip */ }
+  }
+
   // Strip leading JSON object fragments: {"subsystem":"diagnostic"} ...
   cleaned = cleaned.replace(/^\{[^}]*\}\s*/, '');
 
@@ -154,6 +163,10 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
   if (/\bbrowser failed:\s*tab not found\b/i.test(message)) {
     return null;
   }
+  // Skip browser sandbox configuration messages (setting issue, not runtime error)
+  if (/\bSandbox browser is unavailable\b/i.test(message)) {
+    return null;
+  }
 
   // Skip tool errors that agents retry internally (edit mismatch, EISDIR, ENOENT on memory)
   if (/\bedit failed:\s*Could not find the exact text\b/i.test(message)) {
@@ -174,16 +187,23 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
   }
 
   // Skip transient network_error and 500 errors from embedded runs (auto-recovered)
-  if (/\bUnhandled stop reason:\s*network_error\b/i.test(message)) {
+  if (/\bnetwork_error\b/i.test(message)) {
     return null;
   }
   if (/\bembedded run agent end\b/i.test(message) && /\berror=500\b/.test(message)) {
     return null;
   }
 
-  // Skip WhatsApp auto-reconnect attempts (self-recovering)
+  // Skip WhatsApp/messaging auto-reconnect attempts (self-recovering infrastructure)
   if (/\bWeb connection closed\b/i.test(message) &&
       /\bRetry \d+\/\d+\b/i.test(message)) {
+    return null;
+  }
+  if (/\bwhatsapp\b/i.test(message) || /\bWebSocket error\b/i.test(message)) {
+    return null;
+  }
+  // Skip raw JSON connection status blobs (WhatsApp session reconnect)
+  if (/^\{"connectionId":/i.test(message)) {
     return null;
   }
 

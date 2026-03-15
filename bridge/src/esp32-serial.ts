@@ -46,10 +46,68 @@ let connections: SerialConnection[] = [];
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let stateProvider: (() => BridgeEvent | null) | null = null;
+let usageProvider: (() => BridgeEvent | null) | null = null;
+let initialStateProvider: (() => BridgeEvent[]) | null = null;
 let messageHandler: ((port: string, msg: ESP32ToHostMessage) => void) | null = null;
 
 // Events to forward — shared constant from @agentdeck/shared
 const FORWARDED_EVENTS = SERIAL_FORWARDED_EVENTS;
+
+/**
+ * Convert ISO 8601 reset time to pre-formatted relative string ("4h 23m", "2d 5h").
+ * ESP32 without WiFi/NTP can't parse ISO dates, so bridge formats them.
+ */
+function formatResetTime(iso: string | undefined): string | undefined {
+  if (!iso || !iso.includes('T')) return iso; // already formatted or missing
+
+  try {
+    const resetMs = new Date(iso).getTime();
+    if (isNaN(resetMs)) return undefined;
+    const diffSec = Math.max(0, Math.floor((resetMs - Date.now()) / 1000));
+
+    if (diffSec === 0) return 'now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m`;
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    if (h < 24) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Prepare a BridgeEvent for serial transmission.
+ * - Pre-format ISO reset times (ESP32 has no NTP)
+ * - Strip fields the ESP32 firmware doesn't parse (reduce size for small RX buffers)
+ */
+function prepareForSerial(event: BridgeEvent): BridgeEvent {
+  const e = event as any;
+
+  if (event.type === 'usage_update') {
+    // Pre-format ISO dates + strip unused fields
+    const { ollamaStatus, tokenStatus, extraUsageEnabled, extraUsageMonthlyLimit,
+            extraUsageUsedCredits, extraUsageUtilization, costSpent, costLimit,
+            sessionPercent, resetTime, resetDate, ...keep } = e;
+    return {
+      ...keep,
+      fiveHourResetsAt: formatResetTime(keep.fiveHourResetsAt),
+      sevenDayResetsAt: formatResetTime(keep.sevenDayResetsAt),
+    };
+  }
+
+  if (event.type === 'state_update') {
+    // Strip agentCapabilities + other fields ESP32 doesn't parse
+    const { agentCapabilities, billingType, remoteUrl, diff, context,
+            selectedOptionIndex, ...keep } = e;
+    return keep;
+  }
+
+  return event;
+}
 
 /** Run a shell command with timeout, escalating to SIGKILL if SIGTERM fails. */
 function execWithKill(cmd: string, timeoutMs = 3000): Promise<string> {
@@ -124,14 +182,9 @@ function handleSerialLine(conn: SerialConnection, line: string): void {
 
 async function openPort(port: string): Promise<SerialConnection | null> {
   try {
-    // Configure baud rate + disable DTR/RTS to prevent ESP32 reset
-    const platform = process.platform;
-    if (platform === 'darwin') {
-      await execWithKill(`stty -f ${port} 115200 cs8 -cstopb -parenb -hupcl`);
-    } else if (platform === 'linux') {
-      await execWithKill(`stty -F ${port} 115200 cs8 -cstopb -parenb -hupcl`);
-    }
-
+    // Open streams first, THEN configure baud rate.
+    // On macOS, opening a serial device can reset stty settings to defaults (9600).
+    // So stty must run AFTER the file descriptors are open.
     const stream = createWriteStream(port, { flags: 'w' });
     const conn: SerialConnection = {
       port, stream, reader: null, readBuf: '',
@@ -172,7 +225,6 @@ async function openPort(port: string): Promise<SerialConnection | null> {
 
       reader.on('error', (err) => {
         debug('ESP32', `Serial read error on ${port}: ${err.message}`);
-        // Read errors don't necessarily mean write is broken
       });
 
       reader.on('close', () => {
@@ -183,10 +235,40 @@ async function openPort(port: string): Promise<SerialConnection | null> {
       // Write-only still works for broadcast
     }
 
-    debug('ESP32', `Opened serial port (r/w): ${port}`);
+    // Configure baud rate AFTER file descriptors are open.
+    // On macOS, open() on serial devices can reset stty to defaults (9600).
+    // Skip stty for native USB CDC ports (cu.usbmodem / ttyACM) — they use
+    // USB bus speed, not UART baud rate. stty can interfere with open fds.
+    const isCDC = /usbmodem|ttyACM/.test(port);
+    if (!isCDC) {
+      const platform = process.platform;
+      if (platform === 'darwin') {
+        await execWithKill(`stty -f ${port} 115200 cs8 -cstopb -parenb -hupcl`);
+      } else if (platform === 'linux') {
+        await execWithKill(`stty -F ${port} 115200 cs8 -cstopb -parenb -hupcl`);
+      }
+    }
+
+    const portType = isCDC ? 'CDC' : 'UART';
+    debug('ESP32', `Opened serial port (r/w): ${port} [${portType}]`);
 
     // Request device info on connect
     sendToConnection(conn, JSON.stringify({ type: 'device_info_request' }));
+
+    // Send full initial state (state + usage + sessions) so ESP32 doesn't
+    // have to wait for next state change or heartbeat cycle
+    if (initialStateProvider) {
+      const events = initialStateProvider();
+      for (const event of events) {
+        if (!FORWARDED_EVENTS.has(event.type)) continue;
+        // Skip usage_update without API data — would reset ESP32 to "no data"
+        if (event.type === 'usage_update' && (event as any).fiveHourPercent == null) continue;
+        sendToConnection(conn, JSON.stringify(prepareForSerial(event)));
+      }
+    } else if (stateProvider) {
+      const event = stateProvider();
+      if (event) sendToConnection(conn, JSON.stringify(event));
+    }
 
     return conn;
   } catch (err: any) {
@@ -214,6 +296,22 @@ export function setESP32StateProvider(provider: () => BridgeEvent | null): void 
 }
 
 /**
+ * Register a callback that returns the current usage_update event.
+ * Heartbeat sends both state + usage every cycle so ESP32 stays in sync.
+ */
+export function setESP32UsageProvider(provider: () => BridgeEvent | null): void {
+  usageProvider = provider;
+}
+
+/**
+ * Register a provider that returns all initial state events (state + usage + sessions).
+ * Called when a new ESP32 device connects to send full state immediately.
+ */
+export function setESP32InitialStateProvider(provider: () => BridgeEvent[]): void {
+  initialStateProvider = provider;
+}
+
+/**
  * Register a handler for messages received from ESP32 devices.
  * Called with (portPath, parsedMessage) for each JSON message.
  */
@@ -221,13 +319,33 @@ export function onESP32Message(handler: (port: string, msg: ESP32ToHostMessage) 
   messageHandler = handler;
 }
 
+let heartbeatCount = 0;
 function sendHeartbeat(): void {
-  if (connections.length === 0 || !stateProvider) return;
-  const event = stateProvider();
-  if (!event) return;
-  const json = JSON.stringify(event);
-  for (const conn of connections) {
-    sendToConnection(conn, json);
+  if (connections.length === 0) return;
+  heartbeatCount++;
+
+  // Send state_update (stripped for serial — smaller payload)
+  if (stateProvider) {
+    const event = stateProvider();
+    if (event) {
+      const json = JSON.stringify(prepareForSerial(event));
+      for (const conn of connections) {
+        sendToConnection(conn, json);
+      }
+    }
+  }
+
+  // Send usage_update (so ESP32 always has fresh usage/reset times)
+  // Only send if API usage data is present (fiveHourPercent defined),
+  // otherwise the ESP32 would reset its cached values to "no data" sentinel.
+  if (usageProvider) {
+    const event = usageProvider();
+    if (event && (event as any).fiveHourPercent != null) {
+      const json = JSON.stringify(prepareForSerial(event));
+      for (const conn of connections) {
+        sendToConnection(conn, json);
+      }
+    }
   }
 }
 
@@ -289,7 +407,21 @@ export function broadcastESP32(event: BridgeEvent): void {
   if (connections.length === 0) return;
   if (!FORWARDED_EVENTS.has(event.type)) return;
 
-  const json = JSON.stringify(event);
+  const prepared = prepareForSerial(event);
+
+  // Debug: log sessions_list and state_update details for ESP32 troubleshooting
+  if (event.type === 'sessions_list') {
+    const e = event as any;
+    const summary = (e.sessions || []).map((s: any) =>
+      `${s.agentType}:${s.state ?? '?'}(${s.alive ? 'alive' : 'dead'})`
+    ).join(', ');
+    debug('ESP32', `→ sessions_list: [${summary}]`);
+  } else if (event.type === 'state_update') {
+    const e = event as any;
+    debug('ESP32', `→ state_update: agent=${e.agentType} state=${e.state}`);
+  }
+
+  const json = JSON.stringify(prepared);
   for (const conn of connections) {
     sendToConnection(conn, json);
   }

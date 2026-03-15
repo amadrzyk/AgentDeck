@@ -5,23 +5,53 @@
  * All requests have 2s timeout and fail silently (display is non-critical).
  *
  * Frame format: 64×64 RGB = 12,288 bytes → base64 encoded.
- * PicID counter resets every 30 frames to prevent device lockup (~300 cumulative).
+ *
+ * CRITICAL: PicID must be strictly incrementing — device silently ignores
+ * frames with non-sequential IDs (returns error_code:0 but doesn't update display).
+ * GetHttpGifId syncs counter; ResetHttpGifId resets to 0 (use sparingly — may crash firmware).
  */
 
+import http from 'node:http';
 import { debug } from '../logger.js';
+
+// Pixoo's embedded HTTP server can't handle keep-alive connections properly
+// (Node 19+ defaults to keepAlive:true). Force fresh TCP per request.
+const pixooAgent = new http.Agent({ keepAlive: false, maxSockets: 1 });
 
 const TAG = 'Pixoo';
 const REQUEST_TIMEOUT_MS = 2000;
-const PIC_ID_RESET_INTERVAL = 30;
+const PIC_ID_RESYNC_THRESHOLD = 250;  // Re-sync before ~300 overflow
 
-let frameCounter = 0;
+// Per-device static PicID — synced once and held forever (allows real-time streaming without loading screen)
+const devicePicId = new Map<string, number>();
 
-// ===== Circuit Breaker (per-device exponential backoff) =====
+/** Clear cached static PicID for a device (call when device reboots to re-sync). */
+export function clearStaticPicId(ip: string): void {
+  devicePicId.delete(ip);
+  debug(TAG, `Static PicID cleared for ${ip} — will re-sync on next push`);
+}
+
+// Gamma correction LUT: pow(v/255, 0.7) * 255 — boosts dark values for LED display
+const gammaLUT = new Uint8Array(256);
+for (let i = 0; i < 256; i++) {
+  gammaLUT[i] = Math.round(Math.pow(i / 255, 0.7) * 255);
+}
+
+// ===== Circuit Breaker (per-device exponential backoff + auto-probe) =====
 
 const deviceBackoff = new Map<string, { failures: number; backoffUntil: number }>();
-const BACKOFF_THRESHOLD = 3;
-const BACKOFF_INITIAL_MS = 30_000;  // 30s
-const BACKOFF_MAX_MS = 300_000;     // 5m cap
+const BACKOFF_THRESHOLD = 6;            // failures before backing off (ESP32 has transient drops)
+const BACKOFF_INITIAL_MS = 5_000;       // 5s initial backoff (quick recovery)
+const BACKOFF_MAX_MS = 60_000;          // 1m max cap
+const PROBE_INTERVAL_MS = 5_000;        // Probe every 5s during backoff
+
+let probeTimer: ReturnType<typeof setInterval> | null = null;
+let statusCallback: ((ip: string, online: boolean) => void) | null = null;
+
+/** Register a callback for device online/offline transitions. */
+export function onDeviceStatusChange(cb: (ip: string, online: boolean) => void): void {
+  statusCallback = cb;
+}
 
 function isBackedOff(ip: string): boolean {
   const entry = deviceBackoff.get(ip);
@@ -30,18 +60,71 @@ function isBackedOff(ip: string): boolean {
 }
 
 function recordSuccess(ip: string): void {
+  const wasBackedOff = isBackedOff(ip);
   deviceBackoff.delete(ip);
+  if (wasBackedOff) {
+    debug(TAG, `Device ${ip} recovered — backoff cleared, re-syncing PicID`);
+    clearStaticPicId(ip);  // Device may have rebooted — force fresh PicID sync
+    statusCallback?.(ip, true);
+    updateProbeTimer();
+  }
 }
 
 function recordFailure(ip: string): void {
+  const wasBackedOff = isBackedOff(ip);
   const entry = deviceBackoff.get(ip) ?? { failures: 0, backoffUntil: 0 };
   entry.failures++;
   if (entry.failures >= BACKOFF_THRESHOLD) {
     const delay = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, entry.failures - BACKOFF_THRESHOLD), BACKOFF_MAX_MS);
     entry.backoffUntil = Date.now() + delay;
     debug(TAG, `Backoff ${ip}: ${Math.round(delay / 1000)}s (${entry.failures} failures)`);
+    if (!wasBackedOff) {
+      statusCallback?.(ip, false);
+      updateProbeTimer();
+    }
   }
   deviceBackoff.set(ip, entry);
+}
+
+/** Start/stop the probe timer based on whether any device is backed off. */
+function updateProbeTimer(): void {
+  const anyBackedOff = [...deviceBackoff.values()].some(
+    e => e.failures >= BACKOFF_THRESHOLD && Date.now() < e.backoffUntil
+  );
+  if (anyBackedOff && !probeTimer) {
+    probeTimer = setInterval(probeBackedOffDevices, PROBE_INTERVAL_MS);
+    debug(TAG, 'Probe timer started (30s interval)');
+  } else if (!anyBackedOff && probeTimer) {
+    clearInterval(probeTimer);
+    probeTimer = null;
+    debug(TAG, 'Probe timer stopped — all devices online');
+  }
+}
+
+/** Probe backed-off devices to detect recovery. */
+async function probeBackedOffDevices(): Promise<void> {
+  const ipsToProbe = [...deviceBackoff.entries()]
+    .filter(([, e]) => e.failures >= BACKOFF_THRESHOLD)
+    .map(([ip]) => ip);
+
+  for (const ip of ipsToProbe) {
+    debug(TAG, `Probing backed-off device ${ip}...`);
+    const config = await getDeviceConfig(ip);
+    if (config) {
+      debug(TAG, `Probe success for ${ip} — restoring connection`);
+      recordSuccess(ip);
+      // Re-initialize: switch to custom channel
+      switchToCustomChannel(ip).catch(() => {});
+    }
+  }
+}
+
+/** Clean up probe timer. Call on shutdown. */
+export function stopProbeTimer(): void {
+  if (probeTimer) {
+    clearInterval(probeTimer);
+    probeTimer = null;
+  }
 }
 
 /** Get circuit breaker status for a device. */
@@ -57,19 +140,17 @@ export function getDeviceBackoffStatus(ip: string): { failures: number; backedOf
   };
 }
 
-/** POST a command to the Pixoo device. Returns true on success. */
+/**
+ * POST a command to the Pixoo device using node:http (not fetch).
+ * Pixoo's embedded HTTP server can't handle keep-alive connections —
+ * Node 19+ fetch uses keepAlive:true by default, causing timeouts after 2-3 requests.
+ */
 async function postCommand(ip: string, command: Record<string, unknown>): Promise<boolean> {
   if (isBackedOff(ip)) return false;
 
   try {
-    const response = await fetch(`http://${ip}/post`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(command),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      debug(TAG, `HTTP ${response.status} from ${ip}`);
+    const result = await httpPost(ip, command);
+    if (!result) {
       recordFailure(ip);
       return false;
     }
@@ -82,8 +163,46 @@ async function postCommand(ip: string, command: Record<string, unknown>): Promis
   }
 }
 
+/** Low-level HTTP POST with keepAlive:false agent. */
+function httpPost(ip: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request({
+      hostname: ip,
+      port: 80,
+      path: '/post',
+      method: 'POST',
+      agent: pixooAgent,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      },
+      timeout: REQUEST_TIMEOUT_MS,
+    }, res => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 400) {
+          debug(TAG, `HTTP ${res.statusCode} from ${ip}`);
+          resolve(null);
+          return;
+        }
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
+        } catch {
+          resolve({});
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.end(data);
+  });
+}
+
 /**
  * Push a single 64×64 RGB frame to the device.
+ * PicID increments per frame so the device renders each new image.
  * @param buffer - 12,288 bytes (64 * 64 * 3) raw RGB
  */
 export async function pushFrame(ip: string, buffer: Uint8Array): Promise<boolean> {
@@ -92,54 +211,42 @@ export async function pushFrame(ip: string, buffer: Uint8Array): Promise<boolean
     return false;
   }
 
-  // Reset + PicID 0 every time — ensures device replaces current image
-  frameCounter++;
-  if (frameCounter >= PIC_ID_RESET_INTERVAL) {
-    await resetPicId(ip);
-    frameCounter = 0;
+  // Get or initialize PicID for this device
+  let picId = devicePicId.get(ip);
+  if (picId === undefined) {
+    // First push — sync with device's current counter + 1 to ensure freshness
+    picId = await getHttpGifId(ip);
+    debug(TAG, `Synced PicID for ${ip}: ${picId}`);
   }
 
-  const base64 = Buffer.from(buffer).toString('base64');
+  // Increment PicID per frame (device renders new image only on new sequential ID)
+  picId++;
+
+  // Prevent counter overflow (~300 causes device lockup) — reset gracefully
+  if (picId >= PIC_ID_RESYNC_THRESHOLD) {
+    debug(TAG, `PicID ${picId} near overflow for ${ip}, resetting`);
+    await resetPicId(ip);
+    picId = 1;
+  }
+
+  devicePicId.set(ip, picId);
+
+  // Apply gamma boost for LED display
+  const boosted = new Uint8Array(buffer.length);
+  for (let i = 0; i < buffer.length; i++) {
+    boosted[i] = gammaLUT[buffer[i]];
+  }
+
+  const base64 = Buffer.from(boosted).toString('base64');
   return postCommand(ip, {
     Command: 'Draw/SendHttpGif',
-    PicNum: 1,
+    PicNum: 1,      // Always 1 (single image, bypasses loading screen)
     PicWidth: 64,
     PicOffset: 0,
-    PicID: 0,
-    PicSpeed: 100,
+    PicID: picId,   // INCREMENTS each push so device renders every frame
+    PicSpeed: 1000,
     PicData: base64,
   });
-}
-
-/**
- * Push a multi-frame animation (device loops internally, no ongoing HTTP needed).
- * @param frames - Array of 12,288-byte RGB buffers
- * @param speedMs - Per-frame display time in milliseconds
- */
-export async function pushAnimation(ip: string, frames: Uint8Array[], speedMs: number): Promise<boolean> {
-  if (frames.length === 0 || frames.length > 60) {
-    debug(TAG, `Invalid frame count: ${frames.length} (max 60)`);
-    return false;
-  }
-
-  // Reset counter before animation upload
-  await resetPicId(ip);
-  frameCounter = 0;
-
-  for (let i = 0; i < frames.length; i++) {
-    const base64 = Buffer.from(frames[i]).toString('base64');
-    const ok = await postCommand(ip, {
-      Command: 'Draw/SendHttpGif',
-      PicNum: frames.length,
-      PicWidth: 64,
-      PicOffset: i,
-      PicID: i,
-      PicSpeed: speedMs,
-      PicData: base64,
-    });
-    if (!ok) return false;
-  }
-  return true;
 }
 
 /**
@@ -184,6 +291,16 @@ export async function setBrightness(ip: string, value: number): Promise<boolean>
   });
 }
 
+/** Query the device's current PicID counter. Returns 0 on failure. */
+export async function getHttpGifId(ip: string): Promise<number> {
+  try {
+    const data = await httpPost(ip, { Command: 'Draw/GetHttpGifId' });
+    return (data as any)?.PicId ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** Reset the PicID counter to prevent device lockup. */
 export async function resetPicId(ip: string): Promise<boolean> {
   return postCommand(ip, { Command: 'Draw/ResetHttpGifId' });
@@ -201,14 +318,7 @@ export async function switchToCustomChannel(ip: string): Promise<boolean> {
  */
 export async function getDeviceConfig(ip: string): Promise<Record<string, unknown> | null> {
   try {
-    const response = await fetch(`http://${ip}/post`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Command: 'Channel/GetAllConf' }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) return null;
-    return await response.json() as Record<string, unknown>;
+    return await httpPost(ip, { Command: 'Channel/GetAllConf' });
   } catch {
     return null;
   }

@@ -6,7 +6,7 @@
  * - mDNS advertisement
  * - OpenClaw Gateway proxy
  * - Usage relay (sibling HTTP → WS → direct API)
- * - Pixoo + ADB device modules
+ * - Pixoo + ADB + Serial device modules
  *
  * Exports `startDaemon()` called by cli.ts.
  */
@@ -23,12 +23,16 @@ import {
 } from './session-registry.js';
 import { fetchUsageFromApi, hasOAuthToken, type ApiUsageData } from './usage-api.js';
 import { isLocalConnection, validateToken } from './auth.js';
+import { getLastFrame, renderPreviewFrame, onFrameRendered, offFrameRendered } from './pixoo/pixoo-bridge.js';
+import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
 import { enableDebugLog, debug } from './logger.js';
 import {
   initModules,
   stopModules,
   createDefaultModules,
 } from './modules/index.js';
+import { SerialModule } from './modules/serial-module.js';
+import { esp32ConnectionCount } from './esp32-serial.js';
 import {
   BRIDGE_WS_PORT,
   OPENCLAW_CAPABILITIES,
@@ -151,8 +155,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   // ===== HTTP server =====
   const httpServer = createServer((req, res) => {
+    const pathname = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).pathname;
+
     // Health check is public (no auth) — used by iOS/Android for pairing token discovery
-    if (req.method === 'GET' && req.url === '/health') {
+    if (req.method === 'GET' && pathname === '/health') {
       const snap = core.stateMachine.getSnapshot();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -163,7 +169,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       }));
       return;
     }
-    if (req.method === 'GET' && req.url === '/status') {
+    if (req.method === 'GET' && pathname === '/status') {
       const snap = core.stateMachine.getSnapshot();
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(`<html><body>
@@ -175,13 +181,59 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       </body></html>`);
       return;
     }
-    if (req.method === 'GET' && req.url === '/sse') {
+    if (req.method === 'GET' && pathname === '/pixoo/stream') {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      });
+
+      const listener = (frame: Uint8Array) => {
+        const bmp = rgbToBmp(frame, 64, 64);
+        const b64 = bmp.toString('base64');
+        try { res.write(`event: frame\ndata: ${b64}\n\n`); } catch { /* client gone */ }
+      };
+      onFrameRendered(listener);
+
+      // Send current frame immediately
+      const current = getLastFrame() ?? renderPreviewFrame();
+      listener(current);
+
+      // Heartbeat
+      const heartbeat = setInterval(() => {
+        try { res.write(':heartbeat\n\n'); } catch { /* */ }
+      }, 30_000);
+
+      req.on('close', () => {
+        offFrameRendered(listener);
+        clearInterval(heartbeat);
+      });
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/pixoo/frame') {
+      const rgb = getLastFrame() ?? renderPreviewFrame();
+      const bmp = rgbToBmp(rgb, 64, 64);
+      res.writeHead(200, {
+        'Content-Type': 'image/bmp',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(bmp);
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/pixoo') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(pixooLiveHtml({ projectName: 'AgentDeck' }));
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/sse') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
       res.write(`event: connected\ndata: {}\n\n`);
       req.on('close', () => {});
       return;
     }
-    if (req.method === 'POST' && req.url === '/shutdown') {
+    if (req.method === 'POST' && pathname === '/shutdown') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'shutting_down' }));
       core.shutdown();
@@ -214,9 +266,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const deviceModules = createDefaultModules('daemon' as any);
   const startedModules = await initModules(
     deviceModules,
-    { mdns: true, adb: 'auto', serial: false, pixoo: 'auto' },
+    { mdns: true, adb: 'auto', serial: 'auto', pixoo: 'auto' },
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
+
+  // Serial module state provider (heartbeat needs cached state)
+  let lastStateEvent: BridgeEvent | null = null;
+  const serialModule = startedModules.find(m => m.name === 'serial') as SerialModule | undefined;
+  if (serialModule) {
+    serialModule.setStateProvider(() => lastStateEvent);
+    serialModule.setUsageProvider(() => core.buildUsage());
+    // Send full state (state + usage + sessions) when new ESP32 device connects
+    serialModule.setInitialStateProvider(() => {
+      const events: BridgeEvent[] = [];
+      if (lastStateEvent) events.push(lastStateEvent);
+      events.push(core.buildUsage());
+      // Sessions list (async enrichment runs synchronously from cache here)
+      core.broadcastSessionsList().catch(() => {});
+      return events;
+    });
+    // Include ESP32 serial connections in client count for polling guards
+    core.setExternalClientCountProvider(() => esp32ConnectionCount());
+  }
 
   log(`[agentdeck] WebSocket server ready on port ${port}`);
   log(`[agentdeck] Pairing URL: ${core.wsUrl}`);
@@ -227,6 +298,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== Gateway adapter lifecycle =====
   let gatewayAdapter: OpenClawAdapter | null = null;
   let gatewayConnecting = false;
+
+  // Inject OpenClaw virtual session into sessions_list when Gateway is connected
+  // so ESP32/Android clients show the session in their agent list
+  core.setSessionsEnricher((sessions) => {
+    if (!gatewayAdapter?.isAlive()) return sessions;
+    if (sessions.some(s => s.agentType === 'openclaw')) return sessions;
+    const snap = core.stateMachine.getSnapshot();
+    return [...sessions, {
+      id: 'openclaw-gateway',
+      port: 18789,
+      projectName: snap.projectName ?? 'OpenClaw',
+      agentType: 'openclaw' as const,
+      alive: true,
+      state: snap.state,
+    }];
+  });
 
   function connectGatewayAdapter(): void {
     if (gatewayAdapter || gatewayConnecting) return;
@@ -277,11 +364,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             }
             // Force full state broadcast
             const snap = core.stateMachine.getSnapshot();
-            core.wsServer.broadcast(core.buildStateEvent({
+            const gwStateEvent = core.buildStateEvent({
               agentType: 'openclaw',
               agentCapabilities: OPENCLAW_CAPABILITIES,
               snapshot: snap,
-            }));
+            });
+            lastStateEvent = gwStateEvent;
+            core.wsServer.broadcast(gwStateEvent);
             core.broadcastUsage();
           } else {
             bridgeLogStream.stop();
@@ -318,11 +407,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== State changed → broadcast =====
   core.stateMachine.on('state_changed', (snapshot) => {
     const gwAlive = gatewayAdapter?.isAlive() ?? false;
-    core.wsServer.broadcast(core.buildStateEvent({
+    const stateEvent = core.buildStateEvent({
       agentType: gwAlive ? 'openclaw' : 'daemon' as any,
       agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
       snapshot,
-    }));
+    });
+    lastStateEvent = stateEvent;
+    core.wsServer.broadcast(stateEvent);
     core.maybeBroadcastSessionsList();
     core.broadcastUsage();
   });

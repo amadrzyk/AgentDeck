@@ -1,20 +1,18 @@
 /**
- * Pixoo64 Bridge — event listener + push orchestrator.
+ * Pixoo64 Bridge — event listener + HTTP realtime 2FPS streamer.
  *
- * Mirrors esp32-serial.ts pattern: receives BridgeEvents via wsServer.onBroadcast()
- * hook, renders 64×64 frames, and pushes to Pixoo64 devices via HTTP.
- *
- * Key behaviors:
- * - Animation loop: continuous 1.2s frame push (real-time animation on device)
- * - Event-driven: state/usage changes trigger immediate frame push (debounced 800ms)
- * - Multi-device: all configured devices receive simultaneous pushes
+ * Real-time continuous streaming approach:
+ *   - The device cannot handle real-time HTTP single-frame pushes faster than ~4 FPS.
+ *   - Multi-frame loops trigger an unavoidable hardware loading screen.
+ *   - Solution: Constantly push `PicNum: 1` with a **static PicId** every 500ms (2 FPS).
+ *   - The device will smoothly overwrite its buffer without stalling.
  */
 
 import { State } from '../types.js';
 import type { BridgeEvent, StateUpdateEvent, UsageEvent } from '../types.js';
 import type { SessionInfo, SessionsListEvent } from '@agentdeck/shared/protocol';
 import { DISPLAY_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
-import { pushFrame, setBrightness, clearText, getDeviceBackoffStatus, switchToCustomChannel } from './pixoo-client.js';
+import { pushFrame, setBrightness, clearText, getDeviceBackoffStatus, switchToCustomChannel, onDeviceStatusChange, stopProbeTimer } from './pixoo-client.js';
 import { renderFrame } from './pixoo-renderer.js';
 import { debug } from '../logger.js';
 
@@ -25,15 +23,14 @@ const TAG = 'Pixoo';
 export interface PixooDevice {
   ip: string;
   name?: string;
-  brightness?: number; // 0-100, default 40
+  brightness?: number; // 0-100, default 100
 }
 
 // ===== Internal State =====
 
 let devices: PixooDevice[] = [];
-let animTimer: ReturnType<typeof setInterval> | null = null;
+let streamTimer: ReturnType<typeof setInterval> | null = null;
 let lastPushTime = 0;
-let pendingPush: ReturnType<typeof setTimeout> | null = null;
 let pushing = false; // guard against overlapping pushes
 
 // Cached latest events
@@ -41,16 +38,26 @@ let lastStateEvent: StateUpdateEvent | null = null;
 let lastUsageEvent: UsageEvent | null = null;
 let lastSessions: SessionInfo[] | null = null;
 
-// Last rendered frame (cached for live preview)
-let lastRenderedFrame: Uint8Array | null = null;
+// Frame listeners for SSE streaming
+let frameListeners: Array<(frame: Uint8Array) => void> = [];
+let previewTimer: ReturnType<typeof setInterval> | null = null;
+let previewFps = 10; // Adjustable 1–10 FPS for /pixoo live preview
 
-const DEBOUNCE_MS = 800;      // Min interval between event-driven pushes
-const ANIM_INTERVAL_MS = 1200; // Continuous animation frame interval (~0.83fps)
-const DEFAULT_BRIGHTNESS = 40;
+const HTTP_STREAM_INTERVAL_MS = 500;     // 2 FPS hardware push (smooth animation, stable on Pixoo64)
+const CHANNEL_REASSERT_MS = 30_000;     // Re-assert custom channel every 30s (fast recovery after reboots)
+const DEFAULT_BRIGHTNESS = 100;
 
 const FORWARDED_EVENTS = DISPLAY_FORWARDED_EVENTS;
 
+// Broadcast function injected by module for sending status notifications
+let broadcastFn: ((event: BridgeEvent) => void) | null = null;
+
 // ===== Public API =====
+
+/** Set broadcast function for pushing Pixoo status events to WS clients. */
+export function setPixooBroadcast(fn: (event: BridgeEvent) => void): void {
+  broadcastFn = fn;
+}
 
 export function startPixooBridge(pixooDevices?: PixooDevice[]): void {
   if (!pixooDevices || pixooDevices.length === 0) {
@@ -61,22 +68,43 @@ export function startPixooBridge(pixooDevices?: PixooDevice[]): void {
   devices = pixooDevices;
   debug(TAG, `Starting with ${devices.length} device(s): ${devices.map(d => d.name || d.ip).join(', ')}`);
 
-  // Switch to custom channel + set brightness (fire-and-forget)
+  // Switch to custom channel + set brightness (fire-and-forget, one-time only)
+  // Do NOT repeat this call — it resets the HTTP GIF buffer, clearing the display.
   for (const dev of devices) {
     switchToCustomChannel(dev.ip).catch(() => {});
     setBrightness(dev.ip, dev.brightness ?? DEFAULT_BRIGHTNESS).catch(() => {});
   }
 
-  // Continuous animation loop — push a new frame every 1.2s
-  animTimer = setInterval(animTick, ANIM_INTERVAL_MS);
+  // Wire device status change → WS notification
+  onDeviceStatusChange((ip, online) => {
+    const dev = devices.find(d => d.ip === ip);
+    const name = dev?.name || 'Pixoo64';
+    if (broadcastFn) {
+      broadcastFn({
+        type: 'device_status',
+        device: 'pixoo',
+        name,
+        ip,
+        online,
+        message: online
+          ? `${name} reconnected`
+          : `${name} offline — power cycle may be needed`,
+      } as any);
+    }
+    debug(TAG, online ? `${name} (${ip}) back online` : `${name} (${ip}) went offline`);
+  });
 
-  debug(TAG, 'Bridge started');
+  // Start continuous 2 FPS stream — no repeated channel switches
+  if (streamTimer) clearInterval(streamTimer);
+  streamTimer = setInterval(doStreamPush, HTTP_STREAM_INTERVAL_MS);
+
+  debug(TAG, 'Bridge started (Continuous 2 FPS stream)');
 }
 
 export function broadcastPixoo(event: BridgeEvent): void {
-  if (devices.length === 0) return;
   if (!FORWARDED_EVENTS.has(event.type)) return;
 
+  // Always cache state for live preview (even without Pixoo devices)
   switch (event.type) {
     case 'state_update':
       lastStateEvent = event as StateUpdateEvent;
@@ -95,32 +123,61 @@ export function broadcastPixoo(event: BridgeEvent): void {
       break;
   }
 
-  // State changes trigger immediate push (debounced)
-  if (event.type === 'state_update' || event.type === 'connection') {
-    schedulePush();
+  // Immediate push on major disconnections to feel snappy
+  if (event.type === 'connection' && devices.length > 0) {
+    if (!pushing) doStreamPush();
   }
 }
 
 export function stopPixooBridge(): void {
-  if (animTimer) {
-    clearInterval(animTimer);
-    animTimer = null;
+  if (streamTimer) {
+    clearInterval(streamTimer);
+    streamTimer = null;
   }
-  if (pendingPush) {
-    clearTimeout(pendingPush);
-    pendingPush = null;
-  }
+  stopProbeTimer();
 
   for (const dev of devices) {
     clearText(dev.ip).catch(() => {});
   }
 
+  stopPreviewTimer();
   devices = [];
   lastStateEvent = null;
   lastUsageEvent = null;
   lastSessions = null;
-  lastRenderedFrame = null;
+  broadcastFn = null;
+  frameListeners = [];
   debug(TAG, 'Bridge stopped');
+}
+
+/** Register a listener called whenever a new frame is rendered. */
+export function onFrameRendered(listener: (frame: Uint8Array) => void): void {
+  frameListeners.push(listener);
+  startPreviewTimer();
+}
+
+/** Remove a frame listener. */
+export function offFrameRendered(listener: (frame: Uint8Array) => void): void {
+  frameListeners = frameListeners.filter(l => l !== listener);
+  if (frameListeners.length === 0) stopPreviewTimer();
+}
+
+/**
+ * Set the live preview frame rate (1–10 FPS).
+ * Takes effect immediately by restarting the preview timer.
+ */
+export function setPreviewFps(fps: number): void {
+  previewFps = Math.max(1, Math.min(10, Math.round(fps)));
+  if (frameListeners.length > 0) {
+    stopPreviewTimer();
+    startPreviewTimer();
+  }
+  debug(TAG, `Preview FPS set to ${previewFps}`);
+}
+
+/** Get current preview FPS setting. */
+export function getPreviewFps(): number {
+  return previewFps;
 }
 
 export function pixooDeviceCount(): number {
@@ -150,26 +207,32 @@ export function getPixooDeviceDetails(): Array<{
 
 // ===== Internal =====
 
-/** Event-driven push (debounced). */
-function schedulePush(): void {
-  const elapsed = Date.now() - lastPushTime;
-  if (elapsed >= DEBOUNCE_MS) {
-    doPush();
-  } else if (!pendingPush) {
-    pendingPush = setTimeout(() => {
-      pendingPush = null;
-      doPush();
-    }, DEBOUNCE_MS - elapsed);
-  }
-}
-
-/** Animation timer tick — continuous frame push for live animation. */
-function animTick(): void {
+/**
+ * Main Continuous Stream tick: 2 FPS push to all hardware devices (500ms interval).
+ */
+function doStreamPush(): void {
   if (devices.length === 0) return;
-  // Skip if a recent event-driven push already covered this interval
+  if (pushing) return;
+  
   const elapsed = Date.now() - lastPushTime;
-  if (elapsed < ANIM_INTERVAL_MS * 0.7) return;
-  doPush();
+  if (elapsed < HTTP_STREAM_INTERVAL_MS * 0.8) return;
+  
+  pushing = true;
+  lastPushTime = Date.now();
+
+  const frame = renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
+  const ts = new Date().toISOString().slice(11, 19);
+  process.stderr.write(`[Pixoo] ${ts} pushing to ${devices.length} dev(s)\n`);
+
+  const promises = devices.map(dev =>
+    pushFrame(dev.ip, frame).then(ok => {
+      process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ${ok ? 'OK' : 'FAIL'}\n`);
+    }).catch((err: any) => {
+      process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ERROR ${err?.message}\n`);
+    })
+  );
+  
+  Promise.all(promises).then(() => { pushing = false; });
 }
 
 /**
@@ -181,27 +244,30 @@ export function renderPreviewFrame(): Uint8Array {
 }
 
 /**
- * Get the last frame pushed to Pixoo devices, or render one on-demand.
- * Returns 64×64×3 RGB buffer (12,288 bytes).
+ * Get the last calculated frame.
  */
 export function getLastFrame(): Uint8Array | null {
-  return lastRenderedFrame;
+  return renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
 }
 
-/** Render and push a single frame to all devices. */
-function doPush(): void {
-  if (pushing) return; // prevent overlapping async pushes
-  pushing = true;
-  lastPushTime = Date.now();
+/** Notify all SSE frame listeners. */
+function notifyFrameListeners(frame: Uint8Array): void {
+  for (const listener of frameListeners) {
+    try { listener(frame); } catch { /* best-effort */ }
+  }
+}
 
-  const frame = renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
-  lastRenderedFrame = frame;
-  debug(TAG, `push ${frame.length}B to ${devices.length} dev(s)`);
+/** Preview timer: Generates frames at previewFps for the Web UI stream. */
+function startPreviewTimer(): void {
+  if (previewTimer) return;
+  const intervalMs = Math.round(1000 / previewFps);
+  previewTimer = setInterval(() => {
+    if (frameListeners.length === 0) { stopPreviewTimer(); return; }
+    const frame = renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
+    notifyFrameListeners(frame);
+  }, intervalMs);
+}
 
-  const promises = devices.map(dev =>
-    pushFrame(dev.ip, frame).then(ok => {
-      if (!ok) debug(TAG, `push FAILED to ${dev.ip}`);
-    }).catch(() => {})
-  );
-  Promise.all(promises).then(() => { pushing = false; });
+function stopPreviewTimer(): void {
+  if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
 }

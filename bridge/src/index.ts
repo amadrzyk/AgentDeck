@@ -25,6 +25,7 @@ import {
   listActive as listActiveSessions,
   findAvailablePort,
   detectTmuxSession,
+  findExistingDaemon,
 } from './session-registry.js';
 import { fetchUsageFromApi, hasOAuthToken } from './usage-api.js';
 import { buildUsageEvent } from './usage-event.js';
@@ -263,6 +264,14 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     serial: 'auto',
     pixoo: 'auto',
   };
+
+  // When daemon is running, disable device modules unless explicitly enabled
+  // ('auto' from CLI default gets downgraded; explicit true would still work)
+  const daemonRunning = !!findExistingDaemon();
+  if (daemonRunning) {
+    if (moduleConfigs.serial === 'auto') moduleConfigs.serial = false;
+    if (moduleConfigs.pixoo === 'auto') moduleConfigs.pixoo = false;
+  }
   const deviceModules = createDefaultModules(agentType);
 
   // Set up ESP32 state provider before module init
@@ -270,6 +279,16 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   const serialModule = deviceModules.find(m => m.name === 'serial') as SerialModule | undefined;
   if (serialModule) {
     serialModule.setStateProvider(() => lastStateEvent);
+    serialModule.setUsageProvider(() => core.buildUsage());
+    serialModule.setInitialStateProvider(() => {
+      const events: BridgeEvent[] = [];
+      if (lastStateEvent) events.push(lastStateEvent);
+      events.push(core.buildUsage());
+      core.broadcastSessionsList().catch(() => {});
+      return events;
+    });
+    // Include ESP32 serial connections in client count for polling guards
+    core.setExternalClientCountProvider(() => esp32ConnectionCount());
   }
 
   const startedModules = await initModules(deviceModules, moduleConfigs, {
@@ -895,6 +914,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     if (shutdownInProgress) return;
     shutdownInProgress = true;
 
+    // Hard failsafe — exit no matter what after 3s
+    setTimeout(() => process.exit(0), 3000).unref();
+
     log('[sdc] Shutting down...');
 
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
@@ -906,10 +928,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     bridgeLogStream?.stop();
     journal.close();
 
-    stopModules(startedModules).catch(() => {});
-
     core.onShutdown(async () => {
-      await adapter.shutdown();
+      await Promise.all([
+        adapter.shutdown(),
+        stopModules(startedModules).catch(() => {}),
+      ]);
       process.exit(0);
     });
     core.shutdown();
