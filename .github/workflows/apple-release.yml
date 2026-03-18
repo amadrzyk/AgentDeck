@@ -110,6 +110,7 @@ jobs:
           rm -rf ~/private_keys
 
   build-macos:
+    if: false  # TODO: needs "Mac Installer Distribution" cert + cloud signing permission
     runs-on: macos-15
     timeout-minutes: 30
 

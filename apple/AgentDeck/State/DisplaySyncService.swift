@@ -8,7 +8,7 @@ import Foundation
 import UIKit
 #endif
 
-@Observable
+@Observable @MainActor
 final class DisplaySyncService {
     var enabled = true
 
