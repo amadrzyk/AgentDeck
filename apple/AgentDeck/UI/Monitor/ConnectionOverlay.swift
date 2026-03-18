@@ -158,7 +158,9 @@ struct ConnectionOverlay: View {
         .onAppear {
             searchingElapsed = 0
             elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-                searchingElapsed += 1
+                Task { @MainActor in
+                    searchingElapsed += 1
+                }
             }
         }
         .onDisappear {
