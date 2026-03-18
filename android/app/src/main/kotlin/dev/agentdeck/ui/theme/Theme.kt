@@ -102,7 +102,9 @@ fun AgentDeckTheme(
     isEink: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = if (isEink) EinkColorScheme else DarkColorScheme
+    val colorScheme = if (isEink) {
+        if (dev.agentdeck.util.EinkDetector.isColorEink()) EinkColorColorScheme else EinkColorScheme
+    } else DarkColorScheme
     val typography = if (isEink) EinkTypography else AppTypography
 
     CompositionLocalProvider(LocalIsEink provides isEink) {

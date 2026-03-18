@@ -16,9 +16,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import dev.agentdeck.state.GroupedEntry
 import dev.agentdeck.state.TimelineEntry
 import dev.agentdeck.state.groupConsecutive
+import dev.agentdeck.terrarium.renderer.einkColorEnabled
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -61,6 +63,7 @@ fun EinkEventLog(
                 val time = formatTimeHHMM(entry.timestamp)
                 val agentTag = agentTag(entry.agentType)
                 val icon = typeIcon(entry.type, entry.status)
+                val eventColor = typeColor(entry.type, entry.status)
                 val countSuffix = if (group.count > 1) " (×${group.count})" else ""
                 val line = "$time $agentTag$icon ${entry.summary}$countSuffix"
                 val hasDetail = !entry.detail.isNullOrEmpty() && entry.detail != entry.summary
@@ -72,7 +75,7 @@ fun EinkEventLog(
                         lineHeight = 17.sp,
                         fontWeight = if (entry.type == "chat_start") FontWeight.Bold else FontWeight.Normal,
                     ),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = eventColor ?: MaterialTheme.colorScheme.onSurface,
                     maxLines = if (hasDetail) 2 else 1,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -121,6 +124,24 @@ private fun typeIcon(type: String, status: String? = null): String = when (type)
     "user_action" -> "☞"
     "state_change" -> "△"
     else -> "·"
+}
+
+/** Color-code timeline events by type on color e-ink (matches tablet typeColor). */
+private fun typeColor(type: String, status: String?): Color? {
+    if (!einkColorEnabled) return null
+    return when (type) {
+        "chat_start", "chat_end" -> Color(0xFF227733)   // green — chat lifecycle
+        "chat_response" -> Color(0xFF335588)             // blue — model response
+        "tool_request" -> when (status) {
+            "denied" -> Color(0xFFCC2222)                // red — denied
+            else -> Color(0xFFBB7700)                    // amber — pending/approved
+        }
+        "tool_resolved", "tool_exec" -> Color(0xFF557722)// olive — tool done
+        "model_call", "model_response" -> Color(0xFF335588) // blue — model
+        "error" -> Color(0xFFCC2222)                     // red — error
+        "memory_recall" -> Color(0xFF775599)             // purple — memory
+        else -> null
+    }
 }
 
 private fun agentTag(agentType: String?): String = when (agentType) {

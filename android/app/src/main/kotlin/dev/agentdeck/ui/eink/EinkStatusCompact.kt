@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.agentdeck.state.DashboardState
+import dev.agentdeck.terrarium.renderer.einkColorEnabled
 import dev.agentdeck.util.formatBytes
 import dev.agentdeck.util.formatResetTime
 import kotlin.math.roundToInt
@@ -114,6 +115,16 @@ private fun LimitsColumn(state: DashboardState) {
     }
 }
 
+/** Color-code gauge by usage level on color e-ink: green < 60%, amber 60-85%, red > 85%. */
+private fun gaugeColor(percent: Double): Color {
+    if (!einkColorEnabled) return Color.Black
+    return when {
+        percent >= 85.0 -> Color(0xFFCC2222) // red — critical
+        percent >= 60.0 -> Color(0xFFBB7700) // amber — warning
+        else -> Color(0xFF227733)             // green — ok
+    }
+}
+
 @Composable
 private fun GaugeText(label: String, percent: Double, resetTime: String, stale: String) {
     val gauge = blockGauge(percent)
@@ -123,7 +134,7 @@ private fun GaugeText(label: String, percent: Double, resetTime: String, stale: 
         fontSize = 11.sp,
         lineHeight = 14.sp,
         fontFamily = FontFamily.Monospace,
-        color = Color.Black,
+        color = gaugeColor(percent),
         maxLines = 1,
     )
 }
@@ -142,9 +153,11 @@ private fun ModelsColumn(state: DashboardState) {
         } else {
             "connected"
         }
-        DataLine("OAuth: $modelText", maxLines = 2)
+        DataLine("OAuth: $modelText", maxLines = 2,
+            color = if (einkColorEnabled) Color(0xFF227733) else Color.Black)
     } else if (state.oauthConnected == false) {
-        DataLine("OAuth: disconnected")
+        DataLine("OAuth: disconnected",
+            color = if (einkColorEnabled) Color(0xFFCC2222) else Color.Black)
     }
 
     val ollama = state.ollamaStatus
@@ -177,19 +190,19 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.Bold,
         fontFamily = FontFamily.Monospace,
         letterSpacing = 1.sp,
-        color = Color.DarkGray,
+        color = if (einkColorEnabled) Color(0xFF335588) else Color.DarkGray,
         modifier = Modifier.padding(bottom = 3.dp),
     )
 }
 
 @Composable
-private fun DataLine(text: String, maxLines: Int = 1) {
+private fun DataLine(text: String, maxLines: Int = 1, color: Color = Color.Black) {
     Text(
         text = text,
         fontSize = 11.sp,
         lineHeight = 13.sp,
         fontFamily = FontFamily.Monospace,
-        color = Color.Black,
+        color = color,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth(),

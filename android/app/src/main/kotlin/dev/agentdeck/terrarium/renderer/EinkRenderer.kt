@@ -219,7 +219,7 @@ private fun renderEinkFrame(
     Log.d("EinkFrame", "octopus=${state.octopus} agents=${state.agents.size} agentsStates=${state.agents.map{it.visualState}} frame=$animFrame")
 
     // Water background — entire frame is the aquarium (no inner border)
-    canvas.drawColor(GRAY_WATER_BG)
+    canvas.drawColor(einkPick(GRAY_WATER_BG, COLOR_WATER_BG))
 
     // Water surface — flat air region above water line, wave only on the boundary
     val creatureFrame = animFrame % 4
@@ -232,7 +232,7 @@ private fun renderEinkFrame(
     // The contrast between GRAY_AIR (0xEE) and GRAY_WATER_BG (0xDD) forms a natural
     // subtle water surface. No separate wave stroke needed (it was too prominent on e-ink).
     paint.style = Paint.Style.FILL
-    paint.color = GRAY_AIR
+    paint.color = einkPick(GRAY_AIR, COLOR_AIR)
     val airPath = android.graphics.Path().apply {
         moveTo(0f, 0f)
         lineTo(width.toFloat(), 0f)
@@ -257,18 +257,18 @@ private fun renderEinkFrame(
         val r = 3f + i * 0.8f
         // Inner highlight
         paint.style = Paint.Style.FILL
-        paint.color = GRAY_AIR
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
         canvas.drawCircle(bx, by, r * 0.5f, paint)
         // Outer ring
         paint.style = Paint.Style.STROKE
-        paint.color = GRAY_BUBBLE
+        paint.color = einkPick(GRAY_BUBBLE, COLOR_BUBBLE)
         paint.strokeWidth = 1.0f
         canvas.drawCircle(bx, by, r, paint)
     }
 
     // Sand floor — subtle darker band at bottom for visual grounding
     paint.style = Paint.Style.FILL
-    paint.color = GRAY_SAND
+    paint.color = einkPick(GRAY_SAND, COLOR_SAND)
     canvas.drawRect(0f, height * 0.82f, width.toFloat(), height.toFloat(), paint)
 
     // Light rays — 2 fixed-position gray gradient rectangles
@@ -313,7 +313,7 @@ private fun renderEinkFrame(
     // Pop burst particles (1-frame effect when leaving ASKING state)
     if (state.popBurstPositions.isNotEmpty()) {
         paint.style = Paint.Style.FILL
-        paint.color = GRAY_AIR
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
         for ((px, py) in state.popBurstPositions) {
             val burstCx = width * px
             val burstCy = height * py
@@ -332,10 +332,11 @@ private fun renderEinkFrame(
     // Front-layer fish (in front of creatures for 3D depth)
     drawEinkDataParticles(canvas, paint, width, height, state.tetra, state.agents.size, state.crayfish, animFrame, layer = 1, fishSchool = fishSchool)
 
-    // Snap to native 16-level grayscale — only needed on state-change renders.
+    // Snap to native 16-level grayscale — only needed on B&W e-ink state-change renders.
     // Animation frames skip this because all draw colors are already pre-quantized
     // gray values and isAntiAlias=false, so the 180K-pixel pass is essentially a no-op.
-    if (!skipDither) {
+    // Color e-ink: skip entirely — preserve RGB colors for CFA rendering.
+    if (!skipDither && !einkColorEnabled) {
         DitherEngine.snapToNearestGray(bitmap)
     }
 
@@ -347,7 +348,7 @@ private fun renderEinkFrame(
 private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int) {
     val bottomY = h * 0.82f
     paint.style = Paint.Style.FILL
-    paint.color = GRAY_ROCK
+    paint.color = einkPick(GRAY_ROCK, COLOR_ROCK)
 
     // Right rock cluster
     val rockPath = android.graphics.Path().apply {
@@ -360,11 +361,11 @@ private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int,
     canvas.drawPath(rockPath, paint)
     // Outline for definition on e-ink
     paint.style = Paint.Style.STROKE
-    paint.color = GRAY_GRAVEL
+    paint.color = einkPick(GRAY_GRAVEL, COLOR_GRAVEL)
     paint.strokeWidth = 1.0f
     canvas.drawPath(rockPath, paint)
     paint.style = Paint.Style.FILL
-    paint.color = GRAY_ROCK
+    paint.color = einkPick(GRAY_ROCK, COLOR_ROCK)
 
     // Left small rocks
     val leftRock = android.graphics.Path().apply {
@@ -377,12 +378,12 @@ private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int,
     canvas.drawPath(leftRock, paint)
     // Outline for definition
     paint.style = Paint.Style.STROKE
-    paint.color = GRAY_GRAVEL
+    paint.color = einkPick(GRAY_GRAVEL, COLOR_GRAVEL)
     paint.strokeWidth = 1.0f
     canvas.drawPath(leftRock, paint)
 
     // Sand texture lines
-    paint.color = GRAY_GRAVEL
+    paint.color = einkPick(GRAY_GRAVEL, COLOR_GRAVEL)
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 0.5f
     for (i in 0 until 4) {
@@ -394,7 +395,7 @@ private fun drawEinkRocks(canvas: android.graphics.Canvas, paint: Paint, w: Int,
 private fun drawEinkSeaweed(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int, animFrame: Int = 0) {
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 2.0f
-    paint.color = GRAY_SEAWEED
+    paint.color = einkPick(GRAY_SEAWEED, COLOR_SEAWEED)
 
     // Sway offset per frame: control points shift 1-2px horizontally (4-frame cycle)
     val swayOffsets = floatArrayOf(0f, 1.5f, 0f, -1.5f)
@@ -430,7 +431,7 @@ private fun drawEinkSeaweed(canvas: android.graphics.Canvas, paint: Paint, w: In
 
 private fun drawEinkGravel(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int) {
     val bottomY = h * 0.88f
-    paint.color = GRAY_GRAVEL
+    paint.color = einkPick(GRAY_GRAVEL, COLOR_GRAVEL)
 
     // Gravel: small dots along bottom
     paint.style = Paint.Style.FILL
@@ -441,7 +442,7 @@ private fun drawEinkGravel(canvas: android.graphics.Canvas, paint: Paint, w: Int
     }
 
     // Pebbles: small ovals
-    paint.color = GRAY_PEBBLE
+    paint.color = einkPick(GRAY_PEBBLE, COLOR_PEBBLE)
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 1.2f
     canvas.drawOval(RectF(w * 0.20f, bottomY, w * 0.26f, bottomY + h * 0.04f), paint)
@@ -449,7 +450,7 @@ private fun drawEinkGravel(canvas: android.graphics.Canvas, paint: Paint, w: Int
     canvas.drawOval(RectF(w * 0.60f, bottomY + 1f, w * 0.64f, bottomY + h * 0.03f), paint)
 
     // Additional ripple strokes for sand texture
-    paint.color = GRAY_GRAVEL
+    paint.color = einkPick(GRAY_GRAVEL, COLOR_GRAVEL)
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 0.8f
     val rippleY1 = bottomY + (h - bottomY) * 0.2f
@@ -475,7 +476,7 @@ private fun drawEinkLightRays(canvas: android.graphics.Canvas, paint: Paint, w: 
         val rayH = h * 0.45f
 
         // Simple trapezoid with fading gray
-        paint.color = GRAY_AIR // 0xEE — very light, subtle
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
         val path = android.graphics.Path().apply {
             moveTo(cx - topW, 0f)
             lineTo(cx + topW, 0f)
@@ -486,7 +487,7 @@ private fun drawEinkLightRays(canvas: android.graphics.Canvas, paint: Paint, w: 
         // Use a shader for gradient effect
         paint.shader = android.graphics.LinearGradient(
             cx, 0f, cx, rayH,
-            GRAY_AIR, GRAY_WATER_BG,
+            einkPick(GRAY_AIR, COLOR_AIR), einkPick(GRAY_WATER_BG, COLOR_WATER_BG),
             android.graphics.Shader.TileMode.CLAMP,
         )
         canvas.drawPath(path, paint)
@@ -498,7 +499,7 @@ private fun drawEinkLightRays(canvas: android.graphics.Canvas, paint: Paint, w: 
 private fun drawEinkWaterSurface(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int, animFrame: Int) {
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 2.0f
-    paint.color = GRAY_SURFACE_LINE
+    paint.color = einkPick(GRAY_SURFACE_LINE, 0xFF99BBCC.toInt())
 
     val surfaceY = h * 0.04f
     val phase = animFrame * 0.3f
@@ -518,7 +519,7 @@ private fun drawEinkWaterSurface(canvas: android.graphics.Canvas, paint: Paint, 
 private fun drawEinkGrass(canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int, animFrame: Int) {
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 2.0f
-    paint.color = GRAY_SEAWEED // 0x22 — dark, visible on sand
+    paint.color = einkPick(GRAY_SEAWEED, COLOR_GRASS)
 
     val sandY = h * 0.82f
     val sway = if (animFrame % 4 < 2) 1f else -1f
@@ -621,8 +622,16 @@ private fun drawEinkOctopus(
     val gap = EINK_PIXEL_GAP
 
     // SLEEPING: dimmer body (lighter gray = closer to background)
-    val bodyGray = if (state == OctopusVisualState.SLEEPING) GRAY_SEAWEED else GRAY_OCTO_BODY
-    val limbGray = if (state == OctopusVisualState.SLEEPING) GRAY_GRAVEL else GRAY_OCTO_LIMB
+    val bodyGray = if (state == OctopusVisualState.SLEEPING) {
+        einkPick(GRAY_SEAWEED, COLOR_OCTO_SLEEP)
+    } else {
+        einkPick(GRAY_OCTO_BODY, COLOR_OCTO_BODY)
+    }
+    val limbGray = if (state == OctopusVisualState.SLEEPING) {
+        einkPick(GRAY_GRAVEL, COLOR_OCTO_SLEEP)
+    } else {
+        einkPick(GRAY_OCTO_LIMB, COLOR_OCTO_LIMB)
+    }
 
     paint.style = Paint.Style.FILL
     for (row in 0 until EINK_OCTOPUS_ROWS) {
@@ -703,10 +712,10 @@ private fun drawEinkOctopus(
         val bubbleY = (startY - gridH * 0.3f).coerceAtLeast(bubbleR + 2f)
 
         // Bubble circle
-        paint.color = GRAY_AIR
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
         paint.style = Paint.Style.FILL
         canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
-        paint.color = GRAY_OCTO_LIMB
+        paint.color = einkPick(GRAY_OCTO_LIMB, COLOR_OCTO_LIMB)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.5f * scaleFactor
         canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
@@ -761,12 +770,12 @@ private fun drawEinkNameTag(
     val tagTop = (startY - tagHeight - gap).coerceAtLeast(2f)
 
     // Background rounded rect for readability
-    paint.color = GRAY_WATER_BG
+    paint.color = einkPick(GRAY_WATER_BG, COLOR_WATER_BG)
     paint.style = Paint.Style.FILL
     val rect = RectF(cx - tagWidth / 2, tagTop, cx + tagWidth / 2, tagTop + tagHeight)
     canvas.drawRoundRect(rect, 3f, 3f, paint)
     // Border for separation from background
-    paint.color = GRAY_OCTO_LIMB
+    paint.color = einkPick(GRAY_OCTO_LIMB, COLOR_OCTO_LIMB)
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 1f
     canvas.drawRoundRect(rect, 3f, 3f, paint)
@@ -836,7 +845,7 @@ private fun drawEinkCrayfish(
 
     if (state == CrayfishVisualState.DORMANT) {
         // Only show antenna tips above rocks
-        paint.color = GRAY_CRAY_BODY
+        paint.color = einkPick(GRAY_CRAY_BODY, COLOR_CRAY_BODY)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.5f
         canvas.drawLine(cx - bodyWidth * 0.1f, cy - bodyWidth * 0.1f,
@@ -887,13 +896,21 @@ private fun drawEinkCrayfish(
         canvas.rotate(-10f, EINK_SVG_VIEWBOX / 2f, EINK_SVG_VIEWBOX / 2f)
     }
 
-    // 1. Body — filled with body gray (lighter when sick)
+    // 1. Body — filled with body color (lighter when sick)
     paint.style = Paint.Style.FILL
-    paint.color = if (state == CrayfishVisualState.SICK) GRAY_CRAY_SICK else GRAY_CRAY_BODY
+    paint.color = if (state == CrayfishVisualState.SICK) {
+        einkPick(GRAY_CRAY_SICK, COLOR_CRAY_SICK)
+    } else {
+        einkPick(GRAY_CRAY_BODY, COLOR_CRAY_BODY)
+    }
     canvas.drawPath(einkCrayfishBodyPath, paint)
 
-    // 2. Left claw with rotation — darker claw gray
-    paint.color = if (state == CrayfishVisualState.SICK) GRAY_CRAY_BODY else GRAY_CRAY_CLAW
+    // 2. Left claw with rotation — darker claw color
+    paint.color = if (state == CrayfishVisualState.SICK) {
+        einkPick(GRAY_CRAY_BODY, COLOR_CRAY_SICK)
+    } else {
+        einkPick(GRAY_CRAY_CLAW, COLOR_CRAY_CLAW)
+    }
     canvas.save()
     canvas.rotate(-clawAngle, 20f, 45f)
     canvas.drawPath(einkCrayfishLeftClawPath, paint)
@@ -905,8 +922,8 @@ private fun drawEinkCrayfish(
     canvas.drawPath(einkCrayfishRightClawPath, paint)
     canvas.restore()
 
-    // 4. Antennae — stroked with body gray
-    paint.color = GRAY_CRAY_BODY
+    // 4. Antennae — stroked with body color
+    paint.color = einkPick(GRAY_CRAY_BODY, COLOR_CRAY_BODY)
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 3f
     paint.strokeCap = Paint.Cap.ROUND
@@ -938,7 +955,7 @@ private fun drawEinkCrayfish(
     if (state == CrayfishVisualState.ROUTING) {
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.5f
-        paint.color = GRAY_SIGNAL
+        paint.color = einkPick(GRAY_SIGNAL, COLOR_CRAY_SIGNAL)
         paint.strokeCap = Paint.Cap.BUTT
         for (i in 1..3) {
             val r = bodyWidth * 0.15f * i
@@ -1191,7 +1208,7 @@ private fun drawEinkDataParticles(
                 val agentY = particleCenterY
                 val particleR = w * 0.06f
                 paint.style = Paint.Style.FILL
-                paint.color = GRAY_PARTICLE
+                paint.color = einkPick(GRAY_PARTICLE, COLOR_PARTICLE)
                 for (p in 0 until 4) {
                     val angle = animFrame * 0.8 + p * kotlin.math.PI / 2.0
                     val pr = particleR * (0.6f + 0.4f * kotlin.math.sin(animFrame * 0.5 + p * 1.2).toFloat())
@@ -1276,7 +1293,7 @@ private fun drawEinkFish(
 
     // Body — asymmetric diamond (wider toward head for fish shape)
     paint.style = Paint.Style.FILL
-    paint.color = GRAY_FISH_BODY
+    paint.color = einkPick(GRAY_FISH_BODY, COLOR_FISH_BODY)
     val bodyPath = android.graphics.Path().apply {
         moveTo(cx + halfLen, cy)                         // nose
         lineTo(cx + halfLen * 0.1f, cy - halfH)         // top (shifted forward)
@@ -1293,13 +1310,13 @@ private fun drawEinkFish(
     canvas.drawPath(bodyPath, paint)
 
     // Neon stripe — lighter highlight for the signature tetra feature
-    paint.color = GRAY_FISH_STRIPE
+    paint.color = einkPick(GRAY_FISH_STRIPE, COLOR_FISH_STRIPE)
     paint.strokeWidth = size * 0.22f
     paint.strokeCap = Paint.Cap.ROUND
     canvas.drawLine(cx - halfLen * 0.3f, cy, cx + halfLen * 0.6f, cy, paint)
 
     // Tail — filled forked V with wiggle
-    paint.color = GRAY_FISH_BODY
+    paint.color = einkPick(GRAY_FISH_BODY, COLOR_FISH_BODY)
     paint.style = Paint.Style.FILL
     val tailX = cx - halfLen
     val tailPath = android.graphics.Path().apply {
@@ -1472,4 +1489,47 @@ private const val GRAY_BUBBLE     = 0xFFAAAAAA.toInt()  // level 10 — bubbles
 private const val GRAY_SAND       = 0xFFCCCCCC.toInt()  // level 12 — sand floor (subtle against water)
 private const val GRAY_AIR        = 0xFFEEEEEE.toInt()  // level 14 — air above surface
 private const val GRAY_SURFACE_LINE = 0xFFAAAAAA.toInt() // level 10 — water surface line
+
+// --- Color e-ink palette (Kaleido 3) ---
+// Saturated fills for CFA color rendering. Kaleido renders color at 1/4 resolution (150 PPI),
+// so these are used ONLY for large fills (creature bodies, sand, water) — never small text.
+// Palette chosen for maximum saturation on Kaleido 3's 4096-color gamut.
+
+/** Lazy-init flag: true when running on a color e-ink device (Kaleido 3, Gallery 3/4). */
+internal val einkColorEnabled: Boolean by lazy {
+    dev.agentdeck.util.EinkDetector.isColorEink()
+}
+
+/** Pick gray or color constant based on display capability. */
+private inline fun einkPick(gray: Int, color: Int): Int = if (einkColorEnabled) color else gray
+
+// Octopus — terracotta (brand color #C07058)
+private val COLOR_OCTO_BODY    = 0xFFC07058.toInt()  // terracotta body
+private val COLOR_OCTO_LIMB    = 0xFF8B4513.toInt()  // saddle brown limbs
+private val COLOR_OCTO_SLEEP   = 0xFFA09080.toInt()  // muted tan (sleeping)
+
+// Crayfish — red
+private val COLOR_CRAY_BODY    = 0xFFCC3333.toInt()  // vivid red body
+private val COLOR_CRAY_CLAW    = 0xFF991111.toInt()  // dark red claws
+private val COLOR_CRAY_SICK    = 0xFF998877.toInt()  // desaturated olive (sick)
+private val COLOR_CRAY_SIGNAL  = 0xFF00AAAA.toInt()  // teal signal arcs
+
+// Fish — blue/cyan neon tetra
+private val COLOR_FISH_BODY    = 0xFF3366AA.toInt()  // royal blue body
+private val COLOR_FISH_STRIPE  = 0xFF55CCEE.toInt()  // cyan neon stripe
+
+// Environment
+private val COLOR_WATER_BG     = 0xFFC8DDE8.toInt()  // pale blue water
+private val COLOR_AIR          = 0xFFE8EEF0.toInt()  // very pale sky
+private val COLOR_SAND         = 0xFFD4B896.toInt()  // sandy beige
+private val COLOR_SEAWEED      = 0xFF336633.toInt()  // dark green
+private val COLOR_GRASS        = 0xFF447744.toInt()  // green
+private val COLOR_ROCK         = 0xFF887766.toInt()  // brown-gray
+private val COLOR_GRAVEL       = 0xFF998866.toInt()  // light brown
+private val COLOR_PEBBLE       = 0xFFAA9977.toInt()  // tan
+private val COLOR_BUBBLE       = 0xFFAADDEE.toInt()  // light blue
+
+// Effects
+private val COLOR_STARBURST    = 0xFFDDAA44.toInt()  // amber/gold working glow
+private val COLOR_PARTICLE     = 0xFF55AACC.toInt()  // data particle cyan
 

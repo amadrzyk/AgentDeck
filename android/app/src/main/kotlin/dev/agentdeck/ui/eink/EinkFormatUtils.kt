@@ -9,7 +9,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import dev.agentdeck.net.AgentState
+import dev.agentdeck.terrarium.renderer.einkColorEnabled
 
 fun formatCount(n: Int): String = when {
     n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
@@ -48,6 +50,19 @@ fun compactStateMarker(state: AgentState): String = when (state) {
     AgentState.AWAITING_OPTION -> "\u25C7 SEL"
     AgentState.AWAITING_DIFF -> "\u25A1 DIFF"
     AgentState.DISCONNECTED -> "\u25CB OFF"
+}
+
+/** Color-coded state indicator for color e-ink. Returns null for B&W e-ink. */
+fun stateColor(state: AgentState): Color? {
+    if (!einkColorEnabled) return null
+    return when (state) {
+        AgentState.IDLE -> Color(0xFF227733)               // green
+        AgentState.PROCESSING -> Color(0xFF335588)         // blue
+        AgentState.AWAITING_PERMISSION -> Color(0xFFBB7700) // amber
+        AgentState.AWAITING_OPTION -> Color(0xFFBB7700)    // amber
+        AgentState.AWAITING_DIFF -> Color(0xFF775599)      // purple
+        AgentState.DISCONNECTED -> Color(0xFFCC2222)       // red
+    }
 }
 
 fun agentIcon(agentType: String?): String = when (agentType) {
