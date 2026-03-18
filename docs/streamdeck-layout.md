@@ -79,11 +79,11 @@ All four quick-action labels and commands are customizable per-instance via the 
 
 | Slot | Label | Color | Action |
 |------|-------|-------|--------|
-| 3 | START | blue `#0f3460` | Open project picker, spawn parallel `sdc` session |
+| 3 | START | blue `#0f3460` | Open project picker, spawn parallel `agentdeck claude` session |
 | 4-6 | *(idle labels, greyed out)* | dim `#1a1a1a` | Disabled — labels remain visible but inactive |
 | 7 | **STOP** | red `#cc0000` | Send Ctrl+C interrupt |
 
-START appears only on slots with a `disconnectedAction` configured (default: slot 3 runs `sdc`).
+START appears only on slots with a `disconnectedAction` configured (default: slot 3 runs `agentdeck claude`).
 
 ### AWAITING_PERMISSION — tool/file approval prompt
 
@@ -148,7 +148,7 @@ Same semantic coloring as permission. Fallback if no options from bridge: APPLY 
 
 | Slot | Label | Color | Action |
 |------|-------|-------|--------|
-| 3 | START | blue `#0f3460` | Open project picker, run `sdc` |
+| 3 | START | blue `#0f3460` | Open project picker, run `agentdeck claude` |
 | 4-6 | — | dim `#1a1a1a` | Disabled |
 | 7 | STOP | dim red `#3a1111` | Disabled |
 

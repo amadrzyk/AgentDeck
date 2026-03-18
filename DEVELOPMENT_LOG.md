@@ -2,6 +2,113 @@
 
 ---
 
+## 2026-03-18 — Daemon Hub 아키텍처 + daemon.json 포트 디스커버리
+
+### 문제
+1. **mDNS daemon-preference 버그**: EinkMonitorScreen에 daemon 우선 grace period 없음 → NSD가 session bridge를 먼저 발견하면 daemon 대신 session bridge에 연결
+2. **`/health` 필드 불일치**: daemon은 `mode: 'daemon'`, session bridge는 `mode` 필드 없음 → Apple 클라이언트가 session bridge 식별 불가
+3. **근본 설계 문제**: 모든 bridge가 각자 mDNS + WS 서빙하는 구조가 daemon-preference 로직의 근본 원인
+
+### 해결
+1. **EinkMonitorScreen**: `withTimeoutOrNull(4000)` 4초 daemon grace period 추가 (MainActivity 패턴과 동일)
+2. **hook-server.ts**: `/health` 응답에 `mode` 필드 추가 (daemon과 동일한 필드명)
+3. **Daemon hub 아키텍처 설계** (Phase 1 — daemon.json 포트 디스커버리):
+   - `session-registry.ts`: `DaemonInfo` 타입, `writeDaemonInfo()`/`readDaemonInfo()`/`removeDaemonInfo()`/`probeDaemonHealth()`/`findDaemonPort()` 추가
+   - `daemon-server.ts`: 3단계 singleton guard (daemon.json → sessions.json → /health probe) + 포트 fallback (non-daemon 점유 시 자동 대체) + bind 후 daemon.json 기록 + shutdown 시 삭제
+   - 모든 클라이언트 (cli.ts, daemon.ts, dashboard.ts) 업데이트
+4. **세션 전환 UI 지연 수정**: `cycleSession()`/`switchToPort()`에서 stale state 즉시 초기화 + `broadcastStateUpdate()` 콜백으로 전체 UI 플러시
+5. **문서 전면 업데이트**: CLAUDE.md, README.md, docs/protocol.md, docs/devices.md, memory/MEMORY.md — daemon-only hub 아키텍처 반영
+
+### 교훈 / 핵심 설계 결정
+- **daemon.json이 정답**: `sessions.json` 스캔 + PID 검증보다 전용 파일이 단순하고 빠름. PID alive 검증 포함, stale 시 자동 삭제
+- **`/health` probe가 최종 방어선**: daemon.json/sessions.json 모두 stale일 수 있으므로 실제 HTTP probe로 확인. 2s timeout
+- **포트 fallback 시 EADDRINUSE race**: probe와 bind 사이에 포트가 잡힐 수 있음 → catch에서 `findAvailablePort()` 재시도
+- **세션 전환 시 stale state = 시각적 지연의 원인**: `currentState`/`currentTool`/`currentModel`을 즉시 초기화하지 않으면 이전 세션의 상태가 잠깐 표시됨. `refreshAll()`은 세션 버튼만 갱신하므로 `broadcastStateUpdate()` 콜백이 필수
+
+---
+
+## 2026-03-18 — Terminal Post-it: iTerm2 badge 제어의 한계
+
+### 문제
+터미널 탭 전환 시 세션 컨텍스트를 즉시 파악하기 위해 iTerm2 badge에 자연어 요약을 오버레이하려 했으나, badge 크기/색상 제어에 심각한 제약 발견.
+
+### 해결
+1. **LLM 요약**: `timeline-summarizer.ts`에 `summarizeSessionContext()` 추가 — 도구 호출 이력을 MLX/Ollama로 한국어 1줄 요약. 5회 도구 사용 or IDLE 전환 시 트리거
+2. **badge 크기 고정**: `SetProfileProperty` escape sequence는 **존재하지 않음** (iTerm2 Python API 전용). Dynamic Profile JSON (`~/Library/Application Support/iTerm2/DynamicProfiles/agentdeck.json`)을 생성 후 `SetProfile` escape sequence로 전환하는 방식으로 해결
+3. **badge 색상**: Dynamic Profile의 `Badge Color` 프로퍼티로 amber(#FFC107, alpha 50%) 설정
+4. **box-drawing 포기**: badge 폰트가 프로포셔널이라 `╭│╰` 정렬 깨짐 — plain text + emoji(📂)로 전환
+5. **크기 제어**: `Badge Max Width/Height`는 터미널 크기의 **비율(0~1)**. 폭 넓게(0.5) + 높이 작게(0.05) 조합으로 줄바꿈 없이 작은 폰트 유지
+
+### 교훈 / 핵심 설계 결정
+- iTerm2 badge 제어 가능한 escape sequence: `SetBadgeFormat`(텍스트), `SetProfile`(프로필 전환) — 이 2개뿐. 크기/색상/폰트는 escape sequence로 불가
+- `Badge Max Width/Height`는 점(points)이 아닌 **비율(fraction)**. iTerm2 소스(`iTermAdvancedSettingsModel.m`)에서 확인: `badgeMaxWidthFraction` default 0.5, `badgeMaxHeightFraction` default 0.2
+- Dynamic Profile의 `Dynamic Profile Parent Name`으로 사용자 기존 프로필 상속 가능 — badge 속성만 오버라이드하면 나머지 설정 유지
+- 프로포셔널 폰트에서 Unicode box-drawing은 사용 불가 — 정렬 보장이 안 됨
+
+---
+
+## 2026-03-18 — Apple 앱 iPhone OOM + macOS 연결 불안정 수정
+
+### 문제
+1. **iPhone OOM (16분 후 kill)**: `TerrariumView`의 `@State lastDate` 변경이 매 Canvas 프레임마다 `DispatchQueue.main.async`로 SwiftUI re-render 트리거. ProMotion 120Hz x 2 (double render) = 240fps 실효 렌더 → 메모리 압력 누적
+2. **macOS/iOS 연결 불안정**: Bridge 사망 시 receive loop error + ping error 동시 발생 → `handleDisconnect` 2회 호출. `defer { isHandlingDisconnect = false }` 가 serial queue에서 순차 실행 시 guard 무효화 → 이중 reconnect 스케줄 → 소켓 2개 경쟁 → cascade failure
+3. **mDNS 중복 브리지 표시**: `DiscoveredBridge.id`가 `host:port` → 같은 서비스가 WiFi/Ethernet 양쪽 인터페이스에서 별도 항목으로 표시
+
+### 해결
+1. **OOM**: `lastDate`를 `TerrariumRenderer` (plain class)로 이동 → `@State` mutation 제거 → double render 해소. `TimelineView(.animation(minimumInterval: 1.0/60))` 60fps cap 추가
+2. **handleDisconnect 이중 호출**: `defer` 제거. `isHandlingDisconnect`는 `connectInternal()`에서만 reset — disconnect~reconnect 구간 동안 두 번째 error callback 차단. 모든 early return 경로에서도 적절히 reset
+3. **ping timer thread-safety**: `Timer`+`RunLoop.main` → `DispatchSourceTimer` on `queue`. `stopPingTimer()`는 `DispatchSource.cancel()` (thread-safe) 직접 호출으로 동기화 보장
+4. **mDNS dedup**: `DiscoveredBridge.id`를 mDNS service name으로 변경. `handleResults`에서 service name 기준 pre-dedup
+5. **waitsForConnectivity**: iOS만 `true` (cold-start WiFi 대기), macOS는 `false` (빠른 failure → 빠른 reconnect)
+6. **Suspend threshold**: 20s → 15s (서버 실제 pong timeout = 15s)
+
+### 교훈 / 핵심 설계 결정
+- **SwiftUI Canvas에서 `@State` mutation 금지**: `DispatchQueue.main.async { @State = value }` 패턴은 매 프레임 re-render 유발. Canvas 내 시간 추적은 renderer 객체 내부 property로 처리
+- **Serial queue `defer` reset은 guard 무효화**: 동일 serial queue에 2개 block이 enqueue되면 첫 block의 `defer` reset 후 두 번째 block이 guard를 통과함. "disconnect~reconnect 구간 동안 true 유지" 패턴이 올바름
+- **`DispatchSource.cancel()`은 thread-safe**: `stopPingTimer`를 async 대신 직접 호출 가능. async dispatch는 `disconnect()`와 race condition 유발
+- **서버 ping 15s + 클라이언트 ping 15s = 위험**: 동일 간격은 경쟁 가능. iOS 클라이언트 background 복귀 시 15s 초과면 소켓 확정 사망으로 즉시 reconnect
+
+---
+
+## 2026-03-17 — Pixoo HUD 레이아웃 개선: 7d 추가 + gauge fill 제거
+
+### 문제
+Pixoo64 하단 HUD가 5h rate limit만 표시. 7d 데이터는 `UsageEvent`에 존재하나 렌더링 안 됨.
+
+### 해결
+1. **단일 행 two-column**: rows 57-63 하나에 좌측=5h / 우측=7d 나란히 표시
+2. **Dark base 먼저**: full-width `blendPixel(black, 0.55)` → 카메라 와이드 시 모래(갈색) 은폐
+3. **Gauge fill 제거**: 배경 fill로 usage를 표현하는 방식 폐기 — 텍스트 색상(blue/teal/amber/red)만으로 충분
+4. **Compact format**: 5h=시간만(`4h`), 7d=일수만(`6d`) — 32px 존에 맞춤
+5. **3 FPS**: 500ms → 333ms (디바이스 한계 ~4FPS 내 안전)
+
+### 교훈 / 핵심 설계 결정
+- **Pixoo HUD dark base 필수**: camera zoom에 따라 rows 57-63이 물(수면) 또는 모래를 표시. text-only 커버리지는 모래 노출로 갈색 배경 문제 → 항상 full-width dark base 먼저 깔 것
+- **Gauge fill = 불필요한 복잡성**: 물 색상이 이미 usage zone을 표현하므로 HUD에서 fill 중복 불필요. 텍스트 색상만으로 충분
+- **`d` 글리프**: 3×5 픽셀 폰트에 `d` 없어서 day 표시 불가 — 새 glyph `[0b001,0b001,0b011,0b101,0b011]` 추가
+
+---
+
+## 2026-03-17 — macOS App Sandbox + mDNS TXT 부재로 daemon 연결 실패
+
+### 문제
+macOS 앱이 Android 태블릿과 동일 daemon에 연결되어야 하나, 3가지 데이터 차이 발생 (agent 목록, timeline, 모델). 근본 원인 2가지:
+1. **App Sandbox**: `~/.agentdeck/sessions.json` 읽기 불가 — `FileManager.homeDirectory`가 컨테이너 경로 (`~/Library/Containers/bound.serendipity.agentdeck/Data/`) 반환
+2. **mDNS TXT 레코드 비어있음**: NWBrowser가 `metadata=<none>` 반환 → `agentType`이 전부 nil → daemon preference 작동 불가 → 랜덤 session bridge에 연결 → 불완전한 데이터
+
+### 해결
+1. `LocalSessionDiscovery` 사용 중단 (sandbox에서 작동 불가, App Store 배포 필수)
+2. macOS도 mDNS 기반으로 전환 (Android과 동일 패턴)
+3. `BridgeDiscovery.fetchHealthInfo()` — `/health` 응답의 `mode: "daemon"` 필드로 agentType 취득 (TXT 레코드 부재 대응)
+4. `autoConnectPolling` — agentType 미해결 bridge 있으면 최대 4초 grace period 후 fallback
+
+### 교훈
+- **App Sandbox**: `NSHomeDirectory()`, `FileManager.homeDirectory` 모두 컨테이너 경로 반환. `getpwuid(getuid())` 로 실제 홈 경로 취득 가능하나, sandbox가 파일 접근 자체를 차단하므로 무의미
+- **mDNS TXT 레코드**: Apple NWBrowser는 TXT 레코드를 비동기/지연 전달할 수 있음. TXT에만 의존하지 말고 HTTP fallback 필수
+- **daemon 우선 연결은 모든 클라이언트의 기본 전제**: daemon 없이 session bridge에 직접 연결하면 sessions_list, timeline, gateway 정보가 불완전. 이 전제가 깨지면 모든 UI가 틀어짐
+
+---
+
 ## 2026-03-16 — Display Sleep/Wake 전 기기 밝기 동기화
 
 ### 문제

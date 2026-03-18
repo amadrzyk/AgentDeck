@@ -7,52 +7,38 @@ Internal reference for the AgentDeck state machine, WebSocket protocol, and proj
 ## Architecture Diagram
 
 ```
-┌──────────────────────┐   WebSocket (ws://localhost:9120)   ┌────────────────────┐
-│  Stream Deck Plugin  │◄───────────────────────────────────►│   Bridge Server    │
-│  (Node.js, SDK v2)   │   state updates ← / → commands     │   (Node.js)        │
-│                      │                                     │                    │
-│  8 Keys              │                                     │  ┌──────────────┐  │
-│  4 Encoders + LCD    │                                     │  │ PTY Manager  │  │
-└──────────────────────┘                                     │  │ (node-pty)   │  │
-                                                             │  └──────┬───────┘  │
-                                                             │         │          │
-┌──────────────────────┐                                     │  ┌──────▼───────┐  │
-│  User's Terminal     │◄──stdio proxy──────────────────────►│  │ claude CLI   │  │
-│  (iTerm2)            │  user sees claude normally          │  └──────┬───────┘  │
-└──────────────────────┘                                     │         │ output   │
-                                                             │  ┌──────▼───────┐  │
-┌──────────────────────┐   HTTP POST (hook JSON on stdin)    │  │ Output       │  │
-│  Claude Code Hooks   │────────────────────────────────────►│  │ Parser       │  │
-│  (settings.json)     │   structured events                 │  └──────┬───────┘  │
-└──────────────────────┘                                     │         │          │
-                                                             │  ┌──────▼───────┐  │
-                                                             │  │ State        │  │
-                                                             │  │ Machine      │  │
-                                                             │  └──────┬───────┘  │
-                                                             │         │          │
-                                                             │  ┌──────▼───────┐  │
-                                                             │  │ WS Server    │  │
-                                                             │  │ :9120        │  │
-                                                             │  └──────────────┘  │
-                                                             │                    │
-                                                             │  ┌──────────────┐  │
-                                                             │  │ Voice        │  │
-                                                             │  │ whisper.cpp  │  │
-                                                             │  └──────────────┘  │
-                                                             └────────┬───────────┘
-                                                                      │
-┌──────────────────────┐   WebSocket (ws://LAN:9120) + mDNS          │
-│  Android Dashboard   │◄────────────────────────────────────────────►│
-│  (Jetpack Compose)   │   SSE / state updates / voice transcribe
-│  E-ink / Tablet      │
-└──────────────────────┘
+                                        ┌─────────────────────────────────────────┐
+                                        │          Daemon (port 9120)             │
+┌──────────────────────┐  WebSocket     │  ┌──────────────┐  ┌──────────────┐    │
+│  Stream Deck Plugin  │◄──────────────►│  │ WS Server    │  │ mDNS         │    │
+│  Android Dashboard   │◄──────────────►│  │ (all clients)│  │ (daemon only)│    │
+│  Apple Dashboard     │◄──────────────►│  └──────────────┘  └──────────────┘    │
+│  TUI Dashboard       │◄──────────────►│  ┌──────────────┐  ┌──────────────┐    │
+│  ESP32               │◄──Serial──────►│  │ Device Mods  │  │ Gateway      │    │
+│  Pixoo64             │◄──HTTP────────►│  │ (adb,serial) │  │ Proxy        │    │
+└──────────────────────┘                │  └──────────────┘  └──────────────┘    │
+                                        └────────────┬────────────────────────────┘
+                                                     │ internal WS (future)
+                                        ┌────────────▼────────────────────────────┐
+                                        │      Session Bridge (port 9121+)        │
+┌──────────────────────┐                │  ┌──────────────┐  ┌──────────────┐    │
+│  User's Terminal     │◄──stdio───────►│  │ PTY Manager  │  │ Hook Server  │    │
+│  (iTerm2)            │                │  │ (node-pty)   │  │ (HTTP POST)  │    │
+└──────────────────────┘                │  └──────┬───────┘  └──────────────┘    │
+                                        │         │                               │
+┌──────────────────────┐  HTTP POST     │  ┌──────▼───────┐  ┌──────────────┐    │
+│  Claude Code Hooks   │───────────────►│  │ Output       │  │ Voice        │    │
+│  (settings.json)     │                │  │ Parser → SM  │  │ whisper.cpp  │    │
+└──────────────────────┘                │  └──────────────┘  └──────────────┘    │
+                                        └─────────────────────────────────────────┘
 ```
 
-**Multi-surface control (macOS host + Stream Deck + Android)**
-- The macOS bridge (`agentdeck` / `sdc`) listens on `0.0.0.0:9120`; local clients are auto-trusted, LAN clients must present the auth token stored at `~/.agentdeck/auth-token`.
-- Stream Deck plugin connects locally; Android tablet/e-ink app connects over the same WebSocket (pair via `agentdeck qr`) and mirrors encoder LCDs and buttons.
-- Bridge computes encoder state and relays the Stream Deck slot map. If the plugin is absent, Android falls back to the v3 default layout while staying fully controllable.
-- Voice from Android uploads WAV to `POST /voice/transcribe`; utility actions (volume/brightness/media/timer) go through the bridge's macOS `osascript` proxy, so either surface can monitor and steer the agent independently or simultaneously.
+**Daemon hub architecture**
+- The daemon is the **sole hub** for all dashboard clients. Session bridges handle PTY + hooks only and do not serve external devices.
+- Daemon listens on `0.0.0.0:9120` (fallback to 9121+ if port occupied by non-daemon). `~/.agentdeck/daemon.json` records the actual port for local client discovery. Remote clients discover via mDNS (`_agentdeck._tcp`, daemon only advertises).
+- Local clients are auto-trusted; LAN clients must present the auth token (`~/.agentdeck/auth-token`). Pair via `agentdeck qr`.
+- Daemon computes encoder state and relays the Stream Deck slot map. If the plugin is absent, Android falls back to the v3 default layout while staying fully controllable.
+- Voice from Android uploads WAV to `POST /voice/transcribe`; utility actions (volume/brightness/media/timer) go through the daemon's macOS `osascript` proxy, so all surfaces can monitor and steer the agent independently or simultaneously.
 
 ---
 
@@ -106,7 +92,7 @@ The bridge combines hook events and PTY output parsing to maintain 6 states:
 
 ## WebSocket Protocol
 
-Communication between the bridge (port 9120) and the Stream Deck plugin / Android app.
+Communication between the daemon (port 9120) and all dashboard clients (Plugin, Android, Apple, TUI, ESP32).
 
 ### Bridge -> Plugin / Android
 
@@ -189,7 +175,7 @@ AgentDeck/
 │       ├── hook-server.ts        # HTTP POST receiver (Claude Code hooks) + SSE + voice endpoint
 │       ├── state-machine.ts      # Hook + PTY event → state management
 │       ├── ws-server.ts          # WebSocket server (plugin comms + remote auth)
-│       ├── session-registry.ts   # Multi-session registry (~/.agentdeck/sessions.json)
+│       ├── session-registry.ts   # Session registry + daemon.json port discovery
 │       ├── usage-tracker.ts      # Session usage tracking (tokens, cost)
 │       ├── usage-api.ts          # Anthropic API usage fetch (OAuth + Keychain)
 │       ├── voice.ts              # sox capture + whisper.cpp transcription

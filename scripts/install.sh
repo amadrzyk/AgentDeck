@@ -128,13 +128,13 @@ ok "Plugin linked"
 echo ""
 
 # --- Link CLI ---
-info "Linking sdc CLI globally..."
+info "Linking agentdeck CLI globally..."
 cd "$PROJECT_DIR/bridge"
 pnpm link --global 2>/dev/null || {
   warn "pnpm link failed — you may need to link manually"
   warn "Run: cd bridge && pnpm link --global"
 }
-ok "sdc CLI linked"
+ok "agentdeck CLI linked"
 
 echo ""
 

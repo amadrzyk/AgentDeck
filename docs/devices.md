@@ -6,13 +6,15 @@
 
 | Device | Transport | Port | Auth | Discovery | Direction | Events |
 |--------|-----------|------|------|-----------|-----------|--------|
-| **Stream Deck+** | WebSocket JSON | 9120–9139 | Token (local bypass) | Session file scan | Bidirectional | All 13 |
-| **Android** | WebSocket + HTTP | 9120–9139 | Token (local bypass) | mDNS / ADB / QR | Bidirectional | All 13 |
-| **Apple** | WebSocket + HTTP | 9120–9139 | Token | mDNS / QR | Bidirectional | All 13 |
+| **Stream Deck+** | WebSocket JSON | Daemon (9120) | Token (local bypass) | `daemon.json` / mDNS | Bidirectional | All 13 |
+| **Android** | WebSocket + HTTP | Daemon (9120) | Token (local bypass) | mDNS / ADB / QR | Bidirectional | All 13 |
+| **Apple** | WebSocket + HTTP | Daemon (9120) | Token | mDNS / QR | Bidirectional | All 13 |
 | **ESP32** | USB Serial JSON | CDC/UART 115200 | None | Port scan 10s | Push only | 6 |
 | **Pixoo64** | HTTP REST (Divoom) | LAN:80 | None | Cloud API / manual | Push only | 4 |
-| **SSE** | HTTP SSE | 9120 | Token | Manual URL | Push only | All 13 |
+| **SSE** | HTTP SSE | Daemon (9120) | Token | Manual URL | Push only | All 13 |
 | **Gateway** | WebSocket Custom | 18789 | Ed25519 | Hardcoded | Bidirectional | N/A (adapter) |
+
+> **Daemon hub**: All dashboard clients connect exclusively to the daemon. Session bridges handle PTY + hooks only and do not serve external devices. Daemon port defaults to 9120; if occupied by non-daemon process, daemon falls back to next available port and records actual port in `~/.agentdeck/daemon.json`. Local clients read `daemon.json`; remote clients discover via mDNS (daemon only advertises `_agentdeck._tcp`).
 
 ## Broadcast Architecture
 
@@ -51,29 +53,29 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 
 ### Stream Deck+ (Plugin)
 
-- **Transport**: WebSocket to bridge port (9120–9139)
-- **Connection**: `ConnectionManager` manages Bridge > Gateway priority
+- **Transport**: WebSocket to daemon
+- **Discovery**: `daemon.json` port → mDNS fallback
 - **Auth**: `~/.agentdeck/auth-token` (32-char hex), local connections bypass
 - **Protocol**: Full `BridgeEvent` / `PluginCommand` bidirectional
 - **Capability gating**: Actions check `AgentCapabilities` for feature availability
-- **When bridge unavailable**: Plugin connects directly to OpenClaw Gateway via `GatewayClient`
+- **When daemon unavailable**: Plugin connects directly to OpenClaw Gateway via `GatewayClient`
 
 ### Android (Tablet / E-ink)
 
-- **Transport**: OkHttp WebSocket + HTTP endpoints
-- **Discovery**: NSD mDNS (`_agentdeck._tcp`) → ADB reverse tunnel → QR pairing
+- **Transport**: OkHttp WebSocket + HTTP endpoints (to daemon)
+- **Discovery**: NSD mDNS (`_agentdeck._tcp`, daemon only advertises) → ADB reverse tunnel → QR pairing
 - **Auth**: Token from mDNS TXT record or QR code
-- **Special endpoints**:
+- **Special endpoints** (on daemon):
   - `POST /voice/transcribe` — WAV upload → whisper transcription
-  - `GET /health` — Bridge health check
+  - `GET /health` — Daemon health check (includes `mode: 'daemon'`)
   - `GET /usage` — Usage data relay
-- **ADB reverse**: Bridge polls USB devices every 30s, auto-sets `adb reverse tcp:9120`
+- **ADB reverse**: Daemon polls USB devices every 30s, auto-sets `adb reverse tcp:{daemonPort}`
 - **Reconnect**: localhost 5 failures → clear URL → fall back to mDNS discovery
 
 ### Apple (iPhone / iPad / macOS)
 
 - **Transport**: URLSessionWebSocketTask + HTTP endpoints
-- **Discovery**: NWBrowser (Network.framework) mDNS (`_agentdeck._tcp`) → QR pairing (VisionKit)
+- **Discovery**: NWBrowser (Network.framework) mDNS (`_agentdeck._tcp`, daemon only advertises) → QR pairing (VisionKit)
 - **Auth**: Token from mDNS TXT record or QR code
 - **Special endpoints**:
   - `POST /voice/transcribe` — WAV upload → whisper transcription (AVAudioEngine 16kHz mono)
@@ -111,7 +113,7 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 
 ### SSE (Server-Sent Events)
 
-- **Transport**: HTTP SSE at `GET /sse` on bridge port
+- **Transport**: HTTP SSE at `GET /sse` on daemon port
 - **Auth**: Token query parameter (local bypass)
 - **Format**: `event: {type}\ndata: {json}\n\n`
 - **Caching**: Bridge caches last `state_update` and `usage_update` for late-connecting clients

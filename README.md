@@ -121,19 +121,22 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 ### Architecture
 
 ```
-Stream Deck Plugin ◄──── WebSocket ────► Bridge Server (Node.js, port 9120)
-                                          ├── PTY Manager → claude CLI
-User's Terminal ◄──── stdio proxy ──────► ├── Output Parser → State Machine
-Claude Code Hooks ──── HTTP POST ──────► ├── Hook Server + SSE
-                                          ├── WS Server → Plugin / Android / Apple / TUI
-Android Dashboard ◄── WebSocket + mDNS ► ├── Voice (whisper.cpp)
-Apple Dashboard   ◄── WebSocket + mDNS ► ├── (iOS/iPad/macOS)
-Pixoo64 LED       ◄── HTTP push ────────► ├── Pixoo Module (pixel art renderer)
-ESP32 Display     ◄── WebSocket ────────► ├── Serial Module (UART/WiFi)
-TUI Dashboard     ◄── WebSocket ────────► └── (agentdeck dashboard)
+                              ┌── Daemon (port 9120, sole hub) ──┐
+Stream Deck Plugin ◄── WS ──►│                                   │
+Android Dashboard  ◄── WS ──►│  WS Server + mDNS + Device Mods  │
+Apple Dashboard    ◄── WS ──►│  Gateway Proxy + Usage Relay      │
+TUI Dashboard      ◄── WS ──►│  Pixoo + ESP32 Serial + SSE      │
+ESP32 Display      ◄ Serial ►│                                   │
+Pixoo64 LED        ◄ HTTP ──►└───────────────┬───────────────────┘
+                                             │ aggregates
+                              ┌── Session Bridge (port 9121+) ──┐
+User's Terminal ◄─ stdio ───►│  PTY Manager → claude CLI         │
+Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    │
+                              │  Hook Server + Voice (whisper)    │
+                              └──────────────────────────────────┘
 ```
 
-The bridge spawns Claude Code in a PTY, parses output + hook events into a state machine, and broadcasts state to all 11 surfaces over WebSocket. Local clients are auto-trusted; LAN clients authenticate with a token from `~/.agentdeck/auth-token`. All surfaces can monitor and control the agent independently or simultaneously.
+The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 11 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token from `~/.agentdeck/auth-token`. All surfaces can monitor and control the agent independently or simultaneously.
 
 ---
 
@@ -171,13 +174,13 @@ The `pnpm setup` command:
 4. Generates icon assets (16 PNGs)
 5. Installs Claude Code hooks
 6. Links the Stream Deck plugin
-7. Links the `agentdeck` / `sdc` CLI globally
+7. Links the `agentdeck` CLI globally
 8. Checks optional dependencies (sox, whisper.cpp)
 
 After setup, **restart the Stream Deck app**, then run:
 
 ```bash
-sdc
+agentdeck claude
 ```
 
 You're steering.
@@ -211,7 +214,7 @@ cd plugin && streamdeck link .sdPlugin
 
 Creates a symlink in `~/Library/Application Support/com.elgato.StreamDeck/Plugins/`. **Restart the Stream Deck app** to load.
 
-### 3. Link `sdc` CLI
+### 3. Link `agentdeck` CLI
 
 ```bash
 cd bridge && pnpm link --global
@@ -239,7 +242,7 @@ This starts the bridge on port 9120 (HTTP + WebSocket), spawns Claude Code insid
 
 ### CLI Reference
 
-`agentdeck` and `sdc` are aliases — both work identically.
+The CLI command is `agentdeck`.
 
 #### Sessions
 
@@ -547,10 +550,10 @@ Edit `config/prompt-templates.json` to customize the prompts cycled by the **Act
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Plugin shows DISCONNECTED | Bridge not running | Run `sdc` |
-| Plugin reconnects every 3s | Bridge crashed | Restart `sdc` |
-| Bridge enters disconnected state | Claude process exited | Restart `sdc` |
-| State tracking not working | Hook server unreachable | Verify `sdc` is running |
+| Plugin shows DISCONNECTED | Bridge not running | Run `agentdeck claude` |
+| Plugin reconnects every 3s | Bridge crashed | Restart `agentdeck claude` |
+| Bridge enters disconnected state | Claude process exited | Restart `agentdeck claude` |
+| State tracking not working | Hook server unreachable | Verify `agentdeck` is running |
 | Stream Deck buttons inactive | Hardware not connected | Reconnect + restart app |
 | Stuck in PROCESSING > 5 min | Agent stalled | STOP button or Ctrl+C in terminal |
 | "Is sox installed?" | sox missing | See [Voice Setup](docs/voice-setup.md) |
@@ -567,9 +570,9 @@ Edit `config/prompt-templates.json` to customize the prompts cycled by the **Act
 
 ### tmux -CC Compatibility
 
-When using iTerm2's `tmux -CC` (control mode): run `sdc` inside a tmux window. The bridge manages its own PTY, so there's no conflict.
+When using iTerm2's `tmux -CC` (control mode): run `agentdeck claude` inside a tmux window. The bridge manages its own PTY, so there's no conflict.
 
-Signal chain: `tmux → iTerm2 → sdc → bridge PTY → claude`
+Signal chain: `tmux → iTerm2 → agentdeck → bridge PTY → claude`
 
 ---
 
@@ -579,7 +582,7 @@ Signal chain: `tmux → iTerm2 → sdc → bridge PTY → claude`
 bash scripts/uninstall.sh
 ```
 
-Removes Claude Code hooks, unlinks `sdc` CLI, and removes the Stream Deck plugin symlink. **Restart the Stream Deck app** afterward.
+Removes Claude Code hooks, unlinks `agentdeck` CLI, and removes the Stream Deck plugin symlink. **Restart the Stream Deck app** afterward.
 
 ---
 
@@ -602,7 +605,7 @@ pnpm test -- --watch      # Watch mode
 Tests cover output parsing, state machine transitions, hook installation, option rendering, and text utilities. Quick smoke test after changes:
 
 ```bash
-pnpm build && pnpm test && sdc status
+pnpm build && pnpm test && agentdeck status
 ```
 
 ### Packaging
@@ -613,18 +616,18 @@ Build a distributable `.streamDeckPlugin` file:
 pnpm package    # → dist/bound.serendipity.agentdeck.streamDeckPlugin
 ```
 
-Recipients double-click to install. The bridge (`sdc`) and Claude Code CLI must be installed separately.
+Recipients double-click to install. The bridge (`agentdeck`) and Claude Code CLI must be installed separately.
 
 Published npm packages: `@agentdeck/shared`, `@agentdeck/bridge`, `@agentdeck/setup`.
 
 ### Debugging
 
-Bridge logs print to the `sdc` terminal:
+Bridge logs print to the `agentdeck` terminal:
 ```
-[sdc] Starting AgentDeck bridge on port 9120...
-[sdc] Hook server listening on port 9120
-[sdc] WebSocket server ready on port 9120
-[sdc] Spawned: claude
+[agentdeck] Starting AgentDeck bridge on port 9120...
+[agentdeck] Hook server listening on port 9120
+[agentdeck] WebSocket server ready on port 9120
+[agentdeck] Spawned: claude
 [WsServer] Plugin connected
 [StateMachine] DISCONNECTED -> idle (trigger: session_start, source: hook)
 ```

@@ -96,7 +96,7 @@ function installBridge() {
   info('Installing AgentDeck bridge (@agentdeck/bridge)...');
   execSync('npm install -g @agentdeck/bridge', { stdio: 'inherit' });
 
-  if (which('agentdeck') || which('sdc')) {
+  if (which('agentdeck')) {
     ok('agentdeck CLI installed');
   } else {
     fail('agentdeck CLI not found after install — check npm global path');
