@@ -85,20 +85,6 @@ struct ConnectionOverlay: View {
                     // Connection options (disconnected or reconnecting with WiFi alternatives)
                     if stateHolder.connection.status == .disconnected || isReconnecting {
 
-                        // macOS: Local sessions from sessions.json
-                        #if os(macOS)
-                        if !stateHolder.localDiscovery.sessions.isEmpty {
-                            VStack(spacing: 8) {
-                                Text("Local Sessions")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(slateText)
-                                ForEach(stateHolder.localDiscovery.sessions) { bridge in
-                                    bridgeRow(bridge, isLocal: true)
-                                }
-                            }
-                        }
-                        #endif
-
                         // mDNS discovered bridges
                         if !stateHolder.discovery.bridges.isEmpty {
                             VStack(spacing: 8) {

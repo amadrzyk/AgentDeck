@@ -12,7 +12,9 @@ struct DiscoveredBridge: Identifiable, Sendable {
     var project: String?
     var agentType: String?
 
-    var id: String { "\(host):\(port)" }
+    /// Use mDNS service name as ID — same service on different interfaces (WiFi/Ethernet)
+    /// resolves to different IPs but is the same bridge. Dedup by name, not host:port.
+    var id: String { name }
 
     var wsUrl: String {
         var url = "ws://\(host):\(port)"
@@ -80,10 +82,26 @@ final class BridgeDiscovery: @unchecked Sendable {
     // MARK: - Result Handling
 
     private func handleResults(_ results: Set<NWBrowser.Result>) {
+        // Dedup by service instance name — same service appears on multiple interfaces
+        // (WiFi + Ethernet). Keep first occurrence (with metadata preferred).
+        var seenNames = Set<String>()
+        var uniqueResults: [NWBrowser.Result] = []
+        // Prefer results with metadata (TXT records)
+        let sorted = results.sorted { r1, r2 in
+            if case .bonjour = r1.metadata { return true }
+            return false
+        }
+        for result in sorted {
+            guard case .service(let name, _, _, _) = result.endpoint else { continue }
+            if seenNames.insert(name).inserted {
+                uniqueResults.append(result)
+            }
+        }
+
         var newBridges: [DiscoveredBridge] = []
         var needsResolve: [(name: String, endpoint: NWEndpoint, port: Int, token: String?, project: String?, agentType: String?)] = []
 
-        for result in results {
+        for result in uniqueResults {
             guard case .service(let name, _, _, _) = result.endpoint else { continue }
 
             // Extract TXT metadata
@@ -103,7 +121,7 @@ final class BridgeDiscovery: @unchecked Sendable {
                 }
                 print("[Discovery] TXT for \(name): ip=\(host ?? "nil") port=\(port ?? -1) token=\(token != nil)")
             } else {
-                // No metadata yet — parse port from service name (e.g., "AgentDeck-Project-9121")
+                // No metadata yet — parse port from service name (e.g., "Project-9121")
                 let parts = name.split(separator: "-")
                 if let last = parts.last, let parsedPort = Int(last) {
                     port = parsedPort
@@ -142,38 +160,24 @@ final class BridgeDiscovery: @unchecked Sendable {
                 let project = item.project
                 let agent = item.agentType
 
-                if token == nil {
-                    // Fetch token from bridge /health endpoint
-                    self?.fetchTokenFromBridge(host: resolvedHost, port: port) { [weak self] fetchedToken in
-                        print("[Discovery] resolved \(name) to \(resolvedHost):\(port) token=\(fetchedToken != nil ? "fetched" : "nil")")
-    DispatchQueue.main.async {
-                            guard let self else { return }
-                            let bridge = DiscoveredBridge(
-                                name: name,
-                                host: resolvedHost,
-                                port: port,
-                                token: fetchedToken,
-                                project: project,
-                                agentType: agent
-                            )
-                            if !self.bridges.contains(where: { $0.id == bridge.id }) {
-                                self.bridges.append(bridge)
-                            }
-                        }
-                    }
-                } else {
-                    print("[Discovery] resolved \(name) to \(resolvedHost):\(port) token=yes")
-                    DispatchQueue.main.async { [weak self] in
+                // Always fetch /health to get agentType (TXT records may be empty)
+                self?.fetchHealthInfo(host: resolvedHost, port: port) { [weak self] health in
+                    let resolvedToken = token ?? health.token
+                    let resolvedAgent = agent ?? health.agentType
+                    print("[Discovery] resolved \(name) to \(resolvedHost):\(port) token=\(resolvedToken != nil ? "yes" : "nil") agent=\(resolvedAgent ?? "nil")")
+                    DispatchQueue.main.async {
                         guard let self else { return }
                         let bridge = DiscoveredBridge(
                             name: name,
                             host: resolvedHost,
                             port: port,
-                            token: token,
+                            token: resolvedToken,
                             project: project,
-                            agentType: agent
+                            agentType: resolvedAgent
                         )
-                        if !self.bridges.contains(where: { $0.id == bridge.id }) {
+                        if let idx = self.bridges.firstIndex(where: { $0.id == bridge.id }) {
+                            self.bridges[idx] = bridge  // Update with health info
+                        } else {
                             self.bridges.append(bridge)
                         }
                     }
@@ -191,37 +195,44 @@ final class BridgeDiscovery: @unchecked Sendable {
 
     // MARK: - Token Fetch
 
-    /// Try to read the auth token from the bridge's pairing info endpoint
-    private func fetchTokenFromBridge(host: String, port: Int, completion: @escaping @Sendable (String?) -> Void) {
-        // Read auth-token from ~/.agentdeck/auth-token (only works on macOS)
+    /// Health info from bridge /health endpoint
+    private struct HealthInfo: Sendable {
+        let token: String?
+        let agentType: String?  // "daemon", "session", etc.
+    }
+
+    /// Fetch token and agentType from bridge /health endpoint
+    private func fetchHealthInfo(host: String, port: Int, completion: @escaping @Sendable (HealthInfo) -> Void) {
+        // Read auth-token from ~/.agentdeck/auth-token (macOS — use real home, not sandbox container)
         #if os(macOS)
-        let tokenPath = NSHomeDirectory() + "/.agentdeck/auth-token"
-        if let token = try? String(contentsOfFile: tokenPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) {
-            completion(token)
-            return
-        }
+        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
+        let tokenPath = realHome + "/.agentdeck/auth-token"
+        // Even with local token, still need /health for agentType
+        let localToken = try? String(contentsOfFile: tokenPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        #else
+        let localToken: String? = nil
         #endif
 
-        // For iOS: try bridge's /health endpoint which doesn't require auth
         let url = URL(string: "http://\(host):\(port)/health")!
         var request = URLRequest(url: url, timeoutInterval: 3)
         request.httpMethod = "GET"
-        print("[Discovery] fetching token from http://\(host):\(port)/health")
+        print("[Discovery] fetching health from http://\(host):\(port)/health")
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
                 print("[Discovery] /health fetch error: \(error.localizedDescription)")
-                completion(nil)
+                completion(HealthInfo(token: localToken, agentType: nil))
                 return
             }
             guard let data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let token = json["pairingToken"] as? String else {
-                print("[Discovery] /health parse failed, data=\(data.map { String(data: $0, encoding: .utf8) ?? "?" } ?? "nil")")
-                completion(nil)
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("[Discovery] /health parse failed")
+                completion(HealthInfo(token: localToken, agentType: nil))
                 return
             }
-            print("[Discovery] /health got token: \(token.prefix(8))...")
-            completion(token)
+            let token = (json["pairingToken"] as? String) ?? localToken
+            let mode = json["mode"] as? String  // "daemon" or "session"
+            print("[Discovery] /health got token: \(token?.prefix(8) ?? "nil")... mode: \(mode ?? "nil")")
+            completion(HealthInfo(token: token, agentType: mode))
         }.resume()
     }
 

@@ -127,6 +127,9 @@ struct StateUpdateEvent: Codable, Sendable {
     var ollamaStatus: OllamaStatus?
     var gatewayAvailable: Bool?
     var gatewayHasError: Bool?
+    var voiceAssistantState: String?  // idle | listening | processing | speaking | disabled
+    var voiceAssistantText: String?
+    var voiceAssistantResponseText: String?
 }
 
 struct UsageEvent: Codable, Sendable {

@@ -6,26 +6,17 @@ struct TerrariumView: View {
     let terrariumState: TerrariumState
 
     @State private var renderer = TerrariumRenderer()
-    @State private var lastDate: Date?
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        // Cap at 60fps — 120Hz is excessive for a monitoring aquarium and wastes memory/battery
+        TimelineView(.animation(minimumInterval: 1.0 / 60)) { timeline in
             Canvas { context, size in
-                let now = timeline.date
-                let dt: Float
-                if let last = lastDate {
-                    dt = min(Float(now.timeIntervalSince(last)), 0.05) // Cap at 50ms
-                } else {
-                    dt = 0.016
-                }
+                // deltaTime stored in renderer (plain class) to avoid @State mutation
+                // which would trigger double SwiftUI re-renders at 120Hz → OOM
+                let dt = renderer.deltaTime(now: timeline.date)
 
                 renderer.update(dt: dt, state: terrariumState)
                 renderer.draw(context: &context, size: size)
-
-                // Store last date — use DispatchQueue to avoid mutating @State during render
-                DispatchQueue.main.async {
-                    lastDate = now
-                }
             }
         }
     }

@@ -49,17 +49,17 @@ struct TimelineStripView: View {
                             ScrollViewReader { proxy in
                                 ScrollView {
                                     LazyVStack(alignment: .leading, spacing: 1) {
-                                        ForEach(Array(grouped.enumerated()), id: \.element.id) { index, group in
+                                        ForEach(Array(grouped.enumerated()), id: \.offset) { index, group in
                                             compactLogRow(group, index: index)
-                                                .id(group.id)
+                                                .id(index)
                                                 .onTapGesture { focusedIndex = index }
                                         }
                                     }
                                     .padding(.horizontal, 4)
                                 }
                                 .onChange(of: grouped.count) {
-                                    if let last = grouped.last, focusedIndex < 0 {
-                                        proxy.scrollTo(last.id, anchor: .bottom)
+                                    if !grouped.isEmpty, focusedIndex < 0 {
+                                        proxy.scrollTo(grouped.count - 1, anchor: .bottom)
                                     }
                                 }
                             }

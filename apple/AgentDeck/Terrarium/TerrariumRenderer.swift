@@ -26,9 +26,26 @@ final class TerrariumRenderer {
     private var lastState: TerrariumState?
     private var envState: EnvironmentVisualState = .calm
 
+    // Delta-time tracking (stored here instead of @State to avoid triggering SwiftUI re-renders)
+    private var lastDate: Date?
+
     // Creature bubble exhale timers
     private var octoBubbleTimer: Float = 0
     private var crayfishBubbleTimer: Float = 0
+
+    // MARK: - Delta Time
+
+    /// Compute dt from wall-clock, storing lastDate internally to avoid @State mutation.
+    func deltaTime(now: Date) -> Float {
+        let dt: Float
+        if let last = lastDate {
+            dt = min(Float(now.timeIntervalSince(last)), 0.05)
+        } else {
+            dt = 0.016
+        }
+        lastDate = now
+        return dt
+    }
 
     // MARK: - Update
 

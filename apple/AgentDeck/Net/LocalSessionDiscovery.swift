@@ -64,15 +64,18 @@ final class LocalSessionDiscovery: @unchecked Sendable {
 
     private func readSessions() -> [DiscoveredBridge] {
         guard let data = FileManager.default.contents(atPath: sessionsFilePath) else {
+            print("[LocalDiscovery] file not found: \(sessionsFilePath)")
             return []
         }
 
         guard let entries = try? JSONDecoder().decode([SessionEntry].self, from: data) else {
+            print("[LocalDiscovery] decode error for \(sessionsFilePath)")
             return []
         }
 
         // Filter to alive processes only
         let alive = entries.filter { isProcessAlive($0.pid) }
+        print("[LocalDiscovery] found \(alive.count) sessions (of \(entries.count) entries)")
 
         return alive.map { entry in
             DiscoveredBridge(

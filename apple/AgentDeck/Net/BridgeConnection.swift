@@ -42,7 +42,7 @@ final class BridgeConnection: @unchecked Sendable {
     private var urlSession: URLSession?
     private var backoffMs = initialBackoffMs
     private var shouldReconnect = false
-    private var pingTimer: Timer?
+    private var pingSource: DispatchSourceTimer?
     private var reconnectWork: DispatchWorkItem?
     private let queue = DispatchQueue(label: "dev.agentdeck.bridge", qos: .userInitiated)
     private var hasReceivedMessage = false
@@ -66,10 +66,14 @@ final class BridgeConnection: @unchecked Sendable {
     }
 
     private func connectInternal(_ urlString: String) {
+        // Allow handleDisconnect to run again for this new connection
+        isHandlingDisconnect = false
+
         // Clean up previous socket without resetting reconnect state
         let wasReconnecting = isReconnecting
         let savedAttempt = reconnectAttempt
-        stopPingTimer()
+        pingSource?.cancel()  // Already on queue — direct access safe
+        pingSource = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         urlSession?.invalidateAndCancel()
@@ -102,7 +106,13 @@ final class BridgeConnection: @unchecked Sendable {
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
+        #if os(iOS)
+        // iOS: WiFi may not be ready on cold start — wait instead of failing immediately
+        config.waitsForConnectivity = true
+        #else
+        // macOS: network is always up — fast failure enables quicker reconnect
         config.waitsForConnectivity = false
+        #endif
         let session = URLSession(configuration: config)
         self.urlSession = session
         let task = session.webSocketTask(with: wsUrl)
@@ -114,7 +124,7 @@ final class BridgeConnection: @unchecked Sendable {
         task.resume()
 
         // Don't set .connected here — wait for first message in receiveLoop
-        startPingTimer()
+        startPingTimerOnQueue()  // Already on queue
         receiveLoop()
     }
 
@@ -124,6 +134,7 @@ final class BridgeConnection: @unchecked Sendable {
         shouldReconnect = reconnect
         reconnectWork?.cancel()
         reconnectWork = nil
+        isHandlingDisconnect = false  // Reset so future handleDisconnect can fire
         stopPingTimer()
 
         webSocket?.cancel(with: .goingAway, reason: nil)
@@ -212,26 +223,33 @@ final class BridgeConnection: @unchecked Sendable {
     // MARK: - Ping
 
     func startPingTimer() {
-        stopPingTimer()
-        DispatchQueue.main.async {
-            let timer = Timer(timeInterval: Self.pingIntervalSec, repeats: true) { [weak self] _ in
-                self?.webSocket?.sendPing { error in
-                    if let error {
-                        print("[BridgeConnection] Ping failed: \(error)")
-                        self?.handleDisconnect(error: error)
-                    }
-                }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            self.pingTimer = timer
+        queue.async { [weak self] in
+            self?.startPingTimerOnQueue()
         }
     }
 
+    /// Cancel ping timer immediately. DispatchSource.cancel() is thread-safe,
+    /// so this is safe to call from any thread (including disconnect()).
     func stopPingTimer() {
-        DispatchQueue.main.async {
-            self.pingTimer?.invalidate()
-            self.pingTimer = nil
+        pingSource?.cancel()
+    }
+
+    /// Start ping timer — must be called on `queue`
+    private func startPingTimerOnQueue() {
+        pingSource?.cancel()
+        pingSource = nil
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now() + Self.pingIntervalSec, repeating: Self.pingIntervalSec)
+        source.setEventHandler { [weak self] in
+            self?.webSocket?.sendPing { error in
+                if let error {
+                    print("[BridgeConnection] Ping failed: \(error)")
+                    self?.handleDisconnect(error: error)
+                }
+            }
         }
+        source.resume()
+        pingSource = source
     }
 
     // MARK: - Health Check & Force Reconnect
@@ -279,84 +297,93 @@ final class BridgeConnection: @unchecked Sendable {
     // MARK: - Reconnect
 
     private func handleDisconnect(error: Error? = nil) {
-        // Guard against concurrent calls (ping callback + receive loop race)
-        guard !isHandlingDisconnect else { return }
-        isHandlingDisconnect = true
-        defer { isHandlingDisconnect = false }
+        // Serialize on queue to prevent concurrent calls (ping callback + receive loop race).
+        // isHandlingDisconnect stays true until connectInternal resets it —
+        // this prevents the second error callback (ping + receive loop both fire when
+        // bridge dies) from scheduling a duplicate reconnect.
+        queue.async { [weak self] in
+            guard let self, !self.isHandlingDisconnect else { return }
+            self.isHandlingDisconnect = true
 
-        stopPingTimer()
-        webSocket?.cancel(with: .goingAway, reason: nil)
-        webSocket = nil
+            self.pingSource?.cancel()
+            self.pingSource = nil
+            self.webSocket?.cancel(with: .goingAway, reason: nil)
+            self.webSocket = nil
 
-        let wasConnected = hasReceivedMessage
-        hasReceivedMessage = false
+            let wasConnected = self.hasReceivedMessage
+            self.hasReceivedMessage = false
 
-        // Notify state holder immediately so UI shows disconnect
-        if wasConnected {
-            DispatchQueue.main.async { self.onDisconnect?() }
-        }
+            // Notify state holder immediately so UI shows disconnect
+            if wasConnected {
+                DispatchQueue.main.async { self.onDisconnect?() }
+            }
 
-        // Check for auth rejection (4001)
-        if let urlError = error as? URLError,
-           urlError.code == .userAuthenticationRequired {
+            // Check for auth rejection (4001)
+            if let urlError = error as? URLError,
+               urlError.code == .userAuthenticationRequired {
+                self.isHandlingDisconnect = false  // No reconnect will follow
+                DispatchQueue.main.async {
+                    self.status = .disconnected
+                    self.lastError = "Unauthorized — check pairing token"
+                    self.shouldReconnect = false
+                    self.isReconnecting = false
+                }
+                return
+            }
+
+            guard self.shouldReconnect, let urlString = self.url else {
+                self.isHandlingDisconnect = false  // No reconnect will follow
+                DispatchQueue.main.async {
+                    self.status = .disconnected
+                }
+                return
+            }
+
+            // Give up after max attempts (fewer for localhost since local discovery will re-find it)
+            let isLocalhost = urlString.contains("127.0.0.1") || urlString.contains("localhost")
+            let maxAttempts = isLocalhost ? 5 : Self.maxReconnectAttempts
+            if self.reconnectAttempt >= maxAttempts {
+                self.isHandlingDisconnect = false  // No reconnect will follow
+                DispatchQueue.main.async {
+                    self.status = .disconnected
+                    self.url = nil
+                    self.isReconnecting = false
+                    self.shouldReconnect = false
+                    self.lastError = wasConnected
+                        ? "Bridge disconnected"
+                        : "Connection failed"
+                    self.onReconnectExhausted?()
+                }
+                return
+            }
+
             DispatchQueue.main.async {
                 self.status = .disconnected
-                self.lastError = "Unauthorized — check pairing token"
-                self.shouldReconnect = false
-                self.isReconnecting = false
+                self.isReconnecting = true
+                self.reconnectAttempt += 1
             }
-            return
-        }
 
-        guard shouldReconnect, let urlString = url else {
-            DispatchQueue.main.async {
-                self.status = .disconnected
+            // Let caller short-circuit reconnect (e.g. macOS local session found)
+            if let check = self.onReconnectAttempt, check() {
+                self.isHandlingDisconnect = false  // Caller takes over connection
+                DispatchQueue.main.async {
+                    self.isReconnecting = false
+                    self.shouldReconnect = false
+                }
+                return
             }
-            return
-        }
 
-        // Give up after max attempts (fewer for localhost since local discovery will re-find it)
-        let isLocalhost = urlString.contains("127.0.0.1") || urlString.contains("localhost")
-        let maxAttempts = isLocalhost ? 5 : Self.maxReconnectAttempts
-        if reconnectAttempt >= maxAttempts {
-            DispatchQueue.main.async {
-                self.status = .disconnected
-                self.url = nil
-                self.isReconnecting = false
-                self.shouldReconnect = false
-                self.lastError = wasConnected
-                    ? "Bridge disconnected"
-                    : "Connection failed"
-                self.onReconnectExhausted?()
+            let delay = Double(self.backoffMs) / 1000.0
+            self.backoffMs = min(self.backoffMs * 2, Self.maxBackoffMs)
+
+            let gen = self.connectionGeneration
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.connectionGeneration == gen,
+                      self.shouldReconnect, let url = self.url else { return }
+                self.connectInternal(url)
             }
-            return
+            self.reconnectWork = work
+            self.queue.asyncAfter(deadline: .now() + delay, execute: work)
         }
-
-        DispatchQueue.main.async {
-            self.status = .disconnected
-            self.isReconnecting = true
-            self.reconnectAttempt += 1
-        }
-
-        // Let caller short-circuit reconnect (e.g. macOS local session found)
-        if let check = onReconnectAttempt, check() {
-            DispatchQueue.main.async {
-                self.isReconnecting = false
-                self.shouldReconnect = false
-            }
-            return
-        }
-
-        let delay = Double(backoffMs) / 1000.0
-        backoffMs = min(backoffMs * 2, Self.maxBackoffMs)
-
-        let gen = connectionGeneration
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, self.connectionGeneration == gen,
-                  self.shouldReconnect, let url = self.url else { return }
-            self.connectInternal(url)
-        }
-        reconnectWork = work
-        queue.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }

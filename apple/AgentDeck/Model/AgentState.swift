@@ -138,6 +138,11 @@ struct DashboardState: Sendable {
     var voiceText: String?
     var voiceError: String?
 
+    // Voice Assistant (wake word pipeline)
+    var voiceAssistantState: String?  // idle | listening | processing | speaking | disabled
+    var voiceAssistantText: String?
+    var voiceAssistantResponseText: String?
+
     // Display
     var hostDisplayOn = true
 

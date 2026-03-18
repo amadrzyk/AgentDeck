@@ -27,6 +27,7 @@ targets:
         PRODUCT_NAME: AgentDeck
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: true
+        DEVELOPMENT_TEAM: R22679GY5Z
       configs:
         debug:
           CODE_SIGN_IDENTITY: "Apple Development"
@@ -46,6 +47,7 @@ targets:
         PRODUCT_NAME: AgentDeck
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: true
+        DEVELOPMENT_TEAM: R22679GY5Z
       configs:
         debug:
           CODE_SIGN_IDENTITY: "Apple Development"

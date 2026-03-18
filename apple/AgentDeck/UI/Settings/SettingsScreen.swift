@@ -239,36 +239,8 @@ struct SettingsScreen: View {
                 }
             }
 
-            #if os(macOS)
-            if !stateHolder.localDiscovery.sessions.isEmpty {
-                Text("Local Sessions")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(TerrariumHUD.subtext)
-                    .padding(.top, 4)
-
-                ForEach(stateHolder.localDiscovery.sessions) { bridge in
-                    Button {
-                        stateHolder.connectTo(bridge)
-                    } label: {
-                        HStack {
-                            Text(bridge.project ?? bridge.name)
-                                .foregroundStyle(.white)
-                            Spacer()
-                            Text("local")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.green)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.green.opacity(0.15), in: Capsule())
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 10)
-                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            #endif
+            // Local sessions removed — sandbox prevents reading ~/.agentdeck/sessions.json
+            // mDNS discovery with daemon preference is used instead
         }
     }
 

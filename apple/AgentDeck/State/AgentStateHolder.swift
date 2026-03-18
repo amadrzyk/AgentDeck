@@ -21,10 +21,6 @@ final class AgentStateHolder: @unchecked Sendable {
     /// Bump to trigger SwiftUI re-render for nested timelineStore changes
     private(set) var timelineVersion: Int = 0
 
-    #if os(macOS)
-    let localDiscovery = LocalSessionDiscovery()
-    #endif
-
     // MARK: - URL Persistence
 
     private static let lastBridgeUrlKey = "lastBridgeUrl"
@@ -56,7 +52,6 @@ final class AgentStateHolder: @unchecked Sendable {
 
     private enum WaterfallStage {
         case idle
-        case localSession    // macOS: reading sessions.json
         case savedUrl        // trying last known URL
         case mdns            // mDNS discovery
     }
@@ -94,20 +89,7 @@ final class AgentStateHolder: @unchecked Sendable {
         connection.onReconnectAttempt = { [weak self] in
             guard let self else { return false }
 
-            #if os(macOS)
-            // macOS: prefer local sessions.json first
-            let localBridges = self.localDiscovery.readSessionsNow()
-            if let bridge = localBridges.first {
-                DispatchQueue.main.async {
-                    self.savedUrl = nil
-                    self.waterfallStage = .idle
-                    self.connectTo(bridge)
-                }
-                return true  // abort reconnect
-            }
-            #endif
-
-            // All platforms: check mDNS discovered bridges (skip blacklisted)
+            // Check mDNS discovered bridges (skip blacklisted, prefer daemon)
             let candidates = self.discovery.bridges.filter { !self.failedBridgeIds.contains($0.id) }
             let bridge = candidates.first(where: { $0.agentType == "daemon" })
                 ?? candidates.first
@@ -150,13 +132,13 @@ final class AgentStateHolder: @unchecked Sendable {
         if !state.bridgeConnected {
             // Not connected — restart discovery
             restartWaterfall()
-        } else if suspendDuration > 20 {
-            // Long suspend — socket is certainly dead (server terminates after ~30s)
-            print("[Lifecycle] long suspend (\(Int(suspendDuration))s) — force reconnect")
+        } else if suspendDuration > 15 {
+            // Server terminates after ~15s without pong — socket is dead
+            print("[Lifecycle] long suspend (\(Int(suspendDuration))s) — socket dead, force reconnect")
             connection.forceDisconnectAndRestart()
             restartWaterfall()
         } else if suspendDuration > 5 {
-            // Medium suspend — check if socket is still alive
+            // 5-15s: might still be alive — health check
             print("[Lifecycle] medium suspend (\(Int(suspendDuration))s) — health check")
             connection.forceHealthCheck { [weak self] alive in
                 guard let self else { return }
@@ -194,24 +176,11 @@ final class AgentStateHolder: @unchecked Sendable {
         print("[Waterfall] starting waterfall")
 
         #if os(macOS)
-        // Stage 1: Check sessions.json (macOS only)
-        waterfallStage = .localSession
-        localDiscovery.startPolling()
-
-        // Give local discovery a moment to scan
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, self.waterfallStage == .localSession else { return }
-
-            if let bridge = self.localDiscovery.sessions.first {
-                self.connectTo(bridge)
-                return
-            }
-
-            // Stage 2: Try saved URL
-            self.trySavedUrl()
-        }
+        // macOS: mDNS first (daemon preference) — sandbox prevents reading ~/.agentdeck/sessions.json
+        // savedUrl tried as fallback after 4s if no mDNS results
+        startMdnsDiscovery()
         #else
-        // iOS: skip local session, go to saved URL
+        // iOS: savedUrl first, then mDNS
         trySavedUrl()
         #endif
     }
@@ -222,8 +191,9 @@ final class AgentStateHolder: @unchecked Sendable {
             waterfallStage = .savedUrl
             connectTo(url: url)
 
-            // Timeout: if not connected within 3 seconds, fall through to mDNS
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            // Timeout: if not connected within 5 seconds, fall through to mDNS
+            // (iOS WiFi init can take 2-4s after app launch)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 guard let self, self.waterfallStage == .savedUrl else { return }
                 if !self.state.bridgeConnected {
                     print("[Waterfall] saved URL timeout, falling through to mDNS")
@@ -241,11 +211,6 @@ final class AgentStateHolder: @unchecked Sendable {
         print("[Waterfall] starting mDNS discovery")
         waterfallStage = .mdns
         discovery.startSearching()
-
-        #if os(macOS)
-        // Keep local discovery running alongside mDNS on macOS
-        localDiscovery.startPolling()
-        #endif
 
         // Poll for discovered bridges and auto-connect to the first one
         startAutoConnectPolling()
@@ -291,12 +256,13 @@ final class AgentStateHolder: @unchecked Sendable {
             print("[AutoConnect] poll: bridges=\(self.discovery.bridges.count), failed=\(self.failedBridgeIds.count), searching=\(self.discovery.isSearching)")
 
             #if os(macOS)
-            // Prefer local sessions on macOS
-            if let local = self.localDiscovery.sessions.first {
-                print("[AutoConnect] connecting to local session: \(local.wsUrl)")
+            // macOS: after 4s with no mDNS, try savedUrl as fallback
+            if self.autoConnectPollCount == 8, self.discovery.bridges.isEmpty, let url = self.savedUrl {
+                print("[AutoConnect] no mDNS after 4s, trying saved URL: \(url)")
                 timer.invalidate()
                 self.autoConnectTimer = nil
-                self.connectTo(local)
+                self.waterfallStage = .savedUrl
+                self.connectTo(url: url)
                 return
             }
             #endif
@@ -305,13 +271,25 @@ final class AgentStateHolder: @unchecked Sendable {
             let candidates = self.discovery.bridges.filter { !self.failedBridgeIds.contains($0.id) }
 
             // Prefer daemon bridge for consistent state (daemon aggregates all sessions)
-            let bridge = candidates.first(where: { $0.agentType == "daemon" })
-                ?? candidates.first
-            if let bridge {
-                print("[AutoConnect] connecting to bridge: \(bridge.wsUrl) (agent=\(bridge.agentType ?? "?"))")
+            let daemon = candidates.first(where: { $0.agentType == "daemon" })
+            if let daemon {
+                print("[AutoConnect] connecting to daemon: \(daemon.wsUrl)")
                 timer.invalidate()
                 self.autoConnectTimer = nil
-                self.connectTo(bridge)
+                self.connectTo(daemon)
+            } else if !candidates.isEmpty {
+                // If some bridges have nil agentType (health not yet resolved), wait up to 4s
+                // for /health responses before falling back to any bridge
+                let hasUnresolved = candidates.contains(where: { $0.agentType == nil })
+                if hasUnresolved && self.autoConnectPollCount < 8 {
+                    print("[AutoConnect] waiting for health info (\(candidates.count) bridges, some unresolved)")
+                } else {
+                    let bridge = candidates.first!
+                    print("[AutoConnect] connecting to bridge: \(bridge.wsUrl) (agent=\(bridge.agentType ?? "?"))")
+                    timer.invalidate()
+                    self.autoConnectTimer = nil
+                    self.connectTo(bridge)
+                }
             }
 
             // After 10 seconds with no mDNS results, stop polling
@@ -401,6 +379,9 @@ final class AgentStateHolder: @unchecked Sendable {
         if let os = e.ollamaStatus { state.ollamaStatus = os }
         state.gatewayAvailable = e.gatewayAvailable ?? state.gatewayAvailable
         state.gatewayHasError = e.gatewayHasError ?? state.gatewayHasError
+        state.voiceAssistantState = e.voiceAssistantState ?? state.voiceAssistantState
+        state.voiceAssistantText = e.voiceAssistantText  // null when idle, no fallback
+        state.voiceAssistantResponseText = e.voiceAssistantResponseText  // null when idle
 
         // Local timeline generation (when bridge doesn't provide rich timeline)
         timelineGenerator.onStateUpdate(

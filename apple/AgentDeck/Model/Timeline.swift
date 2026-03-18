@@ -43,7 +43,8 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
 struct GroupedEntry: Identifiable, Sendable {
     let entry: TimelineEntry
     var count: Int = 1
-    var id: Double { entry.ts }
+    /// Unique ID combining timestamp + type + count to avoid ForEach duplicate ID warnings
+    var id: String { "\(entry.ts)-\(entry.type)-\(count)" }
 }
 
 // MARK: - Timeline Grouping
