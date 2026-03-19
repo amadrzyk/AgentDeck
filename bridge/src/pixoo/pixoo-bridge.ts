@@ -46,7 +46,7 @@ let frameListeners: Array<(frame: Uint8Array) => void> = [];
 let previewTimer: ReturnType<typeof setInterval> | null = null;
 let previewFps = 10; // Adjustable 1–10 FPS for /pixoo live preview
 
-const HTTP_STREAM_INTERVAL_MS = 333;     // 3 FPS hardware push (smooth animation, stable on Pixoo64)
+const HTTP_STREAM_INTERVAL_MS = 250;     // 4 FPS hardware push (near hardware limit of Pixoo64)
 const CHANNEL_REASSERT_MS = 30_000;     // Re-assert custom channel every 30s (fast recovery after reboots)
 const DEFAULT_BRIGHTNESS = 100;
 
@@ -258,20 +258,20 @@ function doStreamPush(): void {
   try {
     const frame = renderFrame(lastStateEvent, lastUsageEvent, lastSessions);
     const ts = new Date().toISOString().slice(11, 19);
-    process.stderr.write(`[Pixoo] ${ts} pushing to ${devices.length} dev(s)\n`);
+    debug('Pixoo', `${ts} pushing to ${devices.length} dev(s)`);
 
     const promises = devices.map(dev =>
       pushFrame(dev.ip, frame).then(ok => {
-        process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ${ok ? 'OK' : 'FAIL'}\n`);
+        debug('Pixoo', `${ts}   → ${dev.ip}: ${ok ? 'OK' : 'FAIL'}`);
       }).catch((err: any) => {
-        process.stderr.write(`[Pixoo] ${ts}   → ${dev.ip}: ERROR ${err?.message}\n`);
+        debug('Pixoo', `${ts}   → ${dev.ip}: ERROR ${err?.message}`);
       })
     );
 
     Promise.all(promises).then(() => { pushing = false; });
   } catch (err: any) {
     pushing = false;
-    process.stderr.write(`[Pixoo] renderFrame error: ${err?.message}\n`);
+    debug('Pixoo', `renderFrame error: ${err?.message}`);
   }
 }
 

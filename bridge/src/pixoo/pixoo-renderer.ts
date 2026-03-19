@@ -579,16 +579,24 @@ function drawUsageHUD(
   const bgTop = textY - 1;
   const bgBot = textY + 5;
 
-  // Full-width dark base — hides sand/terrain at HUD rows regardless of camera zoom
+  // Deep water base — covers sand while preserving underwater feel
   for (let y = bgTop; y <= bgBot; y++) {
     for (let x = 0; x < 64; x++) {
-      blendPixel(buf, x, y, COLORS.black, 0.55);
+      setPixel(buf, x, y, COLORS.waterDeep);
     }
   }
 
-  /** Render a text zone: right-aligned colored text within [leftX..rightX]. */
+  /** Render a zone: gauge fill overlay on dark base, then text on top. */
   function renderZone(text: string, pct: number, leftX: number, rightX: number): void {
-    drawText(buf, text, rightX, textY, gaugeColor(pct, animFrame));
+    const color = gaugeColor(pct, animFrame);
+    const zoneW = rightX - leftX + 1;
+    const fillW = Math.round(zoneW * Math.max(0, Math.min(100, pct)) / 100);
+    for (let y = bgTop; y <= bgBot; y++) {
+      for (let x = leftX; x < leftX + fillW; x++) {
+        blendPixel(buf, x, y, color, 0.3);  // gauge fill on top of dark base
+      }
+    }
+    drawText(buf, text, rightX, textY, color);
   }
 
   const pct5 = usageEvent.fiveHourPercent;

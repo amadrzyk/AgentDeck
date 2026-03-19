@@ -329,7 +329,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     mdns: false, // mDNS handled by daemon, not session (avoids collision)
     adb: 'auto',
     serial: 'auto',
-    pixoo: 'auto',
+    pixoo: false, // Pixoo is daemon-only (like mDNS) — avoid PTY log pollution
   };
 
   // When daemon is running, disable device modules unless explicitly enabled
