@@ -76,15 +76,47 @@ export async function summarizeResponse(text: string): Promise<string | null> {
 export function extractTopicHint(text: string): string | null {
   if (!text || text.length < 5) return null;
 
-  // Take first line or first 80 chars
-  const firstLine = text.split('\n')[0].trim();
-  const snippet = firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // Remove common prefixes
-  const cleaned = snippet
-    .replace(/^(완료했습니다\.\s*|네,?\s*|알겠습니다\.\s*|확인했습니다\.\s*)/i, '')
-    .replace(/^(\*\*|#{1,3}\s*)/g, '')
-    .trim();
+  // Find first non-markdown, non-code-fence, non-empty line
+  let candidate: string | null = null;
+  let inCodeFence = false;
+  for (const line of lines) {
+    // Track code fence boundaries
+    if (/^```/.test(line)) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence) continue;
+
+    // Skip headings-only
+    if (/^#{1,6}\s*$/.test(line)) continue;
+
+    // Strip markdown decorators for evaluation
+    const stripped = line
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^\*\*([^*]+)\*\*$/, '$1')
+      .replace(/^[-*]\s+/, '')
+      .replace(/^>\s+/, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .trim();
+
+    if (stripped.length >= 3) {
+      candidate = stripped;
+      break;
+    }
+  }
+
+  if (!candidate) return null;
+
+  const snippet = candidate.length > 80 ? candidate.slice(0, 77) + '...' : candidate;
+
+  // Remove common Korean prefixes (chained — "네, 확인했습니다." → "")
+  let cleaned = snippet;
+  // Strip leading "네," / "네." first, then polite phrases
+  cleaned = cleaned.replace(/^네[,.]?\s*/i, '');
+  cleaned = cleaned.replace(/^(완료했습니다\.\s*|알겠습니다\.\s*|확인했습니다\.\s*)/i, '');
+  cleaned = cleaned.trim();
 
   return cleaned || null;
 }

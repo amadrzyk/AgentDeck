@@ -7,6 +7,7 @@ import { createPublicKey, createPrivateKey, sign as cryptoSign, randomUUID } fro
 import WebSocket from 'ws';
 import { debug } from '../logger.js';
 import { summarizeResponse, extractTopicHint } from '../timeline-summarizer.js';
+import { cleanDetailText } from '@agentdeck/shared';
 import type {
   AgentAdapter,
   AgentCapabilities,
@@ -711,8 +712,9 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               || (this.accumulatedResponse || undefined);
 
             // Build response detail (folded into chat_end instead of separate chat_response)
-            const responseDetail = responseContent
-              ? (responseContent.length > 1000 ? responseContent.slice(0, 997) + '...' : responseContent)
+            const cleanedResponse = responseContent ? cleanDetailText(responseContent) : undefined;
+            const responseDetail = cleanedResponse
+              ? (cleanedResponse.length > 1000 ? cleanedResponse.slice(0, 997) + '...' : cleanedResponse)
               : undefined;
 
             // Emit chat_end with heuristic summary, then async LLM enrichment

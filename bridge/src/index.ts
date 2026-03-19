@@ -16,7 +16,8 @@ import { createAdapter, ClaudeCodeAdapter } from './adapters/index.js';
 import { MonitorAdapter } from './adapters/monitor.js';
 import { UtilityProxy } from './utility-proxy.js';
 import { BridgeLogStream } from './log-stream.js';
-import { extractTopicHint } from './timeline-summarizer.js';
+import { extractTopicHint, summarizeResponse } from './timeline-summarizer.js';
+import { cleanDetailText } from '@agentdeck/shared';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import { TerminalPostit } from './terminal-postit.js';
 import { readFileSync, existsSync } from 'fs';
@@ -1117,17 +1118,40 @@ function wireClaudeCodeTimeline(
         if (toolSummary) summary += ` \u00B7 ${toolSummary}`;
         let chatEndDetail: string | undefined;
         if (lastAssistantMsg) {
-          chatEndDetail = lastAssistantMsg.length > 1000 ? lastAssistantMsg.slice(0, 1000) + '...' : lastAssistantMsg;
+          const cleaned = cleanDetailText(lastAssistantMsg);
+          chatEndDetail = cleaned ? (cleaned.length > 1000 ? cleaned.slice(0, 1000) + '...' : cleaned) : undefined;
         } else if (ccLastPromptText) {
           chatEndDetail = `Prompt: ${ccLastPromptText.length > 200 ? ccLastPromptText.slice(0, 200) + '...' : ccLastPromptText}`;
         }
+        const chatEndTs = now;
         ccChatStart = null;
         ccLastPromptText = null;
         core.bridgeTimeline.addEntry({
-          ts: now, type: 'chat_end', raw: summary,
+          ts: chatEndTs, type: 'chat_end', raw: summary,
           ...(chatEndDetail ? { detail: chatEndDetail } : {}),
           agentType: 'claude-code',
         });
+
+        // Async LLM summarization — fire-and-forget, upsert chat_end when ready
+        if (lastAssistantMsg && lastAssistantMsg.length > 30) {
+          const savedDuration = duration;
+          const savedToolSummary = toolSummary;
+          const savedDetail = chatEndDetail;
+          summarizeResponse(lastAssistantMsg).then((llmSummary) => {
+            if (llmSummary) {
+              const enrichedParts = [llmSummary];
+              if (savedDuration != null) enrichedParts.push(`${savedDuration}s`);
+              if (savedToolSummary) enrichedParts.push(savedToolSummary);
+              debug('timeline', `CC LLM summary: ${llmSummary}`);
+              core.bridgeTimeline.upsertEntry({
+                ts: chatEndTs, type: 'chat_end',
+                raw: enrichedParts.join(' \u00B7 '),
+                ...(savedDetail ? { detail: savedDetail } : {}),
+                agentType: 'claude-code',
+              });
+            }
+          }).catch(() => { /* summarization failed — keep heuristic */ });
+        }
         break;
       }
     }

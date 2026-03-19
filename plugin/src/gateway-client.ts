@@ -24,7 +24,7 @@ import {
   OPENCLAW_GATEWAY_PORT,
 } from '@agentdeck/shared';
 import type { StateUpdateEvent, ModelCatalogEntry, OcSessionStatus } from '@agentdeck/shared';
-import { augmentedPath, resolveOpenClawBin } from '@agentdeck/shared';
+import { augmentedPath, resolveOpenClawBin, cleanDetailText } from '@agentdeck/shared';
 import type { AgentLink } from './agent-link.js';
 import { timelineStore, type TimelineEntry } from './timeline-store.js';
 import { summarizeResponse } from './timeline-summarizer.js';
@@ -639,8 +639,9 @@ export class GatewayClient extends EventEmitter implements AgentLink {
             const finalText = this.extractMessageText(payload);
             const responseContent = (finalText && finalText.length > 10 ? finalText : undefined)
               || (this.accumulatedResponse.length > 10 ? this.accumulatedResponse : undefined);
-            const responseDetail = responseContent && responseContent.length > 10
-              ? (responseContent.length > 1000 ? responseContent.slice(0, 997) + '...' : responseContent)
+            const cleanedResponse = responseContent ? cleanDetailText(responseContent) : undefined;
+            const responseDetail = cleanedResponse && cleanedResponse.length > 10
+              ? (cleanedResponse.length > 1000 ? cleanedResponse.slice(0, 997) + '...' : cleanedResponse)
               : undefined;
 
             // Emit chat_end summary (response content folded into detail)

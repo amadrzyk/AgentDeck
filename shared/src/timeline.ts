@@ -71,6 +71,57 @@ function extractReadableMessage(message: string): string {
   return cleaned || message.slice(0, 500);
 }
 
+/**
+ * Clean detail text — strip markdown artifacts, JSON blobs, and system noise.
+ * Applied to timeline entry `detail` fields before storage.
+ */
+export function cleanDetailText(text: string): string {
+  if (!text) return text;
+
+  // If entire text is a JSON object, extract readable message
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      // System JSON blobs (connectionId, status codes, etc.) → filter
+      if (parsed.connectionId || parsed.stateVersion || parsed.seq) return '';
+      if (parsed.error) return String(parsed.error);
+      // Other JSON → compact readable form
+      return JSON.stringify(parsed).slice(0, 200);
+    } catch { /* not valid JSON, continue */ }
+  }
+
+  let cleaned = text;
+
+  // Strip code fences: ```lang\n...\n``` → contents
+  cleaned = cleaned.replace(/```[\w]*\n?([\s\S]*?)```/g, '$1');
+
+  // Strip bold: **text** → text
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+  // Strip italic: *text* or _text_ (but not __dunder__)
+  cleaned = cleaned.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1');
+
+  // Strip headings: ## heading → heading
+  cleaned = cleaned.replace(/^#{1,6}\s+/gm, '');
+
+  // Strip blockquotes: > text → text
+  cleaned = cleaned.replace(/^>\s+/gm, '');
+
+  // Strip markdown links: [text](url) → text
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+  // Strip list markers: - item or * item → item (only at line start)
+  cleaned = cleaned.replace(/^[-*]\s+/gm, '');
+
+  // Strip inline code backticks: `code` → code
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+
+  // Collapse multiple blank lines
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  return cleaned.trim();
+}
+
 /** Parse a single JSON log line into a TimelineEntry, or null if unrecognized. */
 export function parseLogLine(json: unknown): TimelineEntry | null {
   if (!json || typeof json !== 'object') return null;
@@ -186,24 +237,44 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
     return null;
   }
 
-  // Skip transient network_error and 500 errors from embedded runs (auto-recovered)
-  if (/\bnetwork_error\b/i.test(message)) {
+  // Messaging channel infrastructure detection — only filter when from known infra subsystems/modules
+  // (avoid filtering user-facing messages that mention "whatsapp" etc.)
+  const isChannelInfra = subsystem === 'channel' || module_ === 'whatsapp' || module_ === 'line'
+    || module_ === 'web-channel' || subsystem === 'messaging';
+
+  // Skip transient network_error — only from known infra subsystems (not user-facing tool errors)
+  if (/\bnetwork_error\b/i.test(message) &&
+      (subsystem === 'gateway/ws' || subsystem === 'diagnostic' || module_ === 'web-heartbeat' || isChannelInfra)) {
     return null;
   }
   if (/\bembedded run agent end\b/i.test(message) && /\berror=500\b/.test(message)) {
     return null;
   }
 
-  // Skip WhatsApp/messaging auto-reconnect attempts (self-recovering infrastructure)
-  if (/\bWeb connection closed\b/i.test(message) &&
-      /\bRetry \d+\/\d+\b/i.test(message)) {
-    return null;
+  if (isChannelInfra) {
+    // Auto-reconnect, retry, connection status — all infra noise
+    if (/\b(Web connection closed|Retry \d+\/\d+|reconnect|heartbeat)\b/i.test(message)) {
+      return null;
+    }
+    if (/\bWebSocket error\b/i.test(message)) {
+      return null;
+    }
   }
-  if (/\bwhatsapp\b/i.test(message) || /\bWebSocket error\b/i.test(message)) {
-    return null;
-  }
-  // Skip raw JSON connection status blobs (WhatsApp session reconnect)
+  // Skip raw JSON connection status blobs (always infra, regardless of subsystem)
   if (/^\{"connectionId":/i.test(message)) {
+    return null;
+  }
+
+  // Skip delivery retry noise (infrastructure auto-recovery)
+  if (/\bDelivery\b.*\bexceeded max retries\b/i.test(message)) {
+    return null;
+  }
+  if (/\bDelivery recovery complete\b/i.test(message)) {
+    return null;
+  }
+
+  // Skip model_fallback_decision JSON blobs (internal routing noise)
+  if (/model_fallback_decision/i.test(message)) {
     return null;
   }
 
