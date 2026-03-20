@@ -2,6 +2,92 @@
 
 ---
 
+## 2026-03-21 — Timeline 노이즈 제거: Keyword 유사도 dedup + Store-level 텍스트 정제
+
+### 문제
+WhatsApp 헬스체크 cron(5분 간격)이 동일한 chat_start/chat_end 쌍을 생성하여 타임라인 100개 중 94개가 같은 내용. `parseLogLine()` 필터는 Gateway `chat` 이벤트에 무력. LLM 요약이 매번 미묘하게 다른 문장 생성 (`"확인 완료"` vs `"확인 완료, 정상"` vs `"연결 확인 완료"`) → exact string 비교로 dedup 불가.
+
+### 해결
+1. **Keyword 유사도 dedup**: `extractKeywords()` — 한국어 어미 정규화 + filler 제거 후 keyword bag 추출. `isSimilarCore()` — 60% overlap threshold. 1시간 윈도우 (5분 cron 대응)
+2. **Store-level 텍스트 정제**: `addEntry()` 입구에서 `cleanRawText()`+`cleanNopMarkers()` 일괄 적용
+3. **Paired chat_start 안전 제거**: chat_end dedup 시 `isRepetitiveEntry()` 검증 후에만 paired chat_start 제거 (고유 이벤트 보호)
+4. **폴백 라벨 개선**: `'Prompt sent'` → `'자동 작업'`, `'Completed'` → `extractTopicHint(response)` 폴백
+
+### 교훈 / 핵심 설계 결정
+- LLM 요약이 non-deterministic이므로 exact string dedup은 반복 cron에 무력 — keyword bag 유사도 필요
+- 한국어 어미 변형은 suffix strip stemming으로 해결 (`확인하겠습니다`/`확인합니다`/`확인한다` → `확인`)
+- Store 입구 텍스트 정제가 adapter별 산재보다 유지보수 우수
+- 실시간에서는 `repeatCount` 엔트리의 `ts` 갱신으로 윈도우가 sliding → 배치보다 효과적
+
+---
+
+## 2026-03-21 — ESP32 마이크 하드웨어 부재 확인 + 코드베이스 정리
+
+### 문제
+Wake word detection 구현을 위해 3대 ESP32 보드(86 Box, IPS 3.5", Round AMOLED)의 마이크 하드웨어를 조사. I2C scan, audio output test, mic pin scan 테스트 펌웨어를 Round AMOLED에 올려 확인.
+
+### 결과
+- 3대 모두 MEMS 마이크 칩 미실장. Round AMOLED의 GPIOs 45/46은 헤더에 노출되어 있으나 I2S 페리페럴 미연결
+- 3.5mm 잭은 오디오용이 아님 (안테나/시리얼 디버그 용도)
+- 마이크 내장 보드 필요 → ESP32-S3-BOX-3 구매 계획
+
+### 정리 작업
+- Round AMOLED 정상 펌웨어 복구 (테스트 펌웨어 → `env:round_amoled`)
+- `platformio.ini`에서 테스트 환경 3개 제거 (`i2c_scan`, `audio_out`, `mic_scan`) + 소스 3개 삭제
+- `board_round_amoled.h` 오디오 핀 주석 업데이트 (미실장 명시)
+- CLI stub 제거: `codex` (미구현 placeholder), `attach` (미구현 stub)
+- `stop [session]` → `stop` (미사용 인자 제거)
+- README.md: `agentdeck claude` 포트 설명 수정 (9120 → 동적 포트), 서피스 제어 범위 정확화, 미구현 명령 제거
+
+### 교훈
+- 저가 ESP32 디스플레이 보드는 대부분 MEMS 마이크 미실장 — 오디오 기능 필요 시 전용 보드(ESP32-S3-BOX-3) 사용
+- README와 CLI 구현의 정합성을 주기적으로 점검해야 함 — stub 명령이 사용자에게 노출되면 혼란 유발
+
+---
+
+## 2026-03-20 — Timeline 노이즈 제거: Store-level dedup + 폴백 라벨 개선
+
+### 문제
+WhatsApp 헬스체크 cron(5분 간격)이 동일한 chat_start/chat_end 쌍을 생성하여 타임라인 94/100 엔트리가 같은 내용으로 채워짐. `parseLogLine()` 필터는 Gateway `chat` 이벤트(delta→final)를 통과시키므로 무력. LLM 요약 실패 시 "Completed", cron 시작 시 "Prompt sent" 등 무의미한 라벨도 문제.
+
+### 해결
+1. **Store-level semantic dedup**: `isRepetitiveEntry()` 공유 함수 — `extractSemanticCore()`로 chat_end의 첫 ` · ` 이전 부분만 비교 (duration/tool suffix 무시). 10분 윈도우 내 동일 core 발견 시 `repeatCount` 증가 + paired chat_start 제거. Bridge/Plugin 양쪽 store에 적용
+2. **폴백 라벨 개선**: `'Prompt sent'` → `'자동 작업'` (cron/web), `'Completed'` → `extractTopicHint(response) || 'Completed'` (LLM 미가용 시 응답 첫줄 topic 사용)
+3. **텍스트 정제 함수**: `cleanRawText()` (inline **bold**/heading/link/backtick strip), `cleanNopMarkers()` (NOP/NOOP 제거)
+
+### 교훈 / 핵심 설계 결정
+- Gateway `chat` 이벤트 기반 timeline은 log-level 필터링으로 제어 불가 — adapter/store 레이어에서 semantic dedup 필요
+- `extractSemanticCore()`로 duration/tool suffix를 무시하는 것이 cron 반복 감지의 핵심 (같은 작업이라도 매번 duration이 다름)
+- Plugin에도 `extractTopicHint()` 추가 필요 (bridge 없이 Gateway 직접 연결 시 동일 enrichment 보장)
+
+---
+
+## 2026-03-20 — Display Dim: E-ink 프론트라이트 동적 탐색 + Pantone 6 한계 발견
+
+### 문제
+macOS display sleep 시 Android 기기 밝기를 제어하는데, Pantone 6(컬러 e-ink)에서 프론트라이트가 안 꺼짐. 기존 코드가 `/sys/class/backlight/warm/white`만 하드코딩 — Pantone 6의 `aw99703` 경로를 모름.
+
+### 조사 과정
+1. **sysfs 동적 탐색**: `KNOWN_BACKLIGHT_DEVICES` 목록으로 probe → `aw99703` 발견했으나 SELinux가 앱 프로세스의 읽기/쓰기 모두 차단
+2. **MOAAN Settings 디컴파일** (jadx): `/proc/aw99703/led_brightness` + `led_current` 경로 발견. `FunctionSettingsControl.setLedValue()` → `FileWriter`로 직접 쓰기. 시스템앱(`/system/app/`)이라 SELinux 통과
+3. **Settings.Global** (`mogu_warm_led_status` 등): 값은 바뀌지만 하드웨어 미반영 (`mBacklight=null` — framework 연결 없음)
+4. **Runtime.exec("cat/echo")**: fork된 프로세스도 앱의 SELinux context 상속 → 동일 차단
+5. **KEYCODE_SLEEP/screen_off_timeout**: 화면 OFF는 되지만, wake 시 MOAAN 드라이버가 프론트라이트를 자동 복원 안 함 → 영구 꺼짐
+
+### 결과
+- **Crema S**: sysfs `warm/white` app-writable → 정상 동작
+- **Pantone 6**: dim 스킵 (프론트라이트 제어 불가, root 필요)
+- **Lenovo LCD**: brightness=0 + SCREEN_OFF_TIMEOUT=2s (기존 방식 유지)
+
+### 교훈
+- E-ink 프론트라이트 제어는 벤더별 완전히 다름 — sysfs, proc, Settings.Global 어느 것도 표준이 아님
+- SELinux가 파일 퍼미션(`rwxrwxrwx`)과 무관하게 앱 context 기반으로 차단
+- `Runtime.exec()`은 앱의 SELinux context를 상속 — `adb shell`과 다른 결과
+- 화면 sleep 시 프론트라이트가 0으로 리셋되면 앱에서 복원 불가 → screen off 방식은 e-ink에 위험
+- MOAAN 전용 API: `/proc/aw99703*/led_{brightness,current}` + `android.os.MoanLedParam` LUT + `Settings.Global` `mogu_*` 키 (하드웨어 무관)
+
+---
+
 ## 2026-03-20 — Timeline 품질 개선: LLM 요약 확장 + detail 클리닝 + 필터 정밀화
 
 ### 문제
