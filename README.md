@@ -18,11 +18,11 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 > One bridge. 11 surfaces. Steer your AI — without leaving your keyboard flow.
 
 <p align="center">
-  <img src="docs/media/desk-setup.jpg" width="720" alt="AgentDeck — 11 surfaces running simultaneously: Stream Deck+, Android tablet, Crema S E-ink, iPhone, iPad, macOS, ESP32 Round AMOLED, ESP32 IPS LCD, ESP32 B86 Box, Pixoo64 LED, TUI terminal">
+  <img src="docs/media/desk-setup-top.jpg" width="720" alt="AgentDeck — 11 surfaces running simultaneously: Stream Deck+, Android tablet, Crema S E-ink, Pantone 6 Color E-ink, iPhone, iPad, macOS, ESP32 Round AMOLED, ESP32 IPS LCD, Pixoo64 LED, TUI terminal">
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/zVzrcaahdEs"><strong>Watch Demo on YouTube</strong></a>
+  <a href="https://youtu.be/s-f8ICBcC4o"><strong>Watch Demo on YouTube</strong></a>
 </p>
 
 <p align="center">
@@ -120,11 +120,11 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 <p align="center"><em>Left: iPad + iPhone (SwiftUI) &nbsp;|&nbsp; Right: ESP32 3 types + Pixoo64 LED</em></p>
 
 <p align="center">
-  <img src="docs/media/eink-esp32-combo.jpg" width="360" alt="Crema S E-ink reader with grayscale aquarium next to ESP32 Round AMOLED">
+  <img src="docs/media/eink-dual-display.jpg" width="360" alt="Dual E-ink display — Crema S (B&W) and Pantone 6 (Color Kaleido 3) showing multi-agent aquarium with ESP32 Round AMOLED">
   &nbsp;&nbsp;
   <img src="docs/media/tui-dashboard.png" width="360" alt="TUI Dashboard in terminal — braille octopus, rate limit gauges, timeline">
 </p>
-<p align="center"><em>Left: E-ink (Crema S) + ESP32 Round AMOLED &nbsp;|&nbsp; Right: TUI terminal dashboard</em></p>
+<p align="center"><em>Left: Dual E-ink — B&W (Crema S) + Color (Pantone 6) + ESP32 AMOLED &nbsp;|&nbsp; Right: TUI terminal dashboard</em></p>
 
 ### Architecture
 
@@ -360,7 +360,7 @@ See **[Stream Deck+ Layout Reference](docs/streamdeck-layout.md)** for per-state
 Monitor and control your AI agents from any Android device — no Stream Deck required.
 
 <p align="center">
-  <img src="docs/media/tablet-fullui.jpg" width="720" alt="Android tablet — full terrarium UI with octopus creatures, crayfish, HUD panels, and timeline">
+  <img src="docs/media/tablet-fullui-latest.png" width="720" alt="Android tablet — full terrarium UI with octopus creatures, crayfish, HUD panels, and timeline">
 </p>
 <p align="center"><em>Tablet mode — color terrarium with multi-session octopi, crayfish, neon tetra, and HUD overlay</em></p>
 
@@ -370,6 +370,11 @@ Monitor and control your AI agents from any Android device — no Stream Deck re
   <img src="docs/media/eink-crema-timeline.png" width="360" alt="Crema S E-ink — grayscale aquarium with timeline and rate limits">
 </p>
 <p align="center"><em>E-ink mode (Crema S) — 16-level grayscale aquarium with agent list, rate limits, and event timeline</em></p>
+
+<p align="center">
+  <img src="docs/media/color-eink-esp32.jpg" width="480" alt="Color E-ink (Pantone 6 Kaleido 3) showing multi-agent aquarium with ESP32 Round AMOLED">
+</p>
+<p align="center"><em>Color E-ink (MOAAN Pantone 6, Kaleido 3) — 4096 colors, multi-agent view with ESP32 Round AMOLED</em></p>
 
 The Android app connects to the same bridge server over your local network, giving you a second screen for agent monitoring and a full mirror of the Stream Deck controls.
 
@@ -490,7 +495,7 @@ Run `agentdeck wifi-setup` to provision WiFi over serial (see [CLI Reference](#c
 64×64 RGB LED pixel art terrarium on a Divoom Pixoo64.
 
 <p align="center">
-  <img src="docs/media/pixoo64.jpg" width="360" alt="Pixoo64 LED matrix showing pixel art creature">
+  <img src="docs/media/pixoo64-night.jpg" width="360" alt="Pixoo64 LED matrix — pixel art octopus and crayfish glowing in the dark">
 </p>
 
 The Pixoo module renders dot-art creatures, water zone colors reflecting agent state, and a compact usage HUD — all pushed over HTTP to the device's local API.
