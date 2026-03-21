@@ -65,17 +65,18 @@ void init() {
 void render(uint16_t* buf, int w, int h, float time, float dt,
             CreatureState state, uint8_t idx, uint8_t total) {
 
-    float bodyRadius = w * Layout::OctBodyRadiusFrac;
+    // Dynamic scale: shrink creatures when many sessions
+    float scaleFactor = (total >= 5) ? 0.60f : (total >= 4) ? 0.70f : (total >= 3) ? 0.85f : 1.0f;
+    float bodyRadius = w * Layout::OctBodyRadiusFrac * scaleFactor;
     float pixW = bodyRadius * 2.0f / 14.0f;
     float pixH = pixW * PIXEL_ASPECT;
 
-    // Calculate home position
+    // Calculate home position — wider spread for more creatures
     float homeX;
     if (total <= 1) {
         homeX = Layout::OctHomeX;
     } else {
-        // Spread octopuses horizontally
-        float span = 0.30f;
+        float span = (total <= 2) ? 0.30f : (total <= 3) ? 0.40f : 0.50f;
         homeX = Layout::OctHomeX - span / 2 + span * idx / (total - 1);
     }
     homeX += jitterX[idx];
@@ -216,12 +217,12 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         }
     }
 
-    // Speech bubble for ASKING state
+    // Speech bubble for ASKING state — positioned beside body (not above, to avoid name tag overlap)
     if (state == CreatureState::ASKING) {
         float bubblePulse = fastSin(t * 2.5f) * 0.08f + 1.0f;
         int bx = cx + (int)(bodyRadius * 1.2f);
-        int by = startY - (int)(bodyRadius * 0.6f);
-        int br = (int)(bodyRadius * 0.7f * bubblePulse);
+        int by = cy;  // Body center height — clear of name tag above
+        int br = (int)(bodyRadius * 0.6f * bubblePulse);
 
         Draw::circle(bx, by, br, 0xFFFFFF, 200);
         // "?" text — simple pixel art
@@ -234,9 +235,9 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         Draw::pixelA(qx + 2, qy + 2, Theme::DeepSea, 255);
         Draw::pixelA(qx + 2, qy + 4, Theme::DeepSea, 255);
 
-        // Tail triangle
-        Draw::line(bx - br / 3, by + br, cx + (int)(bodyRadius * 0.3f),
-                   startY, 0xFFFFFF, 160);
+        // Tail triangle — points from bubble to body right edge
+        Draw::line(bx - br / 3, by + br / 2, cx + (int)(bodyRadius * 0.5f),
+                   cy, 0xFFFFFF, 160);
     }
 
     // Name tag with text (always shown)
@@ -257,7 +258,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     // Use LVGL's text width calculation (handles Korean + Latin mixed text)
     lv_point_t txtSize;
     lv_text_get_size(&txtSize, name, &font_kr_12, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    int textW = txtSize.x + 12;
+    int textW = txtSize.x + (total >= 4 ? 8 : 12);  // Tighter padding when scaled down
     int tagH = 16;
     int tagX = cx - textW / 2;
     int tagY = startY - tagH - 4;

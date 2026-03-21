@@ -80,7 +80,7 @@ extension DashboardState {
         let octopusCount = (primaryIsOctopus ? 1 : 0) + siblings.count
         let slots = CreatureLayout.layoutOctopuses(count: max(1, octopusCount))
 
-        var creatures: [AgentCreatureState] = []
+        var creatures: [AgentCreatureState] = []  // mutated later for dedup numbering
         var slotIdx = 0
 
         if primaryIsOctopus {
@@ -117,6 +117,26 @@ extension DashboardState {
                 homeY: s.y,
                 scale: s.scale
             ))
+        }
+
+        // Number duplicate display names: "AgentDeck", "AgentDeck" → "AgentDeck #1", "AgentDeck #2"
+        let nameCounts = Dictionary(grouping: creatures, by: { $0.projectName }).mapValues { $0.count }
+        var nameCounters: [String: Int] = [:]
+        for i in creatures.indices {
+            if let name = creatures[i].projectName, (nameCounts[name] ?? 0) >= 2 {
+                let seq = (nameCounters[name] ?? 0) + 1
+                nameCounters[name] = seq
+                creatures[i] = AgentCreatureState(
+                    id: creatures[i].id,
+                    projectName: "\(name) #\(seq)",
+                    modelName: creatures[i].modelName,
+                    state: creatures[i].state,
+                    homeX: creatures[i].homeX,
+                    homeY: creatures[i].homeY,
+                    scale: creatures[i].scale,
+                    exitedAsking: creatures[i].exitedAsking
+                )
+            }
         }
 
         result.creatures = creatures

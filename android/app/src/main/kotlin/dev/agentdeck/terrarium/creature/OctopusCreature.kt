@@ -345,9 +345,9 @@ class OctopusCreature(
         val pixelW = bodyRadius * 2f / GRID_COLS
         val gridH = GRID_ROWS * pixelW * PIXEL_ASPECT
 
-        // Position: upper-right of the octopus head
+        // Position: right side at body center — avoids overlapping name tag above
         val bubbleX = cx + bodyRadius * 1.2f
-        val bubbleY = cy - gridH / 2f - bodyRadius * 0.6f
+        val bubbleY = cy  // Body center — clear of name tag above
         val bubbleR = bodyRadius * 0.7f
 
         // Gentle pulse
@@ -370,11 +370,11 @@ class OctopusCreature(
             style = Stroke(width = bodyRadius * 0.04f),
         )
 
-        // Tail triangle pointing toward octopus head
+        // Tail triangle pointing toward body right edge
         bubbleTailPath.reset()
-        bubbleTailPath.moveTo(bubbleX - r * 0.3f, bubbleY + r * 0.8f)
-        bubbleTailPath.lineTo(cx + bodyRadius * 0.5f, cy - gridH / 2f)
-        bubbleTailPath.lineTo(bubbleX - r * 0.05f, bubbleY + r * 0.95f)
+        bubbleTailPath.moveTo(bubbleX - r * 0.3f, bubbleY + r * 0.3f)
+        bubbleTailPath.lineTo(cx + bodyRadius * 0.5f, cy)
+        bubbleTailPath.lineTo(bubbleX - r * 0.05f, bubbleY + r * 0.5f)
         bubbleTailPath.close()
         scope.drawPath(bubbleTailPath, color = Color.White, alpha = 0.25f)
 

@@ -219,9 +219,9 @@ static void handleSessionsList(JsonObject& obj) {
 
     // Populate sessionNames for octopus name tags (with dedup numbering)
     // First pass: collect raw names
-    char rawNames[3][24];
+    char rawNames[MAX_OCTOPUS][24];
     uint8_t nameIdx = 0;
-    for (uint8_t i = 0; i < g_state.sessionCount && nameIdx < 3; i++) {
+    for (uint8_t i = 0; i < g_state.sessionCount && nameIdx < MAX_OCTOPUS; i++) {
         if (g_state.sessions[i].alive &&
             strcmp(g_state.sessions[i].agentType, "openclaw") != 0 &&
             strcmp(g_state.sessions[i].agentType, "daemon") != 0) {

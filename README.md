@@ -7,8 +7,19 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://www.npmjs.com/package/@agentdeck/setup"><img src="https://img.shields.io/npm/v/@agentdeck/setup.svg" alt="npm version"></a>
-  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg" alt="macOS 14+">
+  <a href="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml"><img src="https://github.com/puritysb/AgentDeck/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/tests-466%20passed-brightgreen.svg" alt="466 tests passed">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/host-macOS%2014%2B-lightgrey.svg" alt="macOS 14+">
   <img src="https://img.shields.io/badge/node-%3E%3D20-green.svg" alt="Node.js >= 20">
+  <img src="https://img.shields.io/badge/Stream%20Deck%2B-8%20keys%20%2B%204%20encoders-black.svg?logo=elgato" alt="Stream Deck+">
+  <img src="https://img.shields.io/badge/Android-10%2B%20(tablet%20%2B%20e--ink)-3DDC84.svg?logo=android&logoColor=white" alt="Android 10+">
+  <img src="https://img.shields.io/badge/iOS%20%7C%20iPad%20%7C%20macOS-SwiftUI-007AFF.svg?logo=apple&logoColor=white" alt="Apple platforms">
+  <img src="https://img.shields.io/badge/ESP32-AMOLED%20%7C%20IPS%20%7C%20Touch-orange.svg" alt="ESP32 displays">
+  <img src="https://img.shields.io/badge/Pixoo64-LED%20matrix-ff69b4.svg" alt="Pixoo64">
+  <img src="https://img.shields.io/badge/TUI-terminal%20dashboard-cyan.svg" alt="TUI">
 </p>
 
 **Stop Chatting. Start Steering.**
@@ -66,6 +77,7 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 - [Stream Deck+ Layout Reference](docs/streamdeck-layout.md) — per-state layouts, encoder details, button colors
 - [Android Reference](docs/android.md) — device support, build/signing, creature behavior
 - [Protocol & Architecture](docs/protocol.md) — state machine, WebSocket messages, project structure
+- [Testing Guide](docs/testing.md) — test structure, coverage, CI pipeline, writing tests
 
 ---
 
@@ -610,11 +622,25 @@ pnpm -r typecheck         # Type check without building
 ### Testing
 
 ```bash
-pnpm test                 # Run all tests (vitest)
-pnpm test -- --watch      # Watch mode
+pnpm test                        # Run all tests (vitest)
+pnpm test -- --watch             # Watch mode
+pnpm vitest run --coverage       # Coverage report (v8)
 ```
 
-Tests cover output parsing, state machine transitions, hook installation, option rendering, and text utilities. Quick smoke test after changes:
+**11 test files, 466+ test cases** covering state machine, output parser, adapter hierarchy, timeline dedup, connection management, hook installation, text rendering, and Gateway protocol.
+
+| Package | Key Tests | Coverage |
+|---------|-----------|----------|
+| **shared** | Timeline parsing, semantic dedup, text cleaning | ~55% |
+| **bridge** | State machine, output parser, adapters, cursor sync, sessions | ~16% |
+| **plugin** | Gateway client, connection manager, text utils, option layout | ~23% |
+| **hooks** | Hook installation, format migration | indirect |
+
+CI runs automatically on every push/PR to `master` (`build → typecheck → test`).
+
+See **[Testing Guide](docs/testing.md)** for full details on coverage, writing tests, and future plans.
+
+Quick smoke test after changes:
 
 ```bash
 pnpm build && pnpm test && agentdeck status

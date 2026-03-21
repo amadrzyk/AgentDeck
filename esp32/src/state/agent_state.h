@@ -102,7 +102,7 @@ struct DashboardState {
     uint8_t sessionCount;
     uint8_t octopusCount;   // derived: claude-code sessions alive
     uint8_t crayfishCount;  // derived: openclaw sessions alive
-    char sessionNames[3][24]; // display names for octopus instances
+    char sessionNames[6][24]; // display names for octopus instances (matches max MAX_OCTOPUS)
 
     // Crayfish state (derived from sibling)
     CrayfishState crayfishState;

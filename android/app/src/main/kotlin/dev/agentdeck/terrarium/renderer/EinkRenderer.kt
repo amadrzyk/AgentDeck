@@ -725,11 +725,11 @@ private fun drawEinkOctopus(
         drawEinkNameTag(canvas, paint, cx, startY, scaleFactor, displayName, w)
     }
 
-    // ASKING: speech bubble with "?" — drawn LAST (in front of name tag)
+    // ASKING: speech bubble with "?" — beside body center (not above, to avoid name tag overlap)
     if (state == OctopusVisualState.ASKING) {
         val bubbleR = gridW * 0.25f * scaleFactor
         val bubbleX = cx + gridW * 0.6f
-        val bubbleY = (startY - gridH * 0.3f).coerceAtLeast(bubbleR + 2f)
+        val bubbleY = cy  // Body center — clear of name tag above
 
         // Bubble circle
         paint.color = einkPick(GRAY_AIR, COLOR_AIR)

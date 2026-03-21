@@ -491,9 +491,9 @@ export function renderTerrariumFrame(
           if (px >= 0 && px < width) { chars[px] = name[nc]; charColors[px] = fg(180, 180, 180); }
         }
       }
-      // "?" bubble — same row as name tag, offset right
-      if (oct.state.startsWith('awaiting') && oy - 1 === row) {
-        const qx = Math.floor(oct.x * width) + octHalfW + 2;
+      // "?" bubble — below sprite (not on name tag row, to avoid overlap)
+      if (oct.state.startsWith('awaiting') && oy + braille.length === row) {
+        const qx = Math.floor(oct.x * width) + octHalfW + 1;
         if (qx >= 0 && qx < width) { chars[qx] = '?'; charColors[qx] = fg(255, 255, 100); }
       }
       // Voice assistant indicator — above active octopus (first octopus or processing one)

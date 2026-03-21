@@ -760,6 +760,18 @@ export function renderFrame(
     }
   }
 
+  // Session count indicator (top-left, screen-space) — terracotta dots when 2+ sessions
+  const sessionCount = creatureInstances.size;
+  if (sessionCount >= 2) {
+    for (let i = 0; i < Math.min(sessionCount, 6); i++) {
+      const dotX = 1 + i * 3;  // 2px dot + 1px gap
+      setPixel(outputBuf, dotX, 1, COLORS.octopusBody);
+      setPixel(outputBuf, dotX + 1, 1, COLORS.octopusBody);
+      setPixel(outputBuf, dotX, 2, COLORS.octopusBody);
+      setPixel(outputBuf, dotX + 1, 2, COLORS.octopusBody);
+    }
+  }
+
   // Usage HUD (bottom-right, screen-space)
   drawUsageHUD(outputBuf, usageEvent, animFrame);
 

@@ -311,9 +311,9 @@ final class OctopusCreature: Creature {
         let pixelW = bodyRadius * 2 / CGFloat(Self.gridCols)
         let gridH = CGFloat(Self.gridRows) * pixelW * CGFloat(Self.pixelAspect)
 
-        // Position: upper-right of the octopus head
+        // Position: right side at body center — avoids overlapping name tag above
         let bubbleX = cx + bodyRadius * 1.2
-        let bubbleY = cy - gridH / 2 - bodyRadius * 0.6
+        let bubbleY = cy
         let bubbleR = bodyRadius * 0.7
 
         let pulse = CGFloat(sin(time * 2.5)) * 0.08 + 1
@@ -330,9 +330,9 @@ final class OctopusCreature: Creature {
 
         // Tail triangle
         var tail = Path()
-        tail.move(to: CGPoint(x: bubbleX - r * 0.3, y: bubbleY + r * 0.8))
-        tail.addLine(to: CGPoint(x: cx + bodyRadius * 0.5, y: cy - gridH / 2))
-        tail.addLine(to: CGPoint(x: bubbleX - r * 0.05, y: bubbleY + r * 0.95))
+        tail.move(to: CGPoint(x: bubbleX - r * 0.3, y: bubbleY + r * 0.3))
+        tail.addLine(to: CGPoint(x: cx + bodyRadius * 0.5, y: cy))
+        tail.addLine(to: CGPoint(x: bubbleX - r * 0.05, y: bubbleY + r * 0.5))
         tail.closeSubpath()
         context.fill(tail, with: .color(.white.opacity(0.25)))
 
