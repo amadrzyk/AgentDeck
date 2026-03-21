@@ -165,12 +165,15 @@ The daemon is the sole hub for all dashboard clients. Session bridges handle PTY
 | Item | Required | Install |
 |------|----------|---------|
 | **macOS 14+** (Sonoma) | Yes | Windows/Linux not supported |
+| **Xcode Command Line Tools** | Yes | `xcode-select --install` (node-pty native build) |
 | **Node.js** >= 22 | Yes | `brew install node` |
-| **pnpm** | Yes | `npm install -g pnpm` |
+| **pnpm** >= 9 | Yes | `npm install -g pnpm` |
+| **Python 3** | Yes | `brew install python` (display sleep detection) |
 | **Elgato Stream Deck app** >= 6.7 | Yes | [Elgato Downloads](https://www.elgato.com/downloads) |
 | **Stream Deck+ hardware** | Yes | 8 keys + 4 encoders + LCD touch strip |
 | **iTerm2** | Yes | Terminal management, voice paste, session switching |
 | **Claude Code CLI** | Yes | `npm install -g @anthropic-ai/claude-code` |
+| **JDK 17+** | For Android | `brew install openjdk@17` |
 | **Stream Deck CLI** | Auto | Installed by `pnpm setup` if missing |
 | **sox** (audio capture) | For voice | See [Voice Setup](docs/voice-setup.md) |
 | **whisper.cpp** (transcription) | For voice | See [Voice Setup](docs/voice-setup.md) |

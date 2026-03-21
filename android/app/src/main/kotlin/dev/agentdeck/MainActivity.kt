@@ -23,7 +23,10 @@ import dev.agentdeck.ui.screen.EinkMonitorScreen
 import dev.agentdeck.ui.theme.AgentDeckTheme
 import dev.agentdeck.util.EinkDetector
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.provider.Settings
 import android.util.Log
+import android.view.Surface
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -62,6 +65,22 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             displayPrefs.orientationFlow.collect { orientation ->
                 requestedOrientation = orientation
+
+                // Fallback: Pantone 6 (RK3566) ignores requestedOrientation.
+                // Set system-level rotation as backup (requires WRITE_SETTINGS permission).
+                if (isEinkDevice && Settings.System.canWrite(this@MainActivity)) {
+                    try {
+                        val rotation = when (orientation) {
+                            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE -> Surface.ROTATION_90
+                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT -> Surface.ROTATION_0
+                            else -> return@collect
+                        }
+                        Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0)
+                        Settings.System.putInt(contentResolver, Settings.System.USER_ROTATION, rotation)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "System rotation fallback failed: ${e.message}")
+                    }
+                }
             }
         }
 
