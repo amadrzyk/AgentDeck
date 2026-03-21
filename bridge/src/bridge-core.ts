@@ -17,7 +17,7 @@ import {
   deregister as deregisterSession,
 } from './session-registry.js';
 import { getOrCreateToken, getWsUrl } from './auth.js';
-import { debug } from './logger.js';
+import { log, logError, debug } from './logger.js';
 import { invalidateMdnsInstance } from './mdns.js';
 import {
   State,
@@ -30,9 +30,10 @@ import {
   type VoiceAssistantState,
 } from './types.js';
 
-function log(msg: string): void {
-  process.stderr.write(msg + '\n');
-}
+// log(), logError(), debug() imported from logger.ts
+// - log(): suppressed in PTY mode (after setPtyMode(true))
+// - logError(): always shown (critical errors requiring user action)
+// - debug(): file-only (when --debug enabled)
 
 // ===== Options =====
 
@@ -521,15 +522,15 @@ export class BridgeCore {
         msg.includes('already in use on the network') ||
         (msg.includes('EADDRNOTAVAIL') && msg.includes('5353'))
       ) {
-        log(`[${label}] mDNS error (ignored): ${msg}`);
+        debug('mDNS', `error (ignored): ${msg}`);
         invalidateMdnsInstance();
         return;
       }
-      log(`[${label}] Uncaught exception: ${err}`);
+      logError(`Uncaught exception: ${err}`);
       handler();
     });
     process.on('unhandledRejection', (reason) => {
-      log(`[${label}] Unhandled rejection: ${reason}`);
+      debug('core', `Unhandled rejection: ${reason}`);
       debug('core', `Unhandled rejection stack: ${reason instanceof Error ? reason.stack : reason}`);
       // Non-fatal — don't shutdown
     });
@@ -540,7 +541,7 @@ export class BridgeCore {
     if (this.shutdownInProgress) return;
     this.shutdownInProgress = true;
 
-    log('[core] Shutting down...');
+    log('Shutting down...');
 
     // Clear all timers
     for (const iv of this.intervals) clearInterval(iv);

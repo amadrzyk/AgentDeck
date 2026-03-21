@@ -8,7 +8,7 @@
 import { BridgeCore } from './bridge-core.js';
 import { VoiceManager } from './voice.js';
 import { checkDependencies } from './check-deps.js';
-import { enableDebugLog, debug, setPtyMode } from './logger.js';
+import { enableDebugLog, log, logError, debug, setPtyMode } from './logger.js';
 import { EventJournal } from './event-journal.js';
 import { PtyRingBuffer } from './pty-ringbuffer.js';
 import { createDiagDump } from './diag-analyzer.js';
@@ -95,9 +95,8 @@ function loadTemplates(): PromptTemplate[] {
 
 const promptTemplates = loadTemplates();
 
-function log(msg: string): void {
-  process.stderr.write(msg + '\n');
-}
+// log(), logError(), debug() imported from logger.ts
+// log() is suppressed after setPtyMode(true) — startup messages still shown
 
 /** Extract tool input for timeline display */
 function formatToolInputForTimeline(toolName: string, input: Record<string, unknown> | undefined): string | null {
@@ -141,14 +140,14 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   if (opts.debug) {
     enableDebugLog();
-    log('[agentdeck] Debug logging enabled');
+    log('Debug logging enabled');
   }
 
   // Dependency check (skip for monitor — no PTY needed)
   if (agentType !== 'monitor') {
     const deps = checkDependencies();
     if (!deps.ok) process.exit(1);
-    for (const w of deps.warnings) log(`[agentdeck] WARNING: ${w}`);
+    for (const w of deps.warnings) log(`WARNING: ${w}`);
 
     // Version compatibility check
     if (!opts.noUpdateCheck) {
@@ -157,9 +156,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
         skipCheck: false,
         claudeCodeVersion: deps.claudeCodeVersion,
       });
-      for (const w of versionResult.warnings) log(`[agentdeck] WARNING: ${w}`);
+      for (const w of versionResult.warnings) log(`WARNING: ${w}`);
       if (versionResult.restartNeeded) {
-        log('[agentdeck] AgentDeck updated. Please restart.');
+        log('AgentDeck updated. Please restart.');
         process.exit(0);
       }
     }
@@ -169,7 +168,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   const requestedPort = opts.port ?? BRIDGE_WS_PORT;
   let port = requestedPort === BRIDGE_WS_PORT ? await findAvailablePort() : requestedPort;
   if (port !== requestedPort) {
-    log(`[agentdeck] Port ${requestedPort} in use, using ${port}`);
+    log(`Port ${requestedPort} in use, using ${port}`);
   }
 
   // Auto-migrate hooks (Claude Code mode only)
@@ -189,10 +188,10 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   const sameProject = existingSessions.filter((s) => s.projectName === projectName);
   if (sameProject.length > 0) {
     const ports = sameProject.map((s) => s.port).join(', ');
-    log(`[agentdeck] \u26A0 Session "${projectName}" already running on port ${ports}. Starting new session on port ${port}.`);
+    log(`\u26A0 Session "${projectName}" already running on port ${ports}. Starting new session on port ${port}.`);
   }
 
-  log(`[agentdeck] Starting AgentDeck bridge on port ${port} (agent: ${agentType})...`);
+  log(`Starting AgentDeck bridge on port ${port} (agent: ${agentType})...`);
 
   // ===== Create adapter =====
   const adapter = createAdapter(agentType, opts.gatewayUrl);
@@ -200,9 +199,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   // ===== Start adapter (creates HTTP server, spawns process) =====
   try {
     await adapter.start({ port, command: opts.command, gatewayUrl: opts.gatewayUrl });
-    log(`[agentdeck] Adapter started: ${adapter.capabilities.displayName}`);
+    log(`Adapter started: ${adapter.capabilities.displayName}`);
   } catch (err) {
-    log(`[agentdeck] Failed to start adapter: ${err}`);
+    log(`Failed to start adapter: ${err}`);
     process.exit(1);
   }
 
@@ -280,10 +279,10 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
     // Start (non-blocking)
     voiceAssistant.start().then((ok) => {
-      if (ok) log('[agentdeck] Wake word voice assistant active ("오픈클로")');
-      else log('[agentdeck] Wake word not available (missing model or access key)');
+      if (ok) log('Wake word voice assistant active ("오픈클로")');
+      else log('Wake word not available (missing model or access key)');
     }).catch((err) => {
-      log(`[agentdeck] Wake word start failed: ${err}`);
+      log(`Wake word start failed: ${err}`);
     });
   }
 
@@ -320,7 +319,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   // Override unhandledRejection to not shutdown (index.ts original behavior)
   process.removeAllListeners('unhandledRejection');
   process.on('unhandledRejection', (reason) => {
-    log(`[agentdeck] Unhandled rejection: ${reason}`);
+    debug('Bridge', `Unhandled rejection: ${reason}`);
     debug('Bridge', `Unhandled rejection stack: ${reason instanceof Error ? reason.stack : reason}`);
     // Don't shutdown — non-fatal
   });
@@ -381,15 +380,15 @@ export async function startSession(opts: SessionOptions): Promise<void> {
           bridgePort: port,
           authToken: core.authToken,
         });
-        log(`[agentdeck] WiFi provision sent to ESP32 on ${portPath}`);
+        log(`WiFi provision sent to ESP32 on ${portPath}`);
       } else if (msg.type === 'wifi_provision_ack') {
-        log(msg.success ? `[agentdeck] ESP32 WiFi connected: ${msg.ip} \u2713` : `[agentdeck] ESP32 WiFi failed: ${msg.error || 'unknown'}`);
+        log(msg.success ? `ESP32 WiFi connected: ${msg.ip} \u2713` : `ESP32 WiFi failed: ${msg.error || 'unknown'}`);
       }
     });
   }
 
-  log(`[agentdeck] WebSocket server ready on port ${port}`);
-  log(`[agentdeck] Auth token ready. Pairing URL: ${core.wsUrl}`);
+  log(`WebSocket server ready on port ${port}`);
+  log(`Auth token ready. Pairing URL: ${core.wsUrl}`);
 
   // Device info getter for GET /devices
   hookServer?.setDeviceInfoGetter(() => ({
@@ -504,7 +503,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   // Adapter exit — always shutdown (shutdownInProgress guard prevents double-shutdown)
   adapter.on('exit', () => {
-    log('[agentdeck] Agent process exited');
+    log('Agent process exited');
     shutdown();
   });
 
@@ -1018,7 +1017,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     // Hard failsafe — exit no matter what after 3s
     setTimeout(() => process.exit(0), 3000).unref();
 
-    log('[agentdeck] Shutting down...');
+    log('Shutting down...');
 
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdin.pause();
@@ -1229,7 +1228,7 @@ function migrateHooksIfNeeded(): void {
 
     if (migrated) {
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-      log('[agentdeck] Auto-migrated hooks to v2.1 matcher-group format');
+      log('Auto-migrated hooks to v2.1 matcher-group format');
     }
   } catch (err) {
     debug('agentdeck', `Hook migration check failed: ${err}`);

@@ -12,11 +12,7 @@ import { EventEmitter } from 'events';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { debug } from './logger.js';
-
-function log(msg: string): void {
-  process.stderr.write(`[WakeWord] ${msg}\n`);
-}
+import { log, debug } from './logger.js';
 import {
   WAKE_WORD_MODEL_DIR,
   PICOVOICE_ACCESS_KEY_FILE,

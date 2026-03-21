@@ -45,6 +45,16 @@ export function logTagged(tag: string, ...args: unknown[]): void {
   process.stderr.write(`[${tag}] ${args.map(String).join(' ')}\n`);
 }
 
+/** Critical errors — always shown even in PTY mode (user action required) */
+export function logError(...args: unknown[]): void {
+  const msg = `[agentdeck] ERROR: ${args.map(String).join(' ')}\n`;
+  process.stderr.write(msg);
+  if (debugEnabled && debugStream) {
+    const ts = new Date().toISOString().slice(11, 23);
+    debugStream.write(`${ts} [ERROR] ${args.map(String).join(' ')}\n`);
+  }
+}
+
 /** Debug logging — only goes to file when --debug is enabled */
 export function debug(tag: string, ...args: unknown[]): void {
   if (!debugEnabled || !debugStream) return;

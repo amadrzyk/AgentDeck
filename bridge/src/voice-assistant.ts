@@ -20,11 +20,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { WakeWordListener } from './wake-word.js';
 import { TtsEngine } from './tts.js';
-import { debug } from './logger.js';
-
-function log(msg: string): void {
-  process.stderr.write(`[VoiceAssist] ${msg}\n`);
-}
+import { log, debug } from './logger.js';
 import { REC_CANDIDATES } from '@agentdeck/shared';
 import type { VoiceAssistantState } from '@agentdeck/shared';
 
