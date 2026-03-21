@@ -2,6 +2,43 @@
 
 ---
 
+## 2026-03-22 — 로깅 인프라 통합 + Terminal Badge 개선
+
+### 문제
+1. `agentdeck claude` PTY 세션에서 `[agentdeck] mDNS error (ignored): EADDRNOTAVAIL` 같은 내부 에러가 사용자에게 노출. 이미 "ignored"라고 하면서 출력하는 모순.
+2. Terminal badge(iTerm2) 글씨가 너무 작고, 한국어 요약이 어색.
+
+### 해결
+1. **로깅 이중 시스템 통합**: `bridge-core.ts`, `index.ts`, `voice-assistant.ts`, `wake-word.ts`에 각각 있던 로컬 `log()` (항상 stderr) → `logger.ts`의 `log()` (PTY 모드 시 억제)로 교체. mDNS "ignored" 에러 → `debug()` (디버그 파일 전용). `logError()` 신규 추가 (치명적 에러만 PTY에서도 표시).
+2. **Badge 3줄 고정**: 줄 수가 폰트 크기를 결정하므로 project/summary/state 3줄로 제한. 높이 30%, 다크모드 자동 감지. LLM 요약 영어로 전환.
+
+### 교훈 / 핵심 설계 결정
+- **로깅 3단계**: `debug()` (파일 전용) < `log()` (PTY 시 억제) < `logError()` (항상 표시). daemon은 PTY 없으므로 로컬 `log()` 유지 정상
+- **iTerm2 badge 폰트 = 줄 수의 함수**: 내용이 많을수록 자동 축소. 큰 글씨를 원하면 줄 수를 줄여야 함. `BADGE_MAX_HEIGHT_FRACTION` 증가만으로는 불충분
+- **LLM 요약은 영어가 자연스러움**: 코드 작업 컨텍스트에서 한국어 요약("터미널 포스트잇 기능 구현 중")은 부자연스럽고 토큰 효율도 낮음
+
+---
+
+## 2026-03-21 — E2E 테스트 전략 수립 + 통합 테스트 인프라 구축
+
+### 문제
+기존 11개 vitest 유닛 테스트(~6,600줄)가 데이터 변환 레이어(OutputParser, StateMachine, Timeline dedup)를 잘 커버하지만, 실제 HTTP/WS 서버 스택, Daemon 싱글톤 라이프사이클, ESP32 시리얼 브릿지(Node.js 측), 프로토콜 계약 등 **통합 레이어가 전혀 테스트되지 않음**. 이 "빠진 중간 레이어"가 실제 프로덕션 버그(daemon 이중 실행, Usage 429, hook format migration 실패 등)의 주요 원인.
+
+### 해결
+- **프레임워크**: Vitest 단일화 (Robot Framework는 ESP32 HW 전용 유지). 새 프레임워크 도입 없음
+- **테스터빌리티 개선**: `session-registry.ts`에 `AGENTDECK_DATA_DIR` 환경변수 오버라이드 추가, `esp32-serial.ts`에서 `prepareForSerial`/`handleSerialLine`/패턴 상수를 `@internal` export
+- **테스트 헬퍼 3종**: `temp-data-dir.ts` (격리된 임시 디렉토리), `ws-test-client.ts` (BridgeEvent 수집 + waitFor), `mock-adapter.ts` (스크립트된 AgentAdapter)
+- **6개 통합 테스트 파일**: server-integration (hook→state→WS broadcast), protocol-contract (5 플랫폼 스키마 검증), daemon-lifecycle (싱글톤 가드 + 세션 레지스트리), esp32-serial-node (포트 감지 + 페이로드 최적화), connection-integration (실제 WS 서버), timeline-integration (store + dedup 파이프라인)
+- **결과**: 11→17 test files, 510→578 tests, 전부 통과
+
+### 교훈 / 핵심 설계 결정
+- **소스 복제본 테스트 금지**: esp32-serial 첫 버전에서 `prepareForSerial`을 테스트 안에 재구현했는데, 소스가 변경되어도 테스트가 통과하는 위험한 패턴. 소스에서 `@internal` export하여 실제 함수를 테스트
+- **Mock vs Real 경계**: HTTP/WS 서버는 real (ephemeral port), StateMachine/UsageTracker도 real, 파일 시스템은 real (temp dir). PTY/시리얼/mDNS/OAuth만 mock. 이 경계가 통합 테스트의 핵심
+- **프로토콜 계약 테스트가 최고 장기 ROI**: 5개 클라이언트 플랫폼(Plugin, Android, Apple, ESP32, TUI)이 공유하는 프로토콜 타입의 필수 필드, 상태 enum 값, 이벤트 필터링을 검증. 프로토콜 필드 추가/삭제 시 즉시 잡아줌
+- **Gemini 제안 비판 결과**: Unity/Catch2 C++ 유닛 테스트(펌웨어 2,000줄에 과도), OTA 테스트(AgentDeck에 OTA 없음 — 아키텍처 오독), 멀티플랫폼 호스트 테스트(Bridge는 macOS 전용)는 부적절. Daemon 싱글톤 가드, Usage relay 429 방지, Hook format migration 같은 실제 버그 소스를 놓침
+
+---
+
 ## 2026-03-21 — Timeline dedup 미동작 근본 원인 + cron 최적화
 
 ### 문제

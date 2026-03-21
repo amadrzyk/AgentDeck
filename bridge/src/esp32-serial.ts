@@ -19,21 +19,22 @@ import type { ESP32ToHostMessage, WifiProvisionMessage } from '@agentdeck/shared
 import { formatResetTime } from '@agentdeck/shared';
 import { debug } from './logger.js';
 
-// Serial port patterns for ESP32 devices
-const ESP32_PORT_PATTERNS = [
+/** @internal Exported for testing only */
+export const ESP32_PORT_PATTERNS = [
   /\/dev\/cu\.usbserial-\d+/,   // CH340 (86 Box)
   /\/dev\/cu\.usbmodem\d+/,      // Native USB JTAG (IPS 3.5", Round AMOLED)
   /\/dev\/ttyUSB\d+/,            // Linux CH340
   /\/dev\/ttyACM\d+/,            // Linux native USB
 ];
 
-// Exclude known non-ESP32 devices
-const EXCLUDE_PATTERNS = [
+/** @internal Exported for testing only */
+export const EXCLUDE_PATTERNS = [
   /Bluetooth/i,
   /WLAN/i,
 ];
 
-interface SerialConnection {
+/** @internal Exported for testing only */
+export interface SerialConnection {
   port: string;
   stream: WriteStream;
   reader: ReadStream | null;
@@ -62,7 +63,8 @@ const FORWARDED_EVENTS = SERIAL_FORWARDED_EVENTS;
  * - Pre-format ISO reset times (ESP32 has no NTP)
  * - Strip fields the ESP32 firmware doesn't parse (reduce size for small RX buffers)
  */
-function prepareForSerial(event: BridgeEvent): BridgeEvent {
+/** @internal Exported for testing only */
+export function prepareForSerial(event: BridgeEvent): BridgeEvent {
   const e = event as any;
 
   if (event.type === 'usage_update') {
@@ -131,7 +133,8 @@ async function detectESP32Ports(): Promise<string[]> {
   }
 }
 
-function handleSerialLine(conn: SerialConnection, line: string): void {
+/** @internal Exported for testing only */
+export function handleSerialLine(conn: SerialConnection, line: string): void {
   if (!line.startsWith('{')) return; // Skip debug output like "[WiFi] Connected"
 
   try {

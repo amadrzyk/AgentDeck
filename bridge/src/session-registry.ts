@@ -7,9 +7,13 @@ import { randomUUID } from 'crypto';
 import http from 'http';
 import { debug } from './logger.js';
 
-const SESSIONS_DIR = join(homedir(), '.agentdeck');
-const SESSIONS_FILE = join(SESSIONS_DIR, 'sessions.json');
-const DAEMON_FILE = join(SESSIONS_DIR, 'daemon.json');
+/** Allow tests to override the data directory via env var */
+function getDataDir(): string {
+  return process.env.AGENTDECK_DATA_DIR || join(homedir(), '.agentdeck');
+}
+
+function getSessionsFile(): string { return join(getDataDir(), 'sessions.json'); }
+function getDaemonFile(): string { return join(getDataDir(), 'daemon.json'); }
 export const DAEMON_DEFAULT_PORT = 9120;
 const BASE_PORT = 9120;
 const MAX_PORT = 9139;
@@ -33,14 +37,15 @@ export interface SessionEntry {
 }
 
 function ensureDir(): void {
-  if (!existsSync(SESSIONS_DIR)) {
-    mkdirSync(SESSIONS_DIR, { recursive: true });
+  const dir = getDataDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 }
 
 function readSessions(): SessionEntry[] {
   try {
-    const data = readFileSync(SESSIONS_FILE, 'utf-8');
+    const data = readFileSync(getSessionsFile(), 'utf-8');
     return JSON.parse(data) as SessionEntry[];
   } catch {
     return [];
@@ -50,9 +55,10 @@ function readSessions(): SessionEntry[] {
 /** Atomic write: write to temp file then rename to prevent corruption */
 function writeSessions(sessions: SessionEntry[]): void {
   ensureDir();
-  const tmpFile = join(SESSIONS_DIR, `.sessions.${randomUUID()}.tmp`);
+  const dir = getDataDir();
+  const tmpFile = join(dir, `.sessions.${randomUUID()}.tmp`);
   writeFileSync(tmpFile, JSON.stringify(sessions, null, 2), 'utf-8');
-  renameSync(tmpFile, SESSIONS_FILE);
+  renameSync(tmpFile, getSessionsFile());
 }
 
 /** Check if a PID is alive */
@@ -145,16 +151,17 @@ export function detectTmuxSession(): string | undefined {
 /** Write daemon.json so clients can discover the daemon port */
 export function writeDaemonInfo(info: DaemonInfo): void {
   ensureDir();
-  const tmpFile = join(SESSIONS_DIR, `.daemon.${randomUUID()}.tmp`);
+  const dir = getDataDir();
+  const tmpFile = join(dir, `.daemon.${randomUUID()}.tmp`);
   writeFileSync(tmpFile, JSON.stringify(info, null, 2), 'utf-8');
-  renameSync(tmpFile, DAEMON_FILE);
+  renameSync(tmpFile, getDaemonFile());
   debug('SessionRegistry', `Wrote daemon.json: port=${info.port} pid=${info.pid}`);
 }
 
 /** Remove daemon.json on shutdown */
 export function removeDaemonInfo(): void {
   try {
-    unlinkSync(DAEMON_FILE);
+    unlinkSync(getDaemonFile());
     debug('SessionRegistry', 'Removed daemon.json');
   } catch {
     // Already gone — fine
@@ -164,7 +171,7 @@ export function removeDaemonInfo(): void {
 /** Read daemon.json, validate PID is alive, return info or null */
 export function readDaemonInfo(): DaemonInfo | null {
   try {
-    const data = readFileSync(DAEMON_FILE, 'utf-8');
+    const data = readFileSync(getDaemonFile(), 'utf-8');
     const info = JSON.parse(data) as DaemonInfo;
     if (info.pid && isProcessAlive(info.pid)) {
       return info;
