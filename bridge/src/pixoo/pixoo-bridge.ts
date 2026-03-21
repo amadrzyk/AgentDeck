@@ -268,7 +268,7 @@ function doStreamPush(): void {
       })
     );
 
-    Promise.all(promises).then(() => { pushing = false; });
+    Promise.all(promises).finally(() => { pushing = false; });
   } catch (err: any) {
     pushing = false;
     debug('Pixoo', `renderFrame error: ${err?.message}`);

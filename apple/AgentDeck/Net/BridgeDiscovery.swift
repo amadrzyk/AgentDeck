@@ -98,7 +98,6 @@ final class BridgeDiscovery: @unchecked Sendable {
             }
         }
 
-        var newBridges: [DiscoveredBridge] = []
         var needsResolve: [(name: String, endpoint: NWEndpoint, port: Int, token: String?, project: String?, agentType: String?)] = []
 
         for result in uniqueResults {
@@ -108,18 +107,16 @@ final class BridgeDiscovery: @unchecked Sendable {
             var token: String?
             var project: String?
             var agentType: String?
-            var host: String?
             var port: Int?
 
             if case .bonjour(let txtRecord) = result.metadata {
                 token = txtRecord.getDictionaryValue(for: "token")
                 project = txtRecord.getDictionaryValue(for: "project")
                 agentType = txtRecord.getDictionaryValue(for: "agent")
-                host = txtRecord.getDictionaryValue(for: "ip")
                 if let portStr = txtRecord.getDictionaryValue(for: "port") {
                     port = Int(portStr)
                 }
-                print("[Discovery] TXT for \(name): ip=\(host ?? "nil") port=\(port ?? -1) token=\(token != nil)")
+                print("[Discovery] TXT for \(name): port=\(port ?? -1) agent=\(agentType ?? "nil") token=\(token != nil)")
             } else {
                 // No metadata yet — parse port from service name (e.g., "Project-9121")
                 let parts = name.split(separator: "-")
@@ -130,23 +127,13 @@ final class BridgeDiscovery: @unchecked Sendable {
             }
             port = port ?? 9120
 
-            // If TXT has explicit IP, use it directly
-            if let resolvedHost = host, !resolvedHost.hasPrefix("169.254.") {
-                print("[Discovery] found bridge via TXT: \(resolvedHost):\(port!) token=\(token != nil)")
-                newBridges.append(DiscoveredBridge(
-                    name: name,
-                    host: resolvedHost,
-                    port: port!,
-                    token: token,
-                    project: project,
-                    agentType: agentType
-                ))
-            } else {
-                needsResolve.append((name, result.endpoint, port!, token, project, agentType))
-            }
+            // Always resolve via endpoint — TXT ip field can be stale (Bonjour cache
+            // after DHCP renewal). Endpoint resolution uses the system's live mDNS resolver.
+            // TXT metadata (token, agent, project) is still extracted above for use after resolve.
+            needsResolve.append((name, result.endpoint, port!, token, project, agentType))
         }
 
-        // Resolve endpoints that didn't have IP in TXT
+        // Resolve all endpoints via NWConnection (live mDNS, not cached TXT)
         for item in needsResolve {
             resolveEndpoint(item.endpoint) { [weak self] resolvedHost in
                 guard let resolvedHost, !resolvedHost.hasPrefix("169.254.") else {
@@ -186,10 +173,9 @@ final class BridgeDiscovery: @unchecked Sendable {
         }
 
         DispatchQueue.main.async {
-            // Merge: keep async-resolved bridges that aren't in the new set
-            let newIds = Set(newBridges.map(\.id))
-            let asyncResolved = self.bridges.filter { !newIds.contains($0.id) }
-            self.bridges = newBridges + asyncResolved
+            // Remove bridges whose mDNS service disappeared (not in current browse results)
+            let currentNames = Set(needsResolve.map(\.name))
+            self.bridges.removeAll { !currentNames.contains($0.name) }
         }
     }
 

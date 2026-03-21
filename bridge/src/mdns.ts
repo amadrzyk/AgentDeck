@@ -112,24 +112,31 @@ export function advertiseBridge(
     }
   }
 
-  // Initial publish
-  publish();
+  // Track published IP to detect changes (DHCP renewal, interface switch)
+  let publishedIp: string | undefined;
 
-  // Periodic recovery: if network came back, re-publish
+  function publishAndTrackIp(): boolean {
+    publishedIp = getLanIp();
+    return publish();
+  }
+
+  // Initial publish
+  publishAndTrackIp();
+
+  // Periodic recovery: re-publish if instance lost OR IP changed
   recoveryTimer = setInterval(() => {
     if (stopped) return;
     const lanIp = getLanIp();
     if (!lanIp) {
-      // No network — nothing to recover yet
       debug('mDNS', 'Recovery check: no LAN IP available');
       return;
     }
-    // Test if current mDNS socket is alive by checking the instance
-    // bonjour-service doesn't expose socket state, so we re-publish
-    // only if the instance was lost (set to null after error)
     if (!instance) {
       log('[mDNS] Network recovered — re-publishing service');
-      publish();
+      publishAndTrackIp();
+    } else if (lanIp !== publishedIp) {
+      log(`[mDNS] IP changed (${publishedIp} → ${lanIp}) — re-publishing service`);
+      publishAndTrackIp();
     }
   }, MDNS_RECOVERY_INTERVAL);
 

@@ -175,14 +175,9 @@ final class AgentStateHolder: @unchecked Sendable {
         isAutoConnecting = true
         print("[Waterfall] starting waterfall")
 
-        #if os(macOS)
-        // macOS: mDNS first (daemon preference) — sandbox prevents reading ~/.agentdeck/sessions.json
-        // savedUrl tried as fallback after 4s if no mDNS results
+        // Always mDNS first — savedUrl can be stale after DHCP/network changes.
+        // savedUrl is tried as fallback after 4s if no mDNS results.
         startMdnsDiscovery()
-        #else
-        // iOS: savedUrl first, then mDNS
-        trySavedUrl()
-        #endif
     }
 
     private func trySavedUrl() {
@@ -255,8 +250,7 @@ final class AgentStateHolder: @unchecked Sendable {
 
             print("[AutoConnect] poll: bridges=\(self.discovery.bridges.count), failed=\(self.failedBridgeIds.count), searching=\(self.discovery.isSearching)")
 
-            #if os(macOS)
-            // macOS: after 4s with no mDNS, try savedUrl as fallback
+            // After 4s with no mDNS results, try savedUrl as fallback
             if self.autoConnectPollCount == 8, self.discovery.bridges.isEmpty, let url = self.savedUrl {
                 print("[AutoConnect] no mDNS after 4s, trying saved URL: \(url)")
                 timer.invalidate()
@@ -265,7 +259,6 @@ final class AgentStateHolder: @unchecked Sendable {
                 self.connectTo(url: url)
                 return
             }
-            #endif
 
             // Filter out bridges that previously failed to connect (ghost mDNS entries)
             let candidates = self.discovery.bridges.filter { !self.failedBridgeIds.contains($0.id) }

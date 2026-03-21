@@ -94,7 +94,7 @@ program
   .option('-d, --debug', 'Enable debug logging')
   .option('--no-update-check', 'Skip version check and auto-update')
   .option('--local', 'Disable all device modules (WS only)')
-  .option('--no-mdns', 'Disable mDNS advertisement')
+  // --no-mdns removed: session bridges never advertise mDNS (daemon only)
   .option('--no-adb', 'Disable ADB reverse setup')
   .option('--no-serial', 'Disable ESP32 serial')
   .option('--no-pixoo', 'Disable Pixoo LED matrix')
@@ -111,7 +111,7 @@ program
       postit: opts.postit !== false,
       wakeWord: !!opts.wakeWord,
       modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false } : {
-        mdns: opts.mdns !== false,
+        mdns: false, // mDNS handled by daemon only — session bridges never advertise
         adb: opts.adb !== false ? 'auto' : false,
         serial: opts.serial !== false ? 'auto' : false,
         pixoo: opts.pixoo !== false ? 'auto' : false,
