@@ -38,14 +38,27 @@ export class PtyManager extends EventEmitter {
 
     const env = { ...(process.env as Record<string, string>), ...extraEnv };
 
-    const proc = pty.spawn(shell, ['-l', '-c', command], {
-      name: 'xterm-256color',
-      cols,
-      rows,
-      cwd: process.cwd(),
-      env,
-      handleFlowControl: true,
-    });
+    let proc: IPty;
+    try {
+      proc = pty.spawn(shell, ['-l', '-c', command], {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd: process.cwd(),
+        env,
+        handleFlowControl: true,
+      });
+    } catch (err: any) {
+      if (err?.message?.includes('posix_spawnp')) {
+        throw new Error(
+          'posix_spawnp failed — the prebuilt node-pty binary is incompatible with your Node.js version.\n' +
+          'Fix: rebuild node-pty from source:\n' +
+          '  cd $(npm root -g)/@agentdeck/bridge/node_modules/node-pty && npx node-gyp rebuild\n' +
+          'Or reinstall: npx @agentdeck/setup',
+        );
+      }
+      throw err;
+    }
     this.ptyProcess = proc;
 
     debug('PTY', `spawned pid=${proc.pid}`);

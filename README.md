@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/host-macOS%2014%2B-lightgrey.svg" alt="macOS 14+">
-  <img src="https://img.shields.io/badge/node-%3E%3D20-green.svg" alt="Node.js >= 20">
+  <img src="https://img.shields.io/badge/node-%3E%3D22-green.svg" alt="Node.js >= 22">
   <img src="https://img.shields.io/badge/Stream%20Deck%2B-8%20keys%20%2B%204%20encoders-black.svg?logo=elgato" alt="Stream Deck+">
   <img src="https://img.shields.io/badge/Android-10%2B%20(tablet%20%2B%20e--ink)-3DDC84.svg?logo=android&logoColor=white" alt="Android 10+">
   <img src="https://img.shields.io/badge/iOS%20%7C%20iPad%20%7C%20macOS-SwiftUI-007AFF.svg?logo=apple&logoColor=white" alt="Apple platforms">
@@ -165,7 +165,7 @@ The daemon is the sole hub for all dashboard clients. Session bridges handle PTY
 | Item | Required | Install |
 |------|----------|---------|
 | **macOS 14+** (Sonoma) | Yes | Windows/Linux not supported |
-| **Node.js** >= 20 | Yes | `brew install node` |
+| **Node.js** >= 22 | Yes | `brew install node` |
 | **pnpm** | Yes | `npm install -g pnpm` |
 | **Elgato Stream Deck app** >= 6.7 | Yes | [Elgato Downloads](https://www.elgato.com/downloads) |
 | **Stream Deck+ hardware** | Yes | 8 keys + 4 encoders + LCD touch strip |
@@ -188,7 +188,7 @@ git clone https://github.com/puritysb/AgentDeck.git && cd AgentDeck && pnpm setu
 ```
 
 The `pnpm setup` command:
-1. Checks required dependencies (Node.js 20+, pnpm, Claude CLI, Stream Deck app)
+1. Checks required dependencies (Node.js 22+, pnpm, Claude CLI, Stream Deck app)
 2. Installs `@elgato/cli` if missing
 3. Runs `pnpm install` + `pnpm build`
 4. Generates icon assets (16 PNGs)
@@ -591,6 +591,7 @@ Edit `config/prompt-templates.json` to customize the prompts cycled by the **Act
 | Android app can't find bridge | mDNS blocked on network | Use QR pairing (`agentdeck qr`) or enter IP manually in Settings |
 | Android shows "Not Connected" | Bridge not reachable | Verify same LAN; for USB: `adb reverse tcp:9120 tcp:9120` then connect to 127.0.0.1:9120 |
 | E-ink ghosting on Crema | Missing full GC16 refresh | State transitions trigger full refresh automatically; force refresh by toggling bridge connection |
+| `posix_spawnp failed` | Prebuilt node-pty binary incompatible with Node version | `cd $(npm root -g)/@agentdeck/bridge/node_modules/node-pty && npx node-gyp rebuild` |
 
 ### tmux -CC Compatibility
 

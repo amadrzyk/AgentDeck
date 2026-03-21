@@ -25,13 +25,13 @@ echo ""
 # --- Check required dependencies ---
 MISSING_REQUIRED=0
 
-# Node.js >= 20
+# Node.js >= 22
 if command -v node &>/dev/null; then
   NODE_VER=$(node -v | sed 's/v//' | cut -d. -f1)
-  if [ "$NODE_VER" -ge 20 ]; then
+  if [ "$NODE_VER" -ge 22 ]; then
     ok "Node.js $(node -v)"
   else
-    fail "Node.js $(node -v) — version 20+ required"
+    fail "Node.js $(node -v) — version 22+ required (Node 20 EOL April 2026)"
     MISSING_REQUIRED=1
   fi
 else

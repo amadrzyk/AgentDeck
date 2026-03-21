@@ -2,6 +2,60 @@
 
 ---
 
+## 2026-03-21 — Terminal Post-it 경량화: Badge 제거, Tab Title 유지
+
+### 문제
+Claude Code가 세션 이름을 prompt bar에 네이티브로 표시하고 `--resume`으로 세션 목록도 제공하게 되면서 terminal-postit 기능과 가치가 일부 중복됨. 5줄 LLM 요약 오버레이로 강화하는 방안도 검토 필요.
+
+### 해결
+분석 결과 Claude 네이티브는 **정적 세션 이름**, 우리는 **동적 실시간 상태** — 근본적으로 다른 정보. iTerm2 badge(Layer 2)는 워터마크라 rich 정보 표시에 부적합 (폰트 크기 제어 불가, Dynamic Profile 해킹 fragile). Tab title(Layer 1)은 모든 터미널에서 작동하며 탭 바에서 `● AgentDeck | Edit app.ts` 형태로 유일하게 cross-tab 상태 인식 제공.
+
+- `terminal-postit.ts`(435줄) → `terminal-status.ts`(109줄)로 교체
+- Layer 2(badge), Dynamic Profile, Story accumulator, LLM 세션 요약 제거
+- `timeline-summarizer.ts`에서 `summarizeSessionContext()` + `callLLM()` 제거
+- Layer 1(tab title) + Layer 3(user vars) 유지
+
+### 핵심 설계 결정
+- **Tab title(OSC 1)이 핵심 가치**: 터미널 여러 개 띄울 때 탭 바만으로 각 세션 상태 파악 가능. Claude 네이티브 세션 이름과 보완 관계
+- **Badge는 잘못된 매체**: 워터마크 오버레이는 1-2단어 ambient label용이지 5줄 정보 패널용이 아님
+- **LLM 호출 제거**: 실시간 tool name(`Edit app.ts`)이 LLM 한국어 요약(`포스트잇 기능 구현 중`)보다 즉시적이고 정확
+
+---
+
+## 2026-03-21 — Node.js >=22 + node-pty source build (#3)
+
+### 문제
+Node.js 24 (LTS)에서 prebuilt node-pty 바이너리 ABI 불일치 → `posix_spawnp failed` 에러로 bridge 시작 불가. prebuilt 디렉토리는 존재하지만 Node 24 ABI와 호환되지 않음.
+
+### 해결
+1. **engines `>=22`**: Node 20 EOL (2026-04) 앞두고 최소 버전 상향. setup.ts, install.sh, package.json, README 일괄 변경
+2. **Setup source build**: `npm_config_build_from_source=true` 환경변수로 node-pty 설치 시 항상 소스 빌드 강제. prebuild ABI 문제 원천 차단
+3. **PtyManager 에러 안내**: `posix_spawnp` 에러 catch → rebuild 명령어 + `npx @agentdeck/setup` 재설치 안내
+
+### 교훈
+- node-pty `prebuild.js`는 디렉토리 존재만 체크, 실제 바이너리 호환성 검증 없음
+- `npm_config_build_from_source=true`가 prebuild.js에서 직접 참조하는 환경변수 — npm CLI 플래그(`--build-from-source`)는 `node-pre-gyp` 전용
+- 네이티브 addon은 Node major 버전마다 ABI 변경 가능 — LTS 버전만 지원하되 source build 기본 전략이 안전
+
+---
+
+## 2026-03-21 — mDNS EADDRNOTAVAIL 크래시 → 복구 로직
+
+### 문제
+macOS 슬립/WiFi 재연결 시 `bonjour-service`가 mDNS multicast (`224.0.0.251:5353`)로 `send()` 호출 → `EADDRNOTAVAIL` 에러를 비동기 throw → `uncaughtException` 핸들러가 `"already in use"` 문자열만 체크 → 미매칭 → `shutdown()` 호출 → shutdown 중 동일 에러 재발 → 프로세스 종료. Daemon과 session bridge 양쪽에서 동시 발생. LaunchAgent `last exit code = 0` + `successful exit` semaphore로 재시작 루프 안 돎.
+
+### 해결
+1. `bridge-core.ts` `uncaughtException`: `EADDRNOTAVAIL` + `5353` 패턴도 무시 → 프로세스 생존
+2. `invalidateMdnsInstance()`: 에러 발생 시 Bonjour 인스턴스 destroy + null 마킹
+3. `mdns.ts` 복구 타이머 (30s): `instance === null` + `getLanIp() !== undefined` 감지 시 자동 re-publish
+
+### 교훈
+- `bonjour-service`는 자체 복구/재연결 없음. 소켓 에러 시 `errorCallback`으로 throw만 함
+- 에러 무시만으로는 불충분 — mDNS 광고가 죽은 상태로 남아 원격 클라이언트 발견 불가
+- 네트워크 상태 변화에 대한 방어는 "무시 + 복구" 쌍으로 구현해야 함
+
+---
+
 ## 2026-03-21 — Timeline automated tagging: cron 채팅 노이즈 근본 해결
 
 ### 문제

@@ -12,14 +12,24 @@
     "package": "bash scripts/package-plugin.sh",
     "setup": "bash scripts/install.sh",
     "test": "vitest run",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "postinstall": "bash scripts/postinstall.sh"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1",
     "sharp": "^0.34.5",
+    "typescript-eslint": "^8.57.1",
     "vitest": "^4.0.18"
   }
 }

@@ -41,12 +41,12 @@ function banner() {
 function checkPrerequisites(): boolean {
   let pass = true;
 
-  // Node.js >= 20
+  // Node.js >= 22
   const major = parseInt(process.version.replace('v', '').split('.')[0], 10);
-  if (major >= 20) {
+  if (major >= 22) {
     ok(`Node.js ${process.version}`);
   } else {
-    fail(`Node.js ${process.version} — version 20+ required`);
+    fail(`Node.js ${process.version} — version 22+ required (Node 20 EOL April 2026)`);
     pass = false;
   }
 
@@ -94,7 +94,11 @@ function installStreamDeckCli() {
 
 function installBridge() {
   info('Installing AgentDeck bridge (@agentdeck/bridge)...');
-  execSync('npm install -g @agentdeck/bridge', { stdio: 'inherit' });
+  // Force source build of node-pty to avoid prebuilt binary ABI mismatch (see #3)
+  execSync('npm install -g @agentdeck/bridge', {
+    stdio: 'inherit',
+    env: { ...process.env, npm_config_build_from_source: 'true' },
+  });
 
   if (which('agentdeck')) {
     ok('agentdeck CLI installed');
