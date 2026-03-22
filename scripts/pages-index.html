@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentDeck — Physical Controller for AI Coding Agents</title>
+<style>
+:root { --bg: #0f172a; --surface: #1e293b; --text: #e2e8f0; --dim: #64748b; --accent: #38bdf8; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Inter', system-ui, sans-serif; line-height: 1.6; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; }
+.hero { text-align: center; max-width: 720px; }
+.logo { font-size: 3rem; margin-bottom: 0.5rem; }
+h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
+.tagline { color: var(--accent); font-size: 1.1rem; font-weight: 500; margin-bottom: 1.5rem; }
+.description { color: var(--dim); font-size: 0.95rem; margin-bottom: 2.5rem; max-width: 560px; margin-left: auto; margin-right: auto; }
+.links { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 3rem; }
+.link-card { background: var(--surface); border-radius: 12px; padding: 1.25rem 1.75rem; text-decoration: none; color: var(--text); transition: transform 0.15s, box-shadow 0.15s; min-width: 180px; }
+.link-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+.link-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+.link-card p { font-size: 0.8rem; color: var(--dim); }
+.link-card .icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.platforms { display: flex; gap: 2rem; justify-content: center; color: var(--dim); font-size: 0.8rem; margin-bottom: 2rem; flex-wrap: wrap; }
+.platforms span { display: flex; align-items: center; gap: 0.4rem; }
+.footer { color: var(--dim); font-size: 0.75rem; margin-top: auto; padding-top: 3rem; }
+.footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="logo">&#x1F419;</div>
+  <h1>AgentDeck</h1>
+  <p class="tagline">Stop Chatting. Start Steering.</p>
+  <p class="description">
+    Physical controller for AI coding agents.
+    Stream Deck+, e-ink displays, touch tablets, and LED matrices — all connected to Claude Code, OpenClaw, and Codex CLI through a unified daemon hub.
+  </p>
+
+  <div class="links">
+    <a href="reports/" class="link-card">
+      <div class="icon">&#x1F4CA;</div>
+      <h3>Test Reports</h3>
+      <p>Coverage, scenarios, trends</p>
+    </a>
+    <a href="https://github.com/puritysb/AgentDeck" class="link-card">
+      <div class="icon">&#x1F4BB;</div>
+      <h3>Source Code</h3>
+      <p>GitHub repository</p>
+    </a>
+    <a href="https://www.npmjs.com/package/@agentdeck/setup" class="link-card">
+      <div class="icon">&#x1F4E6;</div>
+      <h3>Install</h3>
+      <p>npx @agentdeck/setup</p>
+    </a>
+  </div>
+
+  <div class="platforms">
+    <span>Stream Deck+</span>
+    <span>Android (E-ink / Tablet)</span>
+    <span>Apple (iOS / macOS)</span>
+    <span>ESP32 (Touch / LED)</span>
+    <span>TUI Dashboard</span>
+  </div>
+</div>
+
+<div class="footer">
+  Built by <a href="https://github.com/puritysb">puritysb</a>
+</div>
+</body>
+</html>

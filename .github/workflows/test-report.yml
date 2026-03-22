@@ -54,10 +54,18 @@ jobs:
       - name: Run Android tests
         run: cd android && ./gradlew testDebugUnitTest || true
 
+      - name: Run Robot Framework tests (no-hw)
+        run: |
+          pip install robotframework platformio
+          mkdir -p coverage/test-report/robot
+          cd esp32/robot && python3 -m robot --include no-hw --exclude hw \
+            --outputdir ../../coverage/test-report/robot \
+            tests/ || true
+
       - name: Fetch previous history
         run: |
           PAGES_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
-          curl -sf "${PAGES_URL}/history.json" -o coverage/test-report/history.json || echo '[]' > coverage/test-report/history.json
+          curl -sf "${PAGES_URL}/reports/history.json" -o coverage/test-report/history.json || echo '[]' > coverage/test-report/history.json
         continue-on-error: true
 
       - name: Generate HTML report
@@ -65,13 +73,22 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
 
+      - name: Assemble Pages site
+        run: |
+          mkdir -p _site/reports
+          # Landing page at root
+          cp scripts/pages-index.html _site/index.html
+          # Test report under /reports/
+          cp coverage/test-report/index.html _site/reports/index.html
+          cp coverage/test-report/history.json _site/reports/history.json 2>/dev/null || true
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: coverage/test-report
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deploy

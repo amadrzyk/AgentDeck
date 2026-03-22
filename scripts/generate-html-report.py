@@ -28,6 +28,7 @@ VITEST_JSON = REPORT_DIR / "vitest.json"
 COVERAGE_JSON = ROOT / "coverage" / "coverage-summary.json"
 ANDROID_XML_DIR = ROOT / "android" / "app" / "build" / "test-results" / "testDebugUnitTest"
 SCENARIO_JSON = ROOT / "scripts" / "scenario-matrix.json"
+ROBOT_XML = REPORT_DIR / "robot" / "output.xml"
 HISTORY_JSON = REPORT_DIR / "history.json"
 OUTPUT_HTML = REPORT_DIR / "index.html"
 
@@ -74,6 +75,50 @@ def load_android_xml():
         suite["passed"] = suite["tests"] - suite["failures"] - suite["errors"] - suite["skipped"]
         suites.append(suite)
     return suites
+
+def load_robot_xml():
+    """Parse Robot Framework output.xml into suite/test structure."""
+    if not ROBOT_XML.exists():
+        return None
+    try:
+        tree = ET.parse(ROBOT_XML)
+    except ET.ParseError:
+        return None
+    root = tree.getroot()
+
+    # Parse statistics for summary
+    stats_el = root.find('.//statistics/total/stat[@name="All Tests"]')
+    if stats_el is None:
+        # Robot 7+ uses different structure
+        stats_el = root.find('.//statistics/total/stat')
+
+    passed = int(stats_el.get('pass', 0)) if stats_el is not None else 0
+    failed = int(stats_el.get('fail', 0)) if stats_el is not None else 0
+    skipped = int(stats_el.get('skip', 0)) if stats_el is not None else 0
+
+    # Parse individual test cases from <suite> elements
+    cases = []
+    for test_el in root.iter('test'):
+        status_el = test_el.find('status')
+        status = status_el.get('status', 'PASS').upper() if status_el is not None else 'PASS'
+        # Robot status: PASS/FAIL/SKIP
+        case_status = "passed" if status == "PASS" else ("skipped" if status == "SKIP" else "failed")
+        msg = ""
+        if status_el is not None and status_el.text:
+            msg = status_el.text[:300]
+        cases.append({
+            "name": test_el.get("name", ""),
+            "status": case_status,
+            "message": msg,
+        })
+
+    return {
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "total": passed + failed + skipped,
+        "cases": cases,
+    }
 
 def load_scenarios():
     if not SCENARIO_JSON.exists():
@@ -334,7 +379,7 @@ def sparkline_svg(history, key, color, label, w=200, h=40):
     </div>'''
 
 
-def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results, history):
+def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results, history, robot=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # --- Aggregate stats ---
@@ -349,9 +394,14 @@ def generate_html(vitest, android_suites, cov_data, scenarios, scenario_results,
     and_total = sum(s["tests"] for s in android_suites)
     and_duration = sum(s["time"] for s in android_suites) * 1000
 
-    total_passed = vt_passed + and_passed
-    total_failed = vt_failed + and_failed
-    total_all = vt_total + and_total
+    rob_passed = robot["passed"] if robot else 0
+    rob_failed = robot["failed"] if robot else 0
+    rob_skipped = robot["skipped"] if robot else 0
+    rob_total = robot["total"] if robot else 0
+
+    total_passed = vt_passed + and_passed + rob_passed
+    total_failed = vt_failed + and_failed + rob_failed
+    total_all = vt_total + and_total + rob_total
     total_duration = vt_duration + and_duration
 
     # Coverage
@@ -744,10 +794,14 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
     <div class="suite-bar">
       <div class="suite-bar-header">
         <h3>Robot Framework</h3>
-        {status_badge("skip")}
+        {status_badge("passed" if robot and rob_failed == 0 else "failed") if robot else status_badge("skip")}
       </div>
-      <div class="progress-bar"><div class="progress-fill" style="width:0"></div></div>
-      <div class="suite-stats"><span style="color:var(--dim)">Requires ESP32 hardware</span></div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:{rob_passed/rob_total*100 if rob_total else 0:.1f}%;background:#22c55e"></div>
+      </div>
+      <div class="suite-stats">
+        {f"<span>Pass {rob_passed}</span><span>Fail {rob_failed}</span><span>Skip {rob_skipped}</span>" if robot else '<span style="color:var(--dim)">Not available</span>'}
+      </div>
     </div>
   </div>
 
@@ -809,6 +863,23 @@ td {{ padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.85
         <th style="width:80px">Time</th>
       </tr></thead>
       <tbody>{and_file_rows}</tbody>
+    </table>
+  </div>"""}
+
+  <!-- Robot Framework Detail -->
+  {"" if not robot else f"""<div class="section">
+    <div class="section-title">Robot Framework <span>ESP32 build verification &middot; {rob_total} tests (no-hw)</span></div>
+    <table id="robot-table">
+      <thead><tr>
+        <th style="width:30px"></th>
+        <th>Test Case</th>
+        <th style="width:80px">Status</th>
+      </tr></thead>
+      <tbody>{"".join(
+        f'<tr class="file-row"><td style="color:{"#22c55e" if c["status"]=="passed" else ("#64748b" if c["status"]=="skipped" else "#ef4444")};font-weight:600">{"✓" if c["status"]=="passed" else ("○" if c["status"]=="skipped" else "✗")}</td><td class="file-path">{c["name"]}</td><td>{status_badge(c["status"])}</td></tr>'
+        + (f'<tr class="test-row"><td></td><td colspan="2" class="fail-msg">{c["message"]}</td></tr>' if c.get("message") and c["status"]=="failed" else "")
+        for c in robot["cases"]
+      )}</tbody>
     </table>
   </div>"""}
 
@@ -910,10 +981,11 @@ def main():
     vitest = load_vitest()
     android = load_android_xml()
     cov = load_coverage()
+    robot = load_robot_xml()
     scenarios = load_scenarios()
     history = load_history()
 
-    if not vitest and not android:
+    if not vitest and not android and not robot:
         print("No test results found. Run 'pnpm test:report' first.")
         sys.exit(1)
 
@@ -927,16 +999,19 @@ def main():
     and_passed = sum(s["passed"] for s in android)
     and_failed = sum(s["failures"] + s["errors"] for s in android)
     and_total = sum(s["tests"] for s in android)
-    total_passed = vt_passed + and_passed
-    total_failed = vt_failed + and_failed
-    total_all = vt_total + and_total
+    rob_passed = robot["passed"] if robot else 0
+    rob_failed = robot["failed"] if robot else 0
+    rob_total = robot["total"] if robot else 0
+    total_passed = vt_passed + and_passed + rob_passed
+    total_failed = vt_failed + and_failed + rob_failed
+    total_all = vt_total + and_total + rob_total
     cov_total = cov.get("total", {}) if cov else {}
     lines_pct = cov_total.get("lines", {}).get("pct", 0)
 
     # Update history
     history = update_history(history, total_passed, total_failed, total_all, lines_pct)
 
-    html = generate_html(vitest, android, cov, scenarios, scenario_results, history)
+    html = generate_html(vitest, android, cov, scenarios, scenario_results, history, robot)
     OUTPUT_HTML.write_text(html, encoding="utf-8")
     print(f"HTML report: {OUTPUT_HTML}")
 
