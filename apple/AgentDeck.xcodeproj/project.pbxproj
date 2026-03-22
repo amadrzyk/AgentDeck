@@ -32,6 +32,7 @@
 		447BEA00A4A2B8DA5DEC15AF /* TimelineStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F37E295246F5931D533E31 /* TimelineStripView.swift */; };
 		46184E81DD69399DC187E6B6 /* Creature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A9A073192C93C1277AE490 /* Creature.swift */; };
 		4B34D6CBC040FE9BE5E51856 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
+		4B34D6CBC040FE9BE5E51857 /* JellyfishCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E85 /* JellyfishCreature.swift */; };
 		4B88BF545E6DD2320A7FDE60 /* TankStatusPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4F61CE4842A567D1BC861E /* TankStatusPanel.swift */; };
 		4D4A0A6C0120C440966AEFB3 /* DisplaySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89F9A134A1BC3EDEE8309695 /* DisplaySyncService.swift */; };
 		4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7847FA7381FB8075331B0F12 /* TimelineTests.swift */; };
@@ -80,6 +81,7 @@
 		C2EE2077BC999B5E03141F89 /* TimelineStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F37E295246F5931D533E31 /* TimelineStripView.swift */; };
 		C8DE7EFB8EAFBD9E0BAD7852 /* CreatureLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDD4BFFE8B182F5EEBC3365 /* CreatureLayout.swift */; };
 		CCB2A2848DDAADBEB6F7BB53 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
+		CCB2A2848DDAADBEB6F7BB54 /* JellyfishCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E85 /* JellyfishCreature.swift */; };
 		D169DFD5EA54C323E1128E7B /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
 		D53BC123AAE467EB342A5041 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */; };
 		D863C121DC06035A0007914B /* WaterSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F134F38758589B5D47652C8 /* WaterSurface.swift */; };
@@ -148,6 +150,7 @@
 		6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDeckApp.swift; sourceTree = "<group>"; };
 		6DDD4BFFE8B182F5EEBC3365 /* CreatureLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatureLayout.swift; sourceTree = "<group>"; };
 		776467350B975D0CA1A18E84 /* OctopusCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OctopusCreature.swift; sourceTree = "<group>"; };
+		776467350B975D0CA1A18E85 /* JellyfishCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JellyfishCreature.swift; sourceTree = "<group>"; };
 		7847FA7381FB8075331B0F12 /* TimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTests.swift; sourceTree = "<group>"; };
 		83E77BCD933FB80831B3E6FD /* AgentDeck.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AgentDeck.entitlements; sourceTree = "<group>"; };
 		89F9A134A1BC3EDEE8309695 /* DisplaySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaySyncService.swift; sourceTree = "<group>"; };
@@ -202,6 +205,7 @@
 				3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */,
 				05A9A073192C93C1277AE490 /* Creature.swift */,
 				57722317EDF1D567981112DE /* DataParticleSystem.swift */,
+				776467350B975D0CA1A18E85 /* JellyfishCreature.swift */,
 				776467350B975D0CA1A18E84 /* OctopusCreature.swift */,
 			);
 			path = Creatures;
@@ -554,6 +558,7 @@
 				F5B2BB7991E7283F4B99902F /* MonitorHUD.swift in Sources */,
 				DCDA12FC8E9B9961BA2D8182 /* MonitorScreen.swift in Sources */,
 				4B34D6CBC040FE9BE5E51856 /* OctopusCreature.swift in Sources */,
+				4B34D6CBC040FE9BE5E51857 /* JellyfishCreature.swift in Sources */,
 				2DDD8DC9B5918E9D0001AE28 /* PlanktonSystem.swift in Sources */,
 				7D1FA2E1BD47D35C7E3FEB23 /* Protocol.swift in Sources */,
 				85B903EFA7879FA42B54A258 /* RockFormation.swift in Sources */,
@@ -605,6 +610,7 @@
 				DEBCF013EEAB22462CF0044C /* MonitorHUD.swift in Sources */,
 				A50EA56C00F6A51F498DD20E /* MonitorScreen.swift in Sources */,
 				CCB2A2848DDAADBEB6F7BB53 /* OctopusCreature.swift in Sources */,
+				CCB2A2848DDAADBEB6F7BB54 /* JellyfishCreature.swift in Sources */,
 				0061BF09A7B22C7ADFE7C175 /* PlanktonSystem.swift in Sources */,
 				2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */,
 				530A55B6786D79B8D42211BF /* RockFormation.swift in Sources */,

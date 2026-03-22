@@ -39,6 +39,13 @@ enum TerrariumColors {
     static let tetraFin = Color(red: 1.0, green: 0.42, blue: 0.42)            // #FF6B6B
     static let tetraStripe = Color(red: 0.0, green: 0.898, blue: 1.0)         // #00E5FF
 
+    // Jellyfish (Codex CLI)
+    static let jellyfishBell = Color(red: 0.388, green: 0.400, blue: 0.945)      // #6366F1 indigo
+    static let jellyfishGlow = Color(red: 0.647, green: 0.706, blue: 0.988)      // #A5B4FC light indigo
+    static let jellyfishTentacle = Color(red: 0.506, green: 0.533, blue: 0.969)  // #8188F7 mid indigo
+    static let jellyfishMarking = Color(red: 0.878, green: 0.886, blue: 0.992)   // #E0E2FD near white
+    static let jellyfishNameBg = Color(red: 0.388, green: 0.400, blue: 0.945).opacity(0.6)
+
     // Environment
     static let bubbleWhite = Color.white.opacity(0.25)      // 0x40FFFFFF
     static let bubbleHighlight = Color.white.opacity(0.5)    // 0x80FFFFFF
@@ -130,6 +137,12 @@ enum TerrariumLayout {
     static let crayfishDefaultX: Float = 0.78
     static let crayfishSittingY: Float = 0.57
     static let crayfishRoutingY: Float = 0.45
+
+    // Jellyfish
+    static let jellyfishBodyRadius: Float = 0.050
+    static let jellyfishDefaultX: Float = 0.50
+    static let jellyfishIdleY: Float = 0.45
+    static let jellyfishProcessingY: Float = 0.20
 
     // Surface
     static let surfaceY: Float = 0.04

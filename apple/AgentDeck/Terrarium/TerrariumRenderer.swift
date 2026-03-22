@@ -7,6 +7,7 @@ final class TerrariumRenderer {
     // MARK: - Creatures
 
     private var octopuses: [String: OctopusCreature] = [:]
+    private var jellyfish: [String: JellyfishCreature] = [:]
     private let crayfish = CrayfishCreature()
     private let tetra = DataParticleSystem()
     private let bubbles = BubbleSystem()
@@ -59,8 +60,9 @@ final class TerrariumRenderer {
         sand.setState(envState)
         bubbles.setState(envState)
 
-        // Sync octopus lifecycle
+        // Sync creature lifecycles
         syncOctopuses(state: state)
+        syncJellyfish(state: state)
 
         // Update all subsystems
         waterEffect.update(dt: dt)
@@ -105,9 +107,12 @@ final class TerrariumRenderer {
             bubbles.emitCreatureBubbles(x: pos.x, y: pos.y - 0.02, count: 1)
         }
 
-        // Tetra coupling
-        let workingPositions = state.creatures
+        // Tetra coupling — working octopi + pulsing jellyfish attract fish
+        var workingPositions = state.creatures
             .filter { $0.state == .working }
+            .map { ($0.homeX, $0.homeY) }
+        workingPositions += state.jellyfishCreatures
+            .filter { $0.state == .pulsing }
             .map { ($0.homeX, $0.homeY) }
         tetra.octopusPositions = workingPositions
         tetra.crayfishPosition = crayfish.visible ? crayfish.currentPosition() : nil
@@ -117,6 +122,9 @@ final class TerrariumRenderer {
         // Creatures
         for oct in octopuses.values {
             oct.update(dt: dt, state: state)
+        }
+        for jf in jellyfish.values {
+            jf.update(dt: dt, state: state)
         }
         crayfish.update(dt: dt, state: state)
 
@@ -159,6 +167,11 @@ final class TerrariumRenderer {
         // Layer 9: Octopuses
         for oct in octopuses.values {
             oct.draw(context: &context, size: size)
+        }
+
+        // Layer 9.2: Jellyfish (between octopuses and front fish)
+        for jf in jellyfish.values {
+            jf.draw(context: &context, size: size)
         }
 
         // Layer 9.5: Front-layer fish
@@ -207,6 +220,39 @@ final class TerrariumRenderer {
     }
 
     // MARK: - Octopus Lifecycle
+
+    private func syncJellyfish(state: TerrariumState) {
+        let currentIds = Set(state.jellyfishCreatures.map(\.id))
+        let existingIds = Set(jellyfish.keys)
+
+        // Remove departed
+        for id in existingIds.subtracting(currentIds) {
+            jellyfish.removeValue(forKey: id)
+        }
+
+        // Add new or update existing
+        for creature in state.jellyfishCreatures {
+            if jellyfish[creature.id] == nil {
+                let jf = JellyfishCreature(
+                    sessionId: creature.id,
+                    homeX: creature.homeX,
+                    homeY: creature.homeY,
+                    scale: creature.scale
+                )
+                jf.displayName = creature.projectName
+                jf.onWaitingExit = { [weak self] in
+                    self?.bubbles.emitPopBurst(x: creature.homeX, y: creature.homeY)
+                }
+                jellyfish[creature.id] = jf
+            } else {
+                let jf = jellyfish[creature.id]!
+                jf.homeX = creature.homeX
+                jf.homeY = creature.homeY
+                jf.scale = creature.scale
+                jf.displayName = creature.projectName
+            }
+        }
+    }
 
     private func syncOctopuses(state: TerrariumState) {
         let currentIds = Set(state.creatures.map(\.id))

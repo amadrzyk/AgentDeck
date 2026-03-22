@@ -32,6 +32,18 @@ enum TetraVisualState {
     case hovering   // Near options
 }
 
+// MARK: - Jellyfish Creature State
+
+struct JellyfishCreatureState: Identifiable {
+    let id: String
+    let projectName: String?
+    let state: JellyfishVisualState
+    let homeX: Float
+    let homeY: Float
+    let scale: Float
+    var exitedWaiting = false
+}
+
 // MARK: - Agent Creature State
 
 struct AgentCreatureState: Identifiable {
@@ -51,6 +63,7 @@ struct AgentCreatureState: Identifiable {
 
 struct TerrariumState {
     var creatures: [AgentCreatureState] = []
+    var jellyfishCreatures: [JellyfishCreatureState] = []
     var crayfishState: CrayfishVisualState = .dormant
     var crayfishVisible: Bool = false
     var tetraState: TetraVisualState = .circling
@@ -67,18 +80,19 @@ extension DashboardState {
     func toTerrariumState(previous: TerrariumState? = nil) -> TerrariumState {
         var result = TerrariumState()
 
-        // Primary session creature (skip daemon and openclaw — they're not octopuses)
+        // Primary session creature (skip daemon, openclaw, codex-cli — they're not octopuses)
         let primaryIsOctopus = state != .disconnected
             && agentType != "daemon"
             && agentType != "openclaw"
+            && agentType != "codex-cli"
 
-        // Octopus siblings (exclude daemon + openclaw)
+        // Octopus siblings (exclude daemon + openclaw + codex-cli)
         let siblings = siblingSessions.filter {
-            $0.agentType != "daemon" && $0.agentType != "openclaw"
+            $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli"
         }
 
         let octopusCount = (primaryIsOctopus ? 1 : 0) + siblings.count
-        let slots = CreatureLayout.layoutOctopuses(count: max(1, octopusCount))
+        let slots = CreatureLayout.layoutOctopuses(count: octopusCount)
 
         var creatures: [AgentCreatureState] = []  // mutated later for dedup numbering
         var slotIdx = 0
@@ -105,6 +119,7 @@ extension DashboardState {
         }
         // Sibling octopuses
         for (i, sibling) in siblings.enumerated() {
+            guard !slots.isEmpty else { break }
             let idx = min(slotIdx + i, slots.count - 1)
             let s = slots[idx]
             let sibState = mapSiblingState(sibling.state)
@@ -140,6 +155,37 @@ extension DashboardState {
         }
 
         result.creatures = creatures
+
+        // Jellyfish (Codex CLI sessions)
+        let primaryIsJellyfish = state != .disconnected && agentType == "codex-cli"
+        let jellyfishSiblings = siblingSessions.filter { $0.agentType == "codex-cli" }
+        let jellyfishCount = (primaryIsJellyfish ? 1 : 0) + jellyfishSiblings.count
+        let jellySlots = CreatureLayout.layoutOctopuses(count: jellyfishCount) // reuse octopus layout
+
+        var jellyfishCreatures: [JellyfishCreatureState] = []
+        var jellySlotIdx = 0
+        if primaryIsJellyfish {
+            let s = jellySlots.first ?? CreatureSlot(x: 0.50, y: 0.45, scale: 1.0)
+            jellyfishCreatures.append(JellyfishCreatureState(
+                id: sessionId ?? "jf-primary",
+                projectName: projectName,
+                state: mapToJellyfishState(state),
+                homeX: s.x, homeY: s.y, scale: s.scale
+            ))
+            jellySlotIdx = 1
+        }
+        for (i, sibling) in jellyfishSiblings.enumerated() {
+            guard !jellySlots.isEmpty else { break }
+            let idx = min(jellySlotIdx + i, jellySlots.count - 1)
+            let s = jellySlots[idx]
+            jellyfishCreatures.append(JellyfishCreatureState(
+                id: sibling.id,
+                projectName: sibling.projectName,
+                state: mapSiblingToJellyfishState(sibling.state),
+                homeX: s.x, homeY: s.y, scale: s.scale
+            ))
+        }
+        result.jellyfishCreatures = jellyfishCreatures
 
         // Environment state — in daemon mode, derive from most active sibling
         let isDaemonLike = agentType == "daemon" ||
@@ -200,6 +246,24 @@ extension DashboardState {
         case "awaiting_permission", "awaiting_option", "awaiting_diff": .asking
         case "idle": .floating
         default: .sleeping
+        }
+    }
+
+    private func mapToJellyfishState(_ connState: AgentConnectionState) -> JellyfishVisualState {
+        switch connState {
+        case .disconnected: .dormant
+        case .idle: .drifting
+        case .processing: .pulsing
+        case .awaitingPermission, .awaitingOption, .awaitingDiff: .waiting
+        }
+    }
+
+    private func mapSiblingToJellyfishState(_ stateStr: String?) -> JellyfishVisualState {
+        switch stateStr {
+        case "processing": .pulsing
+        case "awaiting_permission", "awaiting_option", "awaiting_diff": .waiting
+        case "idle": .drifting
+        default: .dormant
         }
     }
 
