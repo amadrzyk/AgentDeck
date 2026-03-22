@@ -62,7 +62,9 @@ interface ToolCallRecord {
 
 interface Milestone {
   time: number;
-  text: string;       // LLM-summarized or heuristic
+  endTime: number;     // last activity timestamp (for merge gap calculation)
+  text: string;        // LLM-summarized or heuristic
+  tools: ToolCallRecord[];  // accumulated tools (for re-summarization on merge)
 }
 
 const MAX_MILESTONES = 5;
@@ -70,6 +72,7 @@ const MAX_TOOL_HISTORY = 20;
 const DEDUP_MS = 2000;
 const SUMMARIZE_DEBOUNCE_MS = 5000;
 const TOOL_COUNT_TRIGGER = 5;
+const MERGE_GAP_MS = 90_000;  // merge rounds within 90s into one milestone
 
 // Dynamic Profile constants
 const DYNAMIC_PROFILE_NAME = 'AgentDeck Postit';
@@ -269,24 +272,42 @@ export class TerminalStatus {
     const roundTools = [...this.roundTools];
     this.roundTools = [];
 
-    // Immediate heuristic milestone
-    const heuristic = this.getRoundHeuristic(roundTools);
-    const milestone: Milestone = { time: this.roundStartTime || time, text: heuristic };
-    this.milestones.push(milestone);
-    if (this.milestones.length > MAX_MILESTONES) {
-      this.milestones = this.milestones.slice(-MAX_MILESTONES);
+    const startTime = this.roundStartTime || time;
+    const lastMs = this.milestones[this.milestones.length - 1];
+    const isContinuous = lastMs && (startTime - lastMs.endTime) < MERGE_GAP_MS;
+
+    let targetIdx: number;
+    if (isContinuous && lastMs) {
+      // Merge into previous milestone — continuous work chunk
+      lastMs.tools.push(...roundTools);
+      lastMs.endTime = time;
+      lastMs.text = this.getMergedHeuristic(lastMs.tools);
+      targetIdx = this.milestones.length - 1;
+    } else {
+      // New milestone
+      const heuristic = this.getRoundHeuristic(roundTools);
+      const milestone: Milestone = {
+        time: startTime, endTime: time, text: heuristic, tools: roundTools,
+      };
+      this.milestones.push(milestone);
+      if (this.milestones.length > MAX_MILESTONES) {
+        this.milestones = this.milestones.slice(-MAX_MILESTONES);
+      }
+      targetIdx = this.milestones.length - 1;
     }
 
-    // Async LLM enhancement
-    const idx = this.milestones.length - 1;
-    void summarizeRound(
-      roundTools.map(tc => ({ tool: tc.tool, input: tc.input })),
-    ).then(result => {
-      if (result && this.milestones[idx]) {
-        this.milestones[idx].text = result;
-        if (this.lastSnapshot) this.render(this.lastSnapshot);
-      }
-    }).catch(() => { /* keep heuristic */ });
+    // Async LLM enhancement (re-summarize with full tool list)
+    const target = this.milestones[targetIdx];
+    if (target) {
+      void summarizeRound(
+        target.tools.map(tc => ({ tool: tc.tool, input: tc.input })),
+      ).then(result => {
+        if (result && this.milestones[targetIdx] === target) {
+          target.text = result;
+          if (this.lastSnapshot) this.render(this.lastSnapshot);
+        }
+      }).catch(() => { /* keep heuristic */ });
+    }
   }
 
   /** Quick heuristic for a round: "Updated X, Y" or "Investigated X" */
@@ -309,6 +330,34 @@ export class TerminalStatus {
     if (hasBash) return 'Ran commands';
     if (hasSearch) return 'Code search';
     return 'Investigation';
+  }
+
+  /** Heuristic for merged milestone: summarize the overall work chunk */
+  private getMergedHeuristic(tools: ToolCallRecord[]): string {
+    const editFiles = new Set<string>();
+    let hasSearch = false;
+    let hasBash = false;
+    let hasAgent = false;
+    for (const tc of tools) {
+      if (['Edit', 'Write'].includes(tc.tool) && tc.input) {
+        editFiles.add(tc.input.split('/').pop() ?? tc.input);
+      }
+      if (['Grep', 'Glob', 'Read'].includes(tc.tool)) hasSearch = true;
+      if (tc.tool === 'Bash') hasBash = true;
+      if (tc.tool === 'Agent') hasAgent = true;
+    }
+
+    const parts: string[] = [];
+    if (editFiles.size > 0) {
+      const files = Array.from(editFiles).slice(0, 3).join(', ');
+      parts.push(files);
+    }
+    if (hasAgent) parts.push('subagents');
+    if (hasBash && editFiles.size === 0) parts.push('commands');
+    if (hasSearch && editFiles.size === 0 && !hasAgent) parts.push('research');
+
+    if (parts.length === 0) return 'Investigation';
+    return parts.join(' + ');
   }
 
   // ===== LLM Summarization =====

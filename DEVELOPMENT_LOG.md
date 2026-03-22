@@ -2,6 +2,66 @@
 
 ---
 
+## 2026-03-22 — Terminal Badge: MODEL_INFO 정규식 개행 버그 + 마일스톤 병합
+
+### 문제
+1. **Badge 모델명에 빈 줄 삽입**: `MODEL_INFO` 정규식의 `\s*`가 개행 문자를 포함한 모든 공백을 매칭. 멀티라인 PTY 청크에서 "opus"와 다음 줄의 숫자 "423"을 하나의 모델명 `"opus\n\n423"`으로 캡처 → badge에서 3줄로 렌더링
+2. **같은 분 마일스톤 반복**: `PROCESSING→IDLE` 전환마다 마일스톤 1개 생성. 짧은 작업 사이클이 반복되면 `16:16` 같은 시간 3줄 소비 → 5줄 히스토리 공간 낭비
+
+### 해결
+1. `output-parser.ts` MODEL_INFO 정규식: `\s*` → `[ \t]*` (수평 공백만 매칭, 개행 차단)
+2. `terminal-status.ts` 마일스톤 연속작업 병합:
+   - `Milestone` 인터페이스에 `endTime`, `tools` 추가
+   - `MERGE_GAP_MS=90초`: 이전 마일스톤 종료 후 90초 이내 새 라운드는 같은 마일스톤에 병합
+   - 병합 시 전체 도구 기록으로 LLM 재요약 → 작업 덩어리의 의미 있는 요약 생성
+
+### 교훈 / 핵심 설계 결정
+- **정규식 `\s*`는 개행을 포함한다**: PTY 출력을 멀티라인 청크로 처리하는 파서에서 `\s*`는 의도치 않게 줄을 넘어 매칭. 단일 행 패턴에는 `[ \t]*` 사용
+- **마일스톤 병합 기준은 시간 갭**: 단순 같은-분 그룹핑보다 `endTime→다음 startTime` 갭(90초)이 "연속 작업" 판단에 더 정확. LLM 재요약으로 파일 나열 대신 의미 있는 작업 요약 제공
+
+---
+
+## 2026-03-22 — OpenClaw Gateway 이중 연결 정리 (Plugin→Daemon 단일 경로)
+
+### 문제
+Plugin이 OpenClaw Gateway(port 18789)에 **독립적으로** WS 연결을 유지하고 있었음 — daemon과 별개로 Ed25519 인증, `openclaw logs --follow --json` subprocess, timeline enrichment를 모두 중복 수행. Gateway 관점에서 동일 device의 WS 연결 2개 + log subprocess 2개 = 리소스 낭비 + 상태 혼란(불안정성 원인 추정).
+
+### 해결
+Plugin의 직접 Gateway 연결을 완전 제거, daemon 경유 단일 경로로 전환:
+- `plugin/src/gateway-client.ts` (1200줄), `log-stream.ts`, `timeline-summarizer.ts` 삭제 (순 -2288줄)
+- `ConnectionManager` 재작성: `GatewayClient`/`activeLink` 이중 링크 → `BridgeClient` 단일 연결
+- `switch_agent` WS 커맨드 추가 (`shared/protocol.ts` + `daemon-server.ts`) — 에이전트 전환을 daemon에 위임
+- Session button의 `activateGateway()`/`activateBridge()` → `switchToOpenClaw()`/`switchToClaude()`
+
+### 교훈 / 핵심 설계 결정
+- **Gateway 연결은 daemon 단독** — Android/Apple/TUI/ESP32 모두 이미 daemon 경유. Plugin만 이중 연결이었음
+- `receivingBridgeTimeline` 플래그로 이벤트만 억제해도 WS 연결 자체는 유지되어 Gateway에 부하. 근본 해결은 연결 자체 제거
+- Daemon이 이미 `onCommand` 핸들러에서 Plugin WS 커맨드를 `OpenClawAdapter.handleCommand()`에 라우팅하고 있었으므로, 새 인프라 추가 없이 `switch_agent` 커맨드만 추가하여 해결
+
+---
+
+## 2026-03-22 — 디바이스 연결 실패 진단 (mDNS stale IP, ESP32 포트 식별)
+
+### 문제
+1. iPad/iPhone이 daemon에 연결 안 됨 (ConnectionOverlay 표시)
+2. ESP32 Round AMOLED이 "No WiFi" 표시 (시리얼 데이터는 수신 중)
+3. Daemon이 간헐적으로 크래시 (stderr 로그 없이 죽음)
+
+### 해결
+1. **mDNS stale IP**: daemon 시작 시 `getLanIp()`가 반환한 IP가 DHCP 갱신으로 변경되었지만 mDNS TXT 레코드가 갱신되지 않음. `mdns.ts` recovery timer에 IP 변경 감지 추가. Apple 앱에서 TXT `ip` 필드를 무시하고 항상 `NWConnection` endpoint resolution 사용. iOS waterfall을 macOS와 동일하게 mDNS-first로 변경 (stale `savedUrl` 5초 대기 제거)
+2. **Session mDNS 광고 버그**: `cli.ts`에서 session bridge가 `mdns: true`로 mDNS 광고하고 있었음. `mdns: false`로 수정
+3. **ESP32 "No WiFi"**: 펌웨어가 connection overlay에서 `serialConnected()` 상태를 무시하고 WiFi 없으면 무조건 "No WiFi" 표시. 시리얼 연결도 유효한 연결로 간주하도록 `main.cpp` 수정
+4. **Daemon 크래시 추적**: `uncaughtException`에서 `process.exit(0)`하기 전 `~/.agentdeck/daemon-crash.log`에 스택 트레이스 append
+5. **ESP32 포트 혼동**: `usbmodem` 번호가 USB 허브 포트/케이블에 따라 변동됨. `device_info_request` JSON으로 보드 식별하는 방식으로 전환
+
+### 교훈 / 핵심 설계 결정
+- **ESP32 USB 포트 번호는 고정이 아님** — 같은 보드도 다른 허브 포트/케이블에 꽂으면 번호 변경. 플래시 전 반드시 `device_info_request`로 보드 확인 필수
+- **mDNS TXT record의 `ip` 필드는 신뢰할 수 없음** — Bonjour 캐시 + DHCP 갱신으로 stale 가능. endpoint resolution이 유일한 확실한 방법
+- **`uncaughtException` → `process.exit(0)`은 LaunchAgent `SuccessfulExit: false`와 조합 시 재시작 안 됨** — crash log 별도 보존 필수
+- **시리얼 연결은 WiFi와 동등한 "연결" 상태** — ESP32 펌웨어에서 connection overlay 로직이 WiFi만 체크하면 시리얼 전용 환경에서 영구 "No WiFi" 표시
+
+---
+
 ## 2026-03-22 — 로깅 인프라 통합 + Terminal Badge 개선
 
 ### 문제

@@ -56,7 +56,7 @@ const MODE_DEFAULT = /\?\s*for\s*shortcuts/;
 
 // Model info line: "Sonnet 4.6 · Claude Max" or "Claude 4 Sonnet (id) · api.anthropic.com"
 // ANSI stripping can remove inter-word spaces (e.g. "Opus4.6·ClaudeMax")
-const MODEL_INFO = /((?:Opus|Sonnet|Haiku)\s*[\d.]+|Claude\s*[\d.]+\s*(?:Opus|Sonnet|Haiku))(?:\s*(?:\([^)]+\))?\s*[·•]\s*(.+))?/i;
+const MODEL_INFO = /((?:Opus|Sonnet|Haiku)[ \t]*[\d.]+|Claude[ \t]*[\d.]+[ \t]*(?:Opus|Sonnet|Haiku))(?:[ \t]*(?:\([^)]+\))?[ \t]*[·•][ \t]*(.+))?/i;
 
 // Effort level: "/model" UI shows "High effort ← → to adjust" during selection
 // and "with high effort" in the confirmation line. Levels: high, medium, low.
