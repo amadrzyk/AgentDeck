@@ -16,6 +16,7 @@ import WebSocket from 'ws';
 import { BridgeCore } from './bridge-core.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
 import { BridgeLogStream } from './log-stream.js';
+import { SessionTimelineRelay } from './session-timeline-relay.js';
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import {
@@ -326,6 +327,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.wireTimeline(bridgeLogStream);
   core.wireDisplayMonitor();
 
+  // Subscribe to sibling session bridges' timelines for relay
+  const timelineRelay = new SessionTimelineRelay(port, core.bridgeTimeline);
+  timelineRelay.start();
+
   // mDNS + device modules
   const deviceModules = createDefaultModules('daemon' as any);
   const startedModules = await initModules(
@@ -605,6 +610,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       }
       return;
     }
+    if (cmd.type === 'switch_agent') {
+      const target = (cmd as any).agent as string;
+      if (target === 'openclaw' && gatewayAdapter?.isAlive()) {
+        // Force broadcast OpenClaw state to all clients
+        const snap = core.stateMachine.getSnapshot();
+        const gwStateEvent = core.buildStateEvent({
+          agentType: 'openclaw',
+          agentCapabilities: OPENCLAW_CAPABILITIES,
+          snapshot: snap,
+        });
+        lastStateEvent = gwStateEvent;
+        core.wsServer.broadcast(gwStateEvent);
+      } else if (target === 'claude-code') {
+        // Broadcast daemon/claude-code state — clients reconnect to session bridges independently
+        const snap = core.stateMachine.getSnapshot();
+        const stateEvent = core.buildStateEvent({
+          agentType: 'daemon' as any,
+          snapshot: snap,
+        });
+        lastStateEvent = stateEvent;
+        core.wsServer.broadcast(stateEvent);
+      }
+      return;
+    }
     if (cmd.type === 'query_usage') {
       fetchUsageRelayed(port).then((usage) => {
         if (usage) core.updateApiUsage(usage);
@@ -660,6 +689,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== Shutdown =====
   core.onShutdown(async () => {
     removeDaemonInfo();
+    timelineRelay.stop();
     voiceAssistant?.stop();
     voiceManager?.disconnectFromServer();
     bridgeLogStream.stop();

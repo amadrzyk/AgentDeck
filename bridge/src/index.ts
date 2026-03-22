@@ -12,7 +12,7 @@ import { enableDebugLog, log, logError, debug, setPtyMode } from './logger.js';
 import { EventJournal } from './event-journal.js';
 import { PtyRingBuffer } from './pty-ringbuffer.js';
 import { createDiagDump } from './diag-analyzer.js';
-import { createAdapter, ClaudeCodeAdapter } from './adapters/index.js';
+import { createAdapter, ClaudeCodeAdapter, CodexCliAdapter } from './adapters/index.js';
 import { MonitorAdapter } from './adapters/monitor.js';
 import { UtilityProxy } from './utility-proxy.js';
 import { BridgeLogStream } from './log-stream.js';
@@ -145,16 +145,16 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   // Dependency check (skip for monitor — no PTY needed)
   if (agentType !== 'monitor') {
-    const deps = checkDependencies();
+    const deps = checkDependencies(agentType);
     if (!deps.ok) process.exit(1);
     for (const w of deps.warnings) log(`WARNING: ${w}`);
 
-    // Version compatibility check
-    if (!opts.noUpdateCheck) {
+    // Version compatibility check (Claude Code only — uses npm registry + compatibleClaudeCode range)
+    if (agentType === 'claude-code' && !opts.noUpdateCheck) {
       const { checkVersionCompatibility } = await import('./version-check.js');
       const versionResult = await checkVersionCompatibility({
         skipCheck: false,
-        claudeCodeVersion: deps.claudeCodeVersion,
+        claudeCodeVersion: deps.agentVersion,
       });
       for (const w of versionResult.warnings) log(`WARNING: ${w}`);
       if (versionResult.restartNeeded) {
@@ -293,6 +293,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     hookServer.setMeta({ agentType, projectName });
     hookServer.setVoiceManager(voiceManager);
     hookServer.onApiUsage(() => ({ usage: core.cachedApiUsage, fetchedAt: core.lastApiFetchTime }));
+    hookServer.pairingToken = core.authToken;
+  } else if (adapter instanceof CodexCliAdapter) {
+    hookServer = adapter.getCodexHookServer();
+    hookServer.setMeta({ agentType, projectName });
+    hookServer.setVoiceManager(voiceManager);
     hookServer.pairingToken = core.authToken;
   } else if (adapter instanceof MonitorAdapter) {
     hookServer = adapter.getHookServer();
