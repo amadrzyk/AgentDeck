@@ -9,7 +9,8 @@
         "unit": [
           {"file": "bridge/src/__tests__/state-machine.test.ts", "patterns": ["basic transitions", "SessionStart", "SessionEnd", "DISCONNECTED", "IDLE", "PROCESSING"]},
           {"file": "bridge/src/__tests__/output-parser.test.ts", "patterns": ["*"]},
-          {"file": "bridge/src/__tests__/codex-output-parser.test.ts", "patterns": ["*"]}
+          {"file": "bridge/src/__tests__/codex-output-parser.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/cursor-sync.test.ts", "patterns": ["*"]}
         ],
         "integration": [
           {"file": "bridge/src/__tests__/server-integration.test.ts", "patterns": ["hook event", "state transition", "WS broadcast"]},
@@ -52,11 +53,14 @@
       "tests": {
         "unit": [
           {"file": "bridge/src/__tests__/adapter.test.ts", "patterns": ["*"]},
-          {"file": "bridge/src/__tests__/session-registry.test.ts", "patterns": ["session", "register", "deregister"]}
+          {"file": "bridge/src/__tests__/session-registry.test.ts", "patterns": ["session", "register", "deregister"]},
+          {"file": "bridge/src/__tests__/tui-dashboard.test.ts", "patterns": ["*"]}
         ],
         "integration": [
           {"file": "bridge/src/__tests__/daemon-lifecycle.test.ts", "patterns": ["*"]},
-          {"file": "bridge/src/__tests__/bridge-core.test.ts", "patterns": ["sessions_list", "client"]}
+          {"file": "bridge/src/__tests__/bridge-core.test.ts", "patterns": ["sessions_list", "client"]},
+          {"file": "bridge/src/__tests__/tui-renderer-snapshots.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/tui-terrarium-snapshots.test.ts", "patterns": ["*"]}
         ],
         "platform": [],
         "e2e": []
@@ -71,10 +75,12 @@
       "tests": {
         "unit": [
           {"file": "bridge/src/__tests__/esp32-serial-node.test.ts", "patterns": ["*"]},
+          {"file": "bridge/src/__tests__/pixoo-sprites.test.ts", "patterns": ["*"]},
           {"file": "shared/src/__tests__/protocol-contract.test.ts", "patterns": ["*"]}
         ],
         "integration": [
           {"file": "plugin/src/__tests__/connection-integration.test.ts", "patterns": ["*"]},
+          {"file": "plugin/src/__tests__/connection-manager.test.ts", "patterns": ["*"]},
           {"file": "bridge/src/__tests__/tier3-integration.test.ts", "patterns": ["*"]}
         ],
         "platform": [
@@ -128,7 +134,8 @@
       "tests": {
         "unit": [
           {"file": "plugin/src/__tests__/option-scenario.test.ts", "patterns": ["layout", "button", "slot"]},
-          {"file": "plugin/src/__tests__/text-utils-and-labels.test.ts", "patterns": ["*"]}
+          {"file": "plugin/src/__tests__/text-utils-and-labels.test.ts", "patterns": ["*"]},
+          {"file": "plugin/src/__tests__/renderer-snapshots.test.ts", "patterns": ["*"]}
         ],
         "integration": [],
         "platform": [],
