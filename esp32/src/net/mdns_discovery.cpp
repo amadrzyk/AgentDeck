@@ -57,8 +57,8 @@ bool mdnsPoll(BridgeInfo& out) {
     if (selected < 0) return false;
 
     {
-#if defined(BOARD_ROUND_AMOLED) || defined(BOARD_IPS_35)
-        IPAddress ip = MDNS.address(selected);  // ESP-IDF 5.x
+#if defined(BOARD_ROUND_AMOLED) || defined(BOARD_IPS_35) || defined(BOARD_BOX_86)
+        IPAddress ip = MDNS.address(selected);  // ESP-IDF 5.x (pioarduino)
 #else
         IPAddress ip = MDNS.IP(selected);       // ESP-IDF 4.4
 #endif
