@@ -118,55 +118,63 @@ static int formatResetCompact(const char* reset, char* out, int maxLen) {
     return ri;
 }
 
-// Full-screen usage gauge: background fill + overlaid text
-// Layout: entire 32x8 screen
-//   Rows 0-7: usage color fill from left (proportional to percent used)
-//   Row 1: "72%" left-aligned (dark on bright fill, bright on dark empty)
-//   Row 1: "1H23" right-aligned (dimmed time color)
-//   Row 6: "5H" label left (dim)
+// Full-screen usage gauge: battery-style remaining bar
+// Layout:
+//   Row 1: "5H" label (left) + remaining bar (middle) + "1H23" reset time (right)
+//   Bar shows REMAINING capacity (100-percent), color by zone
 static void drawFullScreenGauge(CRGB* leds, float percent, const char* label,
                                  const char* resetStr, int slideX) {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
+    float remaining = 100.0f - percent;
 
-    // Usage fill color (based on how much used — NOT remaining)
+    // Label width: "5H" = 2 chars = 8px + 1px gap
+    int labelW = 9;
+    // Reset time
+    char timeBuf[8];
+    int timeLen = formatResetCompact(resetStr, timeBuf, sizeof(timeBuf));
+    int timeW = timeLen > 0 ? MatrixFont::textWidth(timeBuf) + 2 : 0;  // +2 gap
+
+    // Bar area
+    int barX0 = labelW;
+    int barX1 = MATRIX_W - timeW - 1;
+    int barW = barX1 - barX0;
+    if (barW < 4) barW = 4;
+
+    // Remaining fill color
     CRGB fillColor;
-    if (percent < 50)       fillColor = CRGB(0, 0, 100);     // Blue: safe
-    else if (percent < 70)  fillColor = CRGB(0, 140, 130);   // Teal
-    else if (percent < 90)  fillColor = CRGB(160, 120, 0);   // Amber: caution
-    else                    fillColor = CRGB(180, 0, 0);      // Red: critical
+    if (remaining > 40)      fillColor = CRGB(0, 160, 0);
+    else if (remaining > 20) fillColor = CRGB(160, 130, 0);
+    else                     fillColor = CRGB(180, 0, 0);
 
-    CRGB emptyColor = CRGB(12, 12, 12);
-    int fillW = (int)(percent / 100.0f * MATRIX_W);
+    int fillPx = (int)(remaining / 100.0f * barW);
 
-    // Fill entire screen
-    for (int x = 0; x < MATRIX_W; x++) {
-        int sx = x + slideX;
-        if (sx < 0 || sx >= MATRIX_W) continue;
-        CRGB c = (x < fillW) ? fillColor : emptyColor;
-        for (int y = 0; y < MATRIX_H; y++) {
-            setPixel(leds, sx, y, c);
+    // Draw bar outline (rows 1-6, full height battery shape)
+    CRGB border = CRGB(50, 50, 50);
+    for (int x = barX0; x <= barX1; x++) {
+        setPixel(leds, x + slideX, 0, border);
+        setPixel(leds, x + slideX, 7, border);
+    }
+    for (int y = 0; y < MATRIX_H; y++) {
+        setPixel(leds, barX0 + slideX, y, border);
+        setPixel(leds, barX1 + slideX, y, border);
+    }
+
+    // Fill interior (remaining = filled from left)
+    for (int x = 0; x < barW - 2; x++) {
+        CRGB c = (x < fillPx) ? fillColor : CRGB(10, 10, 10);
+        for (int y = 1; y <= 6; y++) {
+            setPixel(leds, barX0 + 1 + x + slideX, y, c);
         }
     }
 
-    // Percentage text (row 1, left)
-    char pctBuf[5];
-    snprintf(pctBuf, sizeof(pctBuf), "%d%%", (int)percent);
-    // Dark text on bright fill, bright text on dark empty
-    CRGB pctColor = (fillW > 12) ? CRGB(0, 0, 0) : CRGB(200, 200, 200);
-    MatrixFont::drawScrollText(leds, pctBuf, 1 + slideX, 1, pctColor, MATRIX_W, MATRIX_H);
+    // Label text (vertically centered, row 1)
+    MatrixFont::drawScrollText(leds, label, 0 + slideX, 1, CRGB(150, 150, 150), MATRIX_W, MATRIX_H);
 
-    // Reset time (row 1, right-aligned, dimmed)
-    char timeBuf[8];
-    if (formatResetCompact(resetStr, timeBuf, sizeof(timeBuf)) > 0) {
-        int tw = MatrixFont::textWidth(timeBuf);
-        CRGB timeColor = CRGB(100, 120, 140);  // dimmed blue-gray
-        MatrixFont::drawScrollText(leds, timeBuf, MATRIX_W - tw - 1 + slideX, 1, timeColor, MATRIX_W, MATRIX_H);
-    }
-
-    // Label (row 6, left, dim)
-    for (int i = 0; label[i]; i++) {
-        MatrixFont::drawChar(leds, i * 4 + 1 + slideX, 6, label[i], CRGB(80, 80, 80), MATRIX_W, MATRIX_H);
+    // Reset time (right side, vertically centered, row 1)
+    if (timeLen > 0) {
+        int timeX = MATRIX_W - MatrixFont::textWidth(timeBuf) + slideX;
+        MatrixFont::drawScrollText(leds, timeBuf, timeX, 1, CRGB(150, 150, 150), MATRIX_W, MATRIX_H);
     }
 }
 
