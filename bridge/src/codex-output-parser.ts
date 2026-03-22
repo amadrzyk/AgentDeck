@@ -1,0 +1,254 @@
+import stripAnsi from 'strip-ansi';
+import { EventEmitter } from 'events';
+import { debug } from './logger.js';
+
+/**
+ * Codex CLI output parser — detects state changes from Ink TUI PTY output.
+ *
+ * Unlike Claude Code's OutputParser which matches specific spinner characters (✢✳✶✻✽),
+ * Codex CLI uses Ink (React-based TUI) with braille spinners and structured approval prompts.
+ *
+ * Emits the same event vocabulary as OutputParser for StateMachine compatibility:
+ * - spinner_start, spinner_stop, idle, permission_prompt, option_prompt
+ * - tool_action, project_name, model_info
+ */
+
+// Braille spinner characters used by Ink/ora
+const BRAILLE_SPINNERS = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/;
+
+// Codex processing indicators
+const THINKING_TEXT = /\b(?:Thinking|Working|Processing|Generating)\b/i;
+
+// Codex idle prompt — the `>` prompt or the end-of-turn marker
+// Ink renders a `❯` or `>` prompt when waiting for input
+const IDLE_PROMPT = /^[❯>]\s/m;
+
+// Sandbox approval prompts — Codex asks user to approve shell commands/file writes
+const APPROVAL_ALLOW = /\bAllow\b.*\bDeny\b|\bapprove\b.*\bdeny\b/i;
+const APPROVAL_YN = /\(y\)es.*\(n\)o|\[Y\/n\]|\[y\/N\]/i;
+const APPROVAL_ALWAYS = /Always\s+allow|Allow\s+once/i;
+
+// Tool/command execution indicators
+const TOOL_RUNNING = /(?:Running|Executing|Ran)(?:\s+in\s+\S+)?:\s*[`"]?(.+?)[`"]?\s*$/m;
+const FILE_OPERATION = /(?:Reading|Writing|Creating|Deleting|Editing|Patching)\s+(.+)/i;
+
+// Model info from Codex startup or status
+const MODEL_INFO = /(?:model|using)\s*:?\s*(gpt-[\w.-]+|o\d[\w.-]*|codex[\w.-]*)/i;
+
+// Project/working directory
+const WORKDIR = /(?:Working\s+(?:directory|in)|cwd)\s*:?\s*(.+)/i;
+const PROJECT_DIR = /[~\/][\w.\-\/]+\/(\w[\w.\-]*)\s*$/m;
+
+const SPINNER_DEBOUNCE_MS = 2000;
+const IDLE_DEBOUNCE_MS = 300;
+const OPTION_DEBOUNCE_MS = 150;
+
+export class CodexOutputParser extends EventEmitter {
+  private buffer = '';
+  private spinnerActive = false;
+  private spinnerTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private optionTimer: ReturnType<typeof setTimeout> | null = null;
+  private projectName: string | null = null;
+  private modelName: string | null = null;
+  private seenFirstIdle = false;
+  private pendingAnsi = '';
+
+  feed(rawData: string): void {
+    const data = this.pendingAnsi + rawData;
+    this.pendingAnsi = '';
+
+    // Buffer incomplete ANSI escape sequences
+    const lastEsc = data.lastIndexOf('\x1b');
+    if (lastEsc !== -1 && lastEsc >= data.length - 20) {
+      const tail = data.slice(lastEsc);
+      if (/^\x1b\[[\d;:]*$/.test(tail) || /^\x1b$/.test(tail) || /^\x1b\](?:(?!\x1b\\|\x07).)*$/.test(tail)) {
+        this.pendingAnsi = tail;
+        const complete = data.slice(0, lastEsc);
+        if (complete.length === 0) return;
+        return this.processFeed(complete);
+      }
+    }
+    this.processFeed(data);
+  }
+
+  private processFeed(rawData: string): void {
+    const spaced = rawData
+      .replace(/\x1b\[\d*C/g, ' ')
+      .replace(/\x1b\[\d*(?:;\d*)?[Hf]/g, '\n')
+      .replace(/\x1b\[\d*[ABEF]/g, '\n');
+    const clean = stripAnsi(spaced);
+    this.buffer += clean;
+
+    if (this.buffer.length > 8192) {
+      this.buffer = this.buffer.slice(-4096);
+    }
+
+    const preview = clean.replace(/[\n\r]/g, '\\n').replace(/[\x00-\x1f]/g, '?').slice(0, 100);
+    if (preview.trim().length > 0) {
+      debug('CodexParser', `feed(${clean.length}): "${preview}"`);
+    }
+
+    this.detectPatterns(clean);
+  }
+
+  private detectPatterns(chunk: string): void {
+    // --- Always extract metadata ---
+    this.parseToolAction(chunk);
+    this.parseProjectName(chunk);
+    this.parseModelInfo(chunk);
+
+    // --- Pre-scan ---
+    const hasIdlePrompt = IDLE_PROMPT.test(chunk);
+    const hasApproval =
+      APPROVAL_ALLOW.test(chunk) ||
+      APPROVAL_YN.test(chunk) ||
+      APPROVAL_ALWAYS.test(chunk);
+
+    // --- Spinner + prompt handling ---
+    const hasSpinner = BRAILLE_SPINNERS.test(chunk) || THINKING_TEXT.test(chunk);
+
+    // Approval prompt → AWAITING_PERMISSION
+    if (hasApproval) {
+      if (this.spinnerTimer) { clearTimeout(this.spinnerTimer); this.spinnerTimer = null; }
+      if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+
+      if (this.spinnerActive) {
+        this.spinnerActive = false;
+        debug('CodexParser', 'EMIT spinner_stop (approval detected)');
+        this.emit('spinner_stop');
+      }
+
+      if (this.optionTimer) clearTimeout(this.optionTimer);
+      this.optionTimer = setTimeout(() => {
+        this.optionTimer = null;
+        debug('CodexParser', 'EMIT permission_prompt');
+        this.emit('permission_prompt', { options: this.extractApprovalOptions(chunk) });
+      }, OPTION_DEBOUNCE_MS);
+      return;
+    }
+
+    // Idle prompt detected
+    if (hasIdlePrompt) {
+      if (!this.seenFirstIdle) {
+        this.seenFirstIdle = true;
+        debug('CodexParser', 'First idle prompt detected');
+      }
+
+      if (this.spinnerTimer) { clearTimeout(this.spinnerTimer); this.spinnerTimer = null; }
+
+      if (this.spinnerActive) {
+        this.spinnerActive = false;
+        debug('CodexParser', 'EMIT spinner_stop (idle detected)');
+        this.emit('spinner_stop');
+      }
+
+      // Debounce idle emission
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+      this.idleTimer = setTimeout(() => {
+        this.idleTimer = null;
+        debug('CodexParser', 'EMIT idle');
+        this.emit('idle');
+      }, IDLE_DEBOUNCE_MS);
+      return;
+    }
+
+    // Spinner / processing detection
+    if (hasSpinner && this.seenFirstIdle) {
+      if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+
+      if (!this.spinnerActive) {
+        // Debounce: small spinner chunks only → wait before confirming
+        if (this.spinnerTimer) clearTimeout(this.spinnerTimer);
+        this.spinnerTimer = setTimeout(() => {
+          if (!this.spinnerActive) {
+            this.spinnerActive = true;
+            debug('CodexParser', 'EMIT spinner_start');
+            this.emit('spinner_start');
+            // Schedule stop timeout in case no more spinner data arrives
+            this.spinnerTimer = setTimeout(() => {
+              this.spinnerTimer = null;
+              if (this.spinnerActive) {
+                this.spinnerActive = false;
+                debug('CodexParser', 'EMIT spinner_stop (timeout)');
+                this.emit('spinner_stop');
+                this.emit('idle');
+              }
+            }, SPINNER_DEBOUNCE_MS);
+          }
+        }, 100);
+      } else {
+        // Already active — reset the stop timeout
+        if (this.spinnerTimer) clearTimeout(this.spinnerTimer);
+        this.spinnerTimer = setTimeout(() => {
+          this.spinnerTimer = null;
+          if (this.spinnerActive) {
+            this.spinnerActive = false;
+            debug('CodexParser', 'EMIT spinner_stop (timeout)');
+            this.emit('spinner_stop');
+            this.emit('idle');
+          }
+        }, SPINNER_DEBOUNCE_MS);
+      }
+    }
+  }
+
+  private extractApprovalOptions(chunk: string): string[] {
+    const options: string[] = [];
+    if (/Allow\s+once/i.test(chunk)) options.push('Allow once');
+    if (/Always\s+allow/i.test(chunk)) options.push('Always allow');
+    if (/\bDeny\b/i.test(chunk)) options.push('Deny');
+    if (/\(y\)es/i.test(chunk)) options.push('Yes');
+    if (/\(n\)o/i.test(chunk)) options.push('No');
+    if (options.length === 0) options.push('Allow', 'Deny');
+    return options;
+  }
+
+  private parseToolAction(chunk: string): void {
+    const runMatch = chunk.match(TOOL_RUNNING);
+    if (runMatch) {
+      debug('CodexParser', `EMIT tool_action: ${runMatch[1]}`);
+      this.emit('tool_action', { tool: 'shell', args: runMatch[1] });
+      return;
+    }
+    const fileMatch = chunk.match(FILE_OPERATION);
+    if (fileMatch) {
+      const op = chunk.match(/^(Reading|Writing|Creating|Deleting|Editing|Patching)/i)?.[1] ?? 'file';
+      debug('CodexParser', `EMIT tool_action: ${op} ${fileMatch[1]}`);
+      this.emit('tool_action', { tool: op.toLowerCase(), args: fileMatch[1] });
+    }
+  }
+
+  private parseProjectName(chunk: string): void {
+    if (this.projectName) return;
+    const wdMatch = chunk.match(WORKDIR);
+    if (wdMatch) {
+      const dirMatch = wdMatch[1].match(/\/(\w[\w.\-]*)$/);
+      if (dirMatch) {
+        this.projectName = dirMatch[1];
+        debug('CodexParser', `EMIT project_name: ${this.projectName}`);
+        this.emit('project_name', { name: this.projectName });
+        return;
+      }
+    }
+    const dirMatch = chunk.match(PROJECT_DIR);
+    if (dirMatch) {
+      this.projectName = dirMatch[1];
+      debug('CodexParser', `EMIT project_name: ${this.projectName}`);
+      this.emit('project_name', { name: this.projectName });
+    }
+  }
+
+  private parseModelInfo(chunk: string): void {
+    const match = chunk.match(MODEL_INFO);
+    if (match && match[1] !== this.modelName) {
+      this.modelName = match[1];
+      debug('CodexParser', `EMIT model_info: ${this.modelName}`);
+      this.emit('model_info', { model: this.modelName });
+    }
+  }
+
+  getProjectName(): string | null {
+    return this.projectName;
+  }
+}

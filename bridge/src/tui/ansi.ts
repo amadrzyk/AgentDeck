@@ -82,6 +82,8 @@ export const colors = {
   seaweed: fg(34, 139, 34),      // forestgreen
   bubble: fg(135, 206, 250),     // lightskyblue
   crayfishGlow: fg(255, 107, 107), // #FF6B6B - signal wave color
+  jellyfish: fg(99, 102, 241),     // #6366F1 indigo
+  jellyfishGlow: fg(165, 180, 252), // #A5B4FC light indigo
 };
 
 // ===== State to color mapping =====

@@ -210,5 +210,18 @@ export const MONITOR_CAPABILITIES: AgentCapabilities = {
   hasModelCatalog: false,
 };
 
+export const CODEX_CLI_CAPABILITIES: AgentCapabilities = {
+  type: 'codex-cli',
+  displayName: 'Codex CLI',
+  hasTerminal: true,
+  hasModeSwitching: false,
+  hasDiffReview: false,
+  hasOptionLists: true,
+  hasNavigablePrompts: false,
+  hasSuggestedPrompts: false,
+  hasApiUsage: false,
+  hasModelCatalog: false,
+};
+
 /** Default OpenClaw Gateway port */
 export const OPENCLAW_GATEWAY_PORT = 18789;

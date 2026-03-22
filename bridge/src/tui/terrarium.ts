@@ -197,6 +197,94 @@ function renderCrayfish(state: CrayfishState, frame: number, scale: SpriteScale)
   return { braille, color };
 }
 
+// ===== Jellyfish Sprite =====
+// Codex CLI creature — dome-shaped bell + trailing tentacles
+// Small: 12×8 pixel → 6×2 braille, Large: 24×16 → 12×4 braille
+
+// Cell types: 0=empty, 1=bell, 2=marking(>_), 3=bell_edge, 4=tentacle_left, 5=tentacle_right, 6=tentacle_center
+const JELLYFISH_GRID_SMALL: number[][] = [
+  [0,0,0,1,1,1,1,1,1,0,0,0], // bell top
+  [0,0,1,1,1,1,1,1,1,1,0,0], // bell wide
+  [0,1,1,2,2,1,1,2,1,1,1,0], // bell with >_ marking
+  [0,0,3,1,1,1,1,1,1,3,0,0], // bell edge (contracts)
+  [0,0,0,3,3,3,3,3,3,0,0,0], // bell rim
+  [0,0,4,0,6,0,0,6,0,5,0,0], // tentacles upper
+  [0,4,0,0,0,6,6,0,0,0,5,0], // tentacles mid
+  [4,0,0,0,0,0,0,0,0,0,0,5], // tentacles lower
+];
+
+const JELLYFISH_GRID_LARGE = scaleGridN(JELLYFISH_GRID_SMALL, 2);
+const JELLYFISH_GRID_XLARGE = scaleGridN(JELLYFISH_GRID_SMALL, 3);
+
+export interface JellyfishInstance {
+  id: string;
+  x: number;
+  y: number;
+  homeX: number;
+  state: string;
+  name?: string;
+  phaseOffset: number;
+}
+
+function renderJellyfish(inst: JellyfishInstance, frame: number, scale: SpriteScale): { braille: string[]; color: string } {
+  const f = frame + inst.phaseOffset;
+  const srcGrid = scale === 'xlarge' ? JELLYFISH_GRID_XLARGE :
+                  scale === 'large' ? JELLYFISH_GRID_LARGE : JELLYFISH_GRID_SMALL;
+  const gh = srcGrid.length;
+  const gw = srcGrid[0].length;
+  const sf = scale === 'xlarge' ? 3 : scale === 'large' ? 2 : 1;
+  const grid: boolean[][] = [];
+
+  // Bell pulse: contracts/expands based on state
+  const pulseSpeed = inst.state === 'processing' ? 0.25 : 0.06;
+  const pulsePhase = Math.sin(f * pulseSpeed);
+  const contracting = pulsePhase < 0;
+
+  for (let y = 0; y < gh; y++) {
+    grid[y] = [];
+    for (let x = 0; x < gw; x++) {
+      const cell = srcGrid[y][x];
+      const origY = Math.floor(y / sf);
+      const origX = Math.floor(x / sf);
+
+      if (cell === 0) {
+        grid[y][x] = false;
+      } else if (cell === 2) {
+        // >_ marking — blinks subtly
+        grid[y][x] = (f % 60) > 5;
+      } else if (cell === 3) {
+        // Bell edge — contracts during pulse
+        grid[y][x] = !contracting;
+      } else if (cell === 4 || cell === 5) {
+        // Outer tentacles — wave motion
+        const tentPhase = cell === 4 ? 0 : Math.PI;
+        const wave = Math.sin(f * 0.12 + tentPhase + origY * 0.5);
+        grid[y][x] = wave > -0.4;
+      } else if (cell === 6) {
+        // Center tentacles — different phase
+        const wave = Math.sin(f * 0.1 + origX * 0.3);
+        grid[y][x] = wave > -0.3;
+      } else {
+        grid[y][x] = true; // bell body
+      }
+    }
+  }
+  const braille = gridToBraille(grid, gw, gh);
+
+  // Color: dim when disconnected, glow when processing
+  let color: string;
+  if (inst.state === 'disconnected') {
+    color = DIM + colors.jellyfish;
+  } else if (inst.state === 'processing') {
+    // Bioluminescent pulse
+    const glow = Math.sin(f * 0.2) > 0;
+    color = glow ? colors.jellyfishGlow : colors.jellyfish;
+  } else {
+    color = colors.jellyfish;
+  }
+  return { braille, color };
+}
+
 // ===== Neon Tetra =====
 
 interface Fish { x: number; y: number; vx: number; vy: number; }
@@ -263,6 +351,7 @@ interface TerrariumContext {
   bubbles: Bubble[];
   schools: FishSchool[];
   octopi: OctopusInstance[];
+  jellyfish: JellyfishInstance[];
   crayfish: CrayfishState;
   voiceAssistantState: string;
 }
@@ -281,6 +370,7 @@ export function initTerrarium(): TerrariumContext {
     bubbles,
     schools: [initSchool(5, 0), initSchool(5, 1)],
     octopi: [],
+    jellyfish: [],
     crayfish: { visible: false, routing: false, sick: false, x: 0.75, y: 0.88 },
     voiceAssistantState: 'disabled',
   };
@@ -296,11 +386,14 @@ export function updateTerrarium(ctx: TerrariumContext, frame: number): void {
     }
   }
 
-  // Attract target: processing octopus > routing crayfish > none
+  // Attract target: processing octopus > processing jellyfish > routing crayfish > none
   const activeOct = ctx.octopi.find(o => o.state === 'processing');
+  const activeJelly = ctx.jellyfish.find(j => j.state === 'processing');
   let attractTarget: { x: number; y: number } | undefined;
   if (activeOct) {
     attractTarget = { x: activeOct.x, y: activeOct.y };
+  } else if (activeJelly) {
+    attractTarget = { x: activeJelly.x, y: activeJelly.y };
   } else if (ctx.crayfish.visible && ctx.crayfish.routing) {
     attractTarget = { x: ctx.crayfish.x, y: ctx.crayfish.y };
   }
@@ -321,6 +414,21 @@ export function updateTerrarium(ctx: TerrariumContext, frame: number): void {
     oct.y += Math.sin((frame + oct.phaseOffset) * bobFreq) * bobAmp;
   }
 
+  // Animate jellyfish Y — jellyfish naturally float higher than octopi
+  for (const jf of ctx.jellyfish) {
+    const targetY = jf.state === 'processing' ? 0.20 :
+                    jf.state.startsWith('awaiting') ? 0.40 :
+                    0.55; // idle: mid-water float (jellyfish don't rest on floor)
+    jf.y += (targetY - jf.y) * 0.03; // slower drift than octopus
+    // Jellyfish pulse bob — gentle undulation
+    const bobAmp = jf.state === 'processing' ? 0.025 : 0.01;
+    const bobFreq = jf.state === 'processing' ? 0.12 : 0.03;
+    jf.y += Math.sin((frame + jf.phaseOffset) * bobFreq) * bobAmp;
+    // Gentle horizontal drift
+    jf.x += Math.sin((frame + jf.phaseOffset) * 0.02) * 0.002;
+    jf.x = Math.max(0.08, Math.min(0.65, jf.x));
+  }
+
   // Crayfish Y: routing swims up, sitting rests on floor
   const crayfishTargetY = ctx.crayfish.routing ? 0.50 : 0.85;
   ctx.crayfish.y += (crayfishTargetY - ctx.crayfish.y) * 0.04;
@@ -331,7 +439,9 @@ export function setOctopi(
   sessions: Array<{ id?: string; state: string; name?: string; agentType?: string }>,
 ): void {
   const octSessions = sessions.filter(s =>
-    (s.agentType as string) !== 'daemon' && (s.agentType as string) !== 'openclaw'
+    (s.agentType as string) !== 'daemon' &&
+    (s.agentType as string) !== 'openclaw' &&
+    (s.agentType as string) !== 'codex-cli'
   );
   const count = octSessions.length;
   // Count name occurrences to number duplicates
@@ -375,6 +485,48 @@ export function setCrayfish(ctx: TerrariumContext, visible: boolean, routing: bo
   ctx.crayfish.routing = routing;
   ctx.crayfish.sick = sick || false;
   if (name !== undefined) ctx.crayfish.name = name;
+}
+
+export function setJellyfish(
+  ctx: TerrariumContext,
+  sessions: Array<{ id?: string; state: string; name?: string; agentType?: string }>,
+): void {
+  const jellySessions = sessions.filter(s => (s.agentType as string) === 'codex-cli');
+  const count = jellySessions.length;
+  const nameCounts = new Map<string, number>();
+  for (const s of jellySessions) {
+    const n = s.name || '';
+    nameCounts.set(n, (nameCounts.get(n) || 0) + 1);
+  }
+  const nameSeq = new Map<string, number>();
+  const newJellyfish: JellyfishInstance[] = [];
+  for (let i = 0; i < count; i++) {
+    const s = jellySessions[i];
+    const sid = s.id || `jf-${i}`;
+    const baseName = s.name || '';
+    const seq = (nameSeq.get(baseName) || 0) + 1;
+    nameSeq.set(baseName, seq);
+    const displayName = (nameCounts.get(baseName) || 0) > 1
+      ? `${baseName} #${seq}` : baseName;
+    // Jellyfish home: right of center, between octopi and crayfish
+    const homeX = count === 1 ? 0.50 : 0.38 + (i * 0.25) / Math.max(1, count - 1);
+    const existing = ctx.jellyfish.find(j => j.id === sid);
+    if (existing) {
+      existing.state = s.state;
+      existing.name = displayName || undefined;
+      existing.homeX = homeX;
+      existing.x = homeX;
+      newJellyfish.push(existing);
+    } else {
+      newJellyfish.push({
+        id: sid,
+        x: homeX, y: 0.55, homeX,
+        state: s.state, name: displayName || undefined,
+        phaseOffset: Math.floor(Math.random() * 60),
+      });
+    }
+  }
+  ctx.jellyfish = newJellyfish;
 }
 
 export function setVoiceAssistantState(ctx: TerrariumContext, state: string): void {
@@ -558,6 +710,52 @@ export function renderTerrariumFrame(
           const py = Math.floor(oct.y * height + Math.sin(angle) * burstR * 0.5);
           if (py === row && px >= 0 && px < width) {
             chars[px] = '\u2727'; charColors[px] = fg(255, 200, 100);
+          }
+        }
+      }
+    }
+
+    // Jellyfish (scale-aware braille)
+    for (const jf of ctx.jellyfish) {
+      const { braille, color } = renderJellyfish(jf, frame, scale);
+      const jfHalfW = Math.floor(braille[0]?.length / 2) || 3;
+      const jx = Math.floor(jf.x * width) - jfHalfW;
+      const jy = Math.floor(jf.y * height) - Math.floor(braille.length / 2);
+      for (let br = 0; br < braille.length; br++) {
+        if (jy + br === row) {
+          for (let bc = 0; bc < braille[br].length; bc++) {
+            const px = jx + bc;
+            if (px >= 0 && px < width) {
+              chars[px] = braille[br][bc];
+              charColors[px] = color;
+            }
+          }
+        }
+      }
+      // Name tag
+      if (jf.name && jy - 1 === row) {
+        const name = jf.name.length > 12 ? jf.name.slice(0, 11) + '\u2026' : jf.name;
+        const nx = Math.floor(jf.x * width) - Math.floor(name.length / 2);
+        for (let nc = 0; nc < name.length; nc++) {
+          const px = nx + nc;
+          if (px >= 0 && px < width) { chars[px] = name[nc]; charColors[px] = fg(180, 180, 180); }
+        }
+      }
+      // "?" bubble when awaiting
+      if (jf.state.startsWith('awaiting') && jy + braille.length === row) {
+        const qx = Math.floor(jf.x * width) + jfHalfW + 1;
+        if (qx >= 0 && qx < width) { chars[qx] = '?'; charColors[qx] = fg(255, 255, 100); }
+      }
+      // Bioluminescent glow particles when processing
+      if (jf.state === 'processing') {
+        const glowR = (1.5 + Math.sin(frame * 0.1) * 0.5) * (scaleFactor * 0.75);
+        for (let p = 0; p < 4; p++) {
+          const angle = (p / 4) * Math.PI * 2 + frame * 0.08;
+          const px = Math.floor(jf.x * width + Math.cos(angle) * glowR);
+          const py = Math.floor(jf.y * height + Math.sin(angle) * glowR * 0.6);
+          if (py === row && px >= 0 && px < width && chars[px] === ' ') {
+            chars[px] = '\u2022'; // •
+            charColors[px] = colors.jellyfishGlow;
           }
         }
       }

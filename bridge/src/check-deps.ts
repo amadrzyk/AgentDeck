@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import type { AgentType } from './types.js';
 
 interface DepCheck {
   name: string;
@@ -7,13 +8,24 @@ interface DepCheck {
   installHint: string;
 }
 
-const DEPS: DepCheck[] = [
-  {
+/** Agent-specific binary requirements */
+const AGENT_DEPS: Partial<Record<AgentType, DepCheck>> = {
+  'claude-code': {
     name: 'claude',
     command: 'claude --version',
     required: true,
     installHint: 'npm install -g @anthropic-ai/claude-code',
   },
+  'codex-cli': {
+    name: 'codex',
+    command: 'codex --version',
+    required: true,
+    installHint: 'npm install -g @openai/codex',
+  },
+};
+
+/** Shared optional dependencies */
+const SHARED_DEPS: DepCheck[] = [
   {
     name: 'sox (rec)',
     command: 'which rec',
@@ -34,28 +46,31 @@ const DEPS: DepCheck[] = [
   },
 ];
 
-export function checkDependencies(): { ok: boolean; warnings: string[]; claudeCodeVersion?: string } {
+export function checkDependencies(agentType?: AgentType): { ok: boolean; warnings: string[]; agentVersion?: string } {
   const warnings: string[] = [];
   let ok = true;
-  let claudeCodeVersion: string | undefined;
+  let agentVersion: string | undefined;
 
-  for (const dep of DEPS) {
+  // Check agent-specific binary
+  const agentDep = agentType ? AGENT_DEPS[agentType] : AGENT_DEPS['claude-code'];
+  if (agentDep) {
     try {
-      if (dep.name === 'claude') {
-        const output = execSync(dep.command, { encoding: 'utf-8', timeout: 5000 }).trim();
-        claudeCodeVersion = output.match(/^([\d.]+)/)?.[1] ?? undefined;
-      } else {
-        execSync(dep.command, { stdio: 'ignore' });
-      }
+      const output = execSync(agentDep.command, { encoding: 'utf-8', timeout: 5000 }).trim();
+      agentVersion = output.match(/^([\d.]+)/)?.[1] ?? undefined;
     } catch {
-      if (dep.required) {
-        process.stderr.write(`[agentdeck] ERROR: ${dep.name} not found. Install: ${dep.installHint}\n`);
-        ok = false;
-      } else {
-        warnings.push(`${dep.name} not found — ${dep.installHint}`);
-      }
+      process.stderr.write(`[agentdeck] ERROR: ${agentDep.name} not found. Install: ${agentDep.installHint}\n`);
+      ok = false;
     }
   }
 
-  return { ok, warnings, claudeCodeVersion };
+  // Check shared optional deps
+  for (const dep of SHARED_DEPS) {
+    try {
+      execSync(dep.command, { stdio: 'ignore' });
+    } catch {
+      warnings.push(`${dep.name} not found — ${dep.installHint}`);
+    }
+  }
+
+  return { ok, warnings, agentVersion };
 }

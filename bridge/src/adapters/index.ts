@@ -1,9 +1,11 @@
 import type { AgentType, AgentAdapter } from '../types.js';
 import { ClaudeCodeAdapter } from './claude-code.js';
+import { CodexCliAdapter } from './codex-cli.js';
 import { OpenClawAdapter } from './openclaw.js';
 import { MonitorAdapter } from './monitor.js';
 
 export { ClaudeCodeAdapter } from './claude-code.js';
+export { CodexCliAdapter } from './codex-cli.js';
 export { OpenClawAdapter } from './openclaw.js';
 export { MonitorAdapter } from './monitor.js';
 export { PtyAdapter } from './pty-adapter.js';
@@ -15,6 +17,8 @@ export function createAdapter(type: AgentType, gatewayUrl?: string): AgentAdapte
   switch (type) {
     case 'claude-code':
       return new ClaudeCodeAdapter();
+    case 'codex-cli':
+      return new CodexCliAdapter();
     case 'openclaw':
       return new OpenClawAdapter(gatewayUrl);
     case 'monitor':

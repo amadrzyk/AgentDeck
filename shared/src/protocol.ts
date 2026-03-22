@@ -367,6 +367,11 @@ export interface UtilityCommand {
   value?: number; // delta ticks (for adjust commands)
 }
 
+export interface SwitchAgentCommand {
+  type: 'switch_agent';
+  agent: 'openclaw' | 'claude-code';
+}
+
 export type PluginCommand =
   | ResponseCommand
   | SelectOptionCommand
@@ -378,7 +383,8 @@ export type PluginCommand =
   | VoiceCommand
   | QueryUsageCommand
   | DiagCommand
-  | UtilityCommand;
+  | UtilityCommand
+  | SwitchAgentCommand;
 
 // ===== Hook Event Types =====
 

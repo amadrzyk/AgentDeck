@@ -120,6 +120,34 @@ program
   });
 
 program
+  .command('codex')
+  .description('Start Codex CLI session (PTY + bridge)')
+  .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
+  .option('-c, --command <cmd>', 'Command to spawn', 'codex')
+  .option('-d, --debug', 'Enable debug logging')
+  .option('--local', 'Disable all device modules (WS only)')
+  .option('--no-adb', 'Disable ADB reverse setup')
+  .option('--no-serial', 'Disable ESP32 serial')
+  .option('--no-pixoo', 'Disable Pixoo LED matrix')
+  .option('--no-postit', 'Disable terminal tab title updates')
+  .action(async (opts) => {
+    const { startSession } = await import('./index.js');
+    await startSession({
+      agentType: 'codex-cli',
+      port: parseInt(opts.port, 10),
+      command: opts.command,
+      debug: opts.debug,
+      postit: opts.postit !== false,
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false } : {
+        mdns: false,
+        adb: opts.adb !== false ? 'auto' : false,
+        serial: opts.serial !== false ? 'auto' : false,
+        pixoo: opts.pixoo !== false ? 'auto' : false,
+      },
+    });
+  });
+
+program
   .command('monitor')
   .description('Start hook-only bridge (no PTY — run claude separately)')
   .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))

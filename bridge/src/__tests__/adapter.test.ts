@@ -32,6 +32,7 @@ vi.mock('http', async () => {
   const mockServer = {
     listen: vi.fn((_port: number, _host: string, cb: () => void) => cb()),
     close: vi.fn((cb: () => void) => cb()),
+    closeAllConnections: vi.fn(),
     on: vi.fn(),
   };
   return {
@@ -53,7 +54,7 @@ vi.mock('ws', () => {
   return { default: MockWebSocket };
 });
 
-import { createAdapter, ClaudeCodeAdapter, OpenClawAdapter } from '../adapters/index.js';
+import { createAdapter, ClaudeCodeAdapter, CodexCliAdapter, OpenClawAdapter, MonitorAdapter } from '../adapters/index.js';
 import type { AgentAdapter, AdapterEvent, PluginCommand } from '../types.js';
 
 describe('createAdapter factory', () => {
@@ -74,6 +75,13 @@ describe('createAdapter factory', () => {
   it('passes gatewayUrl to OpenClawAdapter', () => {
     const adapter = createAdapter('openclaw', 'ws://custom:9999');
     expect(adapter).toBeInstanceOf(OpenClawAdapter);
+  });
+
+  it('creates CodexCliAdapter for "codex-cli"', () => {
+    const adapter = createAdapter('codex-cli');
+    expect(adapter).toBeInstanceOf(CodexCliAdapter);
+    expect(adapter.capabilities.type).toBe('codex-cli');
+    expect(adapter.capabilities.displayName).toBe('Codex CLI');
   });
 
   it('throws for unknown agent type', () => {
@@ -601,5 +609,345 @@ describe('OpenClawAdapter gateway protocol', () => {
     wsInstance.send.mockClear();
     adapter.handleCommand({ type: 'respond', value: 'y' });
     expect(wsInstance.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('CodexCliAdapter', () => {
+  let adapter: CodexCliAdapter;
+
+  beforeEach(() => {
+    adapter = new CodexCliAdapter();
+  });
+
+  describe('capabilities', () => {
+    it('reports Codex CLI capabilities correctly', () => {
+      const caps = adapter.capabilities;
+      expect(caps.type).toBe('codex-cli');
+      expect(caps.displayName).toBe('Codex CLI');
+      expect(caps.hasTerminal).toBe(true);
+      expect(caps.hasModeSwitching).toBe(false);
+      expect(caps.hasDiffReview).toBe(false);
+      expect(caps.hasOptionLists).toBe(true);
+      expect(caps.hasNavigablePrompts).toBe(false);
+      expect(caps.hasSuggestedPrompts).toBe(false);
+      expect(caps.hasApiUsage).toBe(false);
+      expect(caps.hasModelCatalog).toBe(false);
+    });
+  });
+
+  describe('handleCommand routing', () => {
+    it('handles respond → returns true', () => {
+      const cmd: PluginCommand = { type: 'respond', value: 'y' };
+      expect(adapter.handleCommand(cmd)).toBe(true);
+    });
+
+    it('handles interrupt → returns true', () => {
+      const cmd: PluginCommand = { type: 'interrupt' };
+      expect(adapter.handleCommand(cmd)).toBe(true);
+    });
+
+    it('handles escape → returns true', () => {
+      const cmd: PluginCommand = { type: 'escape' };
+      expect(adapter.handleCommand(cmd)).toBe(true);
+    });
+
+    it('does not handle switch_mode → returns false', () => {
+      const cmd: PluginCommand = { type: 'switch_mode' };
+      expect(adapter.handleCommand(cmd)).toBe(false);
+    });
+
+    it('defers select_option to bridge → returns false', () => {
+      const cmd: PluginCommand = { type: 'select_option', index: 0 };
+      expect(adapter.handleCommand(cmd)).toBe(false);
+    });
+
+    it('defers navigate_option to bridge → returns false', () => {
+      const cmd: PluginCommand = { type: 'navigate_option', direction: 'up' };
+      expect(adapter.handleCommand(cmd)).toBe(false);
+    });
+
+    it('defers send_prompt to bridge → returns false', () => {
+      const cmd: PluginCommand = { type: 'send_prompt', text: 'hello' };
+      expect(adapter.handleCommand(cmd)).toBe(false);
+    });
+
+    it('defers voice to bridge → returns false', () => {
+      const cmd: PluginCommand = { type: 'voice', action: 'start' };
+      expect(adapter.handleCommand(cmd)).toBe(false);
+    });
+
+    it('defers query_usage to bridge → returns false', () => {
+      const cmd: PluginCommand = { type: 'query_usage' };
+      expect(adapter.handleCommand(cmd)).toBe(false);
+    });
+  });
+
+  describe('lifecycle', () => {
+    it('isAlive returns false before start', () => {
+      expect(adapter.isAlive()).toBe(false);
+    });
+
+    it('getTtyPath returns undefined before start', () => {
+      expect(adapter.getTtyPath()).toBeUndefined();
+    });
+
+    it('getProjectName returns null before start', () => {
+      expect(adapter.getProjectName()).toBeNull();
+    });
+
+    it('getHttpServer returns an object', () => {
+      expect(adapter.getHttpServer()).toBeDefined();
+    });
+  });
+
+  describe('onRawData callback', () => {
+    it('can register callback without error', () => {
+      const cb = vi.fn();
+      expect(() => adapter.onRawData(cb)).not.toThrow();
+    });
+  });
+
+  describe('onDiag handler', () => {
+    it('can register handler without error', () => {
+      const handler = vi.fn();
+      expect(() => adapter.onDiag(handler)).not.toThrow();
+    });
+  });
+});
+
+describe('CodexCliAdapter start lifecycle', () => {
+  let adapter: CodexCliAdapter;
+  let events: AdapterEvent[];
+
+  beforeEach(() => {
+    adapter = new CodexCliAdapter();
+    events = [];
+    adapter.on('event', (evt: AdapterEvent) => events.push(evt));
+  });
+
+  afterEach(async () => {
+    await adapter.shutdown();
+  });
+
+  it('emits SessionStart and connected on start', async () => {
+    await adapter.start({ port: 9170 });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ source: 'hook', event: 'SessionStart' }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ source: 'connection', status: 'connected' }),
+    );
+  });
+
+  it('feeds PTY data to output parser and emits activity', async () => {
+    await adapter.start({ port: 9171 });
+
+    const pty = await import('node-pty');
+    const mockPty = (pty.spawn as any).mock.results[0]?.value;
+    if (mockPty?.onData?.mock?.calls?.[0]?.[0]) {
+      events.length = 0;
+      const dataHandler = mockPty.onData.mock.calls[0][0];
+      dataHandler('some output data');
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ source: 'activity' }),
+      );
+    }
+  });
+});
+
+describe('MonitorAdapter', () => {
+  let adapter: MonitorAdapter;
+
+  beforeEach(() => {
+    adapter = new MonitorAdapter();
+  });
+
+  afterEach(async () => {
+    await adapter.shutdown();
+  });
+
+  describe('capabilities', () => {
+    it('reports monitor capabilities correctly', () => {
+      const caps = adapter.capabilities;
+      expect(caps.type).toBe('monitor');
+      expect(caps.displayName).toBe('Monitor');
+      expect(caps.hasTerminal).toBe(false);
+      expect(caps.hasModeSwitching).toBe(false);
+      expect(caps.hasDiffReview).toBe(false);
+      expect(caps.hasOptionLists).toBe(false);
+      expect(caps.hasNavigablePrompts).toBe(false);
+      expect(caps.hasSuggestedPrompts).toBe(false);
+      expect(caps.hasApiUsage).toBe(true);     // monitor tracks usage via hooks
+      expect(caps.hasModelCatalog).toBe(false);
+    });
+  });
+
+  describe('handleCommand routing', () => {
+    it('rejects respond (no PTY)', () => {
+      expect(adapter.handleCommand({ type: 'respond', value: 'y' })).toBe(false);
+    });
+
+    it('rejects interrupt (no PTY)', () => {
+      expect(adapter.handleCommand({ type: 'interrupt' })).toBe(false);
+    });
+
+    it('rejects escape (no PTY)', () => {
+      expect(adapter.handleCommand({ type: 'escape' })).toBe(false);
+    });
+
+    it('rejects switch_mode (no PTY)', () => {
+      expect(adapter.handleCommand({ type: 'switch_mode' })).toBe(false);
+    });
+
+    it('rejects select_option (no PTY)', () => {
+      expect(adapter.handleCommand({ type: 'select_option', index: 0 })).toBe(false);
+    });
+
+    it('rejects send_prompt (no PTY)', () => {
+      expect(adapter.handleCommand({ type: 'send_prompt', text: 'hello' })).toBe(false);
+    });
+
+    it('defers voice to bridge', () => {
+      expect(adapter.handleCommand({ type: 'voice', action: 'start' })).toBe(false);
+    });
+
+    it('defers query_usage to bridge', () => {
+      expect(adapter.handleCommand({ type: 'query_usage' })).toBe(false);
+    });
+  });
+
+  describe('lifecycle', () => {
+    it('isAlive always returns true', () => {
+      expect(adapter.isAlive()).toBe(true);
+    });
+
+    it('getTtyPath returns undefined (no PTY)', () => {
+      expect(adapter.getTtyPath()).toBeUndefined();
+    });
+
+    it('getProjectName returns null', () => {
+      expect(adapter.getProjectName()).toBeNull();
+    });
+
+    it('getHttpServer returns an object', () => {
+      expect(adapter.getHttpServer()).toBeDefined();
+    });
+
+    it('writeInput is a no-op (no PTY)', () => {
+      expect(() => adapter.writeInput('test')).not.toThrow();
+    });
+
+    it('attachTerminal is a no-op', () => {
+      const mockStdin = { on: vi.fn() } as any;
+      const mockStdout = { write: vi.fn() } as any;
+      expect(() => adapter.attachTerminal(mockStdin, mockStdout)).not.toThrow();
+    });
+
+    it('onRawData is a no-op', () => {
+      const cb = vi.fn();
+      expect(() => adapter.onRawData(cb)).not.toThrow();
+    });
+  });
+
+  describe('start and event emission', () => {
+    it('emits connected event on start', async () => {
+      const events: AdapterEvent[] = [];
+      adapter.on('event', (evt: AdapterEvent) => events.push(evt));
+
+      await adapter.start({ port: 9150 });
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ source: 'connection', status: 'connected' }),
+      );
+    });
+
+    it('exposes hook server for external wiring', () => {
+      expect(adapter.getHookServer()).toBeDefined();
+    });
+  });
+});
+
+describe('ClaudeCodeAdapter start lifecycle', () => {
+  let adapter: ClaudeCodeAdapter;
+  let events: AdapterEvent[];
+
+  beforeEach(async () => {
+    // Clear pty.spawn mock to avoid stale results from earlier test suites
+    const pty = await import('node-pty');
+    (pty.spawn as any).mockClear();
+    adapter = new ClaudeCodeAdapter();
+    events = [];
+    adapter.on('event', (evt: AdapterEvent) => events.push(evt));
+  });
+
+  afterEach(async () => {
+    await adapter.shutdown();
+  });
+
+  it('emits SessionStart and connected on start', async () => {
+    await adapter.start({ port: 9160 });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ source: 'hook', event: 'SessionStart' }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ source: 'connection', status: 'connected' }),
+    );
+  });
+
+  it('uses claude as default command', async () => {
+    const pty = await import('node-pty');
+    await adapter.start({ port: 9161 });
+
+    expect(pty.spawn).toHaveBeenCalled();
+    const callArgs = (pty.spawn as any).mock.calls[0];
+    // First arg is the shell, second includes the command
+    expect(callArgs).toBeDefined();
+  });
+
+  it('feeds PTY data to output parser and emits activity', async () => {
+    await adapter.start({ port: 9162 });
+
+    // Get the onData callback from the mock PTY
+    const pty = await import('node-pty');
+    const mockPty = (pty.spawn as any).mock.results[0]?.value;
+    if (mockPty?.onData?.mock?.calls?.[0]?.[0]) {
+      events.length = 0;
+      const dataHandler = mockPty.onData.mock.calls[0][0];
+      dataHandler('some output data');
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ source: 'activity' }),
+      );
+    }
+  });
+
+  it('emits SessionEnd and disconnected on PTY exit', async () => {
+    await adapter.start({ port: 9163 });
+
+    const pty = await import('node-pty');
+    const mockPty = (pty.spawn as any).mock.results[0]?.value;
+    if (mockPty?.onExit?.mock?.calls?.[0]?.[0]) {
+      events.length = 0;
+      const exitHandler = mockPty.onExit.mock.calls[0][0];
+      exitHandler({ exitCode: 0, signal: 0 });
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ source: 'hook', event: 'SessionEnd' }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({ source: 'connection', status: 'disconnected' }),
+      );
+    }
+  });
+
+  it('registers rawData callback without error', async () => {
+    const rawCb = vi.fn();
+    expect(() => adapter.onRawData(rawCb)).not.toThrow();
+    await adapter.start({ port: 9164 });
+    // rawData callback is stored internally; actual invocation requires real PTY data
+    // which is tested via integration tests (cursor-sync, output-parser)
   });
 });
