@@ -27,6 +27,8 @@ test-*.js
 /*.gif
 /*.mov
 /*.webp
+assets/videos/
+assets/screenshots/
 
 # Runtime
 compatibility.json

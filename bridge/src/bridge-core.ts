@@ -532,6 +532,7 @@ export class BridgeCore {
       // Log and continue rather than killing the daemon.
       if (
         code === 'EPIPE' || code === 'ECONNRESET' || code === 'ENOTCONN' ||
+        code === 'ENXIO' || code === 'EIO' || code === 'EBADF' ||
         msg.includes('ERR_STREAM_DESTROYED') || msg.includes('ERR_STREAM_WRITE_AFTER_END') ||
         msg.includes('write after end') || msg.includes('This socket has been ended')
       ) {

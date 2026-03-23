@@ -221,9 +221,11 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
     struct OctoInfo {
         char state[20];
         bool isCodex;  // codex-cli = true, claude-code = false
+        int instanceIdx;
     };
     OctoInfo octos[6];
     int octoCount = 0;
+    int claudeSeen = 0, codexSeen = 0;
 
     for (int i = 0; i < sessionCount && octoCount < 6; i++) {
         if (!g_state.sessions[i].alive) continue;
@@ -232,6 +234,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         strncpy(octos[octoCount].state, g_state.sessions[i].state, 19);
         octos[octoCount].state[19] = '\0';
         octos[octoCount].isCodex = (strcmp(g_state.sessions[i].agentType, "codex-cli") == 0);
+        octos[octoCount].instanceIdx = octos[octoCount].isCodex ? codexSeen++ : claudeSeen++;
         octoCount++;
     }
     unlockState();
@@ -263,24 +266,33 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         return;
     }
 
-    // Claude = terracotta (#C07058), Codex = sky blue (#4488CC)
-    auto octoColor = [&](const char* state, bool isCodex) -> CRGB {
+    // Claude = terracotta (#C07058), Codex = indigo (#6366F1, approx CRGB(99, 102, 241))
+    auto octoColor = [&](const char* state, bool isCodex, int instanceIdx) -> CRGB {
+        CRGB baseColor;
         if (strcmp(state, "processing") == 0) {
             bool on = fmodf(animTime, 0.5f) < 0.25f;
-            // Blink between bright and dim base color
-            if (isCodex) return on ? CRGB(60, 140, 220) : CRGB(15, 35, 55);
-            else         return on ? CRGB(200, 120, 90) : CRGB(50, 30, 22);
+            if (isCodex) baseColor = on ? CRGB(100, 100, 240) : CRGB(30, 30, 80);
+            else         baseColor = on ? CRGB(200, 120, 90) : CRGB(50, 30, 22);
         }
-        if (strstr(state, "awaiting")) {
+        else if (strstr(state, "awaiting")) {
             bool on = fmodf(animTime, 1.0f) < 0.5f;
-            return on ? CRGB(200, 120, 0) : CRGB(40, 24, 0);  // amber for both
+            baseColor = on ? CRGB(200, 120, 0) : CRGB(40, 24, 0);  // amber for both
         }
-        if (strcmp(state, "idle") == 0) {
-            // Dim base color
-            if (isCodex) return CRGB(20, 50, 80);
-            else         return CRGB(80, 45, 35);
+        else if (strcmp(state, "idle") == 0) {
+            if (isCodex) baseColor = CRGB(30, 30, 80);
+            else         baseColor = CRGB(80, 45, 35);
         }
-        return CRGB(25, 25, 25);  // disconnected
+        else {
+            baseColor = CRGB(25, 25, 25);  // disconnected
+        }
+        
+        // Darken for additional instances
+        if (instanceIdx > 0) {
+            baseColor.r = (baseColor.r * (10 - instanceIdx * 2)) / 10;
+            baseColor.g = (baseColor.g * (10 - instanceIdx * 2)) / 10;
+            baseColor.b = (baseColor.b * (10 - instanceIdx * 2)) / 10;
+        }
+        return baseColor;
     };
 
     int visibleSlots = 3;
@@ -291,7 +303,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         for (int i = 0; i < octoCount; i++) {
             int x = 1 + i * spacing;
             int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.5f));
-            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state, octos[i].isCodex));
+            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state, octos[i].isCodex, octos[i].instanceIdx));
         }
     } else {
         // 4+: show 3, pause 2s, scroll left to reveal more
@@ -312,7 +324,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             int x = 1 + i * spacing - scrollOffset;
             if (x > octoMaxX || x < -5) continue;
             int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.2f));
-            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state, octos[i].isCodex));
+            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state, octos[i].isCodex, octos[i].instanceIdx));
         }
     }
 }
@@ -352,16 +364,21 @@ void MatrixPages::renderInfo(CRGB* leds, float animTime) {
                 g_state.sessions[i].projectName[0] ? g_state.sessions[i].projectName : "---", 39);
         entries[entryCount].project[39] = '\0';
 
-        // Model: use agentType as fallback (sessions don't have individual model names)
+        // Model: use session's modelName if available, else agentType fallback
+        const char* modelName = g_state.sessions[i].modelName;
         const char* agentType = g_state.sessions[i].agentType;
-        if (strcmp(agentType, "claude-code") == 0)
+        
+        if (modelName[0] != '\0') {
+            strncpy(entries[entryCount].model, modelName, 31);
+        } else if (strcmp(agentType, "claude-code") == 0) {
             strncpy(entries[entryCount].model, g_state.modelName[0] ? g_state.modelName : "CLAUDE", 31);
-        else if (strcmp(agentType, "openclaw") == 0)
+        } else if (strcmp(agentType, "openclaw") == 0) {
             strncpy(entries[entryCount].model, "OPENCLAW", 31);
-        else if (strcmp(agentType, "codex-cli") == 0)
+        } else if (strcmp(agentType, "codex-cli") == 0) {
             strncpy(entries[entryCount].model, "CODEX", 31);
-        else
+        } else {
             strncpy(entries[entryCount].model, agentType, 31);
+        }
         entries[entryCount].model[31] = '\0';
         entryCount++;
     }

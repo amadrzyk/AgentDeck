@@ -70,7 +70,7 @@ run_vitest() {
     echo -e "${CYAN}${BOLD}▶ Vitest${RESET} (bridge / plugin / shared / hooks)"
 
     local json_out="$REPORT_DIR/vitest.json"
-    if cd "$ROOT" && npx vitest run --reporter=json --outputFile="$json_out" 2>/dev/null; then
+    if cd "$ROOT" && npx vitest run --reporter=json --reporter=default --outputFile="$json_out" --coverage 2>/dev/null; then
         local passed failed
         passed=$(python3 -c "import json; d=json.load(open('$json_out')); print(d['numPassedTests'])" 2>/dev/null || echo 0)
         failed=$(python3 -c "import json; d=json.load(open('$json_out')); print(d['numFailedTests'])" 2>/dev/null || echo 0)

@@ -197,6 +197,8 @@ static void handleSessionsList(JsonObject& obj) {
         strncpy(g_state.sessions[i].id, s["id"] | "", sizeof(g_state.sessions[i].id) - 1);
         strncpy(g_state.sessions[i].projectName, s["projectName"] | "",
                 sizeof(g_state.sessions[i].projectName) - 1);
+        strncpy(g_state.sessions[i].modelName, s["modelName"] | "",
+                sizeof(g_state.sessions[i].modelName) - 1);
         strncpy(g_state.sessions[i].agentType, s["agentType"] | "claude-code",
                 sizeof(g_state.sessions[i].agentType) - 1);
         strncpy(g_state.sessions[i].state, s["state"] | "",

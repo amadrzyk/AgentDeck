@@ -175,6 +175,7 @@ async function openPort(port: string): Promise<SerialConnection | null> {
     stream.on('error', (err) => {
       debug('ESP32', `Serial write error on ${port}: ${err.message}`);
       conn.connected = false;
+      try { conn.reader?.destroy(); } catch { /* ignore */ }
     });
 
     stream.on('close', () => {
@@ -206,10 +207,14 @@ async function openPort(port: string): Promise<SerialConnection | null> {
 
       reader.on('error', (err) => {
         debug('ESP32', `Serial read error on ${port}: ${err.message}`);
+        conn.connected = false;
+        try { reader.destroy(); } catch { /* ignore */ }
+        try { conn.stream.end(); } catch { /* ignore */ }
       });
 
       reader.on('close', () => {
         conn.reader = null;
+        conn.connected = false;
       });
     } catch (err: any) {
       debug('ESP32', `Failed to open reader on ${port}: ${err.message}`);
@@ -260,6 +265,10 @@ async function openPort(port: string): Promise<SerialConnection | null> {
 
 function sendToConnection(conn: SerialConnection, json: string): void {
   if (!conn.connected) return;
+  if (conn.stream.destroyed || !conn.stream.writable) {
+    conn.connected = false;
+    return;
+  }
   try {
     conn.stream.write(json + '\n');
   } catch {

@@ -1,0 +1,143 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { enrichSessionsWithState, buildEnrichedSessionsList } from '../session-aggregator.js';
+import type { SessionEntry } from '../session-registry.js';
+
+vi.mock('../session-registry.js', () => ({
+  listActive: vi.fn(() => []),
+}));
+
+import { listActive } from '../session-registry.js';
+
+const mockListActive = vi.mocked(listActive);
+
+function makeSession(overrides: Partial<SessionEntry> = {}): SessionEntry {
+  return {
+    id: 'session-1',
+    port: 9121,
+    pid: process.pid,
+    projectName: 'AgentDeck',
+    startedAt: new Date().toISOString(),
+    agentType: 'claude-code',
+    ...overrides,
+  };
+}
+
+describe('session-aggregator', () => {
+  beforeEach(() => {
+    mockListActive.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('uses ownState for the current session without fetching /health', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const sessions = await enrichSessionsWithState(
+      [makeSession({ id: 'own-session', port: 9125 })],
+      'own-session',
+      'processing',
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        id: 'own-session',
+        port: 9125,
+        projectName: 'AgentDeck',
+        agentType: 'claude-code',
+        alive: true,
+        state: 'processing',
+      }),
+    ]);
+  });
+
+  it('fetches sibling /health and merges state and modelName', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      json: async () => ({ state: 'idle', modelName: 'opus-4' }),
+    } as Response);
+
+    const sessions = await enrichSessionsWithState(
+      [makeSession({ id: 'sibling', port: 9130, projectName: 'Backend' })],
+      'own-session',
+      'processing',
+    );
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:9130/health',
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        id: 'sibling',
+        port: 9130,
+        projectName: 'Backend',
+        state: 'idle',
+        modelName: 'opus-4',
+      }),
+    ]);
+  });
+
+  it('falls back to base session info when sibling /health fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect failed'));
+
+    const sessions = await enrichSessionsWithState(
+      [makeSession({ id: 'sibling', port: 9131, agentType: 'codex-cli' })],
+      'own-session',
+      'processing',
+    );
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        id: 'sibling',
+        port: 9131,
+        projectName: 'AgentDeck',
+        alive: true,
+        agentType: 'codex-cli',
+      }),
+    ]);
+  });
+
+  it('buildEnrichedSessionsList excludes daemon and own session before enrichment', async () => {
+    mockListActive.mockReturnValue([
+      makeSession({ id: 'own-session', port: 9121, projectName: 'Main' }),
+      makeSession({ id: 'daemon-1', port: 9120, projectName: 'Daemon', agentType: 'daemon' }),
+      makeSession({ id: 'sibling-1', port: 9122, projectName: 'Backend' }),
+      makeSession({ id: 'sibling-2', port: 9123, projectName: 'Frontend', agentType: 'codex-cli' }),
+    ]);
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes(':9122/health')) {
+        return { json: async () => ({ state: 'processing', modelName: 'opus-4' }) } as Response;
+      }
+      if (url.includes(':9123/health')) {
+        return { json: async () => ({ state: 'idle', modelName: 'gpt-5.4' }) } as Response;
+      }
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    const sessions = await buildEnrichedSessionsList('own-session', 'awaiting_option');
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        id: 'sibling-1',
+        projectName: 'Backend',
+        state: 'processing',
+        modelName: 'opus-4',
+      }),
+      expect.objectContaining({
+        id: 'sibling-2',
+        projectName: 'Frontend',
+        state: 'idle',
+        modelName: 'gpt-5.4',
+        agentType: 'codex-cli',
+      }),
+    ]);
+  });
+});

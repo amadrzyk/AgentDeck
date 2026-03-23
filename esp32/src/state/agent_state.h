@@ -49,6 +49,7 @@ struct PromptOption {
 struct SessionInfo {
     char id[32];
     char projectName[40];
+    char modelName[32];
     char agentType[16];  // "claude-code" / "openclaw"
     char state[20];
     uint16_t port;

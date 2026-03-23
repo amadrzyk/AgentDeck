@@ -1,133 +1,32 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, readFileSync, mkdirSync, rmSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
-
-// Test hook installation logic by reimplementing the core algorithm
-// (avoids side effects on real ~/.claude/settings.local.json)
-
-const HOOK_EVENTS = [
-  'SessionStart',
-  'SessionEnd',
-  'PreToolUse',
-  'PostToolUse',
-  'Stop',
-  'Notification',
-  'UserPromptSubmit',
-] as const;
-
-// New matcher-group format for Claude Code v2.1+
-function buildHookEntry(eventName: string) {
-  const handler: any = {
-    type: 'command',
-    command: `curl -sf -X POST http://localhost:\${AGENTDECK_PORT:-9120}/hooks/${eventName} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
-  };
-  return {
-    matcher: '',
-    hooks: [handler],
-  };
-}
-
-function installHooks(settings: any): any {
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-  for (const event of HOOK_EVENTS) {
-    if (!settings.hooks[event]) {
-      settings.hooks[event] = [];
-    }
-    // Remove both old flat format and new matcher format
-    settings.hooks[event] = settings.hooks[event].filter((h: any) => {
-      if (h.command?.includes('AGENTDECK_PORT') || h.command?.includes('localhost:9120')) {
-        return false;
-      }
-      if (Array.isArray(h.hooks) && h.hooks.some((hh: any) =>
-        hh.command?.includes('AGENTDECK_PORT') || hh.command?.includes('localhost:9120')
-      )) {
-        return false;
-      }
-      return true;
-    });
-    settings.hooks[event].push(buildHookEntry(event));
-  }
-  return settings;
-}
-
-function uninstallHooks(settings: any): any {
-  if (!settings.hooks) return settings;
-  for (const event of HOOK_EVENTS) {
-    if (settings.hooks[event]) {
-      settings.hooks[event] = settings.hooks[event].filter((h: any) => {
-        if (h.command?.includes('AGENTDECK_PORT') || h.command?.includes('localhost:9120')) {
-          return false;
-        }
-        if (Array.isArray(h.hooks) && h.hooks.some((hh: any) =>
-          hh.command?.includes('AGENTDECK_PORT') || hh.command?.includes('localhost:9120')
-        )) {
-          return false;
-        }
-        return true;
-      });
-      if (settings.hooks[event].length === 0) {
-        delete settings.hooks[event];
-      }
-    }
-  }
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-  return settings;
-}
-
-/** Simulate the bridge's migrateHooksIfNeeded logic */
-function migrateHooks(settings: any): { settings: any; migrated: boolean } {
-  let migrated = false;
-  if (!settings.hooks) return { settings, migrated };
-
-  for (const event of Object.keys(settings.hooks)) {
-    const hooks = settings.hooks[event];
-    if (!Array.isArray(hooks)) continue;
-    for (let i = 0; i < hooks.length; i++) {
-      const hook = hooks[i];
-
-      // Migration 1: hardcoded port → env var (flat format)
-      if (hook.command?.includes('localhost:9120') && !hook.command?.includes('AGENTDECK_PORT')) {
-        hook.command = hook.command.replace(
-          /localhost:9120/g,
-          'localhost:${AGENTDECK_PORT:-9120}',
-        );
-        migrated = true;
-      }
-
-      // Migration 2: flat format → matcher-group format
-      if (hook.type === 'command' && hook.command?.includes('AGENTDECK_PORT') && !hook.hooks) {
-        const handler: Record<string, unknown> = { type: hook.type, command: hook.command };
-        hooks[i] = { matcher: '', hooks: [handler] };
-        migrated = true;
-      }
-
-      // Migration 3: hardcoded port inside matcher-group
-      if (Array.isArray(hook.hooks)) {
-        for (const inner of hook.hooks) {
-          if (inner.command?.includes('localhost:9120') && !inner.command?.includes('AGENTDECK_PORT')) {
-            inner.command = inner.command.replace(
-              /localhost:9120/g,
-              'localhost:${AGENTDECK_PORT:-9120}',
-            );
-            migrated = true;
-          }
-        }
-      }
-    }
-  }
-  return { settings, migrated };
-}
+import { describe, it, expect } from 'vitest';
+import {
+  HOOK_EVENTS,
+  buildHookEntry,
+  applyHooks,
+  removeHooks,
+  migrateHooks,
+} from '../install.js';
 
 describe('Hook Installer', () => {
-  describe('installHooks', () => {
+  describe('buildHookEntry', () => {
+    it('creates matcher-group format with AGENTDECK_PORT env var', () => {
+      const entry = buildHookEntry('SessionStart');
+      expect(entry.matcher).toBe('');
+      expect(entry.hooks).toHaveLength(1);
+      expect(entry.hooks[0].type).toBe('command');
+      expect(entry.hooks[0].command).toContain('AGENTDECK_PORT');
+      expect(entry.hooks[0].command).toContain('/hooks/SessionStart');
+    });
+
+    it('includes fallback port 9120 in command', () => {
+      const entry = buildHookEntry('Stop');
+      expect(entry.hooks[0].command).toContain('${AGENTDECK_PORT:-9120}');
+    });
+  });
+
+  describe('applyHooks', () => {
     it('installs hooks to empty settings in matcher-group format', () => {
-      const result = installHooks({});
+      const result = applyHooks({});
       expect(result.hooks).toBeDefined();
       expect(Object.keys(result.hooks)).toHaveLength(HOOK_EVENTS.length);
 
@@ -149,7 +48,7 @@ describe('Hook Installer', () => {
           ],
         },
       };
-      const result = installHooks(settings);
+      const result = applyHooks(settings);
       expect(result.hooks.SessionStart).toHaveLength(2);
       expect(result.hooks.SessionStart[0].hooks[0].command).toBe('echo "custom hook"');
     });
@@ -165,7 +64,7 @@ describe('Hook Installer', () => {
           ],
         },
       };
-      const result = installHooks(settings);
+      const result = applyHooks(settings);
       expect(result.hooks.SessionStart).toHaveLength(1);
       expect(result.hooks.SessionStart[0].hooks[0].command).toContain('AGENTDECK_PORT');
     });
@@ -181,14 +80,14 @@ describe('Hook Installer', () => {
           ],
         },
       };
-      const result = installHooks(settings);
+      const result = applyHooks(settings);
       expect(result.hooks.SessionStart).toHaveLength(1);
       expect(result.hooks.SessionStart[0].hooks[0].command).toContain('AGENTDECK_PORT');
     });
 
     it('is idempotent — running twice produces same result', () => {
-      const first = installHooks({});
-      const second = installHooks(JSON.parse(JSON.stringify(first)));
+      const first = applyHooks({});
+      const second = applyHooks(JSON.parse(JSON.stringify(first)));
 
       for (const event of HOOK_EVENTS) {
         expect(second.hooks[event]).toHaveLength(1);
@@ -197,16 +96,16 @@ describe('Hook Installer', () => {
 
     it('preserves existing non-hook settings', () => {
       const settings = { permissions: { allow: true }, other: 'value' };
-      const result = installHooks(settings);
+      const result = applyHooks(settings);
       expect(result.permissions).toEqual({ allow: true });
       expect(result.other).toBe('value');
     });
   });
 
-  describe('uninstallHooks', () => {
+  describe('removeHooks', () => {
     it('removes all AgentDeck hooks (new format)', () => {
-      const installed = installHooks({});
-      const result = uninstallHooks(installed);
+      const installed = applyHooks({});
+      const result = removeHooks(installed);
       expect(result.hooks).toBeUndefined();
     });
 
@@ -218,28 +117,28 @@ describe('Hook Installer', () => {
           ],
         },
       };
-      const result = uninstallHooks(settings);
+      const result = removeHooks(settings);
       expect(result.hooks).toBeUndefined();
     });
 
     it('preserves non-AgentDeck hooks', () => {
-      const settings = installHooks({});
+      const settings = applyHooks({});
       settings.hooks.SessionStart.unshift({
         matcher: 'custom',
         hooks: [{ type: 'command', command: 'echo "keep me"' }],
       });
-      const result = uninstallHooks(settings);
+      const result = removeHooks(settings);
       expect(result.hooks.SessionStart).toHaveLength(1);
       expect(result.hooks.SessionStart[0].hooks[0].command).toBe('echo "keep me"');
     });
 
     it('handles empty settings gracefully', () => {
-      const result = uninstallHooks({});
+      const result = removeHooks({});
       expect(result.hooks).toBeUndefined();
     });
   });
 
-  describe('hook migration', () => {
+  describe('migrateHooks', () => {
     it('migrates old hardcoded port to env var', () => {
       const settings = {
         hooks: {
@@ -277,7 +176,7 @@ describe('Hook Installer', () => {
     });
 
     it('skips already-migrated hooks (new format)', () => {
-      const settings = installHooks({});
+      const settings = applyHooks({});
       const { migrated: didMigrate } = migrateHooks(settings);
       expect(didMigrate).toBe(false);
     });
@@ -310,6 +209,26 @@ describe('Hook Installer', () => {
         expect(settings.hooks[event][0].hooks).toBeDefined();
         expect(settings.hooks[event][0].hooks[0].command).toContain('AGENTDECK_PORT');
       }
+    });
+
+    it('migrates hardcoded port inside matcher-group', () => {
+      const settings = {
+        hooks: {
+          Stop: [
+            {
+              matcher: '',
+              hooks: [{
+                type: 'command',
+                command: "curl -sf http://localhost:9120/hooks/Stop ...",
+              }],
+            },
+          ],
+        },
+      };
+      const { migrated: didMigrate } = migrateHooks(settings);
+      expect(didMigrate).toBe(true);
+      expect(settings.hooks.Stop[0].hooks[0].command).toContain('AGENTDECK_PORT');
+      expect(settings.hooks.Stop[0].hooks[0].command).not.toContain('localhost:9120');
     });
   });
 });
