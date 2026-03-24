@@ -14,7 +14,7 @@ func formatResetTime(_ isoString: String?) -> String? {
             ?? ISO8601DateFormatter().date(from: isoString) else { return nil }
 
     let remaining = date.timeIntervalSinceNow
-    guard remaining > 0 else { return nil }
+    guard remaining > 0 else { return "now" }
 
     let totalMinutes = Int(remaining / 60)
     let days = totalMinutes / (60 * 24)

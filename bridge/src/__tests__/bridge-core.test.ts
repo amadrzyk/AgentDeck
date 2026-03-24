@@ -17,9 +17,9 @@ import type { ApiUsageData } from '../usage-api.js';
 function sampleApiUsage(overrides: Partial<ApiUsageData> = {}): ApiUsageData {
   return {
     fiveHourPercent: 35,
-    fiveHourResetsAt: '2026-03-22T15:00:00Z',
+    fiveHourResetsAt: new Date(Date.now() + 3 * 3600_000).toISOString(),
     sevenDayPercent: 12,
-    sevenDayResetsAt: '2026-03-28T00:00:00Z',
+    sevenDayResetsAt: new Date(Date.now() + 5 * 24 * 3600_000).toISOString(),
     extraUsageEnabled: false,
     extraUsageMonthlyLimit: null,
     extraUsageUsedCredits: null,

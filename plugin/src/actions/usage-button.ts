@@ -9,7 +9,7 @@ import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { State, augmentedPath, resolveOpenClawBin, getLanIp, OPENCLAW_GATEWAY_PORT, BRIDGE_HTTP_PORT, type BillingType, type AgentCapabilities, type ModelCatalogEntry } from '@agentdeck/shared';
+import { State, augmentedPath, resolveOpenClawBin, getLanIp, OPENCLAW_GATEWAY_PORT, BRIDGE_HTTP_PORT, adjustUsagePercent, type BillingType, type AgentCapabilities, type ModelCatalogEntry } from '@agentdeck/shared';
 import type { AgentLink } from '../agent-link.js';
 import { renderButton, svgToDataUrl } from '../renderers/button-renderer.js';
 import { renderQrButtonSvg, extractUrlLabel } from '../renderers/qr-renderer.js';
@@ -153,9 +153,9 @@ function applyUsageCacheData(d: UsageCacheFile['data']): void {
   if (hasRateLimits && billingType === 'unknown') billingType = 'subscription';
   else if (!hasRateLimits && billingType === 'unknown') billingType = 'api';
 
-  if (d.fiveHourPercent != null) fiveHourPercent = d.fiveHourPercent;
+  if (d.fiveHourPercent != null) fiveHourPercent = adjustUsagePercent(d.fiveHourPercent, d.fiveHourResetsAt);
   if (d.fiveHourResetsAt) fiveHourResetsAt = d.fiveHourResetsAt;
-  if (d.sevenDayPercent != null) sevenDayPercent = d.sevenDayPercent;
+  if (d.sevenDayPercent != null) sevenDayPercent = adjustUsagePercent(d.sevenDayPercent, d.sevenDayResetsAt);
   if (d.sevenDayResetsAt) sevenDayResetsAt = d.sevenDayResetsAt;
   if (d.extraUsageEnabled != null) extraUsageEnabled = d.extraUsageEnabled;
   if (d.extraUsageMonthlyLimit != null) extraUsageMonthlyLimit = d.extraUsageMonthlyLimit;
@@ -251,9 +251,9 @@ async function fetchStandaloneUsage(): Promise<void> {
 
     const fh = parseStandaloneUtilization(fiveHour);
     const sd = parseStandaloneUtilization(sevenDay);
-    if (fh.utilization != null) fiveHourPercent = fh.utilization;
+    if (fh.utilization != null) fiveHourPercent = adjustUsagePercent(fh.utilization, fh.resetsAt);
     if (fh.resetsAt) fiveHourResetsAt = fh.resetsAt;
-    if (sd.utilization != null) sevenDayPercent = sd.utilization;
+    if (sd.utilization != null) sevenDayPercent = adjustUsagePercent(sd.utilization, sd.resetsAt);
     if (sd.resetsAt) sevenDayResetsAt = sd.resetsAt;
     if (extra?.enabled != null) extraUsageEnabled = !!(extra.enabled);
     if (extra?.monthly_limit != null) extraUsageMonthlyLimit = extra.monthly_limit as number;

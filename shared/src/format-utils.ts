@@ -77,6 +77,21 @@ export function formatUptime(sec: number): string {
   return `${m}m`;
 }
 
+/** If the rate-limit window has expired (resetsAt <= now), return 0 instead of stale percent */
+export function adjustUsagePercent(
+  percent: number | null | undefined,
+  resetsAt: string | null | undefined,
+): number | undefined {
+  if (percent == null) return undefined;
+  if (resetsAt) {
+    try {
+      const resetMs = new Date(resetsAt).getTime();
+      if (!isNaN(resetMs) && resetMs <= Date.now()) return 0;
+    } catch { /* fall through */ }
+  }
+  return percent;
+}
+
 /** Plain-text gauge bar: "████░░" (no ANSI colors) */
 export function gaugeBar(percent: number, width = 6): string {
   const clamped = Math.max(0, Math.min(100, percent));

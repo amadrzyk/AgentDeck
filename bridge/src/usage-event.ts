@@ -2,6 +2,7 @@ import type { BridgeEvent, StateSnapshot } from './types.js';
 import type { ApiUsageData } from './usage-api.js';
 import { getTokenStatus } from './usage-api.js';
 import type { OllamaStatus } from './ollama-probe.js';
+import { adjustUsagePercent } from '@agentdeck/shared';
 
 /**
  * Build a usage_update BridgeEvent from current state.
@@ -26,9 +27,9 @@ export function buildUsageEvent(
     costLimit: snapshot.costLimit ?? undefined,
     resetTime: snapshot.resetTime ?? undefined,
     resetDate: snapshot.resetDate ?? undefined,
-    fiveHourPercent: apiUsage?.fiveHourPercent ?? undefined,
+    fiveHourPercent: adjustUsagePercent(apiUsage?.fiveHourPercent, apiUsage?.fiveHourResetsAt),
     fiveHourResetsAt: apiUsage?.fiveHourResetsAt ?? undefined,
-    sevenDayPercent: apiUsage?.sevenDayPercent ?? undefined,
+    sevenDayPercent: adjustUsagePercent(apiUsage?.sevenDayPercent, apiUsage?.sevenDayResetsAt),
     sevenDayResetsAt: apiUsage?.sevenDayResetsAt ?? undefined,
     extraUsageEnabled: apiUsage?.extraUsageEnabled ?? undefined,
     extraUsageMonthlyLimit: apiUsage?.extraUsageMonthlyLimit ?? undefined,
