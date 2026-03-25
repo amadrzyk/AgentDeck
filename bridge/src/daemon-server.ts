@@ -724,6 +724,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
     await stopModules(startedModules);
     httpServer.close(() => process.exit(0));
+    // Force exit if httpServer.close() hangs on CLOSE_WAIT connections
+    setTimeout(() => process.exit(0), 5000).unref();
   });
 
   core.registerProcessHandlers('agentdeck');
