@@ -70,6 +70,8 @@ data class TerrariumState(
     val agents: List<AgentCreatureState> = emptyList(),
     /** Codex CLI cloud creatures. */
     val cloudCreatures: List<AgentCreatureState> = emptyList(),
+    /** OpenCode nested-square creatures. */
+    val openCodeCreatures: List<AgentCreatureState> = emptyList(),
     /** OpenClaw backend worker count. */
     val workerCrayfishCount: Int = 0,
     /** Pop burst positions (normalized) — set for 1 frame when ASKING exits. */
@@ -178,8 +180,8 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     // Build multi-agent creature list from sibling sessions
     val agents = mutableListOf<AgentCreatureState>()
 
-    // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, or codex-cli
-    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw" && agentType != "codex-cli") {
+    // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, codex-cli, or opencode
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw" && agentType != "codex-cli" && agentType != "opencode") {
         agents.add(
             AgentCreatureState(
                 sessionId = sessionId ?: "primary",
@@ -198,7 +200,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     for (sibling in siblingSessions) {
         if (sessionId != null && sibling.id == sessionId) continue // skip self (null guard)
         val siblingType = sibling.agentType
-        if (siblingType == "openclaw" || siblingType == "daemon" || siblingType == "codex-cli") continue // not octopus
+        if (siblingType == "openclaw" || siblingType == "daemon" || siblingType == "codex-cli" || siblingType == "opencode") continue // not octopus
         agents.add(
             AgentCreatureState(
                 sessionId = sibling.id,
@@ -246,6 +248,38 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         )
     }
 
+    // Build OpenCode creatures list from opencode sessions
+    val openCodeCreatures = mutableListOf<AgentCreatureState>()
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType == "opencode") {
+        openCodeCreatures.add(
+            AgentCreatureState(
+                sessionId = sessionId ?: "primary-opencode",
+                agentType = agentType,
+                mark = AgentMark.fromAgentType(agentType),
+                visualState = octopus,
+                isPrimary = true,
+                layoutSlot = 0,
+                displayName = projectName,
+            )
+        )
+    }
+    var openCodeSlot = openCodeCreatures.size
+    for (sibling in siblingSessions) {
+        if (sessionId != null && sibling.id == sessionId) continue
+        if (sibling.agentType != "opencode") continue
+        openCodeCreatures.add(
+            AgentCreatureState(
+                sessionId = sibling.id,
+                agentType = sibling.agentType,
+                mark = AgentMark.fromAgentType(sibling.agentType),
+                visualState = mapSessionOctopusState(sibling.state),
+                isPrimary = false,
+                layoutSlot = openCodeSlot++,
+                displayName = sibling.projectName,
+            )
+        )
+    }
+
     // Number duplicate display names: "AgentDeck", "AgentDeck" → "AgentDeck #1", "AgentDeck #2"
     val nameCounts = agents.groupingBy { it.displayName }.eachCount()
     val nameCounters = mutableMapOf<String?, Int>()
@@ -271,6 +305,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         hasError = gatewayHasError == true,
         agents = agents,
         cloudCreatures = cloudCreatures,
+        openCodeCreatures = openCodeCreatures,
         workerCrayfishCount = workerSessionCount ?: 0,
     )
 }

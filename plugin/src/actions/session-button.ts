@@ -527,7 +527,7 @@ function renderSessionSvg(): string {
       const lines: string[] = [
         `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
         `<rect width="${SIZE}" height="${SIZE}" rx="12" fill="#0a2e14"/>`,
-        agentLogoWatermark('claude-code', '#4ade80', 0.08),
+        agentLogoWatermark('claude-code', '#4ade80', 0.12),
         `<circle cx="18" cy="18" r="5" fill="#4ade80"/>`,
       ];
 

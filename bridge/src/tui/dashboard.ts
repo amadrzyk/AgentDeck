@@ -16,7 +16,7 @@ import {
   renderDashboard, getLayout, shouldShowTerrarium, spinner,
 } from './renderer.js';
 import {
-  initTerrarium, updateTerrarium, setOctopi, setJellyfish, setCrayfish,
+  initTerrarium, updateTerrarium, setOctopi, setJellyfish, setOpenCode, setCrayfish,
   setVoiceAssistantState, renderTerrariumFrame,
 } from './terrarium.js';
 
@@ -157,6 +157,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     }
     setOctopi(terrCtx, octSessions);
     setJellyfish(terrCtx, octSessions);
+    setOpenCode(terrCtx, octSessions);
 
     // Crayfish
     const ocSibling = state.sessions.find(s =>

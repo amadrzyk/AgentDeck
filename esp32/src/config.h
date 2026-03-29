@@ -34,6 +34,7 @@ constexpr uint32_t RENDER_INTERVAL_MS  = 33;  // ~30fps
 #if defined(BOARD_ULANZI_TC001)
 constexpr uint8_t  MAX_OCTOPUS         = 1;
 constexpr uint8_t  MAX_CLOUD           = 0;
+constexpr uint8_t  MAX_OPENCODE        = 0;
 constexpr uint8_t  MAX_TETRA           = 0;
 constexpr uint8_t  MAX_BUBBLES         = 0;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 0;
@@ -42,6 +43,7 @@ constexpr uint8_t  WAVE_SEGMENTS       = 0;
 #elif IS_ROUND
 constexpr uint8_t  MAX_OCTOPUS         = 4;
 constexpr uint8_t  MAX_CLOUD           = 2;
+constexpr uint8_t  MAX_OPENCODE        = 2;
 constexpr uint8_t  MAX_TETRA           = 4;
 constexpr uint8_t  MAX_BUBBLES         = 12;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 6;
@@ -50,6 +52,7 @@ constexpr uint8_t  WAVE_SEGMENTS       = 14;
 #else
 constexpr uint8_t  MAX_OCTOPUS         = 6;
 constexpr uint8_t  MAX_CLOUD           = 4;
+constexpr uint8_t  MAX_OPENCODE        = 4;
 constexpr uint8_t  MAX_TETRA           = 6;
 constexpr uint8_t  MAX_BUBBLES         = 20;
 constexpr uint8_t  MAX_FOOD_CRUMBS     = 10;

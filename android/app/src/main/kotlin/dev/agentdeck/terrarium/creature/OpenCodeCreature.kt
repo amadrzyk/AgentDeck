@@ -1,0 +1,421 @@
+package dev.agentdeck.terrarium.creature
+
+import android.graphics.Paint
+import android.graphics.Typeface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import dev.agentdeck.terrarium.OctopusVisualState
+import dev.agentdeck.terrarium.TerrariumColors
+import dev.agentdeck.terrarium.TerrariumLayout
+import dev.agentdeck.terrarium.TerrariumTiming
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+
+/**
+ * OpenCode nested-square creature -- geometric logo, NOT biomorphic.
+ * Two concentric rectangles: bright outer frame (#F1ECEC) + dark inner square (#4B4646).
+ * No eyes, tentacles, or limbs. Animation is limited to bob/pulse only.
+ *
+ * Same public API as OctopusCreature/CloudCreature for interchangeable use.
+ */
+class OpenCodeCreature(
+    centerXFraction: Float = TerrariumLayout.OPENCODE_CENTER_X_FRACTION,
+    centerYFraction: Float = TerrariumLayout.OPENCODE_CENTER_Y_FRACTION,
+    private var scaleFactor: Float = 1f,
+    phaseOffset: Float = 0f,
+    displayName: String? = null,
+) : Creature {
+
+    private var visualState by mutableStateOf(OctopusVisualState.FLOATING)
+    private var time by mutableFloatStateOf(phaseOffset)
+    private var transitionProgress by mutableFloatStateOf(1f)
+    private var nameTag: String? by mutableStateOf(displayName)
+    private var showNameTag by mutableStateOf(displayName != null)
+
+    // Swimming state
+    private var homeX = centerXFraction
+    private var homeY = centerYFraction
+    private var currentX = centerXFraction
+    private var currentY = centerYFraction
+    private var targetX = centerXFraction
+    private var targetY = centerYFraction
+    private var waypointTimer = 0f
+    private var waypointInterval = TerrariumTiming.WAYPOINT_MIN_INTERVAL +
+        kotlin.random.Random.nextFloat() * (TerrariumTiming.WAYPOINT_MAX_INTERVAL - TerrariumTiming.WAYPOINT_MIN_INTERVAL)
+    private val standingJitter = kotlin.random.Random.nextFloat() * 0.06f - 0.03f
+
+    /** Callback invoked when transitioning away from ASKING (bubble pop trigger). */
+    var onAskingExit: ((nx: Float, ny: Float) -> Unit)? = null
+
+    fun setState(newState: OctopusVisualState) {
+        if (newState != visualState) {
+            if (visualState == OctopusVisualState.ASKING) {
+                onAskingExit?.invoke(currentX, currentY)
+            }
+            visualState = newState
+            transitionProgress = 0f
+        }
+    }
+
+    fun setDisplayName(name: String?, show: Boolean = name != null) {
+        nameTag = name
+        showNameTag = show
+    }
+
+    /** Update home position -- creature lerps naturally (no teleport). */
+    fun setHomePosition(x: Float, y: Float, scale: Float) {
+        homeX = x
+        homeY = y
+        scaleFactor = scale
+    }
+
+    /** Current live position for tetra attractor tracking. */
+    fun currentPosition(): Pair<Float, Float> = currentX to currentY
+
+    /** Whether this OpenCode is currently working (swimming, scattering data). */
+    fun isWorking(): Boolean = visualState == OctopusVisualState.WORKING
+
+    override fun update(dt: Float) {
+        time += dt
+        if (transitionProgress < 1f) {
+            transitionProgress = (transitionProgress + dt * 3f).coerceAtMost(1f)
+        }
+
+        when (visualState) {
+            OctopusVisualState.SLEEPING -> {
+                val myDeepY = STANDING_Y_DEEP + standingJitter * 0.5f
+                currentX += (homeX - currentX) * dt * 4f
+                currentY += (myDeepY - currentY) * dt * 4f
+            }
+            OctopusVisualState.FLOATING -> {
+                val myStandingY = STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f
+                val breathBob = sin(time * 0.5f) * 0.003f
+                val idleSway = sin(time * 0.2f) * 0.003f
+                currentX += (homeX + idleSway - currentX) * dt * 4f
+                currentY += (myStandingY + breathBob - currentY) * dt * 4f
+            }
+            OctopusVisualState.ASKING -> {
+                val myStandingY = ASKING_Y + standingJitter + (homeX - 0.4f) * 0.15f
+                val fidgetX = sin(time * 0.8f) * 0.004f
+                currentX += (homeX + fidgetX - currentX) * dt * 4f
+                currentY += (myStandingY - currentY) * dt * 4f
+            }
+            OctopusVisualState.WORKING -> {
+                waypointTimer += dt
+                if (waypointTimer >= waypointInterval) {
+                    waypointTimer = 0f
+                    waypointInterval = TerrariumTiming.WAYPOINT_MIN_INTERVAL +
+                        kotlin.random.Random.nextFloat() * (TerrariumTiming.WAYPOINT_MAX_INTERVAL - TerrariumTiming.WAYPOINT_MIN_INTERVAL)
+                    pickNewWaypoint()
+                }
+                val rate = TerrariumTiming.SWIM_LERP_RATE * dt
+                currentX += (targetX - currentX) * rate
+                currentY += (targetY - currentY) * rate
+                currentX = currentX.coerceIn(TerrariumLayout.SWIM_MIN_X, TerrariumLayout.SWIM_MAX_X)
+                currentY = currentY.coerceIn(WORKING_MIN_Y, WORKING_MAX_Y)
+            }
+        }
+    }
+
+    private fun pickNewWaypoint() {
+        val angle = kotlin.random.Random.nextFloat() * 2f * PI.toFloat()
+        val wanderRadius = 0.12f
+        val radius = kotlin.random.Random.nextFloat() * wanderRadius
+        targetX = (homeX + cos(angle) * radius)
+            .coerceIn(TerrariumLayout.SWIM_MIN_X, TerrariumLayout.SWIM_MAX_X)
+        targetY = (WORKING_CENTER_Y + sin(angle) * radius * 0.5f)
+            .coerceIn(WORKING_MIN_Y, WORKING_MAX_Y)
+    }
+
+    override fun draw(scope: DrawScope) {
+        val w = scope.size.width
+        val h = scope.size.height
+
+        val bodySize = w * BODY_SIZE_FRACTION * scaleFactor
+
+        val centerX = w * currentX
+
+        // Bob animation
+        val bobOffset = when (visualState) {
+            OctopusVisualState.WORKING -> sin(time * 2f * PI.toFloat() / (TerrariumTiming.FLOAT_PERIOD_MS / 1000f)) *
+                h * TerrariumTiming.FLOAT_AMPLITUDE_FRACTION
+            OctopusVisualState.FLOATING -> sin(time * 0.5f) * h * 0.003f
+            else -> 0f
+        }
+        val centerY = h * currentY + bobOffset
+
+        val bodyAlpha = when (visualState) {
+            OctopusVisualState.SLEEPING -> 0.35f
+            else -> 1f
+        }
+
+        // Working pulse
+        val pulseScale = when (visualState) {
+            OctopusVisualState.WORKING -> 1f + sin(time * TerrariumTiming.THINKING_PULSE_SPEED) * 0.03f
+            else -> 1f
+        }
+        val scaledSize = bodySize * pulseScale
+
+        // Draw nested squares
+        drawNestedSquares(scope, centerX, centerY, scaledSize, bodyAlpha)
+
+        // ASKING: speech bubble with "?"
+        if (visualState == OctopusVisualState.ASKING) {
+            drawSpeechBubble(scope, centerX, centerY, scaledSize)
+        }
+
+        // Name tag
+        if (showNameTag && nameTag != null) {
+            drawNameTag(scope, centerX, centerY, scaledSize, nameTag!!)
+        }
+    }
+
+    /**
+     * Draw the nested-square logo: outer frame + inner square.
+     * Geometric, clean, no organic features.
+     */
+    private fun drawNestedSquares(
+        scope: DrawScope,
+        cx: Float, cy: Float,
+        size: Float,
+        alpha: Float,
+    ) {
+        val outerHalf = size / 2f
+        val gap = size * 0.15f  // gap between outer and inner
+        val innerHalf = outerHalf - gap
+
+        // Outer frame color
+        val outerColor = when (visualState) {
+            OctopusVisualState.SLEEPING -> OUTER_DIM
+            OctopusVisualState.WORKING -> {
+                val t = sin(time * TerrariumTiming.THINKING_PULSE_SPEED) * 0.5f + 0.5f
+                lerpColor(OUTER_FRAME, OUTER_BRIGHT, t)
+            }
+            else -> OUTER_FRAME
+        }
+
+        // Inner square color
+        val innerColor = when (visualState) {
+            OctopusVisualState.SLEEPING -> INNER_DIM
+            else -> INNER_SQUARE
+        }
+
+        // Outer frame (filled rectangle)
+        val cornerR = size * 0.06f
+        scope.drawRoundRect(
+            color = outerColor,
+            alpha = alpha,
+            topLeft = Offset(cx - outerHalf, cy - outerHalf),
+            size = Size(outerHalf * 2f, outerHalf * 2f),
+            cornerRadius = CornerRadius(cornerR, cornerR),
+        )
+
+        // Inner square (slightly smaller corner radius)
+        val innerCornerR = cornerR * 0.6f
+        scope.drawRoundRect(
+            color = innerColor,
+            alpha = alpha,
+            topLeft = Offset(cx - innerHalf, cy - innerHalf),
+            size = Size(innerHalf * 2f, innerHalf * 2f),
+            cornerRadius = CornerRadius(innerCornerR, innerCornerR),
+        )
+
+        // Working state: subtle border glow
+        if (visualState == OctopusVisualState.WORKING) {
+            val glowAlpha = (sin(time * 2f) * 0.15f + 0.15f) * alpha
+            scope.drawRoundRect(
+                color = GLOW_COLOR,
+                alpha = glowAlpha,
+                topLeft = Offset(cx - outerHalf - 2f, cy - outerHalf - 2f),
+                size = Size(outerHalf * 2f + 4f, outerHalf * 2f + 4f),
+                cornerRadius = CornerRadius(cornerR + 2f, cornerR + 2f),
+                style = Stroke(width = 3f),
+            )
+        }
+    }
+
+    /** Speech bubble with "?" -- shown during ASKING state. */
+    private fun drawSpeechBubble(scope: DrawScope, cx: Float, cy: Float, bodySize: Float) {
+        val bubbleX = cx + bodySize * 0.7f
+        val bubbleY = cy
+        val bubbleR = bodySize * 0.3f
+
+        val pulse = sin(time * 2.5f) * 0.08f + 1f
+        val r = bubbleR * pulse
+
+        scope.drawCircle(
+            color = Color.White,
+            alpha = 0.25f,
+            radius = r,
+            center = Offset(bubbleX, bubbleY),
+        )
+        scope.drawCircle(
+            color = TerrariumColors.HUDText,
+            alpha = 0.5f,
+            radius = r,
+            center = Offset(bubbleX, bubbleY),
+            style = Stroke(width = bodySize * 0.02f),
+        )
+
+        val canvas = scope.drawContext.canvas.nativeCanvas
+        val textSize = r * 1.2f
+        canvas.drawText(
+            "?", bubbleX, bubbleY + textSize * 0.35f,
+            questionMarkPaint.apply { this.textSize = textSize },
+        )
+    }
+
+    // Cached name tag layout
+    private var cachedNameLayout: CachedNameLayout? = null
+    private data class CachedNameLayout(
+        val name: String, val fontSize: Float, val bodySize: Float,
+        val lines: List<String>, val lineHeight: Float, val hatHeight: Float,
+    )
+
+    /** Name tag above the square -- only shown in multi-session mode. */
+    private fun drawNameTag(scope: DrawScope, cx: Float, cy: Float, bodySize: Float, name: String) {
+        val hatY = cy - bodySize * 0.55f
+        val hatWidth = bodySize * 1.4f
+        val baseFontSize = bodySize * 0.28f
+
+        val cached = cachedNameLayout
+        val chosenSize: Float
+        val lines: List<String>
+        val lineHeight: Float
+        val hatHeight: Float
+
+        if (cached != null && cached.name == name && cached.bodySize == bodySize) {
+            chosenSize = cached.fontSize
+            lines = cached.lines
+            lineHeight = cached.lineHeight
+            hatHeight = cached.hatHeight
+        } else {
+            val tiers = floatArrayOf(0.60f, 0.45f, 0.35f)
+            val maxTextWidth = hatWidth * 0.9f
+            var cs = baseFontSize * tiers[0]
+            var ls = listOf(name)
+
+            for (tier in tiers) {
+                cs = baseFontSize * tier
+                nameTagPaint.textSize = cs
+                val textWidth = nameTagPaint.measureText(name)
+                if (textWidth <= maxTextWidth) {
+                    ls = listOf(name)
+                    break
+                }
+                if (tier == tiers.last()) {
+                    ls = wrapToTwoLines(name, nameTagPaint, maxTextWidth)
+                }
+            }
+
+            chosenSize = cs
+            lines = ls
+            lineHeight = cs * 1.3f
+            hatHeight = if (ls.size == 1) bodySize * 0.25f else lineHeight * ls.size + cs * 0.3f
+            cachedNameLayout = CachedNameLayout(name, cs, bodySize, ls, lineHeight, hatHeight)
+        }
+
+        val canvas = scope.drawContext.canvas.nativeCanvas
+
+        // Hat background -- neutral dark gray
+        scope.drawRoundRect(
+            color = INNER_SQUARE,
+            alpha = 0.6f,
+            topLeft = Offset(cx - hatWidth / 2, hatY - hatHeight),
+            size = Size(hatWidth, hatHeight),
+            cornerRadius = CornerRadius(4f, 4f),
+        )
+
+        nameTagPaint.textSize = chosenSize
+        if (lines.size == 1) {
+            canvas.drawText(
+                lines[0], cx, hatY - hatHeight * 0.25f,
+                nameTagPaint,
+            )
+        } else {
+            val topY = hatY - hatHeight + chosenSize * 0.3f + chosenSize
+            for (i in lines.indices) {
+                canvas.drawText(
+                    lines[i], cx, topY + i * lineHeight,
+                    nameTagPaint,
+                )
+            }
+        }
+    }
+
+    private fun wrapToTwoLines(text: String, paint: Paint, maxWidth: Float): List<String> {
+        val spaces = text.indices.filter { text[it] == ' ' }
+        if (spaces.isEmpty()) return listOf(text)
+
+        var bestSplit = spaces.minByOrNull { kotlin.math.abs(it - text.length / 2) } ?: return listOf(text)
+        var bestMax = Float.MAX_VALUE
+
+        for (sp in spaces) {
+            val line1 = text.substring(0, sp)
+            val line2 = text.substring(sp + 1)
+            val w1 = paint.measureText(line1)
+            val w2 = paint.measureText(line2)
+            val maxW = maxOf(w1, w2)
+            if (maxW < bestMax) {
+                bestMax = maxW
+                bestSplit = sp
+            }
+        }
+
+        return listOf(text.substring(0, bestSplit), text.substring(bestSplit + 1))
+    }
+
+    private fun lerpColor(a: Color, b: Color, t: Float): Color {
+        return Color(
+            red = a.red + (b.red - a.red) * t,
+            green = a.green + (b.green - a.green) * t,
+            blue = a.blue + (b.blue - a.blue) * t,
+            alpha = a.alpha + (b.alpha - a.alpha) * t,
+        )
+    }
+
+    private val questionMarkPaint = Paint().apply {
+        isAntiAlias = true
+        color = android.graphics.Color.argb(180, 226, 232, 240)
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
+    }
+
+    private val nameTagPaint = Paint().apply {
+        isAntiAlias = true
+        color = android.graphics.Color.argb(220, 226, 232, 240)
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    }
+
+    companion object {
+        // Body size as fraction of canvas width
+        private const val BODY_SIZE_FRACTION = 0.08f
+
+        // Positions
+        private const val STANDING_Y = 0.55f
+        private const val STANDING_Y_DEEP = 0.75f
+        private const val ASKING_Y = 0.38f
+        private const val WORKING_CENTER_Y = 0.15f
+        private const val WORKING_MIN_Y = 0.08f
+        private const val WORKING_MAX_Y = 0.30f
+
+        // Colors from opencode-logo-dark.svg
+        private val OUTER_FRAME = Color(0xFFF1ECEC)   // light warm gray outer
+        private val INNER_SQUARE = Color(0xFF4B4646)   // dark brown-gray inner
+        private val OUTER_BRIGHT = Color(0xFFFFF5F5)   // working pulse bright
+        private val OUTER_DIM = Color(0xFF8A8585)       // sleeping outer
+        private val INNER_DIM = Color(0xFF353232)        // sleeping inner
+        private val GLOW_COLOR = Color(0xFFF1ECEC)       // working border glow
+    }
+}

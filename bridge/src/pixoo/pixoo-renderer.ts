@@ -23,9 +23,9 @@ import type { StateUpdateEvent, UsageEvent } from '../types.js';
 import type { SessionInfo } from '@agentdeck/shared/protocol';
 import {
   type RGB, COLORS, setPixel, blendPixel, glowPixel, fillRect, lerpColor,
-  drawOctopus, drawJellyfish, drawCrayfish, drawTetra,
+  drawOctopus, drawJellyfish, drawOpenCode, drawCrayfish, drawTetra,
   drawText,
-  getOctopusPaletteForSession, getJellyfishPaletteForSession,
+  getOctopusPaletteForSession, getJellyfishPaletteForSession, getOpenCodePaletteForSession,
   OCTO_WORLD_W, JF_WORLD_W, CF_WORLD_W,
 } from './pixoo-sprites.js';
 import {
@@ -54,7 +54,7 @@ const CF_DEFAULT_Y = 0.76; // just above sand line (sitting on ground)
 interface CreatureInstance {
   sessionId: string;
   agentType: string;
-  creatureType: 'octopus' | 'jellyfish';
+  creatureType: CreatureType;
   state: 'idle' | 'processing' | 'awaiting';
   worldX: number;
   worldY: number;
@@ -68,9 +68,13 @@ const PHI = (1 + Math.sqrt(5)) / 2;
 const creatureInstances = new Map<string, CreatureInstance>();
 
 /** Agent types that represent coding agents (draw as octopus). */
-const CODING_AGENTS = new Set(['claude-code', 'opencode']);
+const CODING_AGENTS = new Set(['claude-code']);
 /** Agent types drawn as jellyfish (cloud creature). */
 const JELLYFISH_AGENTS = new Set(['codex-cli']);
+/** Agent types drawn as nested-square opencode. */
+const OPENCODE_AGENTS = new Set(['opencode']);
+
+type CreatureType = 'octopus' | 'jellyfish' | 'opencode';
 
 // Y positions by state — idle nearly on sand, active higher up
 const IDLE_Y = 0.78;      // just above sand line (sleeping on ground)
@@ -83,17 +87,15 @@ function stateY(state: 'idle' | 'processing' | 'awaiting'): number {
   return IDLE_Y;
 }
 
-/**
- * Sync creature instances with current session data.
- * Called every frame to add/remove/update creatures.
- */
-/** Check if agent type gets a creature (octopus or jellyfish). */
+/** Check if agent type gets a creature. */
 function isCreatureAgent(agentType: string): boolean {
-  return CODING_AGENTS.has(agentType) || JELLYFISH_AGENTS.has(agentType);
+  return CODING_AGENTS.has(agentType) || JELLYFISH_AGENTS.has(agentType) || OPENCODE_AGENTS.has(agentType);
 }
 
-function creatureTypeFor(agentType: string): 'octopus' | 'jellyfish' {
-  return JELLYFISH_AGENTS.has(agentType) ? 'jellyfish' : 'octopus';
+function creatureTypeFor(agentType: string): CreatureType {
+  if (JELLYFISH_AGENTS.has(agentType)) return 'jellyfish';
+  if (OPENCODE_AGENTS.has(agentType)) return 'opencode';
+  return 'octopus';
 }
 
 function syncCreatures(
@@ -767,6 +769,16 @@ export function renderFrame(
         animFrame + c.phaseOffset,
         camera,
         getJellyfishPaletteForSession(sessionToneIndex),
+      );
+    } else if (c.creatureType === 'opencode') {
+      drawOpenCode(
+        outputBuf,
+        c.worldX,
+        c.worldY,
+        spriteState,
+        animFrame + c.phaseOffset,
+        camera,
+        getOpenCodePaletteForSession(sessionToneIndex),
       );
     } else {
       drawOctopus(

@@ -10,18 +10,21 @@
 #include <cstring>
 #include <cmath>
 
-// 14x5 pixel grid — exact replica of Android OctopusCreature.kt
-// 0=empty, 1=body, 2=eye, 3=left_arm, 4=right_arm, 5=left_leg, 6=right_leg
-static const uint8_t GRID[5][14] = {
-    {0,0, 1,1,1,1,1,1,1,1,1,1, 0,0},  // Row 0: head
-    {0,0, 1,1,2,1,1,1,1,2,1,1, 0,0},  // Row 1: eyes at col 4,9
-    {3,3, 1,1,1,1,1,1,1,1,1,1, 4,4},  // Row 2: body + arms
-    {0,0, 1,1,1,1,1,1,1,1,1,1, 0,0},  // Row 3: waist
-    {0,0, 0,5,0,5,0,0,6,0,6,0, 0,0},  // Row 4: tentacles
+// Simulator SSOT: 12×8 Claude Code block glyph from claudecode-color.svg
+// Flat terracotta glyph: rectangular body, eye cutouts, lower pegs.
+// 0=empty, 1=body (all cells are body — no separate eye/arm/leg types for glyph)
+static const uint8_t GRID[8][12] = {
+    {0,0,1,1,1,1,1,1,1,1,0,0},
+    {0,0,1,1,0,1,1,0,1,1,0,0},  // eye cutouts
+    {1,1,1,1,0,1,1,0,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1},
+    {0,1,1,1,1,1,1,1,1,1,1,0},
+    {0,0,1,0,1,0,0,1,0,1,0,0},  // lower pegs
+    {0,0,1,0,1,0,0,1,0,1,0,0},
 };
-
-constexpr float PIXEL_ASPECT = 2.0f;
-constexpr float PIXEL_GAP = 0.5f;
+constexpr int GRID_COLS = 12;
+constexpr int GRID_ROWS = 8;
 
 // Per-instance jitter (seeded by index)
 static float jitterX[MAX_OCTOPUS];
@@ -68,8 +71,9 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     // Dynamic scale: shrink creatures when many sessions
     float scaleFactor = (total >= 5) ? 0.60f : (total >= 4) ? 0.70f : (total >= 3) ? 0.85f : 1.0f;
     float bodyRadius = w * Layout::OctBodyRadiusFrac * scaleFactor;
-    float pixW = bodyRadius * 2.0f / 14.0f;
-    float pixH = pixW * PIXEL_ASPECT;
+    float glyphW = bodyRadius * 2.2f;
+    float cellW = glyphW / GRID_COLS;
+    float cellH = cellW;  // square cells for block glyph
 
     // Calculate home position — wider spread for more creatures
     float homeX;
@@ -129,9 +133,6 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
 
     // Animation offsets
     float breathBob = 0;
-    float armBob = 0;
-    float tentSpeed = 0.8f;
-    float tentAmp = 0.04f;
     float bodyAlpha = 1.0f;
     uint32_t bodyColor = Theme::ClaudeBody;
 
@@ -139,79 +140,50 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         case CreatureState::SLEEPING:
             bodyAlpha = 0.4f;
             break;
-
         case CreatureState::FLOATING:
-            breathBob = fastSin(t * 0.8f) * h * 0.002f;
-            armBob = fastSin(t * 0.5f) * pixH * 0.02f;
+            breathBob = fastSin(t * 0.9f) * h * 0.004f;
             break;
-
         case CreatureState::WORKING: {
-            breathBob = fastSin(t * 2 * M_PI / 4.0f) * h * 0.015f;
-            tentSpeed = 1.5f;
-            tentAmp = 0.08f;
-            armBob = fastSin(t * 1.0f) * pixH * 0.06f;
-            // Thinking pulse
+            breathBob = fastSin(t * 2.3f) * h * 0.012f;
             float pulse = fastSin(t * 3.0f) * 0.5f + 0.5f;
             bodyColor = lerpColor(Theme::ClaudeBody, Theme::ClaudeBodyLight, pulse);
             break;
         }
-
         case CreatureState::ASKING:
-            breathBob = fastSin(t * 0.8f) * h * 0.002f;
+            breathBob = fastSin(t * 0.9f) * h * 0.004f;
             break;
     }
 
     int cx = (int)(renderX * w);
     int cy = (int)(renderY * h + breathBob);
-    int gridW = (int)(14 * (pixW + PIXEL_GAP));
-    int gridH = (int)(5 * (pixH + PIXEL_GAP));
-    int startX = cx - gridW / 2;
-    int startY = cy - gridH / 2;
-
     uint8_t alpha = (uint8_t)(255 * bodyAlpha);
 
-    // Render pixel grid
-    for (int row = 0; row < 5; row++) {
-        for (int col = 0; col < 14; col++) {
-            uint8_t cell = GRID[row][col];
-            if (cell == 0) continue;
+    int cW = max(1, (int)cellW);
+    int cH = max(1, (int)cellH);
+    int glyphPxW = GRID_COLS * cW;
+    int glyphPxH = GRID_ROWS * cH;
+    int startX = cx - glyphPxW / 2;
+    int startY = cy - glyphPxH / 2;
 
-            int px = startX + (int)(col * (pixW + PIXEL_GAP));
-            int py = startY + (int)(row * (pixH + PIXEL_GAP));
+    // Working sparkle behind body
+    if (state == CreatureState::WORKING) {
+        for (int i = 0; i < 6; i++) {
+            float angle = t * 0.5f + i * (M_PI / 3.0f);
+            int sx = cx + (int)(cosf(angle) * bodyRadius * 0.95f);
+            int sy = cy + (int)(sinf(angle) * bodyRadius * 0.75f);
+            Draw::line(cx, cy, sx, sy, Theme::ClaudeBodyLight, 56);
+        }
+    }
 
-            // Per-cell animation offsets
-            float cellOffY = 0;
-            switch (cell) {
-                case 3: // left arm
-                case 4: // right arm
-                    cellOffY = armBob * ((cell == 3) ? 1.0f : -1.0f);
-                    break;
-                case 5: // left leg
-                case 6: // right leg
-                    cellOffY = fastSin(t * tentSpeed + col * 0.5f) * pixH * tentAmp;
-                    break;
-            }
-            py += (int)cellOffY;
-
-            // Determine color
-            uint32_t color;
-            switch (cell) {
-                case 2: color = Theme::ClaudeEye; break;
-                case 3: case 4: color = Theme::ClaudeBodyDark; break;
-                default: color = bodyColor; break;
-            }
-
-            // Sleeping: compressed eyes
-            int drawH = (int)pixH;
-            if (state == CreatureState::SLEEPING && cell == 2) {
-                drawH = (int)(pixH * 0.2f);
-                py += (int)(pixH * 0.4f);
-            }
-
-            // Draw filled pixel block
-            for (int dy = 0; dy < drawH; dy++) {
-                for (int dx = 0; dx < (int)pixW; dx++) {
-                    Draw::pixelA(px + dx, py + dy, color, alpha);
+    // Render 12×8 block glyph
+    for (int row = 0; row < GRID_ROWS; row++) {
+        for (int col = 0; col < GRID_COLS; col++) {
+            if (GRID[row][col] == 0) continue;
+            int px = startX + col * cW;
+            int py = startY + row * cH;
+            for (int dy = 0; dy < cH; dy++) {
+                for (int dx = 0; dx < cW; dx++) {
+                    Draw::pixelA(px + dx, py + dy, bodyColor, alpha);
                 }
             }
         }

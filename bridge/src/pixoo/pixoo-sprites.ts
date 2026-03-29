@@ -143,6 +143,34 @@ const JF_LOD_ROWS = 5;
 const MARKING = 2;
 const BREATHE_EDGE = 3;
 
+// ===== OpenCode 10×9 — nested-square logo sprite (simulator SSOT) =====
+const OPENCODE_FRAME = 8;
+const OPENCODE_CORE = 9;
+const OPENCODE_GRID: number[][] = [
+  [8,8,8,8,8,8,8,8,8,8],
+  [8,0,0,0,0,0,0,0,0,8],
+  [8,0,9,9,9,9,9,9,0,8],
+  [8,0,9,0,0,0,0,9,0,8],
+  [8,0,9,0,0,0,0,9,0,8],
+  [8,0,9,0,0,0,0,9,0,8],
+  [8,0,9,9,9,9,9,9,0,8],
+  [8,0,0,0,0,0,0,0,0,8],
+  [8,8,8,8,8,8,8,8,8,8],
+];
+const OC_COLS = 10;
+const OC_ROWS = 9;
+
+const OPENCODE_LOD: number[][] = [
+  [8,8,8,8,8,8],
+  [8,0,0,0,0,8],
+  [8,0,9,9,0,8],
+  [8,0,9,9,0,8],
+  [8,0,0,0,0,8],
+  [8,8,8,8,8,8],
+];
+const OC_LOD_COLS = 6;
+const OC_LOD_ROWS = 6;
+
 // ===== Colors — Android-matching darker palette =====
 type RGB = readonly [number, number, number];
 export interface OctopusPalette {
@@ -182,6 +210,12 @@ export const COLORS = {
   jellyfishGlow:    [0x31, 0x33, 0x78] as const,   // dim indigo glow halo
   jellyfishPulse:   [0xA5, 0xB4, 0xFC] as const,   // bioluminescent pulse
   jellyfishSleeping:[0x3A, 0x3C, 0x90] as const,   // dimmed indigo
+
+  // OpenCode (nested square)
+  opencodeOuter:    [0xF1, 0xEC, 0xEC] as const,  // light frame
+  opencodeInner:    [0x4B, 0x46, 0x46] as const,  // dark core
+  opencodePulse:    [0xCF, 0xCE, 0xCD] as const,  // pulse state
+  opencodeSleeping: [0x8A, 0x84, 0x84] as const,  // sleep dim
 
   // Tetra (neon)
   tetraNeon: [0x00, 0xE5, 0xFF] as const,
@@ -298,6 +332,25 @@ export function getJellyfishPaletteForSession(sessionIndex = 0): JellyfishPalett
     marking: scaleColor(COLORS.jellyfishMarking, tone),
     sleeping: scaleColor(COLORS.jellyfishSleeping, tone),
     pulse: scaleColor(COLORS.jellyfishPulse, tone),
+  };
+}
+
+export interface OpenCodePalette {
+  outer: RGB;
+  inner: RGB;
+  sleeping: RGB;
+  pulse: RGB;
+}
+
+export function getOpenCodePaletteForSession(sessionIndex = 0): OpenCodePalette {
+  const tone = SESSION_TONE_FACTORS[
+    Math.max(0, Math.min(SESSION_TONE_FACTORS.length - 1, sessionIndex))
+  ];
+  return {
+    outer: scaleColor(COLORS.opencodeOuter, tone),
+    inner: scaleColor(COLORS.opencodeInner, tone),
+    sleeping: scaleColor(COLORS.opencodeSleeping, tone),
+    pulse: scaleColor(COLORS.opencodePulse, tone),
   };
 }
 
@@ -760,6 +813,65 @@ export function drawJellyfish(
       const sx = scx + Math.cos(angle) * dist;
       const sy = scy + breathPx + Math.sin(angle) * dist * 0.6;
       setPixel(buf, Math.round(sx), Math.round(sy), palette.pulse);
+    }
+  }
+}
+
+// ===== OpenCode — nested-square logo (simulator SSOT) =====
+
+export function drawOpenCode(
+  buf: Uint8Array,
+  worldX: number,
+  worldY: number,
+  state: 'idle' | 'working' | 'sleeping' | 'asking',
+  animFrame: number,
+  camera: { cx: number; cy: number; zoom: number },
+  palette: OpenCodePalette,
+): void {
+  const scx = Math.round(((worldX - camera.cx) * camera.zoom + 0.5) * 64);
+  const scy = Math.round(((worldY - camera.cy) * camera.zoom + 0.5) * 64);
+  const worldW = 10 / 64;
+  const pixW = Math.max(1, Math.round(worldW * camera.zoom * 64 / OC_COLS));
+  const pixH = pixW;
+
+  const breathPx = state === 'working'
+    ? Math.round(Math.sin(animFrame * 0.3) * 1.5)
+    : state === 'idle' ? Math.round(Math.sin(animFrame * 0.08) * 0.7) : 0;
+
+  const useLod = camera.zoom < 1.3;
+  const grid = useLod ? OPENCODE_LOD : OPENCODE_GRID;
+  const gc = useLod ? OC_LOD_COLS : OC_COLS;
+  const gr = useLod ? OC_LOD_ROWS : OC_ROWS;
+
+  const baseX = scx - Math.round((gc * pixW) / 2);
+  const baseY = scy + breathPx - Math.round((gr * pixH) / 2);
+
+  const outerColor = state === 'working'
+    ? lerpColor(palette.outer, palette.pulse, 0.5 + Math.sin(animFrame * 0.2) * 0.5)
+    : state === 'sleeping' ? palette.sleeping : palette.outer;
+  const innerColor = state === 'sleeping'
+    ? scaleColor(palette.inner, 0.6) : palette.inner;
+
+  for (let r = 0; r < gr; r++) {
+    for (let c = 0; c < gc; c++) {
+      const cell = grid[r][c];
+      if (cell === 0) continue;
+      const color = (cell === OPENCODE_CORE) ? innerColor : outerColor;
+      for (let dy = 0; dy < pixH; dy++) {
+        for (let dx = 0; dx < pixW; dx++) {
+          setPixel(buf, baseX + c * pixW + dx, baseY + r * pixH + dy, color);
+        }
+      }
+    }
+  }
+
+  if (state === 'asking') {
+    // Amber three-dot asking indicator
+    const dotCx = scx + Math.round(gc / 2) + 3;
+    const dotCy = baseY - 2 + Math.round(Math.sin(animFrame * 0.26) * 1.4);
+    for (let i = -1; i <= 1; i++) {
+      blendPixel(buf, dotCx + i * 3, dotCy, COLORS.stateAwaiting, 0.75);
+      blendPixel(buf, dotCx + i * 3 + 1, dotCy, COLORS.stateAwaiting, 0.45);
     }
   }
 }

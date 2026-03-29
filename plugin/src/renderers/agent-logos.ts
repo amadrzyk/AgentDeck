@@ -28,27 +28,50 @@ export const OC_CLAW_R =
 const OC_ANTENNA_L = 'M45 15 Q35 5 30 8';
 const OC_ANTENNA_R = 'M75 15 Q85 5 90 8';
 
+/** Codex CLI knot/clover — official SVG from codex brand assets. viewBox 0 0 24 24. */
+export const CODEX_LOGO_PATH =
+  'M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388z';
+
 /**
  * Render an agent logo as an SVG watermark group for the 144x144 button canvas.
- * Returns an SVG `<g>` element positioned at button center with the logo scaled up.
+ * Returns an SVG `<g>` element positioned at button center with the logo at ~72px.
  *
- * For Claude Code: single-color path (caller provides color).
- * For OpenClaw: original brand colors (red gradient body, teal eyes) preserved;
- *   `color` param is ignored — use `opacity` to control visibility.
+ * Simulator spec: centered mark, 72px target size.
  */
 export function agentLogoWatermark(
   agent: AgentType,
   color: string,
-  opacity = 0.08,
+  opacity = 0.12,
 ): string {
   if (agent === 'claude-code') {
-    // 16x16 viewBox → scale(6) = 96px, translate(-8,-8) centers at origin
-    return `<g transform="translate(72,72) scale(6) translate(-8,-8)" opacity="${opacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${color}"/></g>`;
+    // 16x16 viewBox → scale(4.5) = 72px, translate(-8,-8) centers at origin
+    return `<g transform="translate(72,72) scale(4.5) translate(-8,-8)" opacity="${opacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${color}"/></g>`;
   }
-  // OpenClaw lobster: original brand colors, 120x120 centered in 144x144
+  if (agent === 'codex-cli') {
+    // 24x24 viewBox → scale(3) = 72px
+    return [
+      `<defs><linearGradient id="cx-g" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#B1A7FF"/><stop offset="48%" stop-color="#7A9DFF"/><stop offset="100%" stop-color="#3941FF"/></linearGradient></defs>`,
+      `<g transform="translate(72,72) scale(3) translate(-12,-12)" opacity="${opacity}"><path d="${CODEX_LOGO_PATH}" fill="url(#cx-g)"/></g>`,
+    ].join('');
+  }
+  if (agent === 'opencode') {
+    // Nested square: 72px outer, gap, inner square
+    const s = 72;
+    const half = s / 2;
+    const ring = s * 0.18;
+    const inner = s * 0.5;
+    return [
+      `<g opacity="${opacity}">`,
+      `<rect x="${72 - half}" y="${72 - half}" width="${s}" height="${s}" fill="#F1ECEC"/>`,
+      `<rect x="${72 - half + ring}" y="${72 - half + ring}" width="${s - ring * 2}" height="${s - ring * 2}" fill="#4B4646"/>`,
+      `<rect x="${72 - inner / 2}" y="${72 - inner / 2}" width="${inner}" height="${inner}" fill="#4B4646"/>`,
+      `</g>`,
+    ].join('');
+  }
+  // OpenClaw lobster: original brand colors, scaled to ~72px
   return [
     `<defs><linearGradient id="oc-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff4d4d"/><stop offset="100%" stop-color="#991b1b"/></linearGradient></defs>`,
-    `<g transform="translate(12,12)" opacity="${opacity}">`,
+    `<g transform="translate(36,36) scale(0.6)" opacity="${opacity}">`,
     `<path d="${OC_BODY}" fill="url(#oc-g)"/>`,
     `<path d="${OC_CLAW_L}" fill="url(#oc-g)"/>`,
     `<path d="${OC_CLAW_R}" fill="url(#oc-g)"/>`,

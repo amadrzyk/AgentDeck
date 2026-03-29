@@ -1,4 +1,4 @@
-#include "cloud.h"
+#include "opencode.h"
 #include "draw.h"
 #include "renderer.h"
 #include "../theme.h"
@@ -11,41 +11,54 @@
 #include <cmath>
 
 /**
- * Cloud creature — represents Codex CLI agent.
+ * OpenCode logo glyph — nested-square geometric mark.
+ * From opencode-logo-dark.svg: bright outer frame, dark inner square.
  *
- * Body is 6 overlapping filled circles forming a cumulus cloud shape.
- * Interior shows ">_" terminal prompt text.
- * Color: indigo/blue (#5561E0) with lighter highlights.
+ * Cell values:
+ *   0 = transparent (gap between frames)
+ *   8 = outer frame (#F1ECEC)
+ *   9 = inner square (#4B4646)
  *
- * States map to Y positions the same as octopus:
- *   SLEEPING  → floor (dimmed, flat)
- *   FLOATING  → standing position (gentle bob)
- *   WORKING   → near top (swimming, pulsing glow)
- *   ASKING    → mid position (speech bubble "?")
+ * States map to Y positions like other creatures:
+ *   SLEEPING  -> floor (dimmed)
+ *   FLOATING  -> standing (gentle bob)
+ *   WORKING   -> near top (bob + pulse)
+ *   ASKING    -> mid position (speech bubble "?")
  */
+static const uint8_t OPENCODE_GRID[9][10] = {
+    {8,8,8,8,8,8,8,8,8,8},
+    {8,0,0,0,0,0,0,0,0,8},
+    {8,0,9,9,9,9,9,9,0,8},
+    {8,0,9,0,0,0,0,9,0,8},
+    {8,0,9,0,0,0,0,9,0,8},
+    {8,0,9,0,0,0,0,9,0,8},
+    {8,0,9,9,9,9,9,9,0,8},
+    {8,0,0,0,0,0,0,0,0,8},
+    {8,8,8,8,8,8,8,8,8,8},
+};
 
-// Minimum 1 to avoid zero-length arrays on boards with MAX_CLOUD=0
-constexpr uint8_t CLOUD_ARR_SIZE = (MAX_CLOUD > 0) ? MAX_CLOUD : 1;
+// Minimum 1 to avoid zero-length arrays on boards with MAX_OPENCODE=0
+constexpr uint8_t OPENCODE_ARR_SIZE = (MAX_OPENCODE > 0) ? MAX_OPENCODE : 1;
 
 // Per-instance jitter (seeded by index)
-static float jitterX[CLOUD_ARR_SIZE];
-static float jitterY[CLOUD_ARR_SIZE];
-static float phaseOffset[CLOUD_ARR_SIZE];
+static float jitterX[OPENCODE_ARR_SIZE];
+static float jitterY[OPENCODE_ARR_SIZE];
+static float phaseOffset[OPENCODE_ARR_SIZE];
 
-// Swimming state per instance
-static float currentX[CLOUD_ARR_SIZE];
-static float currentY[CLOUD_ARR_SIZE];
-static CreatureState prevState[CLOUD_ARR_SIZE];
+// Position tracking per instance
+static float currentX[OPENCODE_ARR_SIZE];
+static float currentY[OPENCODE_ARR_SIZE];
+static CreatureState prevState[OPENCODE_ARR_SIZE];
 
-namespace Cloud {
+namespace OpenCode {
 
 void init() {
-    for (int i = 0; i < MAX_CLOUD; i++) {
-        jitterX[i] = ((i * 5 + 7) % 11 - 5) * 0.006f;
-        jitterY[i] = ((i * 11 + 3) % 9 - 4) * 0.005f;
-        phaseOffset[i] = i * 2.1f;
-        currentX[i] = Layout::CloudHomeX;
-        currentY[i] = Layout::CloudWorkingY;
+    for (int i = 0; i < MAX_OPENCODE; i++) {
+        jitterX[i] = ((i * 9 + 2) % 11 - 5) * 0.006f;
+        jitterY[i] = ((i * 7 + 6) % 9 - 4) * 0.005f;
+        phaseOffset[i] = i * 1.9f;
+        currentX[i] = Layout::OpenCodeHomeX;
+        currentY[i] = Layout::OpenCodeWorkingY;
         prevState[i] = CreatureState::SLEEPING;
     }
 }
@@ -53,35 +66,35 @@ void init() {
 void render(uint16_t* buf, int w, int h, float time, float dt,
             CreatureState state, uint8_t idx, uint8_t total) {
 
-    if (idx >= MAX_CLOUD) return;
+    if (idx >= MAX_OPENCODE) return;
 
     // Dynamic scale: shrink when many instances
     float scaleFactor = (total >= 4) ? 0.70f : (total >= 3) ? 0.85f : 1.0f;
-    float baseRadius = w * Layout::CloudRadiusFrac * scaleFactor;
+    float bodyRadius = w * Layout::OpenCodeRadiusFrac * scaleFactor;
 
     // Calculate home position — wider spread for more creatures
     float homeX;
     if (total <= 1) {
-        homeX = Layout::CloudHomeX;
+        homeX = Layout::OpenCodeHomeX;
     } else {
         float span = (total <= 2) ? 0.25f : 0.40f;
-        homeX = Layout::CloudHomeX - span / 2 + span * idx / (total - 1);
+        homeX = Layout::OpenCodeHomeX - span / 2 + span * idx / (total - 1);
     }
     homeX += jitterX[idx];
 
     float homeY;
     switch (state) {
         case CreatureState::SLEEPING:
-            homeY = Layout::CloudSleepY;
+            homeY = Layout::OpenCodeSleepY;
             break;
         case CreatureState::WORKING:
-            homeY = Layout::CloudWorkingY;
+            homeY = Layout::OpenCodeWorkingY;
             break;
         case CreatureState::ASKING:
-            homeY = Layout::CloudStandingY;
+            homeY = (Layout::OpenCodeStandingY + Layout::OpenCodeWorkingY) * 0.5f;
             break;
         default:
-            homeY = Layout::CloudStandingY;
+            homeY = Layout::OpenCodeStandingY;
             break;
     }
     // X-correlated depth offset
@@ -93,15 +106,15 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
 
     if (state == CreatureState::WORKING) {
         // Sin-based swimming within bounds
-        float swimPhase = time * 0.35f + phaseOffset[idx];
+        float swimPhase = time * 0.30f + phaseOffset[idx];
         float wanderX = fastSin(swimPhase) * 0.10f;
-        float wanderY = fastCos(swimPhase * 0.65f) * 0.07f;
+        float wanderY = fastCos(swimPhase * 0.6f) * 0.06f;
         renderX = homeX + wanderX;
         renderY = homeY + wanderY;
-        if (renderX < Layout::CloudSwimMinX) renderX = Layout::CloudSwimMinX;
-        if (renderX > Layout::CloudSwimMaxX) renderX = Layout::CloudSwimMaxX;
-        if (renderY < Layout::CloudSwimMinY) renderY = Layout::CloudSwimMinY;
-        if (renderY > Layout::CloudSwimMaxY) renderY = Layout::CloudSwimMaxY;
+        if (renderX < Layout::OpenCodeSwimMinX) renderX = Layout::OpenCodeSwimMinX;
+        if (renderX > Layout::OpenCodeSwimMaxX) renderX = Layout::OpenCodeSwimMaxX;
+        if (renderY < Layout::OpenCodeSwimMinY) renderY = Layout::OpenCodeSwimMinY;
+        if (renderY > Layout::OpenCodeSwimMaxY) renderY = Layout::OpenCodeSwimMaxY;
         currentX[idx] = renderX;
         currentY[idx] = renderY;
     } else {
@@ -116,7 +129,8 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     // Animation parameters
     float breathBob = 0;
     float bodyAlpha = 1.0f;
-    uint32_t bodyColor = Theme::CloudBody;
+    uint32_t outerColor = Theme::OpenCodeOuter;
+    uint32_t innerColor = Theme::OpenCodeInner;
 
     switch (state) {
         case CreatureState::SLEEPING:
@@ -128,10 +142,11 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
             break;
 
         case CreatureState::WORKING: {
-            breathBob = fastSin(t * 2 * M_PI / 4.5f) * h * 0.012f;
-            // Processing pulse
+            // Bob animation: sin(t*2.0)*size*0.006
+            breathBob = fastSin(t * 2.0f) * bodyRadius * 0.006f * h * 0.02f;
+            // Pulse: outer frame brightens
             float pulse = fastSin(t * 2.5f) * 0.5f + 0.5f;
-            bodyColor = lerpColor(Theme::CloudBody, Theme::CloudBodyLight, pulse);
+            outerColor = lerpColor(Theme::OpenCodeOuter, Theme::OpenCodePulse, pulse);
             break;
         }
 
@@ -144,88 +159,48 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     int cy = (int)(renderY * h + breathBob);
     uint8_t alpha = (uint8_t)(255 * bodyAlpha);
 
-    // Simulator SSOT: 12×10 filled pill glyph from codex-color.svg
-    static const uint8_t CODEX_GLYPH[10][12] = {
-        {0,0,0,1,1,1,1,1,1,0,0,0},
-        {0,0,1,1,1,1,1,1,1,1,0,0},
-        {0,1,1,1,1,1,1,1,1,1,1,0},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1,1,1},
-        {0,0,1,1,1,1,1,1,1,1,0,0},
-        {0,0,0,1,1,1,1,1,1,0,0,0},
+    // Pixel-fill lambda
+    auto fillRectA = [&](int x, int y, int rw, int rh, uint32_t color24, uint8_t a) {
+        for (int dy = 0; dy < rh; dy++) {
+            for (int dx = 0; dx < rw; dx++) {
+                Draw::pixelA(x + dx, y + dy, color24, a);
+            }
+        }
     };
-    constexpr int GLYPH_COLS = 12;
-    constexpr int GLYPH_ROWS = 10;
 
-    float glyphW = baseRadius * 2.2f;
-    int cellW = max(1, (int)(glyphW / GLYPH_COLS));
+    // Grid dimensions — square cells
+    int glyphW = (int)(bodyRadius * 2.0f);
+    int cellW = max(1, glyphW / 10);
     int cellH = cellW;
-    int glyphPxW = GLYPH_COLS * cellW;
-    int glyphPxH = GLYPH_ROWS * cellH;
-    int startX = cx - glyphPxW / 2;
-    int startY = cy - glyphPxH / 2;
+    int glyphX = cx - (10 * cellW) / 2;
+    int glyphY = cy - (9 * cellH) / 2;
 
-    // Working glow behind body
+    // Working state: subtle outer glow behind body
     if (state == CreatureState::WORKING) {
         float glow = fastSin(t * 2.0f) * 0.5f + 0.5f;
-        int glowR = (int)(baseRadius * 1.6f + glow * baseRadius * 0.2f);
-        Draw::circle(cx, cy, glowR, Theme::CloudBody, (uint8_t)(glow * 25));
+        int glowR = (int)(bodyRadius * 1.3f + glow * bodyRadius * 0.2f);
+        Draw::circle(cx, cy, glowR, Theme::OpenCodeOuter, (uint8_t)(glow * 20));
     }
 
-    // Render 12×10 pill glyph
-    for (int row = 0; row < GLYPH_ROWS; row++) {
-        for (int col = 0; col < GLYPH_COLS; col++) {
-            if (CODEX_GLYPH[row][col] == 0) continue;
-            // Top rows lighter (gradient effect)
-            uint32_t cellColor = (row < 3)
-                ? lerpColor(bodyColor, Theme::CloudBodyLight, 0.3f)
-                : bodyColor;
-            int px = startX + col * cellW;
-            int py = startY + row * cellH;
-            for (int dy = 0; dy < cellH; dy++) {
-                for (int dx = 0; dx < cellW; dx++) {
-                    Draw::pixelA(px + dx, py + dy, cellColor, alpha);
-                }
-            }
-        }
-    }
-
-    // >_ prompt overlay (larger, centered in body)
-    if (state != CreatureState::SLEEPING) {
-        uint32_t promptColor = Theme::CloudPrompt;
-        uint8_t promptAlpha = (uint8_t)(alpha * 0.9f);
-        int ps = max(1, (int)(baseRadius * 0.08f));
-        int step = ps * 3;
-        int pox = cx - step * 2;
-        int poy = cy - step / 2;
-        auto px = [&](int x, int y) { Draw::pixelA(x, y, promptColor, promptAlpha); };
-        // ">" : 3 rows
-        for (int d = 0; d < ps; d++) {
-            px(pox + d, poy + d);           // top-right diagonal
-            px(pox + ps + d, poy + ps);     // middle
-            px(pox + d, poy + ps * 2 - d);  // bottom-right diagonal
-        }
-        // "_" : underline
-        bool showCursor = (state != CreatureState::WORKING) || fmodf(t, 1.0f) < 0.6f;
-        if (showCursor) {
-            for (int d = 0; d < ps * 2; d++) {
-                px(pox + step + d, poy + ps * 2);
-            }
+    // Render grid
+    for (int row = 0; row < 9; row++) {
+        for (int col = 0; col < 10; col++) {
+            uint8_t cell = OPENCODE_GRID[row][col];
+            if (cell == 0) continue;
+            uint32_t color = (cell == 8) ? outerColor : innerColor;
+            fillRectA(glyphX + col * cellW, glyphY + row * cellH, cellW, cellH, color, alpha);
         }
     }
 
     // Speech bubble for ASKING state
     if (state == CreatureState::ASKING) {
         float bubblePulse = fastSin(t * 2.5f) * 0.08f + 1.0f;
-        int bx = cx + (int)(baseRadius * 1.4f);
+        int bx = cx + (int)(bodyRadius * 1.2f);
         int by = cy;
-        int br = (int)(baseRadius * 0.5f * bubblePulse);
+        int br = (int)(bodyRadius * 0.5f * bubblePulse);
 
         Draw::circle(bx, by, br, 0xFFFFFF, 200);
-        // "?" text
+        // "?" text — simple pixel art
         int qx = bx - 2, qy = by - 3;
         Draw::pixelA(qx + 1, qy, Theme::DeepSea, 255);
         Draw::pixelA(qx + 2, qy, Theme::DeepSea, 255);
@@ -234,16 +209,16 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         Draw::pixelA(qx + 2, qy + 2, Theme::DeepSea, 255);
         Draw::pixelA(qx + 2, qy + 4, Theme::DeepSea, 255);
 
-        // Tail pointing back to cloud
-        Draw::line(bx - br / 3, by + br / 2, cx + (int)(baseRadius * 0.6f),
+        // Tail pointing back to body
+        Draw::line(bx - br / 3, by + br / 2, cx + (int)(bodyRadius * 0.6f),
                    cy, 0xFFFFFF, 160);
     }
 
-    // Name tag (same pattern as octopus)
+    // Name tag (same pattern as octopus/cloud)
     lockState();
     char name[32] = "";
-    if (idx < g_state.cloudCount && g_state.cloudNames[idx][0]) {
-        strncpy(name, g_state.cloudNames[idx], sizeof(name) - 1);
+    if (idx < g_state.opencodeCount && g_state.opencodeNames[idx][0]) {
+        strncpy(name, g_state.opencodeNames[idx], sizeof(name) - 1);
     } else if (g_state.projectName[0]) {
         strncpy(name, g_state.projectName, sizeof(name) - 1);
     } else {
@@ -258,9 +233,9 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     int textW = txtSize.x + (total >= 3 ? 8 : 12);
     int tagH = 16;
     int tagX = cx - textW / 2;
-    int tagY = cy - (int)(baseRadius * 1.1f) - tagH - 4;
+    int tagY = glyphY - tagH - 4;
 
-    // Background pill
+    // Background pill with rounded ends
     for (int dy = 0; dy < tagH; dy++) {
         for (int dx = 0; dx < textW; dx++) {
             int cornerR = 4;
@@ -279,7 +254,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
                 inCorner = d2 > cornerR * cornerR;
             }
             if (!inCorner) {
-                Draw::pixelA(tagX + dx, tagY + dy, Theme::CloudBodyDark, 180);
+                Draw::pixelA(tagX + dx, tagY + dy, Theme::OpenCodeInner, 180);
             }
         }
     }
@@ -309,13 +284,13 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
 }
 
 float getX(uint8_t idx) {
-    if (idx >= MAX_CLOUD) return Layout::CloudHomeX;
+    if (idx >= MAX_OPENCODE) return Layout::OpenCodeHomeX;
     return currentX[idx];
 }
 
 float getY(uint8_t idx) {
-    if (idx >= MAX_CLOUD) return Layout::CloudStandingY;
+    if (idx >= MAX_OPENCODE) return Layout::OpenCodeStandingY;
     return currentY[idx];
 }
 
-}  // namespace Cloud
+}  // namespace OpenCode

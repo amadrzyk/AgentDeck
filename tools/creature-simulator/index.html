@@ -1,0 +1,1854 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentDeck Creature Simulator</title>
+  <style>
+    :root {
+      --bg: #f3eee7;
+      --ink: #211b18;
+      --muted: #6d655f;
+      --panel: #fffaf4;
+      --line: #d3c5b8;
+      --shadow: rgba(30, 20, 10, 0.08);
+      --tablet-water: #15314d;
+      --tablet-water-2: #143554;
+      --eink-bg: #ede6da;
+      --esp-bg: #16324a;
+      --pixoo-bg: #14243c;
+      --ask: #f5b942;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f8f4ef 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+
+    .shell {
+      max-width: 1520px;
+      margin: 0 auto;
+      display: grid;
+      gap: 20px;
+    }
+
+    .toolbar, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 12px 30px var(--shadow);
+    }
+
+    .toolbar {
+      padding: 16px 18px;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .toolbar h1 {
+      margin: 0 20px 0 0;
+      font-size: 20px;
+      letter-spacing: -0.02em;
+    }
+
+    .toolbar label {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .toolbar select {
+      font: inherit;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .grid.devices {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .panel {
+      padding: 14px;
+    }
+
+    .panel h2 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+
+    .panel p {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+      min-height: 32px;
+      line-height: 1.4;
+    }
+
+    svg {
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 14px;
+      display: block;
+      background: #fff;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+
+    .notes {
+      padding: 16px 18px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .notes strong {
+      color: var(--ink);
+    }
+
+    .device-frame {
+      background: #1d1d1f;
+      border-radius: 26px;
+      padding: 12px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 20px 40px rgba(14, 16, 20, 0.18);
+    }
+
+    .device-screen {
+      width: 100%;
+      border-radius: 18px;
+      overflow: hidden;
+      display: block;
+      border: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .device-frame.round {
+      border-radius: 999px;
+      padding: 16px;
+    }
+
+    .device-frame.round .device-screen {
+      border-radius: 999px;
+    }
+
+    .device-meta {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .tc-previews {
+      display: grid;
+      gap: 8px;
+    }
+
+    .tc-previews svg {
+      aspect-ratio: 4 / 1;
+      border-radius: 10px;
+      background: #0d1218;
+    }
+
+    @media (max-width: 1280px) {
+      .grid.devices { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 1100px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 16px; }
+      .grid, .grid.devices { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="toolbar">
+      <h1>AgentDeck Creature Simulator</h1>
+      <label>Agent
+        <select id="agent">
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+          <option value="opencode">OpenCode</option>
+          <option value="openclaw">OpenClaw</option>
+        </select>
+      </label>
+      <label>State
+        <select id="state">
+          <option value="idle">Idle</option>
+          <option value="working">Working</option>
+          <option value="sleeping">Sleeping</option>
+          <option value="asking">Asking</option>
+        </select>
+      </label>
+      <label>Animation
+        <select id="animate">
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label>State Cycle
+        <select id="cycle">
+          <option value="off">Manual</option>
+          <option value="on">Auto</option>
+        </select>
+      </label>
+      <label>Watch Size
+        <select id="watch-size">
+          <option value="46">Series 11 46mm</option>
+          <option value="42">Series 11 42mm</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Asset Reference</h2>
+        <p id="ref-copy"></p>
+        <svg id="reference" viewBox="0 0 320 320" aria-label="Asset reference"></svg>
+      </section>
+      <section class="panel">
+        <h2>Apple Tablet Proposal</h2>
+        <p id="apple-copy"></p>
+        <svg id="apple-tablet" viewBox="0 0 320 320" aria-label="Apple tablet proposal"></svg>
+      </section>
+      <section class="panel">
+        <h2>Android Tablet Proposal</h2>
+        <p id="android-copy"></p>
+        <svg id="android-tablet" viewBox="0 0 320 320" aria-label="Android tablet proposal"></svg>
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>E-ink Proposal</h2>
+        <p id="eink-copy"></p>
+        <svg id="eink" viewBox="0 0 320 320" aria-label="E-ink proposal"></svg>
+      </section>
+      <section class="panel">
+        <h2>ESP32 LCD Proposal</h2>
+        <p id="esp-copy"></p>
+        <svg id="esp32" viewBox="0 0 320 320" aria-label="ESP32 proposal"></svg>
+      </section>
+      <section class="panel">
+        <h2>Pixoo Proposal</h2>
+        <p id="pixoo-copy"></p>
+        <svg id="pixoo" viewBox="0 0 320 320" aria-label="Pixoo proposal"></svg>
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Pixoo Focus</h2>
+        <p>Enlarged Pixoo64 check. Use this panel to judge whether the selected creature, nearby asking bubble, session dots, and HUD still read at real LED scale.</p>
+        <svg id="pixoo-focus" viewBox="0 0 128 128" aria-label="Pixoo focus"></svg>
+      </section>
+      <section class="panel">
+        <h2>TUI Focus</h2>
+        <p>Enlarged terminal terrarium check. This panel now favors actual character/asking placement over full dashboard recreation so sprite readability is easier to judge.</p>
+        <svg id="tui-focus" viewBox="0 0 960 560" aria-label="TUI focus"></svg>
+      </section>
+    </div>
+
+    <div class="panel">
+      <h2>Device Simulations</h2>
+      <p>Device-family simulation with layout proportions pushed closer to the actual implementations. Pixoo and TUI use renderer output directly, while tablet, e-ink, ESP32, and Stream Deck now mirror the real HUD cards, aquarium placement, and status language more closely.</p>
+      <div class="grid devices">
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-apple" viewBox="0 0 1024 768" style="aspect-ratio:4/3"></svg>
+          </div>
+          <div class="device-meta">Apple tablet. Asset-faithful silhouette in the terrarium, no rear sparkle, ellipsis ask chip.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-android" viewBox="0 0 1280 800" style="aspect-ratio:16/10"></svg>
+          </div>
+          <div class="device-meta">Android tablet. Same silhouette language as Apple with a denser HUD.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-eink-bw" viewBox="0 0 1872 1404" style="aspect-ratio:1872/1404"></svg>
+          </div>
+          <div class="device-meta">B&amp;W e-ink. Landscape monitor layout: left agent column, right aquarium, context/status row, and bottom timeline.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-eink-color" viewBox="0 0 1448 1072" style="aspect-ratio:1448/1072"></svg>
+          </div>
+          <div class="device-meta">Color e-ink. Same landscape composition, restrained color, static-friendly creature states.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-esp32-box" viewBox="0 0 480 480" style="aspect-ratio:1/1"></svg>
+          </div>
+          <div class="device-meta">ESP32 86Box. Full-screen aquarium with left session card and right gauge card, matching the LVGL HUD overlay.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-esp32-ips" viewBox="0 0 480 320" style="aspect-ratio:3/2"></svg>
+          </div>
+          <div class="device-meta">ESP32 IPS 3.5. Same aquarium screen, wider left/right HUD cards like the actual IPS layout.</div>
+        </section>
+        <section>
+          <div class="device-frame round">
+            <svg class="device-screen" id="sim-esp32-round" viewBox="0 0 360 360" style="aspect-ratio:1/1"></svg>
+          </div>
+          <div class="device-meta">ESP32 round AMOLED. Top status stack and bottom dual gauges like the actual round HUD layout.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-pixoo" viewBox="0 0 64 64" style="aspect-ratio:1/1"></svg>
+          </div>
+          <div class="device-meta">Pixoo64. Dot-matrix simplification, but silhouette and internal marks stay closer to the source asset.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <div class="tc-previews">
+              <svg class="device-screen" id="sim-tc-usage" viewBox="0 0 32 8" style="aspect-ratio:4/1"></svg>
+              <svg class="device-screen" id="sim-tc-agents" viewBox="0 0 32 8" style="aspect-ratio:4/1"></svg>
+              <svg class="device-screen" id="sim-tc-info" viewBox="0 0 32 8" style="aspect-ratio:4/1"></svg>
+            </div>
+          </div>
+          <div class="device-meta">Ulanzi TC001 / TC100-class matrix. Real device flow preview: full-screen gauge, octopus row plus fixed crayfish, then scroll text. Non-OpenClaw agents collapse to octopus here.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-streamdeck" viewBox="0 0 144 144" style="aspect-ratio:1/1"></svg>
+          </div>
+          <div class="device-meta">Stream Deck session button preview. Watermark, state LED, centered title stack, and active spinner closer to the real button SVG.</div>
+        </section>
+        <section>
+          <div class="device-frame round">
+            <svg class="device-screen" id="sim-apple-watch" viewBox="0 0 416 496" style="aspect-ratio:416/496"></svg>
+          </div>
+          <div class="device-meta">Apple Watch Series 11 preview. Uses the real 46mm or 42mm display pixel aspect. This is a planned simulator, not an implemented watchOS target.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-tui" viewBox="0 0 720 420" style="aspect-ratio:12/7"></svg>
+          </div>
+          <div class="device-meta">Terminal TUI preview. Character spacing, asking placement, and creature recognizability matter more than full dashboard chrome here.</div>
+        </section>
+      </div>
+    </div>
+
+    <div class="panel notes">
+      <strong>Purpose:</strong> compare `assets/logos` against per-device rendering before deploying. Pixoo and TUI are inspected from actual renderer output, while tablet, e-ink, ESP32, TC matrix, Stream Deck, and watch previews follow each platform's real HUD structure and safe-area composition as closely as this simulator can without invoking those native renderers directly.
+    </div>
+  </div>
+
+  <script>
+    const SVG_NS = "http://www.w3.org/2000/svg";
+
+    const CLAUDE_PATH = "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z";
+    const CODEX_PATH = "M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388z";
+    const OPENCLAW_BODY = "M12 2.568c-6.33 0-9.495 5.275-9.495 9.495 0 4.22 3.165 8.44 6.33 9.494v2.11h2.11v-2.11s1.055.422 2.11 0v2.11h2.11v-2.11c3.165-1.055 6.33-5.274 6.33-9.494S18.33 2.568 12 2.568z";
+    const OPENCLAW_CLAW_L = "M3.56 9.953C.396 8.898-.66 11.008.396 13.118c1.055 2.11 3.164 1.055 4.22-1.055.632-1.477 0-2.11-1.056-2.11z";
+    const OPENCLAW_CLAW_R = "M20.44 9.953c3.164-1.055 4.22 1.055 3.164 3.165-1.055 2.11-3.164 1.055-4.22-1.055-.632-1.477 0-2.11 1.056-2.11z";
+    const OPENCLAW_ANT_L = "M5.507 1.875c.476-.285 1.036-.233 1.615.037.577.27 1.223.774 1.937 1.488";
+    const OPENCLAW_ANT_R = "M16.877 1.913c.58-.27 1.14-.323 1.616-.038.476.285.43.91-.326.542-.227-.136-.547-.153-1.022.069-.478.223-1.064.668-1.756 1.361";
+
+    const PIXEL_GRIDS = {
+      claude: [
+        "001111111100",
+        "001101101100",
+        "111101101111",
+        "111111111111",
+        "111111111111",
+        "011111111110",
+        "001010010100",
+        "001010010100",
+      ],
+      codex: [
+        "000111111000",
+        "001111111100",
+        "011111111110",
+        "111111111111",
+        "111111111111",
+        "111111111111",
+        "111111111111",
+        "111111111111",
+        "001111111100",
+        "000111111000",
+      ],
+      opencode: [
+        "1111111111",
+        "1000000001",
+        "1011111101",
+        "1010000101",
+        "1010000101",
+        "1010000101",
+        "1011111101",
+        "1000000001",
+        "1111111111",
+      ],
+      openclaw: [
+        "00100100",
+        "01000010",
+        "11111111",
+        "01100110",
+        "00111100",
+        "01011010",
+      ],
+    };
+
+    const AGENTS = {
+      claude: {
+        label: "Claude Code",
+        referenceCopy: "Use claudecode-color.svg directly: flat terracotta glyph with two eye cutouts and a lower peg. No rear sparkle.",
+        tabletCopy: "Tablets can keep the aquarium scene, but the creature itself should match the asset more closely and asking should use a soft ellipsis chip instead of a question mark.",
+        deviceCopy: "E-ink and ESP32 LCD/AMOLED should stay vector-like. Pixoo can keep a simplified mark. TC001/TC100-class matrix should prioritize octopus-like recognizability over exact logo fidelity.",
+      },
+      codex: {
+        label: "Codex",
+        referenceCopy: "Use codex-color.svg shape language: one continuous knot/clover body with a larger, more legible >_ emphasis.",
+        tabletCopy: "The tablet version should stop feeling like overlapping blobs. Use a seamless clover silhouette and a bigger, more natural >_ placement.",
+        deviceCopy: "E-ink and LCD screens should avoid visible internal circle seams. Pixoo uses a filled clover mass with a larger >_ overlay. TC001/TC100-class matrix should prioritize cloud-like recognizability over exact logo fidelity.",
+      },
+      opencode: {
+        label: "OpenCode",
+        referenceCopy: "Use the opencode nested-square logo directly: outer frame and inner cutout block, no creature-like reinterpretation.",
+        tabletCopy: "Tablets can animate position and emphasis, but the mark itself should remain the nested-square glyph from the asset.",
+        deviceCopy: "OpenCode works well as a square-within-square chip across e-ink, LCD, Pixoo, matrix, watch, and Stream Deck without turning into a mascot.",
+      },
+      openclaw: {
+        label: "OpenClaw",
+        referenceCopy: "Use openclaw-color.svg directly: rounded front-facing body, compact claws, antennae, and teal eye highlights.",
+        tabletCopy: "OpenClaw can stay more character-like than the logo-only agents, but the body and claws should still read as the front-facing openclaw mark rather than a generic lobster.",
+        deviceCopy: "Pixoo and matrix should preserve claw/body recognizability first. LCD, e-ink, watch, TUI, and Stream Deck can keep the front-facing silhouette and simple claw motion.",
+      },
+    };
+
+    const STATE_STYLE = {
+      idle: { opacity: 1, pulse: 0.025 },
+      working: { opacity: 1, pulse: 0.06 },
+      sleeping: { opacity: 0.46, pulse: 0 },
+      asking: { opacity: 1, pulse: 0.02 },
+    };
+    const STATE_ORDER = ["idle", "working", "asking", "sleeping"];
+    const WATCH_SPECS = {
+      "46": { width: 416, height: 496, label: "Series 11 46mm" },
+      "42": { width: 374, height: 446, label: "Series 11 42mm" },
+    };
+    const MATRIX_FONT = {
+      " ": [0, 0, 0, 0, 0],
+      A: [0b010, 0b101, 0b111, 0b101, 0b101],
+      C: [0b011, 0b100, 0b100, 0b100, 0b011],
+      D: [0b110, 0b101, 0b101, 0b101, 0b110],
+      E: [0b111, 0b100, 0b110, 0b100, 0b111],
+      H: [0b101, 0b101, 0b111, 0b101, 0b101],
+      I: [0b111, 0b010, 0b010, 0b010, 0b111],
+      L: [0b100, 0b100, 0b100, 0b100, 0b111],
+      N: [0b101, 0b111, 0b111, 0b101, 0b101],
+      O: [0b010, 0b101, 0b101, 0b101, 0b010],
+      P: [0b110, 0b101, 0b110, 0b100, 0b100],
+      T: [0b111, 0b010, 0b010, 0b010, 0b010],
+      U: [0b101, 0b101, 0b101, 0b101, 0b010],
+      X: [0b101, 0b101, 0b010, 0b101, 0b101],
+      0: [0b010, 0b101, 0b101, 0b101, 0b010],
+      2: [0b110, 0b001, 0b010, 0b100, 0b111],
+      4: [0b101, 0b101, 0b111, 0b001, 0b001],
+      5: [0b111, 0b100, 0b110, 0b001, 0b110],
+      6: [0b011, 0b100, 0b110, 0b101, 0b010],
+      7: [0b111, 0b001, 0b010, 0b010, 0b010],
+      "%": [0b101, 0b001, 0b010, 0b100, 0b101],
+      "-": [0b000, 0b000, 0b111, 0b000, 0b000],
+      ".": [0b000, 0b000, 0b000, 0b000, 0b010],
+    };
+    const MATRIX_SPRITES = {
+      octopus: [0b01110, 0b11111, 0b10101, 0b11111, 0b01010, 0b10101],
+      crayfish: [0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010],
+    };
+
+    let simTime = 0;
+    let animateEnabled = true;
+    let cycleStates = false;
+
+    function clear(node) {
+      while (node.firstChild) node.removeChild(node.firstChild);
+    }
+
+    function el(tag, attrs = {}) {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const [key, value] of Object.entries(attrs)) {
+        node.setAttribute(key, String(value));
+      }
+      return node;
+    }
+
+    function textNode(str, attrs = {}) {
+      const node = el("text", attrs);
+      node.textContent = str;
+      return node;
+    }
+
+    function svgSize(svg) {
+      const fallback = {
+        "sim-apple": [1024, 768],
+        "sim-android": [1280, 800],
+        "sim-eink-bw": [1872, 1404],
+        "sim-eink-color": [1448, 1072],
+        "sim-esp32-box": [480, 480],
+        "sim-esp32-ips": [480, 320],
+        "sim-esp32-round": [360, 360],
+        "sim-pixoo": [64, 64],
+        "sim-tc-usage": [32, 8],
+        "sim-tc-agents": [32, 8],
+        "sim-tc-info": [32, 8],
+        "sim-streamdeck": [144, 144],
+        "sim-apple-watch": [416, 496],
+        "sim-tui": [720, 420],
+        "pixoo-focus": [128, 128],
+        "tui-focus": [960, 560],
+      }[svg.id] || [320, 320];
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      return vb && vb.width ? [vb.width, vb.height] : fallback;
+    }
+
+    function addLinearGradient(svg, id, stops) {
+      const defs = el("defs");
+      const lg = el("linearGradient", { id, x1: "0%", y1: "0%", x2: "0%", y2: "100%" });
+      for (const stop of stops) lg.appendChild(el("stop", stop));
+      defs.appendChild(lg);
+      svg.appendChild(defs);
+    }
+
+    function drawClaudeLogo(svg, cx, cy, size, palette = {}, state = "idle", t = 0) {
+      const style = STATE_STYLE[state];
+      const bob = state === "working" ? Math.sin(t * 2.3) * size * 0.012 : state === "idle" ? Math.sin(t * 0.9) * size * 0.004 : 0;
+      const scale = size / 24;
+      const fill = palette.fill || "#D97757";
+      const opacity = palette.opacity ?? style.opacity;
+      const group = el("g", {
+        transform: `translate(${cx} ${cy + bob}) scale(${scale}) translate(-12 -12)`,
+        opacity,
+      });
+      group.appendChild(el("path", {
+        d: CLAUDE_PATH,
+        fill,
+        "fill-rule": "evenodd",
+        "clip-rule": "evenodd",
+      }));
+      svg.appendChild(group);
+    }
+
+    function drawCodexLogo(svg, cx, cy, size, palette = {}, promptStyle = {}, state = "idle", t = 0) {
+      const style = STATE_STYLE[state];
+      const bob = promptStyle.bob ?? (state === "working" ? Math.sin(t * 2.1) * size * 0.01 : Math.sin(t * 0.8) * size * 0.003);
+      const gradId = `codex-${svg.id}-${Math.round(cx)}-${Math.round(cy)}-${Math.round(size)}`;
+      addLinearGradient(svg, gradId, [
+        { offset: "0%", "stop-color": palette.top || "#B1A7FF" },
+        { offset: "48%", "stop-color": palette.mid || "#7A9DFF" },
+        { offset: "100%", "stop-color": palette.bottom || "#3941FF" },
+      ]);
+      const scale = size / 24;
+      const group = el("g", {
+        transform: `translate(${cx} ${cy + bob}) scale(${scale}) translate(-12 -12)`,
+        opacity: palette.opacity ?? style.opacity,
+      });
+      group.appendChild(el("path", { d: CODEX_PATH, fill: `url(#${gradId})` }));
+      svg.appendChild(group);
+
+      const fontSize = promptStyle.fontSize || size * 0.28;
+      const py = cy + bob + (promptStyle.yOffset ?? size * 0.08);
+      const pColor = promptStyle.color || "#EEF1FF";
+      const pOpacity = promptStyle.opacity ?? (state === "sleeping" ? 0.64 : 1);
+      const workingFrame = Math.floor((t * 4) % 4);
+      const leftChar = state === "working" && workingFrame === 2 ? "|" : ">";
+      const rightChar = state === "working" && workingFrame === 2 ? "<" : "_";
+      const xShift = state === "working" ? Math.sin(t * 8) * size * 0.01 : 0;
+      const yShift = state === "working" ? Math.sin(t * 6) * size * 0.008 : 0;
+      svg.appendChild(textNode(leftChar, {
+        x: cx - fontSize * 0.22 + xShift,
+        y: py + yShift,
+        "font-size": fontSize,
+        "font-weight": promptStyle.fontWeight || 650,
+        "text-anchor": "middle",
+        "font-family": "SF Mono, ui-monospace, Menlo, monospace",
+        fill: pColor,
+        opacity: pOpacity,
+      }));
+      svg.appendChild(textNode(rightChar, {
+        x: cx + fontSize * 0.22 - xShift,
+        y: py - yShift,
+        "font-size": fontSize,
+        "font-weight": promptStyle.fontWeight || 650,
+        "text-anchor": "middle",
+        "font-family": "SF Mono, ui-monospace, Menlo, monospace",
+        fill: pColor,
+        opacity: pOpacity,
+      }));
+    }
+
+    function drawOpenCodeLogo(svg, cx, cy, size, palette = {}, state = "idle", t = 0) {
+      const style = STATE_STYLE[state];
+      const bob = state === "working" ? Math.sin(t * 2.0) * size * 0.006 : 0;
+      const opacity = palette.opacity ?? style.opacity;
+      const outer = size;
+      const inner = size * 0.5;
+      const ring = size * 0.18;
+      svg.appendChild(el("rect", {
+        x: cx - outer / 2,
+        y: cy - outer / 2 + bob,
+        width: outer,
+        height: outer,
+        fill: palette.outer || "#F1ECEC",
+        opacity,
+      }));
+      svg.appendChild(el("rect", {
+        x: cx - (outer - ring * 2) / 2,
+        y: cy - (outer - ring * 2) / 2 + bob,
+        width: outer - ring * 2,
+        height: outer - ring * 2,
+        fill: palette.bg || "#4B4646",
+        opacity,
+      }));
+      svg.appendChild(el("rect", {
+        x: cx - inner / 2,
+        y: cy - inner / 2 + bob,
+        width: inner,
+        height: inner,
+        fill: palette.inner || "#4B4646",
+        opacity,
+      }));
+    }
+
+    function drawOpenClawLogo(svg, cx, cy, size, palette = {}, state = "idle", t = 0) {
+      const style = STATE_STYLE[state];
+      const bob = state === "working" ? Math.sin(t * 3.2) * size * 0.018 : state === "idle" ? Math.sin(t * 0.9) * size * 0.004 : 0;
+      const bodyId = `oc-${svg.id}-${Math.round(cx)}-${Math.round(cy)}-${Math.round(size)}`;
+      addLinearGradient(svg, bodyId, [
+        { offset: "0%", "stop-color": palette.top || "#FF4D4D" },
+        { offset: "100%", "stop-color": palette.bottom || "#991B1B" },
+      ]);
+      const scale = size / 24;
+      const clawAngle = state === "working" ? Math.sin(t * 8) * 8 : 0;
+      const group = el("g", {
+        transform: `translate(${cx} ${cy + bob}) scale(${scale}) translate(-12 -12)`,
+        opacity: palette.opacity ?? style.opacity,
+      });
+      group.appendChild(el("path", { d: OPENCLAW_BODY, fill: `url(#${bodyId})` }));
+      const leftClaw = el("g", { transform: `rotate(${-clawAngle} 4.5 11.5)` });
+      leftClaw.appendChild(el("path", { d: OPENCLAW_CLAW_L, fill: `url(#${bodyId})` }));
+      group.appendChild(leftClaw);
+      const rightClaw = el("g", { transform: `rotate(${clawAngle} 19.5 11.5)` });
+      rightClaw.appendChild(el("path", { d: OPENCLAW_CLAW_R, fill: `url(#${bodyId})` }));
+      group.appendChild(rightClaw);
+      group.appendChild(el("path", {
+        d: OPENCLAW_ANT_L,
+        stroke: palette.antenna || "#FF6B6B",
+        "stroke-width": 0.8,
+        "stroke-linecap": "round",
+        fill: "none",
+      }));
+      group.appendChild(el("path", {
+        d: OPENCLAW_ANT_R,
+        stroke: palette.antenna || "#FF6B6B",
+        "stroke-width": 0.8,
+        "stroke-linecap": "round",
+        fill: "none",
+      }));
+      group.appendChild(el("circle", { cx: 8.835, cy: 7.843, r: 1.266, fill: "#050810" }));
+      group.appendChild(el("circle", { cx: 15.165, cy: 7.843, r: 1.266, fill: "#050810" }));
+      group.appendChild(el("circle", { cx: 9.046, cy: 7.633, r: 0.527, fill: palette.eye || "#00E5CC" }));
+      group.appendChild(el("circle", { cx: 15.376, cy: 7.633, r: 0.527, fill: palette.eye || "#00E5CC" }));
+      svg.appendChild(group);
+    }
+
+    function drawAgentMark(svg, agent, cx, cy, size, options = {}) {
+      const { palette = {}, promptStyle = {}, state = "idle", t = 0 } = options;
+      if (agent === "claude") drawClaudeLogo(svg, cx, cy, size, palette, state, t);
+      else if (agent === "codex") drawCodexLogo(svg, cx, cy, size, palette, promptStyle, state, t);
+      else if (agent === "opencode") drawOpenCodeLogo(svg, cx, cy, size, palette, state, t);
+      else drawOpenClawLogo(svg, cx, cy, size, palette, state, t);
+    }
+
+    function drawAskIndicator(svg, kind, x, y, scale = 1, t = 0) {
+      const drift = Math.sin(t * 2.6) * 1.4 * scale;
+      const pulse = 0.72 + (Math.sin(t * 3.2) + 1) * 0.14;
+      if (kind === "tablet" || kind === "esp32") {
+        const w = kind === "tablet" ? 46 * scale : 34 * scale;
+        const h = kind === "tablet" ? 24 * scale : 18 * scale;
+        svg.appendChild(el("rect", {
+          x: x - w / 2,
+          y: y - h / 2 + drift,
+          width: w,
+          height: h,
+          rx: h / 2,
+          fill: "#F5B942",
+          opacity: pulse,
+        }));
+        svg.appendChild(textNode("...", {
+          x,
+          y: y + drift + h * 0.16,
+          "font-size": h * 0.9,
+          "font-weight": 800,
+          "text-anchor": "middle",
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+          fill: kind === "tablet" ? "#11263D" : "#10233A",
+        }));
+        return;
+      }
+      if (kind === "eink") {
+        const w = 38 * scale;
+        const h = 18 * scale;
+        svg.appendChild(el("rect", {
+          x: x - w / 2,
+          y: y - h / 2,
+          width: w,
+          height: h,
+          rx: 4 * scale,
+          fill: "#5E5B56",
+          opacity: 0.92,
+        }));
+        svg.appendChild(textNode("ASK", {
+          x,
+          y: y + h * 0.18,
+          "font-size": h * 0.72,
+          "font-weight": 700,
+          "text-anchor": "middle",
+          fill: "#F0ECE4",
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+        }));
+        return;
+      }
+      if (kind === "streamdeck") {
+        svg.appendChild(el("rect", { x: x - 18, y: y - 10, width: 36, height: 20, rx: 10, fill: "#F5B942", opacity: pulse }));
+        svg.appendChild(textNode("ASK", {
+          x,
+          y: y + 5,
+          "font-size": 12,
+          "font-weight": 800,
+          "text-anchor": "middle",
+          fill: "#1D1405",
+        }));
+        return;
+      }
+      const gap = kind === "matrix" ? 3.2 * scale : 4.2 * scale;
+      const radius = kind === "matrix" ? 0.8 * scale : 1.5 * scale;
+      for (let i = -1; i <= 1; i++) {
+        svg.appendChild(el("circle", {
+          cx: x + i * gap,
+          cy: y + drift,
+          r: radius,
+          fill: "#F5B942",
+          opacity: 0.65 + (i === 0 ? 0.25 : 0.1),
+        }));
+      }
+    }
+
+    function drawMatrixLedGrid(svg, width = 32, height = 8) {
+      svg.appendChild(el("rect", { x: 0, y: 0, width, height, fill: "#11161B" }));
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          svg.appendChild(el("circle", {
+            cx: x + 0.5,
+            cy: y + 0.5,
+            r: 0.32,
+            fill: "#06090C",
+            opacity: 0.92,
+          }));
+        }
+      }
+    }
+
+    function drawMatrixPixel(svg, x, y, color, opacity = 1) {
+      svg.appendChild(el("rect", { x, y, width: 1, height: 1, fill: color, opacity }));
+    }
+
+    function drawMatrixSprite(svg, x0, y0, sprite, color, opacity = 1) {
+      for (let row = 0; row < sprite.length; row++) {
+        const bits = sprite[row];
+        for (let col = 0; col < 5; col++) {
+          if (bits & (1 << (4 - col))) drawMatrixPixel(svg, x0 + col, y0 + row, color, opacity);
+        }
+      }
+    }
+
+    function drawMatrixText(svg, text, x, y, color, opacity = 1) {
+      let cursor = x;
+      for (const rawChar of text) {
+        const char = rawChar.toUpperCase();
+        const glyph = MATRIX_FONT[char] || MATRIX_FONT[" "];
+        for (let row = 0; row < glyph.length; row++) {
+          const bits = glyph[row];
+          for (let col = 0; col < 3; col++) {
+            if (bits & (1 << (2 - col))) drawMatrixPixel(svg, cursor + col, y + row, color, opacity);
+          }
+        }
+        cursor += 4;
+      }
+    }
+
+    function getActualKey(agent, state) {
+      return `${agent}:${state}`;
+    }
+
+    function getPixooActual(agent, state) {
+      return window.__SIM_DATA?.pixoo?.[getActualKey(agent, state)] || null;
+    }
+
+    function getTuiActual(agent, state) {
+      return window.__SIM_DATA?.tuiTerrarium?.[getActualKey(agent, state)] || null;
+    }
+
+    function decodeBase64Bytes(b64) {
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+
+    function renderRgbFrame(svg, frame) {
+      const [w, h] = svgSize(svg);
+      const cellW = w / frame.width;
+      const cellH = h / frame.height;
+      const bytes = decodeBase64Bytes(frame.b64);
+      for (let y = 0; y < frame.height; y++) {
+        for (let x = 0; x < frame.width; x++) {
+          const idx = (y * frame.width + x) * 3;
+          const r = bytes[idx];
+          const g = bytes[idx + 1];
+          const b = bytes[idx + 2];
+          svg.appendChild(el("rect", {
+            x: x * cellW,
+            y: y * cellH,
+            width: Math.ceil(cellW),
+            height: Math.ceil(cellH),
+            fill: `rgb(${r},${g},${b})`,
+          }));
+        }
+      }
+    }
+
+    function renderTuiActual(svg, frame) {
+      clear(svg);
+      const [w, h] = svgSize(svg);
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, rx: 18, fill: "#0B1118" }));
+      const fontSize = svg.id === "tui-focus" ? 24 : 14;
+      const lineHeight = svg.id === "tui-focus" ? 30 : 20;
+      frame.lines.forEach((line, i) => {
+        svg.appendChild(textNode(line.replace(/\s+$/g, ''), {
+          x: 18,
+          y: 28 + i * lineHeight,
+          fill: "#DDE7F0",
+          "font-size": fontSize,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+          "xml:space": "preserve",
+        }));
+      });
+    }
+
+    function renderReference(svg, agent) {
+      clear(svg);
+      svg.appendChild(el("rect", { x: 0, y: 0, width: 320, height: 320, rx: 18, fill: "#FFFDF9" }));
+      if (agent === "claude") {
+        drawClaudeLogo(svg, 160, 160, 220, { fill: "#D97757" });
+      } else if (agent === "codex") {
+        drawCodexLogo(svg, 160, 162, 220, {
+          top: "#B1A7FF",
+          mid: "#7A9DFF",
+          bottom: "#3941FF",
+        }, {
+          color: "#EEF1FF",
+          fontSize: 62,
+          yOffset: 19,
+          letterSpacing: -4,
+        });
+      } else {
+        drawAgentMark(svg, agent, 160, 160, agent === "openclaw" ? 210 : 190, {
+          state: "idle",
+          t: 0,
+          palette: agent === "openclaw"
+            ? { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC" }
+            : { outer: "#F1ECEC", inner: "#4B4646", bg: "#4B4646" },
+        });
+      }
+    }
+
+    function drawGauge(svg, x, y, size, percent, colors, label, reset, mono = false) {
+      const pct = Math.max(0, Math.min(100, percent));
+      const fillH = (size - 8) * (pct / 100);
+      const fill = mono
+        ? (pct >= 90 ? "#505050" : pct >= 70 ? "#707070" : "#8B8B8B")
+        : (pct >= 90 ? colors.red : pct >= 70 ? colors.amber : colors.green);
+      svg.appendChild(el("text", {
+        x: x + size / 2, y: y - 8, fill: colors.sub, "font-size": Math.max(10, size * 0.16),
+        "font-weight": 700, "text-anchor": "middle", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      })).textContent = label;
+      svg.appendChild(el("rect", {
+        x, y, width: size, height: size, rx: Math.max(4, size * 0.08), fill: "rgba(255,255,255,0.12)",
+      }));
+      svg.appendChild(el("rect", {
+        x: x + 4, y: y + size - 4 - fillH, width: size - 8, height: fillH, rx: 2, fill, opacity: 0.52,
+      }));
+      svg.appendChild(textNode(`${Math.round(pct)}%`, {
+        x: x + size / 2, y: y + size / 2 + size * 0.08, fill: colors.text, "font-size": Math.max(12, size * 0.24),
+        "font-weight": 800, "text-anchor": "middle", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      if (reset) {
+        svg.appendChild(textNode(`⟲ ${reset}`, {
+          x: x + size / 2, y: y + size + Math.max(11, size * 0.18), fill: colors.sub, opacity: 0.72,
+          "font-size": Math.max(9, size * 0.14), "text-anchor": "middle", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+      }
+    }
+
+    function drawSessionPanel(svg, x, y, w, h, opts = {}) {
+      const mono = !!opts.mono;
+      const compact = !!opts.compact;
+      const radius = opts.radius || 18;
+      const bg = opts.bg || (mono ? "#DCD5C7" : "rgba(3,10,20,0.52)");
+      const text = opts.text || (mono ? "#202020" : "#E2E8F0");
+      const sub = opts.sub || (mono ? "#59544D" : "#94A3B8");
+      const accent = opts.accent || (mono ? "#6F6A63" : "#00E5FF");
+      svg.appendChild(el("rect", { x, y, width: w, height: h, rx: radius, fill: bg }));
+      const titleY = y + h * 0.12;
+      svg.appendChild(textNode("AgentDeck", {
+        x: x + w / 2, y: titleY, fill: text, "font-size": h * 0.10, "font-weight": 800,
+        "text-anchor": "middle", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(el("rect", { x: x + w * 0.12, y: titleY + 8, width: w * 0.76, height: Math.max(2, h * 0.012), rx: 1, fill: accent, opacity: mono ? 0.55 : 1 }));
+      const entries = compact ? [
+        { label: "claude", color: mono ? "#555" : "#C07058", state: "● idle" },
+        { label: "codex", color: mono ? "#666" : "#6366F1", state: "● work" },
+      ] : [
+        { label: "claude-code", color: mono ? "#555" : "#C07058", state: "PROCESSING" },
+        { label: "codex", color: mono ? "#666" : "#6366F1", state: "IDLE" },
+        { label: "openclaw", color: mono ? "#4A4A4A" : "#CC3333", state: "ROUTING" },
+      ];
+      let rowY = y + h * 0.34;
+      const rowGap = compact ? h * 0.22 : h * 0.16;
+      for (const entry of entries) {
+        svg.appendChild(el("circle", { cx: x + w * 0.10, cy: rowY - 4, r: Math.max(3, h * 0.016), fill: entry.color }));
+        svg.appendChild(textNode(entry.label, {
+          x: x + w * 0.16, y: rowY, fill: text, "font-size": h * 0.065,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        svg.appendChild(textNode(entry.state, {
+          x: x + w * 0.16, y: rowY + h * 0.055, fill: sub, "font-size": h * 0.052,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        rowY += rowGap;
+      }
+      if (opts.showWorkers && !compact) {
+        svg.appendChild(textNode("Workers: 2", {
+          x: x + w * 0.10, y: y + h * 0.93, fill: text, "font-size": h * 0.058,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+      }
+    }
+
+    function drawTankPanel(svg, x, y, w, h, opts = {}) {
+      const mono = !!opts.mono;
+      const compact = !!opts.compact;
+      const bg = opts.bg || (mono ? "#DCD5C7" : "rgba(3,10,20,0.50)");
+      const text = opts.text || (mono ? "#202020" : "#E2E8F0");
+      const sub = opts.sub || (mono ? "#59544D" : "#94A3B8");
+      const colors = {
+        text,
+        sub,
+        green: mono ? "#8B8B8B" : "#22C55E",
+        amber: mono ? "#707070" : "#FBBF24",
+        red: mono ? "#505050" : "#EF4444",
+      };
+      svg.appendChild(el("rect", { x, y, width: w, height: h, rx: opts.radius || 18, fill: bg }));
+      svg.appendChild(textNode("∿ TANK STATUS", {
+        x: x + w * 0.08, y: y + h * 0.12, fill: sub, "font-size": h * 0.085, "font-weight": 700,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      const gaugeSize = compact ? Math.min(w * 0.30, h * 0.42) : Math.min(w * 0.28, h * 0.34);
+      drawGauge(svg, x + w * 0.12, y + h * 0.26, gaugeSize, 46, colors, "5h", compact ? "1h" : "1h24m", mono);
+      drawGauge(svg, x + w * 0.58, y + h * 0.26, gaugeSize, 72, colors, "7d", compact ? "1d" : "1d12h", mono);
+      if (compact) return;
+      const labelY = y + h * 0.74;
+      svg.appendChild(textNode("MODELS", {
+        x: x + w * 0.08, y: labelY, fill: sub, "font-size": h * 0.066, "font-weight": 700,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode(opts.modelLine || "opus-4 · gpt-5", {
+        x: x + w * 0.08, y: labelY + h * 0.08, fill: text, "font-size": h * 0.062,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      const dotY = y + h * 0.93;
+      const dotColors = [colors.green, mono ? "#666" : "#22C55E"];
+      ["OAuth", "Ollama"].forEach((name, i) => {
+        svg.appendChild(el("circle", { cx: x + w * (0.12 + i * 0.26), cy: dotY - 4, r: Math.max(3, h * 0.016), fill: dotColors[i] }));
+        svg.appendChild(textNode(name, {
+          x: x + w * (0.16 + i * 0.26), y: dotY, fill: sub, "font-size": h * 0.05,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+      });
+    }
+
+    function drawTimelinePanel(svg, x, y, w, h, opts = {}) {
+      const mono = !!opts.mono;
+      const bg = opts.bg || (mono ? "#DCD5C7" : "rgba(3,10,20,0.44)");
+      const text = opts.text || (mono ? "#202020" : "#E2E8F0");
+      const sub = opts.sub || (mono ? "#59544D" : "#94A3B8");
+      svg.appendChild(el("rect", { x, y, width: w, height: h, rx: opts.radius || 20, fill: bg }));
+      const leftW = w * 0.65;
+      svg.appendChild(textNode("TIMELINE", {
+        x: x + 14, y: y + 16, fill: sub, "font-size": h * 0.09, "font-weight": 700,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(el("line", { x1: x + leftW, y1: y + 8, x2: x + leftW, y2: y + h - 8, stroke: mono ? "#8A847C" : "rgba(255,255,255,0.24)", "stroke-width": 1 }));
+      const rows = [
+        ["10:32", "[T]", "Read file_path.ts"],
+        ["10:33", "[M]", "Model call opus-4"],
+        ["10:33", "[S]", "IDLE → PROCESSING"],
+      ];
+      let rowY = y + 34;
+      const rowGap = h * 0.18;
+      rows.forEach((row, idx) => {
+        if (idx === rows.length - 1) svg.appendChild(el("rect", { x: x + 8, y: rowY - 13, width: leftW - 16, height: h * 0.14, rx: 4, fill: mono ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)" }));
+        svg.appendChild(textNode(row[0], {
+          x: x + 14, y: rowY, fill: sub, "font-size": h * 0.072, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        svg.appendChild(textNode(row[1], {
+          x: x + 74, y: rowY, fill: opts.accent || (mono ? "#444" : "#7DD3FC"), "font-size": h * 0.072, "font-weight": 700,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        svg.appendChild(textNode(row[2], {
+          x: x + 108, y: rowY, fill: text, "font-size": h * 0.072, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        rowY += rowGap;
+      });
+      svg.appendChild(textNode("TOOL  10:33:12", {
+        x: x + leftW + 14, y: y + 20, fill: opts.accent || (mono ? "#444" : "#7DD3FC"), "font-size": h * 0.068, "font-weight": 700,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode("Claude ×2", {
+        x: x + leftW + 14, y: y + 38, fill: sub, "font-size": h * 0.056, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode("Read file_path.ts", {
+        x: x + leftW + 14, y: y + 62, fill: text, "font-size": h * 0.074, "font-weight": 700,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode("Examining the renderer and", {
+        x: x + leftW + 14, y: y + 86, fill: sub, "font-size": h * 0.06, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode("device HUD placement.", {
+        x: x + leftW + 14, y: y + 104, fill: sub, "font-size": h * 0.06, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+    }
+
+    function drawFish(svg, x, y, size, color, stripe = "#D9E9F5", opacity = 1) {
+      svg.appendChild(el("path", {
+        d: `M ${x - size} ${y} Q ${x} ${y - size * 0.55} ${x + size * 0.9} ${y} Q ${x} ${y + size * 0.55} ${x - size} ${y} Z`,
+        fill: color,
+        opacity,
+      }));
+      svg.appendChild(el("rect", { x: x - size * 0.05, y: y - size * 0.36, width: size * 0.22, height: size * 0.72, fill: stripe, opacity: opacity * 0.78 }));
+      svg.appendChild(el("circle", { cx: x + size * 0.48, cy: y - size * 0.08, r: Math.max(1, size * 0.08), fill: "#061018", opacity }));
+    }
+
+    function drawTabletTerrarium(svg, x, y, w, h, agent, state, t, opts = {}) {
+      const waterTop = opts.waterTop || "#15314D";
+      const waterBottom = opts.waterBottom || "#0F2337";
+      const sand = opts.sand || "#3A2C1E";
+      const kelp = opts.kelp || "#2E5A47";
+      const bubble = opts.bubble || "#A5D9FF";
+      svg.appendChild(el("rect", { x, y, width: w, height: h, fill: waterTop }));
+      svg.appendChild(el("rect", { x, y: y + h * 0.52, width: w, height: h * 0.48, fill: waterBottom, opacity: 0.62 }));
+      svg.appendChild(el("rect", { x, y: y + h * 0.82, width: w, height: h * 0.18, fill: sand }));
+      for (let i = 0; i < 3; i++) {
+        svg.appendChild(el("path", {
+          d: `M ${x + w * (0.10 + i * 0.08)} ${y + h * 0.84} C ${x + w * (0.08 + i * 0.08)} ${y + h * 0.70}, ${x + w * (0.13 + i * 0.08)} ${y + h * 0.56}, ${x + w * (0.10 + i * 0.08)} ${y + h * 0.42}`,
+          stroke: kelp, "stroke-width": 3, fill: "none", opacity: 0.8,
+        }));
+      }
+      drawFish(svg, x + w * 0.72, y + h * 0.44, h * 0.055, opts.fish || "#55CCEE", opts.fishStripe || "#D9E9F5", 0.9);
+      drawFish(svg, x + w * 0.80, y + h * 0.53, h * 0.045, opts.fish || "#55CCEE", opts.fishStripe || "#D9E9F5", 0.84);
+      [0, 1, 2].forEach((i) => svg.appendChild(el("circle", {
+        cx: x + w * 0.16 + i * w * 0.03,
+        cy: y + h * (0.76 - ((t * 0.12 + i * 0.05) % 0.18)),
+        r: 2 + i * 0.5,
+        fill: bubble,
+        opacity: 0.4,
+      })));
+
+      const creatureX = x + w * 0.46;
+      const creatureY = y + (state === "working" ? h * 0.44 : state === "asking" ? h * 0.56 : h * 0.70);
+      const creatureSize = Math.min(w, h) * 0.18;
+      if (agent === "claude") {
+        drawAgentMark(svg, agent, creatureX, creatureY, creatureSize, { state, t, palette: { fill: opts.claude || "#D97757" } });
+      } else if (agent === "codex") {
+        drawAgentMark(svg, agent, creatureX, creatureY, creatureSize * 1.02, {
+          state, t,
+          palette: opts.codexPalette || { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF" },
+          promptStyle: { color: opts.codexText || "#EEF1FF", fontSize: creatureSize * 0.30, yOffset: creatureSize * 0.09 },
+        });
+      } else if (agent === "opencode") {
+        drawAgentMark(svg, agent, creatureX, creatureY, creatureSize * 0.82, {
+          state, t,
+          palette: { outer: "#F1ECEC", inner: opts.opencodeInner || "#4B4646", bg: waterTop },
+        });
+      } else {
+        drawAgentMark(svg, agent, creatureX, creatureY, creatureSize * 1.02, {
+          state, t,
+          palette: opts.openclawPalette || { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC" },
+        });
+      }
+      if (state === "asking") drawAskIndicator(svg, opts.askKind || "tablet", creatureX + creatureSize * 0.55, creatureY - creatureSize * 0.55, Math.min(w, h) / 320, t);
+    }
+
+    function renderTabletPanel(svg, agent, state, platform, t) {
+      clear(svg);
+      const water = platform === "apple" ? "#16324A" : "#17324B";
+      svg.appendChild(el("rect", { x: 0, y: 0, width: 320, height: 320, rx: 18, fill: "#0E2238" }));
+      svg.appendChild(el("rect", { x: 18, y: 20, width: 284, height: 280, rx: 26, fill: water }));
+      svg.appendChild(el("rect", { x: 26, y: 28, width: 110, height: 34, rx: 14, fill: "rgba(6,16,28,0.52)" }));
+      svg.appendChild(el("rect", { x: 192, y: 28, width: 100, height: 34, rx: 14, fill: "rgba(6,16,28,0.52)" }));
+      svg.appendChild(el("rect", { x: 28, y: 222, width: 120, height: 56, rx: 16, fill: "rgba(6,16,28,0.45)" }));
+      svg.appendChild(el("rect", { x: 172, y: 208, width: 120, height: 70, rx: 18, fill: "rgba(6,16,28,0.40)" }));
+      svg.appendChild(el("rect", { x: 24, y: 74, width: 272, height: 132, rx: 24, fill: "rgba(255,255,255,0.04)" }));
+
+      if (agent === "claude") {
+        drawAgentMark(svg, agent, 160, 150, 118, { state, t, palette: { fill: "#D97757" } });
+      } else if (agent === "codex") {
+        drawAgentMark(svg, agent, 160, 148, 122, {
+          state, t,
+          palette: { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF" },
+          promptStyle: { color: "#EEF1FF", fontSize: 36, yOffset: 9, letterSpacing: -2.4 },
+        });
+      } else if (agent === "opencode") {
+        drawAgentMark(svg, agent, 160, 148, 108, {
+          state, t,
+          palette: { outer: "#F1ECEC", inner: "#4B4646", bg: water },
+        });
+      } else {
+        drawAgentMark(svg, agent, 160, 150, 124, {
+          state, t,
+          palette: { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC" },
+        });
+      }
+
+      if (state === "asking") drawAskIndicator(svg, "tablet", 252, 116, 1, t);
+    }
+
+    function renderProposalPanel(svg, agent, state, kind, t) {
+      clear(svg);
+      const bg = kind === "eink" ? "#E8E1D6" : kind === "esp32" ? "#16324A" : "#14243C";
+      const tank = kind === "eink" ? "#D5CEC1" : kind === "esp32" ? "#214564" : "#1D3554";
+      svg.appendChild(el("rect", { x: 0, y: 0, width: 320, height: 320, rx: 18, fill: bg }));
+      svg.appendChild(el("rect", { x: 18, y: 22, width: 284, height: 268, rx: 24, fill: tank, opacity: kind === "eink" ? 0.75 : 1 }));
+
+      if (kind === "pixoo") {
+        for (let y = 0; y < 64; y++) {
+          for (let x = 0; x < 64; x++) {
+            svg.appendChild(el("circle", {
+              cx: 18 + x * 4.43 + 2.1,
+              cy: 22 + y * 4.18 + 2.1,
+              r: 1.05,
+              fill: "#0A1016",
+              opacity: 0.34,
+            }));
+          }
+        }
+        renderGridGlyph(svg, agent, state, 160, 160, agent === "codex" ? 112 : 100, t);
+        if (state === "asking") drawAskIndicator(svg, "pixoo", 256, 94, 1, t);
+        return;
+      }
+
+      if (agent === "claude") {
+        drawAgentMark(svg, agent, 160, 160, 112, {
+          state, t,
+          palette: { fill: kind === "eink" ? "#666666" : "#D97757" },
+        });
+      } else if (agent === "codex") {
+        drawAgentMark(svg, agent, 160, 160, 116, {
+          state, t,
+          palette: kind === "eink"
+            ? { top: "#9A9A9A", mid: "#777777", bottom: "#595959" }
+            : { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF" },
+          promptStyle: {
+            color: kind === "eink" ? "#F4F4F4" : "#EEF1FF",
+            fontSize: 34,
+            yOffset: 8,
+            letterSpacing: -2.4,
+          },
+        });
+      } else if (agent === "opencode") {
+        drawAgentMark(svg, agent, 160, 160, 92, {
+          state, t,
+          palette: {
+            outer: kind === "eink" ? "#F1ECEC" : "#F1ECEC",
+            inner: kind === "eink" ? "#5A5656" : "#4B4646",
+            bg: tank,
+          },
+        });
+      } else {
+        drawAgentMark(svg, agent, 160, 160, 102, {
+          state, t,
+          palette: kind === "eink"
+            ? { top: "#888", bottom: "#555", eye: "#F2F2F2" }
+            : { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC" },
+        });
+      }
+
+      if (state === "asking") drawAskIndicator(svg, kind === "eink" ? "eink" : "esp32", 256, 104, 1, t);
+    }
+
+    function renderGridGlyph(svg, agent, state, cx, cy, targetW, t = 0) {
+      const grid = PIXEL_GRIDS[agent];
+      const rows = grid.length;
+      const cols = grid[0].length;
+      const style = STATE_STYLE[state];
+      const cell = Math.max(1, Math.floor(targetW / cols));
+      const pulse = 1 + style.pulse * (0.45 + (Math.sin(t * 3) + 1) * 0.25);
+      const bob = state === "working" ? Math.sin(t * 2.1) * 1.2 : state === "idle" ? Math.sin(t) * 0.5 : 0;
+      const startX = cx - (cols * cell * pulse) / 2;
+      const startY = cy - (rows * cell * pulse) / 2 + bob;
+      const palette = {
+        claude: { body: "#D97757", shade: "#BE6D52", mark: "#F2E6E0" },
+        codex: { body: "#7A9DFF", shade: "#3941FF", mark: "#EEF1FF" },
+        opencode: { body: "#F1ECEC", shade: "#4B4646", mark: "#4B4646" },
+        openclaw: { body: "#FF4D4D", shade: "#991B1B", mark: "#00E5CC" },
+      }[agent];
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const value = grid[r][c];
+          if (value === "0") continue;
+          const fill = value === "1" ? palette.body : palette.mark;
+          svg.appendChild(el("rect", {
+            x: startX + c * cell * pulse,
+            y: startY + r * cell * pulse,
+            width: cell * pulse - 1,
+            height: cell * pulse - 1,
+            rx: 1.4,
+            fill,
+            opacity: state === "sleeping" ? 0.52 : 1,
+          }));
+        }
+      }
+
+      if (agent === "codex") {
+          const prompt = textNode(">_", {
+          x: cx,
+          y: cy + cell * 1.45 + bob,
+          "font-size": cell * 3.8,
+          "font-weight": 700,
+          "text-anchor": "middle",
+          "font-family": "SF Mono, ui-monospace, Menlo, monospace",
+          "letter-spacing": "-1px",
+          fill: "#EEF1FF",
+          opacity: state === "sleeping" ? 0.6 : 1,
+        });
+        svg.appendChild(prompt);
+      } else if (agent === "openclaw") {
+        svg.appendChild(el("rect", {
+          x: cx - cell * 0.45,
+          y: cy - cell * 0.4 + bob,
+          width: cell * 0.9,
+          height: cell * 0.9,
+          fill: "#00E5CC",
+          opacity: state === "sleeping" ? 0.55 : 1,
+        }));
+      }
+    }
+
+    function renderTabletDevice(svg, agent, state, platform, t) {
+      clear(svg);
+      const [w, h] = svgSize(svg);
+      const isApple = platform === "apple";
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, fill: isApple ? "#0B1A2B" : "#0A1728" }));
+      drawTabletTerrarium(svg, 0, 0, w, h, agent, state, t, {
+        waterTop: isApple ? "#143554" : "#15314D",
+        waterBottom: isApple ? "#10263D" : "#11263D",
+        sand: "#3A2C1E",
+        fish: "#55CCEE",
+        askKind: "tablet",
+      });
+      drawSessionPanel(svg, 12, 12, Math.min(w * 0.22, 220), Math.min(h * 0.35, 220), { bg: "rgba(0,0,0,0.50)", text: "#E2E8F0", sub: "#94A3B8", accent: "#00E5FF", showWorkers: true });
+      drawTankPanel(svg, w - Math.min(w * 0.32, 280) - 12, 12, Math.min(w * 0.32, 280), Math.min(h * 0.40, 250), {
+        bg: "rgba(0,0,0,0.50)",
+        text: "#E2E8F0",
+        sub: "#94A3B8",
+      });
+      drawTimelinePanel(svg, 16, h * 0.66, w - 32, h * 0.29, {
+        bg: "rgba(0,0,0,0.32)",
+        text: "#E2E8F0",
+        sub: "#94A3B8",
+        accent: "#7DD3FC",
+      });
+    }
+
+    function renderEinkDevice(svg, agent, state, colorMode, t) {
+      clear(svg);
+      const [w, h] = svgSize(svg);
+      const bg = colorMode ? "#F0ECE4" : "#EEE8DD";
+      const panel = colorMode ? "#E2DCCF" : "#DCD5C7";
+      const tank = colorMode ? "#C8DDE8" : "#D7D1C5";
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, fill: bg }));
+      const leftW = w * 0.22;
+      const rightX = leftW + 2;
+      const rightW = w - rightX;
+      drawSessionPanel(svg, 0, 0, leftW, h, {
+        bg: panel,
+        text: colorMode ? "#221F1A" : "#111111",
+        sub: colorMode ? "#625B52" : "#4F4B46",
+        accent: colorMode ? "#3366AA" : "#6E6A66",
+        mono: !colorMode,
+        showWorkers: true,
+        radius: 0,
+      });
+      svg.appendChild(el("rect", { x: leftW, y: 0, width: 2, height: h, fill: colorMode ? "#4A4137" : "#2D2A25" }));
+      const aqY = 0;
+      const aqH = h * 0.50;
+      drawTabletTerrarium(svg, rightX, aqY, rightW, aqH, agent, state, t, {
+        waterTop: tank,
+        waterBottom: colorMode ? "#B5D0DE" : "#CFC8BD",
+        sand: colorMode ? "#D4B896" : "#C7BEB0",
+        kelp: colorMode ? "#336633" : "#6C665E",
+        bubble: colorMode ? "#E8F7FF" : "#F1EFE9",
+        claude: colorMode ? "#C07058" : "#666666",
+        codexPalette: colorMode ? { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF" } : { top: "#8B8B8B", mid: "#707070", bottom: "#555555" },
+        codexText: colorMode ? "#EEF1FF" : "#F4F4F4",
+        opencodeInner: colorMode ? "#4B4646" : "#5A5656",
+        openclawPalette: colorMode ? { top: "#CC3333", bottom: "#7F2020", eye: "#55CCEE" } : { top: "#888", bottom: "#555", eye: "#F2F2F2" },
+        askKind: "eink",
+      });
+      const rowY = h * 0.50 + 1;
+      const rowH = h * 0.13 - 1;
+      svg.appendChild(el("rect", { x: rightX, y: rowY, width: rightW, height: rowH, fill: bg }));
+      svg.appendChild(el("rect", { x: rightX, y: rowY, width: rightW * 0.34, height: rowH, fill: panel }));
+      svg.appendChild(el("rect", { x: rightX + rightW * 0.34 + 1, y: rowY, width: rightW * 0.66 - 1, height: rowH, fill: panel }));
+      svg.appendChild(textNode("CONTEXT", {
+        x: rightX + 14, y: rowY + rowH * 0.18, fill: colorMode ? "#625B52" : "#4F4B46",
+        "font-size": rowH * 0.18, "font-weight": 700, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode(state === "working" ? "Read file_path.ts" : state === "asking" ? "Waiting for approval" : "No active tool", {
+        x: rightX + 14, y: rowY + rowH * 0.46, fill: colorMode ? "#211B18" : "#1A1815",
+        "font-size": rowH * 0.18, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      drawTankPanel(svg, rightX + rightW * 0.34 + 1, rowY, rightW * 0.66 - 1, rowH, {
+        bg: panel,
+        text: colorMode ? "#211B18" : "#1A1815",
+        sub: colorMode ? "#625B52" : "#4F4B46",
+        mono: !colorMode,
+        radius: 0,
+        modelLine: colorMode ? "OAuth: opus-4 · Ollama: qwen" : "OAuth · Ollama",
+      });
+      svg.appendChild(el("rect", { x: rightX, y: h * 0.63, width: rightW, height: 1, fill: colorMode ? "#4A4137" : "#2D2A25" }));
+      drawTimelinePanel(svg, rightX, h * 0.63, rightW, h * 0.37, {
+        bg: bg,
+        text: colorMode ? "#211B18" : "#1A1815",
+        sub: colorMode ? "#625B52" : "#4F4B46",
+        accent: colorMode ? "#3366AA" : "#555555",
+        mono: !colorMode,
+        radius: 0,
+      });
+    }
+
+    function renderEsp32Device(svg, agent, state, variant, t) {
+      clear(svg);
+      const [w, h] = svgSize(svg);
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, fill: "#000000" }));
+      drawTabletTerrarium(svg, 0, 0, w, h, agent, state, t, {
+        waterTop: "#16324A",
+        waterBottom: "#102338",
+        sand: "#2A2118",
+        kelp: "#2E5A47",
+        bubble: "#9BC9FF",
+        askKind: "esp32",
+      });
+      if (variant === "round") {
+        drawSessionPanel(svg, (w - 260) / 2, 20, 260, 84, {
+          bg: "rgba(0,0,0,0.50)",
+          text: "#E2E8F0",
+          sub: "#94A3B8",
+          accent: "#3B82F6",
+          showWorkers: false,
+          compact: true,
+          radius: 12,
+        });
+        drawTankPanel(svg, (w - 120) / 2, h - 122, 120, 92, {
+          bg: "rgba(0,0,0,0.50)",
+          text: "#E2E8F0",
+          sub: "#94A3B8",
+          compact: true,
+          radius: 12,
+        });
+      } else {
+        const topY = 28;
+        const leftW = 170;
+        const rightW = variant === "ips" ? 144 : 132;
+        drawSessionPanel(svg, 8, topY, leftW, variant === "ips" ? 104 : 116, {
+          bg: "rgba(0,0,0,0.50)",
+          text: "#E2E8F0",
+          sub: "#94A3B8",
+          accent: "#3B82F6",
+          showWorkers: false,
+          compact: variant === "ips",
+          radius: 8,
+        });
+        drawTankPanel(svg, w - rightW - 8, topY, rightW, variant === "ips" ? 106 : 112, {
+          bg: "rgba(0,0,0,0.50)",
+          text: "#E2E8F0",
+          sub: "#94A3B8",
+          compact: true,
+          radius: 8,
+        });
+      }
+    }
+
+    function renderPixooDevice(svg, agent, state, t) {
+      const actual = getPixooActual(agent, state);
+      if (actual) {
+        clear(svg);
+        renderRgbFrame(svg, actual);
+        return;
+      }
+      clear(svg);
+      const [w, h] = svgSize(svg);
+      const scale = w / 64;
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, fill: "#14243C" }));
+      for (let y = 0; y < 64; y++) {
+        for (let x = 0; x < 64; x++) {
+          svg.appendChild(el("circle", { cx: x + 0.5, cy: y + 0.5, r: 0.18, fill: "#050A11", opacity: 0.8 }));
+        }
+      }
+      const scene = el("g", { transform: `scale(${scale})` });
+      svg.appendChild(scene);
+      scene.appendChild(el("rect", { x: 0, y: 0, width: 64, height: 6, fill: "#203E60", opacity: 0.9 }));
+      scene.appendChild(el("rect", { x: 0, y: 54, width: 64, height: 10, fill: "#2A2118" }));
+      scene.appendChild(el("rect", { x: 0, y: 50, width: 64, height: 4, fill: "#3A2C1E" }));
+
+      const creatures = [
+        { agent: "claude", state: agent === "claude" ? state : "idle", sx: 18, sy: agent === "claude" && state !== "idle" ? 25 : 31 },
+        { agent: "codex", state: agent === "codex" ? state : "idle", sx: 32, sy: agent === "codex" && state !== "idle" ? 22 : 28 },
+        { agent: "opencode", state: agent === "opencode" ? state : "idle", sx: 46, sy: agent === "opencode" && state !== "idle" ? 25 : 33 },
+        { agent: "openclaw", state: agent === "openclaw" ? state : "idle", sx: 55, sy: agent === "openclaw" && state === "working" ? 42 : 50 },
+      ];
+      for (const creature of creatures) {
+        const sx = creature.sx;
+        const sy = creature.sy;
+        const bob = creature.state === "working" ? Math.sin(t * 6 + sx) * 1.2 : 0;
+        renderGridGlyph(
+          scene,
+          creature.agent,
+          creature.state,
+          sx,
+          sy + bob,
+          creature.agent === agent
+            ? (creature.agent === "codex" ? 22 : creature.agent === "openclaw" ? 16 : 20)
+            : (creature.agent === "codex" ? 12 : creature.agent === "openclaw" ? 9 : 10),
+          t,
+        );
+        if (creature.state === "asking") {
+          const bx = sx + (creature.agent === "openclaw" ? 3 : 4);
+          const by = sy - (creature.agent === "codex" ? 5 : 4);
+          scene.appendChild(el("circle", { cx: bx, cy: by, r: 2.4, fill: "#F4F7FB", opacity: 0.84 }));
+          scene.appendChild(textNode("?", {
+            x: bx,
+            y: by + 0.9,
+            "font-size": 4.2,
+            "font-weight": 800,
+            "text-anchor": "middle",
+            "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fill: "#F5B942",
+          }));
+        }
+      }
+      for (let i = 0; i < 3; i++) {
+        scene.appendChild(el("circle", {
+          cx: 8 + i * 4,
+          cy: 3,
+          r: 1,
+          fill: i === 1 && state === "working" ? "#34D399" : "#7AA0C6",
+          opacity: 0.9,
+        }));
+      }
+      if (state === "working") {
+        for (let i = 0; i < 4; i++) {
+          scene.appendChild(el("circle", {
+            cx: 22 + i * 5,
+            cy: 44 - ((t * 12 + i * 3) % 12),
+            r: 0.7,
+            fill: "#9BC9FF",
+            opacity: 0.8,
+          }));
+        }
+      }
+    }
+
+    function renderMatrixUsageDevice(svg, state, t) {
+      clear(svg);
+      drawMatrixLedGrid(svg);
+      const pct = state === "working" ? 72 : state === "asking" ? 46 : state === "sleeping" ? 18 : 34;
+      const label = Math.floor((t / 4) % 2) === 0 ? "5H" : "7D";
+      const fillW = Math.max(0, Math.min(32, Math.round((pct / 100) * 32)));
+      for (let x = 0; x < fillW; x++) {
+        for (let y = 0; y < 8; y++) drawMatrixPixel(svg, x, y, x < fillW - 2 ? "#2F6FA2" : "#5EA8E5", 0.9);
+      }
+      drawMatrixText(svg, label, 1, 1, "#F5FAFF");
+      drawMatrixText(svg, `${pct}%`, 18, 1, "#F5FAFF");
+    }
+
+    function renderMatrixAgentsDevice(svg, agent, state, t) {
+      clear(svg);
+      drawMatrixLedGrid(svg);
+      const octoAgents = ["claude", "codex", "opencode"];
+      octoAgents.forEach((slotAgent, i) => {
+        const selected = slotAgent === agent;
+        const iconState = selected ? state : "idle";
+        const color = slotAgent === "codex" ? "#6366F1" : slotAgent === "opencode" ? "#C8C1BF" : "#C07058";
+        const opacity = selected ? 1 : 0.72;
+        const bobY = iconState === "working" ? ((Math.sin(t * 4 + i) > 0) ? 0 : 1) : 0;
+        drawMatrixSprite(svg, 1 + i * 7, 1 + bobY, MATRIX_SPRITES.octopus, color, opacity);
+        const dotColor = iconState === "working" ? "#34D399" : iconState === "asking" ? "#F5B942" : iconState === "sleeping" ? "#4B5563" : "#93C5FD";
+        svg.appendChild(el("circle", { cx: 3.5 + i * 7, cy: 7.1, r: 0.45, fill: dotColor, opacity: 0.95 }));
+      });
+      drawMatrixSprite(svg, 27, 1, MATRIX_SPRITES.crayfish, agent === "openclaw" ? "#FF4D4D" : "#7A1F1F", agent === "openclaw" ? 1 : 0.68);
+      svg.appendChild(el("circle", {
+        cx: 29.5,
+        cy: 7.1,
+        r: 0.45,
+        fill: agent === "openclaw" && state === "working" ? "#34D399" : "#93C5FD",
+        opacity: 0.95,
+      }));
+    }
+
+    function renderMatrixInfoDevice(svg, agent, state, t) {
+      clear(svg);
+      drawMatrixLedGrid(svg);
+      const model = agent === "claude" ? "CLAUDE" : agent === "codex" ? "CODEX" : agent === "opencode" ? "OPEN" : "CLAW";
+      const status = state === "working" ? "ACT" : state === "asking" ? "ASK" : state === "sleeping" ? "SLP" : "IDL";
+      const text = `${model}-${status}`;
+      const totalWidth = text.length * 4 - 1;
+      const offset = 32 - ((t * 8) % (totalWidth + 40));
+      drawMatrixText(svg, text, Math.round(offset), 1, "#DCEBFA");
+    }
+
+    function renderStreamDeckDevice(svg, agent, state, t) {
+      clear(svg);
+      const accent = agent === "claude" ? "#4ADE80" : agent === "codex" ? "#8BA4FF" : agent === "openclaw" ? "#C084FC" : "#F1ECEC";
+      const bg = agent === "openclaw" ? "#1A0A2E" : state === "working" ? "#0F1A2E" : state === "sleeping" ? "#1A1A1A" : "#0A2E14";
+      svg.appendChild(el("rect", { x: 0, y: 0, width: 144, height: 144, rx: 12, fill: bg }));
+      svg.appendChild(el("circle", { cx: 18, cy: 18, r: 5, fill: state === "asking" ? "#F5B942" : state === "working" ? "#34D399" : "#4ADE80" }));
+      if (state !== "sleeping") {
+        svg.appendChild(el("rect", { x: 102, y: 6, width: 36, height: 20, rx: 10, fill: accent, opacity: 0.20 }));
+        svg.appendChild(textNode("1/3", {
+          x: 120, y: 20, "font-size": 12, "font-weight": 700, "text-anchor": "middle",
+          fill: accent, "font-family": "Arial,sans-serif",
+        }));
+      }
+      if (agent === "claude") {
+        drawAgentMark(svg, agent, 72, 72, 86, { state: "idle", t, palette: { fill: accent, opacity: 0.08 } });
+      } else if (agent === "codex") {
+        drawAgentMark(svg, agent, 72, 72, 84, {
+          state: "idle", t,
+          palette: { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF", opacity: 0.15 },
+          promptStyle: { color: "#EDEBFF", fontSize: 20, yOffset: 6, opacity: 0.28 },
+        });
+      } else if (agent === "opencode") {
+        drawAgentMark(svg, agent, 72, 72, 66, {
+          state: "idle", t,
+          palette: { outer: "#F1ECEC", inner: "#4B4646", bg, opacity: 0.24 },
+        });
+      } else {
+        drawAgentMark(svg, agent, 72, 72, 78, {
+          state: "idle", t,
+          palette: { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC", opacity: 0.22 },
+        });
+      }
+      if (state === "working" || state === "asking") {
+        const angle = (t * 120) % 360;
+        svg.appendChild(el("g", { transform: `translate(72 56) rotate(${angle})` }));
+        const spinner = svg.lastChild;
+        spinner.appendChild(el("path", {
+          d: "M0,-12 L3,-4 L12,0 L3,4 L0,12 L-3,4 L-12,0 L-3,-4 Z",
+          fill: accent,
+          opacity: 0.82,
+        }));
+      }
+      svg.appendChild(textNode(AGENTS[agent].label.split(" ")[0], {
+        x: 72, y: state === "working" || state === "asking" ? 92 : 80, "font-size": 24,
+        "font-weight": 700, "text-anchor": "middle", fill: accent, "font-family": "Arial,sans-serif",
+      }));
+      svg.appendChild(textNode(state === "working" ? "Read file" : state === "asking" ? "Need input" : agent === "claude" ? "opus-4" : agent === "codex" ? "gpt-5" : "session", {
+        x: 72, y: state === "working" || state === "asking" ? 112 : 100, "font-size": 16,
+        "text-anchor": "middle", fill: accent, opacity: 0.7, "font-family": "Arial,sans-serif",
+      }));
+      if (state === "asking") drawAskIndicator(svg, "streamdeck", 118, 18, 1, t);
+    }
+
+    function renderAppleWatchDevice(svg, agent, state, t) {
+      clear(svg);
+      const selected = document.getElementById("watch-size").value;
+      const spec = WATCH_SPECS[selected] || WATCH_SPECS["46"];
+      svg.setAttribute("viewBox", `0 0 ${spec.width} ${spec.height}`);
+      svg.style.aspectRatio = `${spec.width}/${spec.height}`;
+      const [w, h] = [spec.width, spec.height];
+      const outerInset = Math.round(w * 0.03);
+      const innerInset = Math.round(w * 0.06);
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, rx: w * 0.18, fill: "#05080D" }));
+      svg.appendChild(el("rect", { x: outerInset, y: outerInset + 2, width: w - outerInset * 2, height: h - (outerInset + 2) * 2, rx: w * 0.15, fill: "#0A1018" }));
+      svg.appendChild(el("rect", { x: innerInset, y: innerInset + 6, width: w - innerInset * 2, height: h - (innerInset + 6) * 2, rx: w * 0.13, fill: "#0D1724" }));
+      svg.appendChild(el("rect", { x: w * 0.16, y: h * 0.10, width: w * 0.68, height: h * 0.10, rx: w * 0.05, fill: "#121F31" }));
+      svg.appendChild(textNode(state.toUpperCase(), {
+        x: w / 2,
+        y: h * 0.165,
+        "font-size": h * 0.035,
+        "font-weight": 700,
+        "text-anchor": "middle",
+        fill: "#D9E9F5",
+      }));
+      svg.appendChild(textNode(spec.label.toUpperCase(), {
+        x: w / 2,
+        y: h * 0.92,
+        "font-size": h * 0.028,
+        "font-weight": 600,
+        "text-anchor": "middle",
+        fill: "#93A8BC",
+      }));
+      if (agent === "claude") {
+        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.27, { state, t, palette: { fill: "#D97757" } });
+      } else if (agent === "codex") {
+        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.29, {
+          state, t,
+          palette: { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF" },
+          promptStyle: { color: "#EEF1FF", fontSize: Math.min(w, h) * 0.085, yOffset: Math.min(w, h) * 0.024 },
+        });
+      } else if (agent === "opencode") {
+        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.22, {
+          state, t,
+          palette: { outer: "#F1ECEC", inner: "#4B4646", bg: "#0D1724" },
+        });
+      } else {
+        drawAgentMark(svg, agent, w / 2, h * 0.48, Math.min(w, h) * 0.26, {
+          state, t,
+          palette: { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC" },
+        });
+      }
+      svg.appendChild(textNode(AGENTS[agent].label.split(" ")[0].toUpperCase(), {
+        x: w / 2,
+        y: h * 0.83,
+        "font-size": h * 0.048,
+        "font-weight": 700,
+        "text-anchor": "middle",
+        fill: agent === "opencode" ? "#F1ECEC" : agent === "codex" ? "#AFC0FF" : agent === "openclaw" ? "#FF8B8B" : "#E08A69",
+      }));
+      if (state === "asking") drawAskIndicator(svg, "tablet", w / 2, h * 0.28, Math.min(w, h) / 520, t);
+    }
+
+    function renderTuiDevice(svg, agent, state, t) {
+      const actual = getTuiActual(agent, state);
+      if (actual) {
+        renderTuiActual(svg, actual);
+        return;
+      }
+      clear(svg);
+      const [w, h] = svgSize(svg);
+      const focus = svg.id === "tui-focus";
+      const bg = "#0B1118";
+      const panel = "#101923";
+      const line = "#203040";
+      const accent = agent === "claude" ? "#D97757" : agent === "codex" ? "#8BA4FF" : agent === "openclaw" ? "#FF6B6B" : "#F1ECEC";
+      const dim = "#8FA4B7";
+      const bright = "#DDE7F0";
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, rx: 18, fill: bg }));
+      svg.appendChild(el("rect", { x: 16, y: 16, width: w - 32, height: 36, rx: 10, fill: panel }));
+      svg.appendChild(textNode("agentdeck dashboard", {
+        x: 34, y: 39, fill: bright, "font-size": focus ? 24 : 20, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode(state.toUpperCase(), {
+        x: w - (focus ? 132 : 112), y: 39, fill: accent, "font-size": focus ? 24 : 20, "font-weight": 700, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(el("rect", { x: 20, y: 70, width: w * (focus ? 0.24 : 0.28), height: h - 92, rx: 12, fill: panel }));
+      svg.appendChild(el("rect", { x: w * (focus ? 0.28 : 0.32), y: 70, width: w * (focus ? 0.69 : 0.64) - 24, height: h - 92, rx: 12, fill: panel }));
+      svg.appendChild(el("line", { x1: w * (focus ? 0.28 : 0.32), y1: 94, x2: w - 24, y2: 94, stroke: line, "stroke-width": 1 }));
+      svg.appendChild(textNode("AGENT", {
+        x: 36, y: 94, fill: dim, "font-size": focus ? 20 : 18, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(textNode("TERRARIUM", {
+        x: w * (focus ? 0.28 : 0.32) + 16, y: 94, fill: dim, "font-size": focus ? 20 : 18, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+
+      const lines = [
+        "[1] " + AGENTS[agent].label,
+        "    model · " + (agent === "claude" ? "opus-4" : agent === "codex" ? "gpt-5-codex" : "opencode"),
+        "    state · " + state,
+        "",
+        "limits 5h ███░ 72%",
+        "limits 7d ██░░ 38%",
+      ];
+      lines.forEach((str, i) => {
+        svg.appendChild(textNode(str, {
+          x: 36,
+          y: 126 + i * (focus ? 30 : 28),
+          fill: i === 0 ? bright : dim,
+          "font-size": focus ? 20 : 18,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+      });
+
+      const sprites = {
+        claude: ["  ⢠⣶⣶⡄ ", " ⢸⣿⣿⣿⡇", "  ⠸⠇⠸⠇ "],
+        codex:  ["  ⣠⣶⣦  ", " ⣾⠟⠻⣷ ", "  ⠻⣦⠟  "],
+        opencode:["  ┌────┐  ", "  │ ┌┐ │  ", "  └────┘  "],
+        openclaw:["  ╭╮  ╭╮ ", "  ├╯██╰┤ ", "   ╵╰──╯  "],
+      };
+      const octopi = [
+        { agent: "claude", x: 0.28, y: agent === "claude" ? (state === "working" ? 0.30 : state === "asking" ? 0.50 : 0.88) : 0.88 },
+        { agent: "opencode", x: 0.52, y: agent === "opencode" ? (state === "working" ? 0.30 : state === "asking" ? 0.50 : 0.88) : 0.88 },
+      ];
+      const jellyfish = { agent: "codex", x: 0.50, y: agent === "codex" ? (state === "working" ? 0.10 : state === "asking" ? 0.50 : 0.85) : 0.85 };
+      const crayfish = { agent: "openclaw", x: 0.75, y: agent === "openclaw" && state === "working" ? 0.50 : 0.85 };
+      const terrCreatures = [...octopi, jellyfish, crayfish].map(creature => ({
+        ...creature,
+        x: w * ((focus ? 0.30 : 0.32) + creature.x * (focus ? 0.60 : 0.56)),
+        y: 110 + creature.y * (h - (focus ? 170 : 210)),
+      }));
+      for (const creature of terrCreatures) {
+        const isSelected = creature.agent === agent;
+        const selectedAccent = creature.agent === "claude" ? "#D97757" : creature.agent === "codex" ? "#8BA4FF" : creature.agent === "openclaw" ? "#FF6B6B" : "#F1ECEC";
+        const sprite = sprites[creature.agent];
+        sprite.forEach((row, i) => {
+          svg.appendChild(textNode(row, {
+            x: creature.x - (focus ? 58 : 42),
+            y: creature.y - (focus ? 18 : 12) + i * (focus ? 28 : 20) + (isSelected && state === "working" ? Math.sin(t * 4 + i) * 2 : 0),
+            fill: selectedAccent,
+            opacity: isSelected ? 1 : 0.62,
+            "font-size": focus ? 24 : 18,
+            "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+          }));
+        });
+        if (isSelected && state === "asking") {
+          svg.appendChild(textNode("?", {
+            x: creature.x + (focus ? 42 : 28),
+            y: creature.y + (focus ? 18 : 12),
+            fill: "#F5B942",
+            "font-size": focus ? 24 : 18,
+            "font-weight": 700,
+            "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+          }));
+        }
+        if (isSelected && state === "working") {
+          const burst = creature.agent === "codex" ? ["•", "•", "•", "•"] : ["✧", "✧", "✧", "✧"];
+          burst.forEach((mark, i) => {
+            svg.appendChild(textNode(mark, {
+              x: creature.x + Math.cos(t * 2 + i * Math.PI / 2) * (focus ? 34 : 26),
+              y: creature.y + Math.sin(t * 2 + i * Math.PI / 2) * (focus ? 20 : 14),
+              fill: creature.agent === "codex" ? "#AFC0FF" : "#F2C182",
+              "font-size": focus ? 18 : 14,
+              "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+            }));
+          });
+        }
+      }
+      svg.appendChild(textNode("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~", {
+        x: w * 0.37,
+        y: h - 68,
+        fill: "#5E7D98",
+        "font-size": 20,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+    }
+
+    function effectiveState() {
+      if (!cycleStates) return document.getElementById("state").value;
+      const idx = Math.floor((simTime / 2.4) % STATE_ORDER.length);
+      return STATE_ORDER[idx];
+    }
+
+    function render() {
+      const agent = document.getElementById("agent").value;
+      const state = effectiveState();
+      const t = simTime;
+
+      document.getElementById("ref-copy").textContent = AGENTS[agent].referenceCopy;
+      document.getElementById("apple-copy").textContent = AGENTS[agent].tabletCopy;
+      document.getElementById("android-copy").textContent = AGENTS[agent].tabletCopy;
+      document.getElementById("eink-copy").textContent = AGENTS[agent].deviceCopy;
+      document.getElementById("esp-copy").textContent = AGENTS[agent].deviceCopy;
+      document.getElementById("pixoo-copy").textContent = AGENTS[agent].deviceCopy;
+
+      renderReference(document.getElementById("reference"), agent);
+      renderTabletPanel(document.getElementById("apple-tablet"), agent, state, "apple", t);
+      renderTabletPanel(document.getElementById("android-tablet"), agent, state, "android", t);
+      renderProposalPanel(document.getElementById("eink"), agent, state, "eink", t);
+      renderProposalPanel(document.getElementById("esp32"), agent, state, "esp32", t);
+      renderProposalPanel(document.getElementById("pixoo"), agent, state, "pixoo", t);
+      renderPixooDevice(document.getElementById("pixoo-focus"), agent, state, t);
+      renderTuiDevice(document.getElementById("tui-focus"), agent, state, t);
+
+      renderTabletDevice(document.getElementById("sim-apple"), agent, state, "apple", t);
+      renderTabletDevice(document.getElementById("sim-android"), agent, state, "android", t);
+      renderEinkDevice(document.getElementById("sim-eink-bw"), agent, state, false, t);
+      renderEinkDevice(document.getElementById("sim-eink-color"), agent, state, true, t);
+      renderEsp32Device(document.getElementById("sim-esp32-box"), agent, state, "box", t);
+      renderEsp32Device(document.getElementById("sim-esp32-ips"), agent, state, "ips", t);
+      renderEsp32Device(document.getElementById("sim-esp32-round"), agent, state, "round", t);
+      renderPixooDevice(document.getElementById("sim-pixoo"), agent, state, t);
+      renderMatrixUsageDevice(document.getElementById("sim-tc-usage"), state, t);
+      renderMatrixAgentsDevice(document.getElementById("sim-tc-agents"), agent, state, t);
+      renderMatrixInfoDevice(document.getElementById("sim-tc-info"), agent, state, t);
+      renderStreamDeckDevice(document.getElementById("sim-streamdeck"), agent, state, t);
+      renderAppleWatchDevice(document.getElementById("sim-apple-watch"), agent, state, t);
+      renderTuiDevice(document.getElementById("sim-tui"), agent, state, t);
+    }
+
+    function applyUrlDefaults() {
+      const params = new URLSearchParams(window.location.search);
+      const agent = params.get("agent");
+      const state = params.get("state");
+      const animate = params.get("animate");
+      const cycle = params.get("cycle");
+      const watchSize = params.get("watch");
+      if (agent && AGENTS[agent]) document.getElementById("agent").value = agent;
+      if (state && STATE_STYLE[state]) document.getElementById("state").value = state;
+      if (animate === "off") document.getElementById("animate").value = "off";
+      if (cycle === "on") document.getElementById("cycle").value = "on";
+      if (watchSize && WATCH_SPECS[watchSize]) document.getElementById("watch-size").value = watchSize;
+    }
+
+    document.getElementById("agent").addEventListener("change", render);
+    document.getElementById("state").addEventListener("change", render);
+    document.getElementById("watch-size").addEventListener("change", render);
+    document.getElementById("animate").addEventListener("change", (e) => {
+      animateEnabled = e.target.value === "on";
+      render();
+    });
+    document.getElementById("cycle").addEventListener("change", (e) => {
+      cycleStates = e.target.value === "on";
+      render();
+    });
+
+    applyUrlDefaults();
+    animateEnabled = document.getElementById("animate").value === "on";
+    cycleStates = document.getElementById("cycle").value === "on";
+    let lastTs = 0;
+    function tick(ts) {
+      if (!lastTs) lastTs = ts;
+      const dt = (ts - lastTs) / 1000;
+      lastTs = ts;
+      if (animateEnabled) simTime += dt;
+      render();
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

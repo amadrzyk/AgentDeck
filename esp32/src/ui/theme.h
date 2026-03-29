@@ -38,6 +38,11 @@ constexpr uint32_t CloudBodyLight  = 0x7B85F0;
 constexpr uint32_t CloudBodyDark   = 0x3A45C0;
 constexpr uint32_t CloudPrompt     = 0xE2E8F0;  // ">_" text color
 
+// --- OpenCode (nested square) ---
+constexpr uint32_t OpenCodeOuter = 0xF1ECEC;
+constexpr uint32_t OpenCodeInner = 0x4B4646;
+constexpr uint32_t OpenCodePulse = 0xCFCECD;
+
 // --- Crayfish (OpenClaw) ---
 constexpr uint32_t CrayfishShell     = 0xFF4D4D;
 constexpr uint32_t CrayfishDark      = 0x991B1B;
@@ -120,6 +125,17 @@ constexpr float CloudSwimMaxX   = 0.75f;
 constexpr float CloudSwimMinY   = 0.15f;
 constexpr float CloudSwimMaxY   = 0.58f;
 
+// OpenCode (nested square)
+constexpr float OpenCodeRadiusFrac = 0.050f;
+constexpr float OpenCodeHomeX      = 0.60f;
+constexpr float OpenCodeStandingY  = 0.62f;
+constexpr float OpenCodeSleepY     = 0.70f;
+constexpr float OpenCodeWorkingY   = 0.37f;
+constexpr float OpenCodeSwimMinX   = 0.25f;
+constexpr float OpenCodeSwimMaxX   = 0.75f;
+constexpr float OpenCodeSwimMinY   = 0.15f;
+constexpr float OpenCodeSwimMaxY   = 0.58f;
+
 // Tetra
 constexpr float TetraSize     = 0.018f;
 constexpr float TetraSwimMinX = 0.10f;
@@ -163,6 +179,17 @@ constexpr float CloudSwimMinX   = 0.20f;
 constexpr float CloudSwimMaxX   = 0.68f;
 constexpr float CloudSwimMinY   = 0.10f;
 constexpr float CloudSwimMaxY   = 0.61f;
+
+// OpenCode (nested square)
+constexpr float OpenCodeRadiusFrac = 0.045f;
+constexpr float OpenCodeHomeX      = 0.60f;
+constexpr float OpenCodeStandingY  = 0.63f;
+constexpr float OpenCodeSleepY     = 0.75f;
+constexpr float OpenCodeWorkingY   = 0.37f;
+constexpr float OpenCodeSwimMinX   = 0.20f;
+constexpr float OpenCodeSwimMaxX   = 0.68f;
+constexpr float OpenCodeSwimMinY   = 0.10f;
+constexpr float OpenCodeSwimMaxY   = 0.61f;
 
 // Tetra
 constexpr float TetraSize     = 0.015f;

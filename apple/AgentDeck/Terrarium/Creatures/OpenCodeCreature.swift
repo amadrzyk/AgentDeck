@@ -1,0 +1,234 @@
+// OpenCodeCreature.swift — Nested-square logo creature for OpenCode
+// Geometric logo only — no organic features (eyes, tentacles, limbs)
+// Outer frame #F1ECEC, inner square #4B4646, bob + pulse animation
+
+import SwiftUI
+
+// MARK: - OpenCode Visual State
+
+enum OpenCodeVisualState {
+    case dormant    // Hidden, not drawn
+    case drifting   // Idle — gentle bob, subtle breathing
+    case pulsing    // Processing — glow pulse, wider drift
+    case waiting    // Awaiting — "?" bubble
+}
+
+final class OpenCodeCreature: Creature {
+    // MARK: - Properties
+
+    let sessionId: String
+    var displayName: String?
+    var visualState: OpenCodeVisualState = .drifting
+    var homeX: Float
+    var homeY: Float
+    var scale: Float
+
+    private var time: Float = 0
+    private(set) var currentX: Float
+    private(set) var currentY: Float
+    private var phaseOffset: Float
+    private var driftPhase: Float
+
+    private var previousState: OpenCodeVisualState?
+    private var transitionProgress: Float = 1.0
+
+    var onWaitingExit: (() -> Void)?
+
+    // MARK: - Init
+
+    init(sessionId: String, homeX: Float, homeY: Float, scale: Float) {
+        self.sessionId = sessionId
+        self.homeX = homeX
+        self.homeY = homeY
+        self.scale = scale
+        self.currentX = homeX
+        self.currentY = homeY
+        self.phaseOffset = Float.random(in: 0...Float.pi * 2)
+        self.driftPhase = Float.random(in: 0...Float.pi * 2)
+    }
+
+    // MARK: - Update
+
+    func update(dt: Float, state: TerrariumState) {
+        time += dt
+
+        if let creature = state.opencodeCreatures.first(where: { $0.id == sessionId }) {
+            let newState = creature.state
+            if newState != visualState {
+                if visualState == .waiting { onWaitingExit?() }
+                previousState = visualState
+                transitionProgress = 0
+                visualState = newState
+            }
+        }
+
+        if transitionProgress < 1.0 {
+            transitionProgress = min(1.0, transitionProgress + dt * 2.5)
+        }
+
+        updatePosition(dt: dt)
+    }
+
+    private func updatePosition(dt: Float) {
+        let targetY: Float = switch visualState {
+        case .dormant: 0.70
+        case .drifting: 0.56
+        case .pulsing: 0.14
+        case .waiting: 0.48
+        }
+
+        let lerpRate: Float = visualState == .pulsing ? 2.0 : 1.5
+        let pulseSpeed: Float = visualState == .pulsing ? 1.5 : 0.5
+        let pulseAmp: Float = visualState == .pulsing ? 0.012 : 0.006
+        let pulseBob = sin((time + phaseOffset) * pulseSpeed) * pulseAmp
+        currentY += (targetY + pulseBob - currentY) * dt * lerpRate
+
+        let driftAmp: Float = visualState == .pulsing ? 0.05 : 0.005
+        let driftSpeed: Float = visualState == .pulsing ? 0.15 : 0.25
+        let driftX = sin((time + driftPhase) * driftSpeed) * driftAmp
+        currentX += (homeX + driftX - currentX) * dt * lerpRate
+
+        currentX = min(0.70, max(0.12, currentX))
+        currentY = min(0.65, max(0.08, currentY))
+    }
+
+    func currentPosition() -> (x: Float, y: Float) { (currentX, currentY) }
+    func isPulsing() -> Bool { visualState == .pulsing }
+
+    // MARK: - Colors
+
+    private static let outerColor = Color(red: 0.945, green: 0.925, blue: 0.925) // #F1ECEC
+    private static let innerColor = Color(red: 0.294, green: 0.275, blue: 0.275) // #4B4646
+    private static let glowColor = Color(red: 0.945, green: 0.925, blue: 0.925)  // #F1ECEC for glow
+    static let nameBg = Color(red: 0.294, green: 0.275, blue: 0.275).opacity(0.6)
+
+    // MARK: - Draw
+
+    func draw(context: inout GraphicsContext, size: CGSize) {
+        guard visualState != .dormant else { return }
+
+        let w = Float(size.width)
+        let h = Float(size.height)
+        let bodyWidth = w * 0.055 * scale
+
+        let cx = CGFloat(currentX * w)
+        let bobOffset = visualState == .pulsing ? CGFloat(sin(time * 2.0) * h * 0.006) : 0
+        let cy = CGFloat(currentY * h) + bobOffset
+
+        let alpha: CGFloat = visualState == .dormant ? 0.3 : 1.0
+
+        // Glow behind body (processing)
+        if visualState == .pulsing {
+            drawGlow(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
+        }
+
+        // Nested squares
+        drawNestedSquares(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth), alpha: alpha)
+
+        // "?" bubble
+        if visualState == .waiting {
+            drawSpeechBubble(context: &context, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
+        }
+
+        // Name tag
+        if let name = displayName {
+            drawNameTag(context: &context, name: name, cx: cx, cy: cy, bodyW: CGFloat(bodyWidth))
+        }
+    }
+
+    // MARK: - Nested Squares
+
+    private func drawNestedSquares(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat,
+                                    bodyW: CGFloat, alpha: CGFloat) {
+        let breathScale: CGFloat = 1.0 + CGFloat(sin(time * (visualState == .pulsing ? 2.0 : 0.6)) * 0.02)
+
+        let outerSize = bodyW * 1.6 * breathScale
+        let outerHalf = outerSize / 2
+
+        // Outer rectangle (light frame)
+        let outerRect = CGRect(x: cx - outerHalf, y: cy - outerHalf,
+                               width: outerSize, height: outerSize)
+        let outerCorner = outerSize * 0.08
+
+        var outerAlpha = alpha
+        if visualState == .pulsing {
+            let pulse = CGFloat(sin(time * 3.0) * 0.1 + 0.9)
+            outerAlpha *= pulse
+        }
+
+        context.fill(Path(roundedRect: outerRect, cornerRadius: outerCorner),
+                     with: .color(Self.outerColor.opacity(outerAlpha * 0.92)))
+
+        // Inner rectangle (dark square) — 50% of outer, centered
+        let innerSize = outerSize * 0.50
+        let innerHalf = innerSize / 2
+        let innerRect = CGRect(x: cx - innerHalf, y: cy - innerHalf,
+                               width: innerSize, height: innerSize)
+        let innerCorner = innerSize * 0.06
+
+        context.fill(Path(roundedRect: innerRect, cornerRadius: innerCorner),
+                     with: .color(Self.innerColor.opacity(alpha)))
+    }
+
+    // MARK: - Glow
+
+    private func drawGlow(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let glowPulse = CGFloat(sin(time * 2.5) * 0.3 + 0.7)
+        let glowR = bodyW * 1.2 * glowPulse
+
+        let rect = CGRect(x: cx - glowR, y: cy - glowR, width: glowR * 2, height: glowR * 2)
+        context.fill(Path(ellipseIn: rect),
+                     with: .color(Self.glowColor.opacity(0.08 * Double(glowPulse))))
+    }
+
+    // MARK: - Speech Bubble
+
+    private func drawSpeechBubble(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let bx = cx + bodyW * 0.9
+        let by = cy - bodyW * 0.1
+        let br = bodyW * 0.35
+        let pulse = CGFloat(sin(time * 2.5)) * 0.08 + 1
+        let r = br * pulse
+
+        let rect = CGRect(x: bx - r, y: by - r, width: r * 2, height: r * 2)
+        context.fill(Path(ellipseIn: rect), with: .color(.white.opacity(0.25)))
+        context.stroke(Path(ellipseIn: rect),
+                       with: .color(TerrariumColors.hudText.opacity(0.5)),
+                       lineWidth: bodyW * 0.02)
+
+        var tail = Path()
+        tail.move(to: CGPoint(x: bx - r * 0.3, y: by + r * 0.3))
+        tail.addLine(to: CGPoint(x: cx + bodyW * 0.45, y: cy))
+        tail.addLine(to: CGPoint(x: bx - r * 0.05, y: by + r * 0.5))
+        tail.closeSubpath()
+        context.fill(tail, with: .color(.white.opacity(0.25)))
+
+        context.draw(
+            Text("?").font(.system(size: r * 1.2, weight: .bold)).foregroundColor(TerrariumColors.hudText.opacity(0.7)),
+            at: CGPoint(x: bx, y: by)
+        )
+    }
+
+    // MARK: - Name Tag
+
+    private func drawNameTag(context: inout GraphicsContext, name: String,
+                             cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
+        let tagY = cy - bodyW * 0.95
+        let fontSize = bodyW * 0.22
+        let padding = bodyW * 0.12
+
+        let text = Text(name)
+            .font(.system(size: fontSize, weight: .medium, design: .default))
+            .foregroundColor(TerrariumColors.hudText.opacity(0.86))
+        let resolved = context.resolve(text)
+        let textSize = resolved.measure(in: CGSize(width: 500, height: 100))
+        let tagW = max(bodyW * 0.9, textSize.width + padding * 2)
+        let tagH = max(bodyW * 0.22, textSize.height + padding * 0.6)
+
+        let bgRect = CGRect(x: cx - tagW / 2, y: tagY - tagH, width: tagW, height: tagH)
+        context.fill(Path(roundedRect: bgRect, cornerRadius: 4),
+                     with: .color(Self.nameBg))
+
+        context.draw(resolved, at: CGPoint(x: cx, y: tagY - tagH / 2))
+    }
+}

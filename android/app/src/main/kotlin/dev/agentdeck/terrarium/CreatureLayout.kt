@@ -168,6 +168,50 @@ fun layoutCloudCreatures(count: Int): List<CreatureSlot> {
 }
 
 /**
+ * Compute layout positions for OpenCode creatures.
+ * Similar to cloud creatures but positioned in the mid-center area.
+ */
+fun layoutOpenCodeCreatures(count: Int): List<CreatureSlot> {
+    return when (count) {
+        0 -> emptyList()
+        1 -> listOf(
+            CreatureSlot(
+                TerrariumLayout.OPENCODE_CENTER_X_FRACTION,
+                TerrariumLayout.OPENCODE_CENTER_Y_FRACTION,
+                1.0f,
+            )
+        )
+        2 -> listOf(
+            CreatureSlot(0.38f, 0.38f, 0.85f),
+            CreatureSlot(0.58f, 0.42f, 0.85f),
+        )
+        3 -> listOf(
+            CreatureSlot(0.33f, 0.36f, 0.75f),
+            CreatureSlot(0.53f, 0.36f, 0.75f),
+            CreatureSlot(0.43f, 0.48f, 0.75f),
+        )
+        else -> {
+            val scale = max(0.50f, 0.75f - (count - 3) * 0.05f)
+            val cols = if (count <= 4) 2 else 3
+            val rows = (count + cols - 1) / cols
+            val startX = 0.28f
+            val endX = 0.62f
+            val startY = 0.32f
+            val endY = 0.50f
+            val dx = if (cols > 1) (endX - startX) / (cols - 1) else 0f
+            val dy = if (rows > 1) (endY - startY) / (rows - 1) else 0f
+            (0 until count).map { i ->
+                CreatureSlot(
+                    startX + (i % cols) * dx,
+                    startY + (i / cols) * dy,
+                    scale,
+                )
+            }
+        }
+    }
+}
+
+/**
  * Compute layout positions for OpenClaw worker crayfish.
  * Workers are smaller and arranged in an arc around the main crayfish position.
  */

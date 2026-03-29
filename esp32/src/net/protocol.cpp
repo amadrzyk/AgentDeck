@@ -190,6 +190,7 @@ static void handleSessionsList(JsonObject& obj) {
     g_state.sessionCount = min((int)sessions.size(), 6);
     g_state.octopusCount = 0;
     g_state.cloudCount = 0;
+    g_state.opencodeCount = 0;
     g_state.crayfishCount = 0;
 
     for (uint8_t i = 0; i < g_state.sessionCount; i++) {
@@ -216,6 +217,8 @@ static void handleSessionsList(JsonObject& obj) {
                     g_state.crayfishState = CrayfishState::SITTING;
             } else if (strcmp(g_state.sessions[i].agentType, "codex-cli") == 0) {
                 g_state.cloudCount++;
+            } else if (strcmp(g_state.sessions[i].agentType, "opencode") == 0) {
+                g_state.opencodeCount++;
             } else if (strcmp(g_state.sessions[i].agentType, "daemon") != 0) {
                 g_state.octopusCount++;
             }

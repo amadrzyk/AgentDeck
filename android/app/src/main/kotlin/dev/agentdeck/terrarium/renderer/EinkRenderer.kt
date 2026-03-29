@@ -49,6 +49,22 @@ private val EINK_OCTOPUS_GRID = arrayOf(
     intArrayOf(0, 0, 0, 5, 0, 5, 0, 0, 6, 0, 6, 0, 0, 0), // row 4: tentacles ×4
 )
 
+// OpenCode nested-square grid (simulator SSOT) — 10x9
+// Cell values: 8=outer frame (#F1ECEC), 9=inner square (#4B4646), 0=gap
+private const val EINK_OPENCODE_COLS = 10
+private const val EINK_OPENCODE_ROWS = 9
+private val EINK_OPENCODE_GRID = arrayOf(
+    intArrayOf(8,8,8,8,8,8,8,8,8,8),
+    intArrayOf(8,0,0,0,0,0,0,0,0,8),
+    intArrayOf(8,0,9,9,9,9,9,9,0,8),
+    intArrayOf(8,0,9,0,0,0,0,9,0,8),
+    intArrayOf(8,0,9,0,0,0,0,9,0,8),
+    intArrayOf(8,0,9,0,0,0,0,9,0,8),
+    intArrayOf(8,0,9,9,9,9,9,9,0,8),
+    intArrayOf(8,0,0,0,0,0,0,0,0,8),
+    intArrayOf(8,8,8,8,8,8,8,8,8,8),
+)
+
 // --- E-ink crayfish SVG paths (cached, android.graphics.Path) ---
 
 private const val EINK_SVG_VIEWBOX = 120f
@@ -133,7 +149,8 @@ fun EinkTerrariumView(
 
     val isAnimating = state.octopus != OctopusVisualState.SLEEPING ||
         state.crayfish != CrayfishVisualState.DORMANT ||
-        state.cloudCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
+        state.cloudCreatures.any { it.visualState != OctopusVisualState.SLEEPING } ||
+        state.openCodeCreatures.any { it.visualState != OctopusVisualState.SLEEPING }
 
     // Animation loop — platform-specific:
     // B&W e-ink: 2.5fps full animation (400ms).
@@ -172,7 +189,8 @@ fun EinkTerrariumView(
     // one frame immediately so the transition isn't delayed by up to 600ms.
     val agentsKey = state.agents.map { it.visualState }
     val cloudsKey = state.cloudCreatures.map { it.visualState }
-    LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey) {
+    val openCodeKey = state.openCodeCreatures.map { it.visualState }
+    LaunchedEffect(state.octopus, state.crayfish, state.tetra, state.environment, agentsKey, cloudsKey, openCodeKey) {
         val bmp = reusableBitmap ?: Bitmap.createBitmap(EINK_WIDTH, EINK_HEIGHT, Bitmap.Config.ARGB_8888)
             .also { reusableBitmap = it }
         renderedBitmap = renderEinkFrame(currentState, EINK_WIDTH, EINK_HEIGHT, animFrame, bmp, fishSchool = fishSchool)
@@ -366,6 +384,22 @@ private fun renderEinkFrame(
                 animFrame = creatureFrame,
                 swimFrame = animFrame,
                 displayName = state.cloudCreatures[i].displayName)
+        }
+    }
+
+    // OpenCode creatures (nested-square logo agents)
+    if (state.openCodeCreatures.isNotEmpty()) {
+        val openCodeSlots = dev.agentdeck.terrarium.layoutOpenCodeCreatures(state.openCodeCreatures.size)
+        for (i in state.openCodeCreatures.indices) {
+            val slot = openCodeSlots.getOrElse(i) { openCodeSlots.last() }
+            drawEinkOpenCode(canvas, paint, width, height,
+                state.openCodeCreatures[i].visualState,
+                centerXFraction = slot.centerXFraction,
+                centerYFraction = slot.centerYFraction,
+                scaleFactor = slot.scaleFactor,
+                animFrame = creatureFrame,
+                swimFrame = animFrame,
+                displayName = state.openCodeCreatures[i].displayName)
         }
     }
 
@@ -997,6 +1031,102 @@ private fun drawEinkCloud(
 }
 
 /** E-ink crayfish — front-facing SVG path rendering with claw/antenna animation. */
+/**
+ * E-ink OpenCode creature — nested-square logo pixel grid rendering.
+ * Cell 8 = outer frame, cell 9 = inner square, cell 0 = transparent.
+ * Geometric and clean — no organic features.
+ */
+private fun drawEinkOpenCode(
+    canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,
+    state: OctopusVisualState,
+    centerXFraction: Float = 0.48f,
+    centerYFraction: Float = 0.40f,
+    scaleFactor: Float = 1f,
+    animFrame: Int = 0,
+    swimFrame: Int = 0,
+    displayName: String? = null,
+) {
+    val wanderX = if (state == OctopusVisualState.WORKING) {
+        val phase = swimFrame + ((centerXFraction * 100).toInt() * 9)
+        0.06f * kotlin.math.sin(phase * kotlin.math.PI / 16.0).toFloat()
+    } else 0f
+
+    val cx = w * (centerXFraction + wanderX)
+    val standingOffset = (centerXFraction - 0.48f) * 0.20f
+    val cy = when (state) {
+        OctopusVisualState.SLEEPING -> h * (0.75f + standingOffset * 0.5f)
+        OctopusVisualState.FLOATING -> h * (0.70f + standingOffset)
+        OctopusVisualState.ASKING -> h * (0.40f + standingOffset)
+        OctopusVisualState.WORKING -> h * (centerYFraction +
+            0.02f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat())
+    }
+
+    val bodyWidth = w * 0.12f * scaleFactor
+    val pixelW = bodyWidth / EINK_OPENCODE_COLS
+    val pixelH = pixelW * EINK_PIXEL_ASPECT
+    val gridW = EINK_OPENCODE_COLS * pixelW
+    val gridH = EINK_OPENCODE_ROWS * pixelH
+    val startX = cx - gridW / 2f
+    val startY = cy - gridH / 2f
+
+    val gap = EINK_PIXEL_GAP
+
+    val outerColor = if (state == OctopusVisualState.SLEEPING) {
+        einkPick(GRAY_OPENCODE_SLEEP, COLOR_OPENCODE_SLEEP)
+    } else {
+        einkPick(GRAY_OPENCODE_OUTER, COLOR_OPENCODE_OUTER)
+    }
+    val innerColor = if (state == OctopusVisualState.SLEEPING) {
+        einkPick(GRAY_OPENCODE_SLEEP, COLOR_OPENCODE_SLEEP)
+    } else {
+        einkPick(GRAY_OPENCODE_INNER, COLOR_OPENCODE_INNER)
+    }
+
+    paint.style = Paint.Style.FILL
+    for (row in 0 until EINK_OPENCODE_ROWS) {
+        for (col in 0 until EINK_OPENCODE_COLS) {
+            val cell = EINK_OPENCODE_GRID[row][col]
+            if (cell == 0) continue
+
+            val px = startX + col * pixelW
+            val py = startY + row * pixelH
+            paint.color = when (cell) {
+                8 -> outerColor
+                9 -> innerColor
+                else -> outerColor
+            }
+            canvas.drawRect(px + gap, py + gap, px + pixelW - gap, py + pixelH - gap, paint)
+        }
+    }
+
+    // Name tag (behind bubble)
+    if (displayName != null) {
+        drawEinkNameTag(canvas, paint, cx, startY, scaleFactor, displayName, w)
+    }
+
+    // ASKING: speech bubble with "?" beside body
+    if (state == OctopusVisualState.ASKING) {
+        val bubbleR = gridW * 0.25f * scaleFactor
+        val bubbleX = cx + gridW * 0.6f
+        val bubbleY = cy
+
+        paint.color = einkPick(GRAY_AIR, COLOR_AIR)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+        paint.color = einkPick(GRAY_OPENCODE_INNER, COLOR_OPENCODE_INNER)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f * scaleFactor
+        canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
+
+        paint.color = android.graphics.Color.BLACK
+        paint.style = Paint.Style.FILL
+        paint.textSize = bubbleR * 1.4f
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("?", bubbleX, bubbleY + bubbleR * 0.45f, paint)
+        paint.textAlign = Paint.Align.LEFT
+    }
+}
+
 private fun drawEinkCrayfish(
     canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,
     state: CrayfishVisualState,
@@ -1669,6 +1799,9 @@ private const val GRAY_CRAY_SICK  = 0xFF666666.toInt()  // level 6 — washed ou
 private const val GRAY_CLOUD_BODY = 0xFF555555.toInt()  // level 5 — cloud body (slightly lighter than octopus 0x44)
 private const val GRAY_CLOUD_PROMPT = 0xFF222222.toInt()  // level 2 — >_ terminal prompt text
 private const val GRAY_CLOUD_SLEEP = 0xFF888888.toInt()  // level 8 — dormant/sleeping cloud (faded)
+private const val GRAY_OPENCODE_OUTER = 0xFFBBBBBB.toInt() // level 11 — outer frame (bright, light gray)
+private const val GRAY_OPENCODE_INNER = 0xFF444444.toInt() // level 4 — inner square (dark gray)
+private const val GRAY_OPENCODE_SLEEP = 0xFF888888.toInt() // level 8 — sleeping/dormant (faded)
 private const val GRAY_STARBURST  = 0xFF999999.toInt()  // level 9 — WORKING starburst glow
 private const val GRAY_DECORATION = 0xFF444444.toInt()  // level 4 — keyboard, review docs
 private const val GRAY_SEAWEED    = 0xFF666666.toInt()  // level 6 — seaweed stems
@@ -1730,6 +1863,11 @@ private val COLOR_CRAY_SIGNAL  = 0xFF2A8B6E.toInt()  // teal signals
 private val COLOR_CLOUD_BODY   = 0xFF5561E0.toInt()  // primary indigo
 private val COLOR_CLOUD_PROMPT = 0xFF1A1A3A.toInt()  // dark navy prompt text
 private val COLOR_CLOUD_SLEEP  = 0xFF8888AA.toInt()  // muted lavender sleep
+
+// OpenCode (nested-square logo: warm gray outer, dark inner)
+private val COLOR_OPENCODE_OUTER = 0xFFF1ECEC.toInt()  // light warm gray outer frame
+private val COLOR_OPENCODE_INNER = 0xFF4B4646.toInt()  // dark brown-gray inner square
+private val COLOR_OPENCODE_SLEEP = 0xFF9A9595.toInt()  // muted sleep
 
 // Fish — distinct against light water
 private val COLOR_FISH_BODY    = 0xFF3366AA.toInt()  // royal blue body

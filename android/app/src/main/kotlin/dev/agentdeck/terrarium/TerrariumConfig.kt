@@ -22,6 +22,10 @@ object TerrariumColors {
     val CloudHighlight = Color(0xFFB394E5)   // light violet highlight
     val CloudGlow = Color(0xFF8F94F2)        // processing pulse glow
 
+    // OpenCode (nested-square logo: warm gray outer, dark inner)
+    val OpenCodeOuter = Color(0xFFF1ECEC)    // light warm gray outer frame
+    val OpenCodeInner = Color(0xFF4B4646)    // dark brown-gray inner square
+
     // Crayfish (OpenClaw brand: #FF4D4D→#991B1B gradient, #00E5CC teal eyes)
     val CrayfishShell = Color(0xFFFF4D4D)
     val CrayfishDark = Color(0xFF991B1B)
@@ -96,6 +100,10 @@ object TerrariumLayout {
     const val CLOUD_WIDTH_FRACTION = 0.09f
     const val CLOUD_CENTER_X_FRACTION = 0.55f
     const val CLOUD_CENTER_Y_FRACTION = 0.20f   // upper area — clouds float high
+
+    // OpenCode creature sizing (geometric nested-square)
+    const val OPENCODE_CENTER_X_FRACTION = 0.48f
+    const val OPENCODE_CENTER_Y_FRACTION = 0.40f
 
     // Neon Tetra swim boundaries — full aquarium range
     const val TETRA_SWIM_MIN_X = 0.03f   // near left wall

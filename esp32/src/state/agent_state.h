@@ -103,9 +103,11 @@ struct DashboardState {
     uint8_t sessionCount;
     uint8_t octopusCount;   // derived: claude-code sessions alive
     uint8_t cloudCount;     // derived: codex-cli sessions alive
+    uint8_t opencodeCount;  // derived: opencode sessions alive
     uint8_t crayfishCount;  // derived: openclaw sessions alive
     char sessionNames[6][24]; // display names for octopus instances (matches max MAX_OCTOPUS)
     char cloudNames[4][24];   // display names for cloud instances (matches max MAX_CLOUD)
+    char opencodeNames[4][24]; // display names for opencode instances
 
     // Crayfish state (derived from sibling)
     CrayfishState crayfishState;
