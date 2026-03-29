@@ -2,6 +2,32 @@
 
 ---
 
+## 2026-03-29 — D200H on-device agent: GPIO 버튼 + 디스플레이 역공학
+
+### 문제
+ULANZI D200H (SSD210)에 커스텀 대시보드를 렌더링하고 14키 물리 버튼을 읽어야 함.
+
+### 해결 (버튼 — 완료)
+- 초기 가설: GPIO 매트릭스 → HID gadget으로 전환 → 다시 GPIO로 복귀
+- `/dev/hidg1`에서 HID report를 읽을 수 있었으나, 이는 zkgui가 호스트PC로 보내려고 **write한** 데이터였음 (MCU→SSD210 방향 아님)
+- zkgui 죽인 후 `/dev/hidg1` 데이터 없음 → GPIO가 실제 버튼 입력 경로 확인
+- sysfs GPIO 스캔으로 `OUT=6→IN=1`, `OUT=9→IN=1` 감지. 출력 {4,5,6,9,85}, 입력 {0,1,84}
+
+### 미해결 (디스플레이)
+- fbdev (`/dev/fb0`) mmap/write: 모든 ioctl 성공하지만 화면 변화 없음
+- MI_DISP API (dlopen): `GetBuf`/`PutBuf` ret=0 성공하지만 화면 변화 없음
+- **원인**: zkgui가 MI_GFX 하드웨어 2D 가속 레이어를 사용하고, fbdev/MI_DISP input port는 그 뒤에 가려짐
+- 다음 시도: MI_GFX 직접 사용, zkgui 프로세스 mmap 영역 공유, zkdisplay 역어셈블
+
+### 핵심 설계 결정
+- 버튼: sysfs GPIO 매트릭스 스캔 (`buttons.c`), 20ms 주기, open/close 방식 (lseek 불안정)
+- 통신: Bridge `dispatchCommand()` + D200H agent stdout JSON 파싱 (stdin 모드)
+- zkgui bind mount 무력화: `mount -o bind /dev/null /bin/zkgui` (init 재시작 차단)
+- MI SDK 구조체: steward-fu/nds + loop0728/zkgui_sample에서 확인 (`E_MI_MODULE_ID_DISP=15`)
+- 디스플레이 조사 문서: `zkswe/DISPLAY_RESEARCH.md`, 이어서 작업 프롬프트: `zkswe/PROMPT.md`
+
+---
+
 ## 2026-03-29 — Simulator 기준 전 플랫폼 캐릭터 shape language 통일
 
 ### 문제
