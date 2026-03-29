@@ -5,6 +5,11 @@
 
 #include <lvgl.h>
 #include <Arduino.h>
+#include <Preferences.h>
+
+// Runtime screen dimensions (initialized to build-flag defaults)
+int16_t g_screenW = SCREEN_W;
+int16_t g_screenH = SCREEN_H;
 
 #if !defined(BOARD_ROUND_AMOLED) && !defined(BOARD_IPS_35)
 #include <LovyanGFX.hpp>
@@ -157,9 +162,16 @@ static bool touch_read_axs15231b(uint16_t* x, uint16_t* y) {
     if (buf[0] == 0) return false;  // No touch
     uint16_t raw_x = ((buf[2] & 0x0F) << 8) | buf[3];
     uint16_t raw_y = ((buf[4] & 0x0F) << 8) | buf[5];
-    // Landscape rotation: swap and mirror
-    *x = raw_y;
-    *y = BOARD_NATIVE_W - 1 - raw_x;
+    // Orientation-aware coordinate transform
+    if (g_screenW > g_screenH) {
+        // Landscape: swap and mirror
+        *x = raw_y;
+        *y = BOARD_NATIVE_W - 1 - raw_x;
+    } else {
+        // Portrait: native orientation
+        *x = raw_x;
+        *y = raw_y;
+    }
     return true;
 }
 
@@ -490,7 +502,22 @@ void displayInit() {
     } else {
         Serial.println("[Display] gfx->begin() OK");
     }
-    gfx->setRotation(1);  // Landscape: 480x320
+    // Read saved orientation from NVS (default: landscape)
+    {
+        Preferences prefs;
+        prefs.begin("agentdeck", true);
+        bool landscape = prefs.getBool("landscape", true);
+        prefs.end();
+        if (landscape) {
+            gfx->setRotation(1);
+            g_screenW = SCREEN_W;
+            g_screenH = SCREEN_H;
+        } else {
+            gfx->setRotation(0);
+            g_screenW = SCREEN_H;
+            g_screenH = SCREEN_W;
+        }
+    }
     gfx->fillScreen(RGB565_BLACK);
     gfx_canvas->flush();
     Serial.println("[Display] Canvas initialized and flushed");
@@ -521,7 +548,7 @@ void displayInit() {
     font_kr_12 = lv_font_montserrat_12;  // Copy struct to RAM
     font_kr_12.fallback = &font_noto_kr_12;  // Set Korean fallback
 
-    disp = lv_display_create(SCREEN_W, SCREEN_H);
+    disp = lv_display_create(g_screenW, g_screenH);
     lv_display_set_flush_cb(disp, disp_flush);
 
 #if defined(BOARD_BOX_86)
@@ -551,7 +578,7 @@ void displayInit() {
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_buffers(disp, buf1, buf2, bufSize,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-    Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped, partial)\n", SCREEN_W, SCREEN_H);
+    Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped, partial)\n", g_screenW, g_screenH);
 #else
     // SPI/QSPI panels: partial render with DMA-capable buffers, big-endian RGB565
     static constexpr size_t BUF_LINES = 40;
@@ -575,7 +602,7 @@ void displayInit() {
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_buffers(disp, buf1, buf2, bufSize,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-    Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped)\n", SCREEN_W, SCREEN_H);
+    Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped)\n", g_screenW, g_screenH);
 #endif
 
     lv_indev_t* indev = lv_indev_create();
@@ -607,6 +634,37 @@ void lvglTick() {
 
 void lvglLoop() {
     lv_timer_handler();
+}
+
+bool isLandscape() {
+#if defined(BOARD_IPS_35)
+    return g_screenW > g_screenH;
+#else
+    return true;
+#endif
+}
+
+void setOrientation(bool landscape) {
+#if defined(BOARD_IPS_35)
+    bool currentLandscape = g_screenW > g_screenH;
+    if (landscape == currentLandscape) return;
+
+    g_screenW = landscape ? SCREEN_W : SCREEN_H;
+    g_screenH = landscape ? SCREEN_H : SCREEN_W;
+
+    gfx->setRotation(landscape ? 1 : 0);
+    lv_display_set_resolution(disp, g_screenW, g_screenH);
+
+    Serial.printf("[Display] Orientation: %s (%dx%d)\n",
+                  landscape ? "landscape" : "portrait", g_screenW, g_screenH);
+
+    Preferences prefs;
+    prefs.begin("agentdeck", false);
+    prefs.putBool("landscape", landscape);
+    prefs.end();
+#else
+    (void)landscape;
+#endif
 }
 
 }  // namespace UI

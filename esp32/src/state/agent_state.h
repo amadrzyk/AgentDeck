@@ -138,6 +138,10 @@ struct DashboardState {
     bool hudVisible;
     bool timelineView;  // true = timeline screen, false = aquarium
 
+    // Orientation change request (set by protocol, consumed by UI task)
+    bool orientationChanged;
+    bool pendingLandscape;
+
     void reset() {
         memset(this, 0, sizeof(DashboardState));
         state = AgentState::DISCONNECTED;
@@ -148,6 +152,8 @@ struct DashboardState {
         userBrightness = 255;
         hudVisible = true;
         timelineView = false;
+        orientationChanged = false;
+        pendingLandscape = true;
         // Sentinel -1.0f = "no data" (0 is a valid usage value)
         fiveHourPercent = -1.0f;
         sevenDayPercent = -1.0f;

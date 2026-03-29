@@ -10,6 +10,11 @@
 #define SCREEN_H 320
 #endif
 
+// Runtime screen dimensions (mutable for orientation switching)
+// Initialized to SCREEN_W/SCREEN_H; portrait mode swaps them.
+extern int16_t g_screenW;
+extern int16_t g_screenH;
+
 // ===== Network =====
 constexpr uint16_t BRIDGE_DEFAULT_PORT = 9120;
 constexpr uint16_t BRIDGE_PORT_MAX     = 9139;

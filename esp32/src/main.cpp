@@ -165,6 +165,25 @@ static void uiTask(void* param) {
         // LVGL tick
         if (dt_ms > 0) lv_tick_inc(dt_ms);
 
+        // Check orientation change request (from protocol or settings)
+        lockState();
+        bool orientChange = g_state.orientationChanged;
+        bool newLandscape = g_state.pendingLandscape;
+        if (orientChange) g_state.orientationChanged = false;
+        unlockState();
+        if (orientChange) {
+            UI::setOrientation(newLandscape);
+            // Recreate all screens with new dimensions
+            scrAquarium = Screens::aquariumCreate();
+            Screens::permissionCreate(scrAquarium);
+            lv_obj_add_event_cb(lv_obj_get_child(scrAquarium, 0), onLongPress, LV_EVENT_LONG_PRESSED, NULL);
+            scrTimeline = Screens::timelineCreate();
+            scrSettings = Screens::settingsCreate();
+            lv_obj_add_event_cb(scrSettings, settingsGesture, LV_EVENT_GESTURE, NULL);
+            lv_screen_load(scrAquarium);
+            currentView = VIEW_AQUARIUM;
+        }
+
         // Read view state
         lockState();
         bool connected = g_state.wsConnected || Net::serialConnected();
@@ -298,7 +317,7 @@ void setup() {
 #else
         "Unknown",
 #endif
-        SCREEN_W, SCREEN_H);
+        g_screenW, g_screenH);
 
 #ifndef BOARD_ULANZI_TC001
     // Init PSRAM

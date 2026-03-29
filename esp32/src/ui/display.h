@@ -39,4 +39,17 @@ void lvglTick();
  */
 void lvglLoop();
 
+/**
+ * Switch display orientation at runtime (IPS 3.5" only).
+ * Landscape = 480×320, Portrait = 320×480.
+ * Updates g_screenW/g_screenH, hardware rotation, LVGL resolution, NVS.
+ * Caller must recreate LVGL screens after calling this.
+ */
+void setOrientation(bool landscape);
+
+/**
+ * Returns true if display is in landscape mode.
+ */
+bool isLandscape();
+
 }  // namespace UI

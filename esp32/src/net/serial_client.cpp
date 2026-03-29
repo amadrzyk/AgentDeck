@@ -32,7 +32,7 @@ static void sendDeviceInfoSerial() {
     resp["board"] = "ulanzi_tc001";
     #elif IS_ROUND
     resp["board"] = "round_amoled";
-    #elif defined(IS_86BOX)
+    #elif defined(BOARD_BOX_86)
     resp["board"] = "86box";
     #else
     resp["board"] = "ips_35";

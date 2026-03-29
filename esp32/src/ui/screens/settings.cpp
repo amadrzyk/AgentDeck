@@ -77,14 +77,14 @@ lv_obj_t* settingsCreate() {
 
     // Slider row
     lv_obj_t* sliderRow = lv_obj_create(screen);
-    lv_obj_set_size(sliderRow, SCREEN_W - 40, 30);
+    lv_obj_set_size(sliderRow, g_screenW - 40, 30);
     lv_obj_set_style_bg_opa(sliderRow, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(sliderRow, 0, 0);
     lv_obj_set_style_pad_all(sliderRow, 0, 0);
     lv_obj_clear_flag(sliderRow, LV_OBJ_FLAG_SCROLLABLE);
 
     slider = lv_slider_create(sliderRow);
-    lv_obj_set_width(slider, SCREEN_W - 100);
+    lv_obj_set_width(slider, g_screenW - 100);
     lv_obj_align(slider, LV_ALIGN_LEFT_MID, 0, 0);
     lv_slider_set_range(slider, 10, 255);
     lv_slider_set_value(slider, 255, LV_ANIM_OFF);
@@ -102,7 +102,7 @@ lv_obj_t* settingsCreate() {
     // --- Buttons ---
     // WiFi reset
     lv_obj_t* btnReset = lv_btn_create(screen);
-    lv_obj_set_size(btnReset, SCREEN_W - 40, 38);
+    lv_obj_set_size(btnReset, g_screenW - 40, 38);
     lv_obj_set_style_bg_color(btnReset, lv_color_hex(0x7F1D1D), 0);
     lv_obj_set_style_radius(btnReset, 6, 0);
     lv_obj_add_event_cb(btnReset, onWifiReset, LV_EVENT_CLICKED, NULL);
@@ -113,7 +113,7 @@ lv_obj_t* settingsCreate() {
 
     // Reboot
     lv_obj_t* btnReboot = lv_btn_create(screen);
-    lv_obj_set_size(btnReboot, SCREEN_W - 40, 38);
+    lv_obj_set_size(btnReboot, g_screenW - 40, 38);
     lv_obj_set_style_bg_color(btnReboot, lv_color_hex(0x1E293B), 0);
     lv_obj_set_style_radius(btnReboot, 6, 0);
     lv_obj_add_event_cb(btnReboot, onReboot, LV_EVENT_CLICKED, NULL);
@@ -121,6 +121,24 @@ lv_obj_t* settingsCreate() {
     lv_obj_set_style_text_color(lblReboot, lv_color_hex(Theme::HUDText), 0);
     lv_obj_center(lblReboot);
     lv_label_set_text(lblReboot, "Reboot");
+
+    // Orientation toggle (IPS 3.5" only)
+#if defined(BOARD_IPS_35)
+    lv_obj_t* btnOrient = lv_btn_create(screen);
+    lv_obj_set_size(btnOrient, g_screenW - 40, 38);
+    lv_obj_set_style_bg_color(btnOrient, lv_color_hex(0x1E3A5F), 0);
+    lv_obj_set_style_radius(btnOrient, 6, 0);
+    lv_obj_add_event_cb(btnOrient, [](lv_event_t* e) {
+        lockState();
+        g_state.pendingLandscape = !UI::isLandscape();
+        g_state.orientationChanged = true;
+        unlockState();
+    }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* lblOrient = lv_label_create(btnOrient);
+    lv_obj_set_style_text_color(lblOrient, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_center(lblOrient);
+    lv_label_set_text(lblOrient, UI::isLandscape() ? "Switch to Portrait" : "Switch to Landscape");
+#endif
 
     // Version
     lv_obj_t* lblVer = lv_label_create(screen);

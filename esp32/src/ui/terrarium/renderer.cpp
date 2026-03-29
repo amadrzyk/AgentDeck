@@ -75,14 +75,14 @@ static inline void decodePixel(uint16_t px, uint8_t& r, uint8_t& g, uint8_t& b) 
 
 // Inline pixel setter for direct buffer manipulation
 static inline void setPixel(int x, int y, uint16_t color) {
-    if (x >= 0 && x < SCREEN_W && y >= 0 && y < SCREEN_H) {
-        canvas_buf[y * SCREEN_W + x] = color;
+    if (x >= 0 && x < g_screenW && y >= 0 && y < g_screenH) {
+        canvas_buf[y * g_screenW + x] = color;
     }
 }
 
 static inline void setPixelAlpha(int x, int y, uint32_t color24, uint8_t alpha) {
-    if (x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H || alpha == 0) return;
-    uint16_t* px = &canvas_buf[y * SCREEN_W + x];
+    if (x < 0 || x >= g_screenW || y < 0 || y >= g_screenH || alpha == 0) return;
+    uint16_t* px = &canvas_buf[y * g_screenW + x];
     if (alpha >= 250) {
         *px = rgb565((color24 >> 16) & 0xFF, (color24 >> 8) & 0xFF, color24 & 0xFF);
         return;
@@ -138,11 +138,13 @@ static void drawLine(int x0, int y0, int x1, int y1, uint32_t color24, uint8_t a
 namespace Terrarium {
 
 void init(lv_obj_t* parent) {
-    // Allocate canvas buffer in PSRAM
-    canvas_buf = (uint16_t*)ps_malloc(SCREEN_W * SCREEN_H * sizeof(uint16_t));
+    // Allocate canvas buffer in PSRAM (reuse if already allocated — same total pixel count)
     if (!canvas_buf) {
-        Serial.println("[Terrarium] PSRAM alloc failed!");
-        return;
+        canvas_buf = (uint16_t*)ps_malloc(g_screenW * g_screenH * sizeof(uint16_t));
+        if (!canvas_buf) {
+            Serial.println("[Terrarium] PSRAM alloc failed!");
+            return;
+        }
     }
 
 #if defined(BOARD_BOX_86)
@@ -153,8 +155,8 @@ void init(lv_obj_t* parent) {
     lv_color_format_t canvasFmt = LV_COLOR_FORMAT_RGB565;
 #endif
     canvas = lv_canvas_create(parent);
-    lv_draw_buf_init(&draw_buf, SCREEN_W, SCREEN_H, canvasFmt,
-                     0, canvas_buf, SCREEN_W * SCREEN_H * sizeof(uint16_t));
+    lv_draw_buf_init(&draw_buf, g_screenW, g_screenH, canvasFmt,
+                     0, canvas_buf, g_screenW * g_screenH * sizeof(uint16_t));
     lv_canvas_set_draw_buf(canvas, &draw_buf);
     lv_obj_align(canvas, LV_ALIGN_TOP_LEFT, 0, 0);
 
@@ -176,7 +178,7 @@ void init(lv_obj_t* parent) {
     Bubbles::init();
 
     Serial.printf("[Terrarium] Canvas %dx%d allocated (%d KB PSRAM)\n",
-                  SCREEN_W, SCREEN_H, SCREEN_W * SCREEN_H * 2 / 1024);
+                  g_screenW, g_screenH, g_screenW * g_screenH * 2 / 1024);
 }
 
 void render(float dt) {
@@ -308,74 +310,74 @@ void render(float dt) {
     // Render layers bottom-to-top (direct buffer writes)
 
     // 1. Water gradient background (fills entire buffer)
-    Water::renderBackground(canvas_buf, SCREEN_W, SCREEN_H);
+    Water::renderBackground(canvas_buf, g_screenW, g_screenH);
 
     // 2. Light rays from surface (subtle volumetric shafts)
-    Water::renderLightRays(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
+    Water::renderLightRays(canvas_buf, g_screenW, g_screenH, totalTime);
 
     // 3. Sand + rocks (terrain)
-    Terrain::render(canvas_buf, SCREEN_W, SCREEN_H);
+    Terrain::render(canvas_buf, g_screenW, g_screenH);
 
     // 4. Caustic light patterns on sand
-    Water::renderCaustics(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
+    Water::renderCaustics(canvas_buf, g_screenW, g_screenH, totalTime);
 
     // 5. Kelp (animated sway)
-    Kelp::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
+    Kelp::render(canvas_buf, g_screenW, g_screenH, totalTime);
 
     // 6. Crayfish (if visible)
     if (showCrayfish) {
-        Crayfish::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, cfState);
+        Crayfish::render(canvas_buf, g_screenW, g_screenH, totalTime, cfState);
     }
 
     // 7. Octopus(es) — per-instance state (daemon reports sibling states)
     for (uint8_t i = 0; i < octCount && i < MAX_OCTOPUS; i++) {
-        Octopus::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, dt, octStates[i], i, octCount);
+        Octopus::render(canvas_buf, g_screenW, g_screenH, totalTime, dt, octStates[i], i, octCount);
     }
 
     // 7b. Cloud(s) — Codex CLI creatures (per-instance state)
     for (uint8_t i = 0; i < cloudCount && i < MAX_CLOUD; i++) {
-        Cloud::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, dt, cloudStates[i], i, cloudCount);
+        Cloud::render(canvas_buf, g_screenW, g_screenH, totalTime, dt, cloudStates[i], i, cloudCount);
     }
 
     // 7c. OpenCode creatures
 #if MAX_OPENCODE > 0
     for (uint8_t i = 0; i < opencodeCount && i < MAX_OPENCODE; i++) {
-        OpenCode::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime, dt, opencodeStates[i], i, opencodeCount);
+        OpenCode::render(canvas_buf, g_screenW, g_screenH, totalTime, dt, opencodeStates[i], i, opencodeCount);
     }
 #endif
 
     // 8. Data particles (food crumbs from working agents)
     Particles::update(dt, totalTime, cState, octCount, cfState, showCrayfish, octStates);
-    Particles::render(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
+    Particles::render(canvas_buf, g_screenW, g_screenH, totalTime);
 
     // 9. Neon tetra school (chases food particles)
     Tetra::update(dt, totalTime, tState, cState, octCount);
-    Tetra::render(canvas_buf, SCREEN_W, SCREEN_H);
+    Tetra::render(canvas_buf, g_screenW, g_screenH);
 
     // 10. Floating particles (plankton/dust)
-    Water::renderParticles(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
+    Water::renderParticles(canvas_buf, g_screenW, g_screenH, totalTime);
 
     // 11. Bubbles — pass octCount so exhale comes from all octopuses
     Bubbles::update(dt, totalTime, cState, octCount);
-    Bubbles::render(canvas_buf, SCREEN_W, SCREEN_H);
+    Bubbles::render(canvas_buf, g_screenW, g_screenH);
 
     // 12. Water surface waves + sparkles
-    Water::renderSurface(canvas_buf, SCREEN_W, SCREEN_H, totalTime);
+    Water::renderSurface(canvas_buf, g_screenW, g_screenH, totalTime);
 
 #if IS_ROUND
     // 13. Circular mask — black out pixels outside the inscribed circle
     {
-        const int cx = SCREEN_W / 2;
-        const int cy = SCREEN_H / 2;
-        const int r = min(SCREEN_W, SCREEN_H) / 2;
+        const int cx = g_screenW / 2;
+        const int cy = g_screenH / 2;
+        const int r = min(g_screenW, g_screenH) / 2;
         const int r2 = r * r;
-        for (int y = 0; y < SCREEN_H; y++) {
+        for (int y = 0; y < g_screenH; y++) {
             const int dy = y - cy;
             const int dy2 = dy * dy;
-            for (int x = 0; x < SCREEN_W; x++) {
+            for (int x = 0; x < g_screenW; x++) {
                 const int dx = x - cx;
                 if (dx * dx + dy2 > r2) {
-                    canvas_buf[y * SCREEN_W + x] = 0;  // AMOLED: black = off
+                    canvas_buf[y * g_screenW + x] = 0;  // AMOLED: black = off
                 }
             }
         }

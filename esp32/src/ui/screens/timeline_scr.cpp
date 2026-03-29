@@ -63,7 +63,7 @@ lv_obj_t* timelineCreate() {
 
     // Top status bar (28px)
     topBar = lv_obj_create(screen);
-    lv_obj_set_size(topBar, SCREEN_W, 28);
+    lv_obj_set_size(topBar, g_screenW, 28);
     lv_obj_align(topBar, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_bg_color(topBar, lv_color_hex(0x111827), 0);
     lv_obj_set_style_bg_opa(topBar, LV_OPA_COVER, 0);
@@ -92,7 +92,7 @@ lv_obj_t* timelineCreate() {
 
     // Timeline list area
     listPanel = lv_obj_create(screen);
-    lv_obj_set_size(listPanel, SCREEN_W, SCREEN_H - 28 - 24);
+    lv_obj_set_size(listPanel, g_screenW, g_screenH - 28 - 24);
     lv_obj_align(listPanel, LV_ALIGN_TOP_LEFT, 0, 28);
     lv_obj_set_style_bg_opa(listPanel, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(listPanel, 0, 0);
@@ -104,7 +104,7 @@ lv_obj_t* timelineCreate() {
     // Pre-create entry labels
     for (int i = 0; i < MAX_VISIBLE; i++) {
         entryLabels[i] = lv_label_create(listPanel);
-        lv_obj_set_width(entryLabels[i], SCREEN_W - 8);
+        lv_obj_set_width(entryLabels[i], g_screenW - 8);
         lv_obj_set_style_text_font(entryLabels[i], &font_kr_12, 0);
         lv_obj_set_style_text_color(entryLabels[i], lv_color_hex(Theme::HUDText), 0);
         lv_label_set_long_mode(entryLabels[i], LV_LABEL_LONG_CLIP);

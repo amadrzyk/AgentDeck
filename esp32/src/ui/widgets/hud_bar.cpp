@@ -184,9 +184,16 @@ void init(lv_obj_t* parent) {
     // === Rectangular layout: left panel + right panel ===
 
     // === Left panel: AgentDeck logo + sessions ===
+    const bool portrait = !UI::isLandscape();
     panelLeft = lv_obj_create(parent);
-    lv_obj_set_size(panelLeft, 170, LV_SIZE_CONTENT);
-    lv_obj_set_pos(panelLeft, 8, PANEL_TOP_Y);
+    if (portrait) {
+        // Portrait: full-width panel at top
+        lv_obj_set_size(panelLeft, g_screenW - 16, LV_SIZE_CONTENT);
+        lv_obj_set_pos(panelLeft, 8, PANEL_TOP_Y);
+    } else {
+        lv_obj_set_size(panelLeft, 170, LV_SIZE_CONTENT);
+        lv_obj_set_pos(panelLeft, 8, PANEL_TOP_Y);
+    }
     lv_obj_set_style_bg_color(panelLeft, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(panelLeft, LV_OPA_50, 0);
     lv_obj_set_style_border_width(panelLeft, 0, 0);
@@ -228,7 +235,12 @@ void init(lv_obj_t* parent) {
     panelRight = lv_obj_create(parent);
     int panelW = GAUGE_SIZE * 2 + GAUGE_GAP + 16;
     lv_obj_set_size(panelRight, panelW, LV_SIZE_CONTENT);
-    lv_obj_set_pos(panelRight, SCREEN_W - panelW - 8, PANEL_TOP_Y);
+    if (portrait) {
+        // Portrait: below left panel, aligned to bottom-right
+        lv_obj_align(panelRight, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
+    } else {
+        lv_obj_set_pos(panelRight, g_screenW - panelW - 8, PANEL_TOP_Y);
+    }
     lv_obj_set_style_bg_color(panelRight, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(panelRight, LV_OPA_50, 0);
     lv_obj_set_style_border_width(panelRight, 0, 0);
