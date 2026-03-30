@@ -10,7 +10,7 @@ final class SerialModule: DeviceModule, @unchecked Sendable {
 
     func start() async {
         let devFiles = (try? FileManager.default.contentsOfDirectory(atPath: "/dev")) ?? []
-        let hasSerial = devFiles.contains { $0.hasPrefix("cu.usbserial") || $0.hasPrefix("cu.usbmodem") }
+        let hasSerial = devFiles.contains { $0.hasPrefix("cu.usbserial") || $0.hasPrefix("cu.wchusbserial") || $0.hasPrefix("cu.usbmodem") }
         guard hasSerial else {
             DaemonLogger.shared.debug("Serial", "No USB serial devices found, skipping")
             return

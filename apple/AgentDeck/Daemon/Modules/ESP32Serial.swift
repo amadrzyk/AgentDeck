@@ -9,7 +9,7 @@ import Foundation
 actor ESP32Serial {
     // Port detection patterns
     private static let portPatterns: [NSRegularExpression] = {
-        ["/dev/cu\\.usbserial-\\d+", "/dev/cu\\.usbmodem\\d+"].compactMap {
+        ["/dev/cu\\.usbserial-\\d+", "/dev/cu\\.wchusbserial\\d+", "/dev/cu\\.usbmodem\\d+"].compactMap {
             try? NSRegularExpression(pattern: $0)
         }
     }()
@@ -37,16 +37,16 @@ actor ESP32Serial {
     private var pollTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
 
-    private var stateProvider: (() -> [String: Any]?)?
-    private var usageProvider: (() -> [String: Any]?)?
-    private var initialStateProvider: (() -> [[String: Any]])?
+    nonisolated(unsafe) private var stateProvider: (() -> [String: Any]?)?
+    nonisolated(unsafe) private var usageProvider: (() -> [String: Any]?)?
+    nonisolated(unsafe) private var initialStateProvider: (() -> [[String: Any]])?
     var onMessage: (@Sendable (String, [String: Any]) -> Void)?
 
     var connectionCount: Int { connections.filter(\.connected).count }
 
-    func setStateProviderFn(_ provider: @escaping () -> [String: Any]?) { stateProvider = provider }
-    func setUsageProviderFn(_ provider: @escaping () -> [String: Any]?) { usageProvider = provider }
-    func setInitialStateProviderFn(_ provider: @escaping () -> [[String: Any]]) { initialStateProvider = provider }
+    nonisolated func setStateProviderFn(_ provider: @escaping () -> [String: Any]?) { stateProvider = provider }
+    nonisolated func setUsageProviderFn(_ provider: @escaping () -> [String: Any]?) { usageProvider = provider }
+    nonisolated func setInitialStateProviderFn(_ provider: @escaping () -> [[String: Any]]) { initialStateProvider = provider }
     func setOnMessage(_ handler: @escaping @Sendable (String, [String: Any]) -> Void) { onMessage = handler }
 
     // MARK: - Lifecycle

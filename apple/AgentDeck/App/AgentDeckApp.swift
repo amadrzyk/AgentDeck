@@ -7,24 +7,25 @@ import ServiceManagement
 
 @main
 struct AgentDeckApp: App {
-    @State private var stateHolder = AgentStateHolder()
+    @StateObject private var stateHolder = AgentStateHolder()
     #if os(macOS)
-    @State private var daemonService = DaemonService()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var daemonService = DaemonService()
     @Environment(\.openWindow) private var openWindow
     #endif
 
     var body: some Scene {
         WindowGroup("AgentDeck Dashboard", id: "dashboard") {
             ContentView()
-                .environment(stateHolder)
+                .environmentObject(stateHolder)
                 #if os(macOS)
-                .onAppear { startDaemonAndConnect() }
+                .task { configureDaemonConnection() }
                 #endif
         }
         #if os(macOS)
         Settings {
             SettingsScreen()
-                .environment(stateHolder)
+                .environmentObject(stateHolder)
         }
         MenuBarExtra("AgentDeck", systemImage: daemonService.isRunning
             ? "antenna.radiowaves.left.and.right"
@@ -36,7 +37,10 @@ struct AgentDeckApp: App {
             }.keyboardShortcut("d")
 
             if daemonService.isRunning {
-                Text("Daemon on port \(daemonService.port)")
+                Text(verbatim: "Daemon on port \(daemonService.port)")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if daemonService.isUsingExternalDaemon {
+                Text(verbatim: "Using external daemon on port \(daemonService.port)")
                     .font(.caption).foregroundStyle(.secondary)
             } else if let error = daemonService.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -55,7 +59,7 @@ struct AgentDeckApp: App {
             ))
 
             Button("Launch Claude Session") {
-                SessionLauncher.launchSession()
+                SessionLauncher.launchSession(daemonPort: daemonService.port)
             }
 
             Divider()
@@ -71,13 +75,34 @@ struct AgentDeckApp: App {
     }
 
     #if os(macOS)
-    private func startDaemonAndConnect() {
+    private func configureDaemonConnection() {
+        // Wire AppDelegate to daemon service for clean shutdown
+        appDelegate.daemonService = daemonService
+
         daemonService.onReady = { [stateHolder] wsUrl in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 stateHolder.connectTo(url: wsUrl)
             }
         }
-        daemonService.start()
     }
     #endif
 }
+
+#if os(macOS)
+/// AppDelegate handles app lifecycle events that SwiftUI doesn't cover,
+/// particularly applicationWillTerminate for clean daemon shutdown.
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var daemonService: DaemonService?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Synchronous shutdown — block briefly to release port and clean up daemon.json
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            await daemonService?.stop()
+            semaphore.signal()
+        }
+        // Wait up to 3 seconds for shutdown to complete
+        _ = semaphore.wait(timeout: .now() + 3)
+    }
+}
+#endif

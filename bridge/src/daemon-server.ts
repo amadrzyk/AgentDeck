@@ -17,6 +17,7 @@ import { BridgeCore } from './bridge-core.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
 import { BridgeLogStream } from './log-stream.js';
 import { SessionTimelineRelay } from './session-timeline-relay.js';
+import { SessionFocusRelay } from './session-focus-relay.js';
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import {
@@ -339,14 +340,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const timelineRelay = new SessionTimelineRelay(port, core.bridgeTimeline);
   timelineRelay.setOnModelCatalog((models) => {
     // Merge modelCatalog from sibling Claude Code sessions (daemon doesn't run PTY).
-    // Gateway may also set catalog — merge both, dedup by name.
+    // Gateway may also set catalog — merge both, dedup by key.
     const existing = core.cachedModelCatalog ?? [];
-    const existingNames = new Set(existing.map(m => m.name));
+    const existingKeys = new Set(existing.map(m => m.key));
     const merged = [...existing];
     for (const m of models) {
-      if (!existingNames.has(m.name)) {
+      if (!existingKeys.has(m.key)) {
         merged.push(m);
-        existingNames.add(m.name);
+        existingKeys.add(m.key);
       }
     }
     if (merged.length !== existing.length) {
@@ -355,6 +356,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     }
   });
   timelineRelay.start();
+
+  // Session focus relay — allows SD plugin to interact with a specific session via daemon
+  const focusRelay = new SessionFocusRelay();
+  focusRelay.setEventHandler((evt) => {
+    if (evt.type === 'state_update') {
+      // Merge daemon metadata into the session's state_update
+      const merged: any = {
+        ...evt,
+        modelCatalog: (evt as any).modelCatalog ?? core.cachedModelCatalog,
+        gatewayAvailable: core.cachedGatewayAvailable,
+        ollamaStatus: core.cachedOllamaStatus,
+        gatewayHasError: (evt as any).gatewayHasError ?? core.cachedGatewayHasError,
+      };
+      lastStateEvent = merged;
+      core.wsServer.broadcast(merged);
+    } else {
+      // prompt_options, usage_update — relay as-is
+      core.wsServer.broadcast(evt);
+    }
+  });
 
   // mDNS + device modules
   const deviceModules = createDefaultModules('daemon' as any);
@@ -636,6 +657,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       return;
     }
     if (cmd.type === 'switch_agent') {
+      focusRelay.unfocus(); // Clear session focus on agent switch
       const target = (cmd as any).agent as string;
       if (target === 'openclaw' && gatewayAdapter?.isAlive()) {
         // Force broadcast OpenClaw state to all clients
@@ -657,6 +679,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         lastStateEvent = stateEvent;
         core.wsServer.broadcast(stateEvent);
       }
+      return;
+    }
+    if (cmd.type === 'focus_session') {
+      const sessionId = (cmd as any).sessionId as string;
+      if (!sessionId) return;
+      focusRelay.focus(sessionId);
+      return;
+    }
+    // Route interactive commands to focused session (if any)
+    if (focusRelay.getFocusedSessionId() && focusRelay.routeCommand(cmd)) {
       return;
     }
     if (cmd.type === 'query_usage') {
@@ -714,6 +746,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== Shutdown =====
   core.onShutdown(async () => {
     removeDaemonInfo();
+    focusRelay.stop();
     timelineRelay.stop();
     voiceAssistant?.stop();
     voiceManager?.disconnectFromServer();

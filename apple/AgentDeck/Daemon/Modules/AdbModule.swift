@@ -83,8 +83,44 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
             .compactMap { $0.split(separator: "\t").first.map(String.init) }
     }
 
+    /// Resolved adb binary path (searched once at startup)
+    private lazy var adbPath: String? = Self.findAdb()
+
     private func adbAvailable() -> Bool {
-        shell(timeout: 2, "which", "adb") != nil
+        adbPath != nil
+    }
+
+    /// Search common locations for adb binary (GUI apps have restricted PATH)
+    private static func findAdb() -> String? {
+        let candidates = [
+            "\(NSHomeDirectory())/Library/Android/sdk/platform-tools/adb",
+            "/usr/local/bin/adb",
+            "/opt/homebrew/bin/adb",
+            "/usr/bin/adb",
+        ]
+        for path in candidates {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                DaemonLogger.shared.debug("ADB", "Found adb at \(path)")
+                return path
+            }
+        }
+        // Fallback: try which via shell (works from terminal, not GUI)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["which", "adb"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+        if process.terminationStatus == 0,
+           let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !out.isEmpty {
+            DaemonLogger.shared.debug("ADB", "Found adb via which: \(out)")
+            return out
+        }
+        return nil
     }
 
     @discardableResult
@@ -97,8 +133,14 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
 
     private func runProcess(timeout: TimeInterval, _ args: [String]) -> (status: Int32?, stdout: Data) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
+        // Use resolved adb path for adb commands, /usr/bin/env for others
+        if let adb = adbPath, args.first == "adb" {
+            process.executableURL = URL(fileURLWithPath: adb)
+            process.arguments = Array(args.dropFirst())
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = args
+        }
 
         let stdoutPipe = Pipe()
         process.standardOutput = stdoutPipe

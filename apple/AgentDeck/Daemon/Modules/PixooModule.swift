@@ -49,6 +49,8 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
     nonisolated(unsafe) private var cached5h: Double?
     nonisolated(unsafe) private var cached7d: Double?
 
+    nonisolated(unsafe) private var displayDimmed = false
+
     /// Handle broadcast events — update cached state for next render
     func handleEvent(_ event: [String: Any]) {
         guard let type = event["type"] as? String else { return }
@@ -63,6 +65,16 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
             cached7d = event["sevenDayPercent"] as? Double
         case "sessions_list":
             cachedSessions = event["sessions"] as? [[String: Any]] ?? []
+        case "display_state":
+            let displayOn = event["displayOn"] as? Bool ?? true
+            if !displayOn && !displayDimmed {
+                displayDimmed = true
+                Task { await dimPixoo() }
+            } else if displayOn && displayDimmed {
+                displayDimmed = false
+                Task { await restorePixoo() }
+            }
+            return // Don't re-render on display_state
         default: break
         }
 
@@ -77,7 +89,7 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
 
     /// Push current frame to all Pixoo devices via HTTP
     private func pushFrame() async {
-        guard let frame = lastFrame, !devices.isEmpty else { return }
+        guard let frame = lastFrame, !devices.isEmpty, !displayDimmed else { return }
 
         for device in devices {
             await pushToDevice(device, frame: frame)
@@ -122,6 +134,20 @@ final class PixooModule: DeviceModule, @unchecked Sendable {
             request.timeoutInterval = 2
             _ = try? await URLSession.shared.data(for: request)
         }
+    }
+
+    // MARK: - Display Sleep
+
+    private func dimPixoo() async {
+        await setBrightness(0)
+        DaemonLogger.shared.debug("Pixoo", "Display sleep → brightness 0")
+    }
+
+    private func restorePixoo() async {
+        // Restore default brightness (or device-configured)
+        let level = devices.first?.brightness ?? 80
+        await setBrightness(level)
+        DaemonLogger.shared.debug("Pixoo", "Display wake → brightness \(level)")
     }
 
     // MARK: - Settings

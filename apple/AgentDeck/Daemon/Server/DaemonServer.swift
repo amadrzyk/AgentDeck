@@ -253,22 +253,19 @@ final class DaemonServer {
         moduleManager.register(serial)
 
         // ESP32 state providers — initial state on connect + heartbeat
-        // nonisolated(unsafe) on ESP32Serial side allows MainActor closures to cross actor boundary
-        serial.serial.setStateProviderFn { [weak self] in
-            MainActor.assumeIsolated { self?.lastStateEvent }
-        }
-        serial.serial.setUsageProviderFn { [weak self] in
-            MainActor.assumeIsolated { self?.buildUsageEvent() }
-        }
+        // nonisolated(unsafe) storage in ESP32Serial allows direct setting from @MainActor context
+        serial.serial.setStateProviderFn { [weak self] in self?.lastStateEvent }
+        serial.serial.setUsageProviderFn { [weak self] in self?.buildUsageEvent() }
         serial.serial.setInitialStateProviderFn { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return [] }
-                var events: [[String: Any]] = []
-                if let state = self.lastStateEvent { events.append(state) }
-                if let usage = self.buildUsageEvent() { events.append(usage) }
-                return events
-            }
+            guard let self else { return [] }
+            var events: [[String: Any]] = []
+            if let state = self.lastStateEvent { events.append(state) }
+            if let usage = self.buildUsageEvent() { events.append(usage) }
+            return events
         }
+
+        // Wire external client count (ESP32 serial connections count as clients for polling guards)
+        await wsServer.setExternalClientCountProvider { await serial.serial.connectionCount }
 
         // Pixoo
         let pixoo = PixooModule()
@@ -449,7 +446,8 @@ final class DaemonServer {
                 _ = stateMachine.transition(trigger: "interrupt", source: .user); broadcastStateUpdate()
             default: break
             }
-            if type != "switch_agent" && type != "query_usage" && type != "focus_session" { return }
+            if type != "switch_agent" && type != "query_usage" && type != "focus_session"
+                && type != "mode_toggle" && type != "session_switch" && type != "usage_toggle" { return }
         }
 
         switch type {
@@ -487,6 +485,28 @@ final class DaemonServer {
         case "switch_agent":
             Task { await focusRelay.unfocus() }
             handleSwitchAgent(cmd["agent"] as? String ?? "")
+        case "mode_toggle":
+            // D200H button 0: cycle mode via focused session (sends Shift+Tab to PTY)
+            let modeCmd = SendableDict(["type": "switch_mode"])
+            Task {
+                let routed = await self.focusRelay.routeCommand(modeCmd.value)
+                if !routed {
+                    await MainActor.run { self.forwardCommandToSession(modeCmd.value) }
+                }
+            }
+        case "session_switch":
+            // D200H button 1: cycle focus to next session
+            let sessions = cachedSessions
+            guard !sessions.isEmpty else { break }
+            Task {
+                let currentId = await self.focusRelay.focusedSessionId
+                let currentIdx = sessions.firstIndex(where: { $0.id == currentId }) ?? -1
+                let nextIdx = (currentIdx + 1) % sessions.count
+                await self.focusRelay.focus(sessionId: sessions[nextIdx].id)
+            }
+        case "usage_toggle":
+            // D200H button 2: trigger usage fetch
+            Task { await fetchUsageRelayed() }
         case "utility":
             let util = UtilityProxy()
             util.handleCommand(cmd["action"] as? String ?? "", value: cmd["value"] as? Int)
@@ -607,6 +627,13 @@ final class DaemonServer {
             broadcastStateUpdate()
         case "gateway_presence":
             break // Heartbeat
+        case "model_catalog":
+            // Gateway sends full model catalog — replace entirely (same as Node.js)
+            if let models = event["models"] as? [[String: Any]] {
+                cachedModelCatalog = models
+                DaemonLogger.shared.debug("Daemon", "Model catalog from Gateway: \(models.count) models")
+                broadcastStateUpdate()
+            }
         default:
             break
         }
@@ -633,11 +660,16 @@ final class DaemonServer {
     }
 
     private func mergeModelCatalog(_ models: [[String: Any]]) {
-        let existingNames = Set(cachedModelCatalog.compactMap { $0["name"] as? String })
+        let existingKeys = Set(cachedModelCatalog.compactMap { $0["key"] as? String })
+        var merged = cachedModelCatalog
         for m in models {
-            if let name = m["name"] as? String, !existingNames.contains(name) {
-                cachedModelCatalog.append(m)
+            if let key = m["key"] as? String, !existingKeys.contains(key) {
+                merged.append(m)
             }
+        }
+        if merged.count != cachedModelCatalog.count {
+            cachedModelCatalog = merged
+            DaemonLogger.shared.debug("Daemon", "Model catalog merged: \(merged.count) models total")
         }
     }
 
@@ -657,7 +689,7 @@ final class DaemonServer {
         usagePollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                guard let self, await self.wsServer.clientCount > 0 else { continue }
+                guard let self, await self.wsServer.hasClients() else { continue }
                 await self.fetchUsageRelayed()
             }
         }
@@ -666,7 +698,7 @@ final class DaemonServer {
         ollamaPollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                guard let self, await self.wsServer.clientCount > 0 else { continue }
+                guard let self, await self.wsServer.hasClients() else { continue }
                 await self.probeOllama()
             }
         }
@@ -706,7 +738,7 @@ final class DaemonServer {
         usageTickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                guard let self, await self.wsServer.clientCount > 0 else { continue }
+                guard let self, await self.wsServer.hasClients() else { continue }
                 self.broadcastUsage()
             }
         }

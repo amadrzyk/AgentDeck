@@ -18,6 +18,20 @@ actor WebSocketServer {
     var onClientDisconnect: (@Sendable () -> Void)?
 
     var clientCount: Int { connections.count }
+    private var externalClientCountProvider: (@Sendable () async -> Int)?
+
+    func setExternalClientCountProvider(_ provider: @escaping @Sendable () async -> Int) {
+        externalClientCountProvider = provider
+    }
+
+    /// Total client count including external connections (ESP32 serial)
+    func hasClients() async -> Bool {
+        if !connections.isEmpty { return true }
+        if let provider = externalClientCountProvider {
+            return await provider() > 0
+        }
+        return false
+    }
 
     // HTTP handler delegation
     private var httpHandler: HTTPServer?
