@@ -121,6 +121,9 @@ export class StateMachine extends EventEmitter {
         break;
 
       case 'SessionEnd':
+        this.modelName = null;
+        this.effortLevel = null;
+        this.billingType = 'unknown';
         this.transition(State.DISCONNECTED, 'session_end', 'hook');
         break;
 
