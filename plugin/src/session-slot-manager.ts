@@ -12,23 +12,104 @@ import { dlog } from './log.js';
 
 export type SlotView = 'list' | 'detail';
 
+export interface PresetAction {
+  label: string;
+  iconSvg: string;        // SVG elements for the icon area (centered at 72,44 in 144x144 canvas)
+  color: string;
+  textColor: string;
+  subtitle?: string;       // secondary text below label (e.g. model name)
+  prompt?: string;         // send_prompt text
+  localAction?: string;    // local action: 'open_gateway', 'switch_model'
+  loading?: boolean;       // show loading indicator
+}
+
 export interface SessionSlotConfig {
-  type: 'session' | 'back' | 'info' | 'option' | 'esc' | 'stop' | 'next-page' | 'empty';
+  type: 'session' | 'back' | 'info' | 'option' | 'esc' | 'stop' | 'next-page' | 'preset' | 'empty';
   session?: SessionInfo;
   option?: PromptOption;
   optionIndex?: number;
   label?: string;
+  preset?: PresetAction;
   /** For list view: is this the currently "active" (connected) session? */
   isActive?: boolean;
 }
+
+// ---- OpenClaw preset SVG icons (144x144 button canvas) ----
+
+const SUMMARIZE_ICON_SVG = [
+  `<rect x="40" y="14" width="64" height="56" rx="5" fill="none" stroke="#93c5fd" stroke-width="2"/>`,
+  `<line x1="50" y1="28" x2="94" y2="28" stroke="#93c5fd" stroke-width="2" opacity="0.6"/>`,
+  `<line x1="50" y1="40" x2="88" y2="40" stroke="#93c5fd" stroke-width="2" opacity="0.6"/>`,
+  `<line x1="50" y1="52" x2="78" y2="52" stroke="#93c5fd" stroke-width="2" opacity="0.6"/>`,
+  `<polyline points="82,50 87,56 96,44" fill="none" stroke="#93c5fd" stroke-width="2.5" stroke-linecap="round"/>`,
+].join('');
+
+// MODEL icon: model name large + swap indicator. loading=true shows spinner animation.
+function buildModelIcon(modelName?: string, loading?: boolean): string {
+  if (loading) {
+    // Spinning arrow animation
+    return [
+      `<text x="72" y="52" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#e9d5ff" opacity="0.6">Switching...</text>`,
+      `<circle cx="72" cy="72" r="16" fill="none" stroke="#e9d5ff" stroke-width="2.5" stroke-dasharray="80" stroke-dashoffset="20" opacity="0.7"/>`,
+    ].join('');
+  }
+  const display = modelName ? truncateStr(modelName, 14) : 'Model';
+  const fontSize = display.length > 10 ? 14 : display.length > 7 ? 17 : 20;
+  return [
+    // Swap icon (small, top)
+    `<path d="M56,24 L48,24 L53,19" fill="none" stroke="#e9d5ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>`,
+    `<path d="M88,24 L96,24 L91,29" fill="none" stroke="#e9d5ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>`,
+    `<line x1="48" y1="24" x2="96" y2="24" stroke="#e9d5ff" stroke-width="1" opacity="0.25"/>`,
+    // Model name (centered, prominent)
+    `<text x="72" y="${58 + (fontSize < 17 ? 2 : 0)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${fontSize}" font-weight="bold" fill="#e9d5ff">${escapeXml(display)}</text>`,
+  ].join('');
+}
+
+function truncateStr(s: string, max: number): string {
+  return s.length <= max ? s : s.slice(0, max - 1) + '\u2026';
+}
+
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+import { OC_BODY, OC_CLAW_L, OC_CLAW_R } from './renderers/agent-logos.js';
+
+const GATEWAY_ICON_SVG = [
+  `<rect x="30" y="16" width="84" height="64" rx="6" fill="none" stroke="#94a3b8" stroke-width="2"/>`,
+  `<line x1="30" y1="30" x2="114" y2="30" stroke="#94a3b8" stroke-width="1.5"/>`,
+  `<circle cx="40" cy="23" r="2.5" fill="#ef4444"/>`,
+  `<circle cx="48" cy="23" r="2.5" fill="#fbbf24"/>`,
+  `<circle cx="56" cy="23" r="2.5" fill="#4ade80"/>`,
+  `<g transform="translate(51,32) scale(0.35)">`,
+  `<defs><linearGradient id="oc-btn-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff4d4d"/><stop offset="100%" stop-color="#991b1b"/></linearGradient></defs>`,
+  `<path d="${OC_BODY}" fill="url(#oc-btn-g)"/>`,
+  `<path d="${OC_CLAW_L}" fill="url(#oc-btn-g)"/>`,
+  `<path d="${OC_CLAW_R}" fill="url(#oc-btn-g)"/>`,
+  `<circle cx="45" cy="35" r="6" fill="#050810"/>`,
+  `<circle cx="75" cy="35" r="6" fill="#050810"/>`,
+  `</g>`,
+].join('');
+
+// OpenClaw preset definitions (iconSvg + action)
+// MODEL iconSvg is built dynamically with current model name
+const OC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; dynamicIcon?: 'model' }> = [
+  { label: 'STATUS', iconSvg: SUMMARIZE_ICON_SVG, color: '#1a1a3e', textColor: '#93c5fd', prompt: 'status' },
+  { label: 'MODEL', dynamicIcon: 'model', color: '#2d1f3d', textColor: '#e9d5ff', localAction: 'switch_model' },
+  { label: 'GATEWAY', iconSvg: GATEWAY_ICON_SVG, color: '#1a0f2e', textColor: '#c084fc', localAction: 'open_gateway' },
+];
 
 const SLOTS_PER_PAGE = 7; // When paginating: 7 sessions + 1 nav
 const MAX_SESSIONS = 20;
 const MAX_SLOTS = 8;
 
 export class SessionSlotManager {
+  private static readonly DETAIL_OPTIONS_PER_PAGE = 4;
+  private static readonly MODEL_SWITCH_TIMEOUT_MS = 12000;
+
   private _view: SlotView = 'list';
   private _currentPage = 0;
+  private _detailPage = 0;
   private _sessions: SessionInfo[] = [];
   private _focusedSessionId: string | null = null;
   private _activeSessionId: string | null = null;
@@ -43,6 +124,9 @@ export class SessionSlotManager {
   private _detailQuestion: string | undefined;
   private _detailModelName: string | undefined;
   private _detailMode: string | undefined;
+  private _modelSwitching = false;
+  private _prevModelName: string | undefined;
+  private _modelSwitchStartedAt = 0;
 
   get view(): SlotView { return this._view; }
   get currentPage(): number { return this._currentPage; }
@@ -50,6 +134,36 @@ export class SessionSlotManager {
   get sessions(): SessionInfo[] { return this._sessions; }
   get detailState(): State { return this._detailState; }
   get detailOptions(): PromptOption[] { return this._detailOptions; }
+  get modelSwitching(): boolean { return this._modelSwitching; }
+
+  startModelSwitch(): void {
+    this._prevModelName = this._detailModelName;
+    this._modelSwitching = true;
+    this._modelSwitchStartedAt = Date.now();
+  }
+
+  /** Called when model name changes after switch — auto-detects completion */
+  private checkModelSwitchDone(): void {
+    if (!this._modelSwitching) return;
+    const timedOut = Date.now() - this._modelSwitchStartedAt >= SessionSlotManager.MODEL_SWITCH_TIMEOUT_MS;
+    const enteredInteractiveModelPicker =
+      this._detailState === State.AWAITING_OPTION
+      || this._detailState === State.AWAITING_PERMISSION
+      || this._detailState === State.AWAITING_DIFF;
+    const leftIdle = this._detailState !== State.IDLE;
+
+    if (timedOut || enteredInteractiveModelPicker || leftIdle) {
+      this._modelSwitching = false;
+      this._prevModelName = undefined;
+      this._modelSwitchStartedAt = 0;
+      return;
+    }
+    if (this._modelSwitching && this._detailModelName && this._detailModelName !== this._prevModelName) {
+      this._modelSwitching = false;
+      this._prevModelName = undefined;
+      this._modelSwitchStartedAt = 0;
+    }
+  }
 
   // ---- Session list updates ----
 
@@ -111,6 +225,12 @@ export class SessionSlotManager {
     this._detailQuestion = question;
     this._detailModelName = modelName;
     this._detailMode = mode;
+    if (!this.isAwaitingDetailState()) {
+      this._detailPage = 0;
+    } else {
+      this._detailPage = Math.min(this._detailPage, Math.max(0, this.detailOptionPages() - 1));
+    }
+    this.checkModelSwitchDone();
   }
 
   // ---- View transitions ----
@@ -118,16 +238,28 @@ export class SessionSlotManager {
   enterDetailView(sessionId: string): void {
     this._focusedSessionId = sessionId;
     this._view = 'detail';
+    this._detailPage = 0;
     dlog('SlotMgr', `enterDetailView: ${sessionId}`);
   }
 
   exitDetailView(): void {
     this._focusedSessionId = null;
     this._view = 'list';
+    this._detailPage = 0;
+    this._modelSwitching = false;
+    this._prevModelName = undefined;
+    this._modelSwitchStartedAt = 0;
     dlog('SlotMgr', `exitDetailView → list`);
   }
 
   nextPage(): void {
+    if (this._view === 'detail') {
+      const total = this.detailOptionPages();
+      if (total <= 1) return;
+      this._detailPage = (this._detailPage + 1) % total;
+      dlog('SlotMgr', `nextDetailPage: ${this._detailPage + 1}/${total}`);
+      return;
+    }
     const total = this.totalPages();
     if (total <= 1) return;
     this._currentPage = (this._currentPage + 1) % total;
@@ -147,11 +279,12 @@ export class SessionSlotManager {
 
   /** Handle button press. Returns action to take. */
   handleSlotPress(slot: number): {
-    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'none';
+    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'none';
     sessionId?: string;
     sessionPort?: number;
     optionIndex?: number;
     optionValue?: string;
+    promptText?: string;
   } {
     const config = this.getSlotConfig(slot);
 
@@ -176,6 +309,18 @@ export class SessionSlotManager {
             optionIndex: config.optionIndex,
             optionValue: config.option.label,
           };
+        }
+        return { action: 'none' };
+
+      case 'preset':
+        if (config.preset?.localAction === 'open_gateway') {
+          return { action: 'open-gateway' };
+        }
+        if (config.preset?.localAction === 'switch_model') {
+          return { action: 'switch-model' };
+        }
+        if (config.preset?.prompt) {
+          return { action: 'send-prompt', promptText: config.preset.prompt };
         }
         return { action: 'none' };
 
@@ -210,6 +355,17 @@ export class SessionSlotManager {
     return this._sessions.length > MAX_SLOTS;
   }
 
+  private isAwaitingDetailState(): boolean {
+    return this._detailState === State.AWAITING_OPTION
+      || this._detailState === State.AWAITING_PERMISSION
+      || this._detailState === State.AWAITING_DIFF;
+  }
+
+  private detailOptionPages(): number {
+    if (!this.isAwaitingDetailState()) return 1;
+    return Math.max(1, Math.ceil(this._detailOptions.length / SessionSlotManager.DETAIL_OPTIONS_PER_PAGE));
+  }
+
   private getListSlotConfig(slot: number): SessionSlotConfig {
     const needsPage = this.needsPagination();
     const sessionsOnPage = needsPage ? SLOTS_PER_PAGE : MAX_SLOTS;
@@ -236,40 +392,72 @@ export class SessionSlotManager {
 
   private getDetailSlotConfig(slot: number): SessionSlotConfig {
     const session = this.getFocusedSession();
-    const isAwaiting = this._detailState === State.AWAITING_OPTION
-      || this._detailState === State.AWAITING_PERMISSION
-      || this._detailState === State.AWAITING_DIFF;
+    const isAwaiting = this.isAwaitingDetailState();
     const isProcessing = this._detailState === State.PROCESSING;
+    const isOpenClaw = session?.agentType === 'openclaw';
+    const detailOptionStart = this._detailPage * SessionSlotManager.DETAIL_OPTIONS_PER_PAGE;
+    const detailOptionPages = this.detailOptionPages();
+
+    // Layout (2×4 grid):
+    //   0=BACK   1=INFO   2=content  3=content
+    //   4=ESC/STOP  5=content  6=content  7=reserved(expand)
+    // Content slots: 1,2,3,5,6 (slot 1=info, rest=options/presets/info)
 
     switch (slot) {
       case 0:
-        // BACK button
         return { type: 'back', label: 'BACK' };
 
+      case 4:
+        // ESC/STOP — below BACK, always visible (dimmed when not actionable)
+        if (isAwaiting) return { type: 'esc', label: 'active' };
+        if (isProcessing) return { type: 'stop', label: 'active' };
+        // IDLE/DISCONNECTED: show dimmed ESC (harmless, clears typed text)
+        return { type: 'esc', label: 'dim' };
+
       case 1:
-        // Session info
         return { type: 'info', session, label: session?.projectName ?? 'Session' };
 
       case 7:
-        // ESC/STOP
-        if (isAwaiting) return { type: 'esc', label: 'ESC' };
-        if (isProcessing) return { type: 'stop', label: 'STOP' };
+        if (isAwaiting && detailOptionPages > 1) {
+          return { type: 'next-page', label: `${this._detailPage + 1}/${detailOptionPages}` };
+        }
         return { type: 'empty' };
 
       default: {
-        // Slots 2-6: options (AWAITING) or info (other states)
-        const optSlot = slot - 2; // 0-4 for slots 2-6
+        // Content slots: 2,3,5,6 → option indices (paged)
+        const CONTENT_SLOTS = [2, 3, 5, 6];
+        const contentIdx = CONTENT_SLOTS.indexOf(slot);
+        if (contentIdx < 0) return { type: 'empty' };
 
-        if (isAwaiting && optSlot < this._detailOptions.length) {
+        const optionIndex = detailOptionStart + contentIdx;
+        if (isAwaiting && optionIndex < this._detailOptions.length) {
           return {
             type: 'option',
-            option: this._detailOptions[optSlot],
-            optionIndex: optSlot,
+            option: this._detailOptions[optionIndex],
+            optionIndex,
           };
         }
 
-        // PROCESSING: slot 2 shows current tool
-        if (isProcessing && slot === 2 && this._detailTool) {
+        // OpenClaw presets (IDLE or PROCESSING without options)
+        if (isOpenClaw && !isAwaiting && contentIdx < OC_PRESET_DEFS.length) {
+          const def = OC_PRESET_DEFS[contentIdx];
+          const iconSvg = def.dynamicIcon === 'model'
+            ? buildModelIcon(this._detailModelName, this._modelSwitching)
+            : (def.iconSvg ?? '');
+          const preset: PresetAction = {
+            label: def.label,
+            iconSvg,
+            color: def.color,
+            textColor: def.textColor,
+            prompt: def.prompt,
+            localAction: def.localAction,
+            loading: def.dynamicIcon === 'model' ? this._modelSwitching : undefined,
+          };
+          return { type: 'preset', preset };
+        }
+
+        // PROCESSING: first content slot shows current tool
+        if (isProcessing && contentIdx === 0 && this._detailTool) {
           return {
             type: 'info',
             label: this._detailTool,
@@ -277,8 +465,8 @@ export class SessionSlotManager {
           };
         }
 
-        // IDLE: slot 2 shows model/mode
-        if (this._detailState === State.IDLE && slot === 2) {
+        // IDLE: first content slot shows model/mode (coding agents only)
+        if (!isOpenClaw && this._detailState === State.IDLE && contentIdx === 0) {
           const parts = [this._detailModelName, this._detailMode].filter(Boolean);
           if (parts.length > 0) {
             return { type: 'info', label: parts.join(' / '), session };

@@ -26,9 +26,11 @@ import {
   renderDetailInfo,
   renderOptionButton,
   renderInfoSlot,
+  renderPresetButton,
 } from '../renderers/session-slot-renderer.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
 import { dlog } from '../log.js';
+import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
 // ---- Module state ----
 
@@ -197,11 +199,17 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
     case 'option':
       return renderOptionButton(config.option!, config.optionIndex ?? 0);
 
+    case 'preset':
+      if (config.preset) {
+        return renderPresetButton(config.preset.label, config.preset.iconSvg, config.preset.color, config.preset.textColor, config.preset.subtitle, config.preset.loading);
+      }
+      return renderEmptySlot();
+
     case 'esc':
-      return renderEscButton();
+      return renderEscButton(config.label === 'active');
 
     case 'stop':
-      return renderStopButton();
+      return renderStopButton(config.label === 'active');
 
     case 'next-page':
       return renderNextPageButton(config.label ?? '');
@@ -228,16 +236,27 @@ export class SessionSlotButtonAction extends SingletonAction {
     const slot = row * 4 + col; // SD+ 2×4 grid: row 0 = slots 0-3, row 1 = slots 4-7
     slotMap.set(id, slot);
 
-    dlog('SesSlot', `willAppear: id=${id.slice(-6)} slot=${slot} (row=${row} col=${col})`);
+    dlog('SesSlot', `willAppear: id=${id.slice(-6)} slot=${slot} (row=${row} col=${col}) daemon=${daemonConnected}`);
 
-    const config = manager.getSlotConfig(slot);
-    const svg = renderSlotSvg(config, slot);
-    await ev.action.setImage(svgToDataUrl(svg));
+    // Render appropriate state
+    if (!daemonConnected) {
+      await ev.action.setImage(svgToDataUrl(renderNoDaemonSlot(slot)));
+    } else {
+      const config = manager.getSlotConfig(slot);
+      await ev.action.setImage(svgToDataUrl(renderSlotSvg(config, slot)));
+    }
   }
 
   override async onKeyDown(ev: KeyDownEvent): Promise<void> {
     const slot = slotMap.get(ev.action.id);
     if (slot == null) return;
+
+    // No daemon — slot 0 = START (launch macOS app)
+    if (!daemonConnected && slot === 0) {
+      dlog('SesSlot', 'keyDown: launching AgentDeck app or GitHub');
+      void openAgentDeckAppOrGitHub().catch(() => {});
+      return;
+    }
 
     const result = manager.handleSlotPress(slot);
     dlog('SesSlot', `keyDown: slot=${slot} action=${result.action}`);

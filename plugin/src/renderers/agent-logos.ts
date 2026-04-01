@@ -38,49 +38,68 @@ export const CODEX_LOGO_PATH =
  *
  * Simulator spec: centered mark, 72px target size.
  */
+/**
+ * Mix a hex color toward black by the given ratio (0=original, 1=black).
+ * Used to create muted watermark tones that are visible but don't fight text.
+ */
+function dimColor(hex: string, ratio: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const dr = Math.round(r * (1 - ratio));
+  const dg = Math.round(g * (1 - ratio));
+  const db = Math.round(b * (1 - ratio));
+  return `#${dr.toString(16).padStart(2, '0')}${dg.toString(16).padStart(2, '0')}${db.toString(16).padStart(2, '0')}`;
+}
+
 export function agentLogoWatermark(
   agent: AgentType,
   color: string,
   opacity = 0.12,
 ): string {
+  // High opacity + dimmed colors → clearly visible mark that doesn't fight white text
+  const markOpacity = Math.min(opacity * 3, 0.8);
+  const fill = dimColor(color, 0.5);
+
   if (agent === 'claude-code') {
     // 16x16 viewBox → scale(4.5) = 72px, translate(-8,-8) centers at origin
-    return `<g transform="translate(72,72) scale(4.5) translate(-8,-8)" opacity="${opacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${color}"/></g>`;
+    return `<g transform="translate(72,72) scale(4.5) translate(-8,-8)" opacity="${markOpacity}"><path d="${CLAUDE_LOGO_PATH}" fill="${fill}"/></g>`;
   }
   if (agent === 'codex-cli') {
-    // 24x24 viewBox → scale(3) = 72px
+    // 24x24 viewBox → scale(3) = 72px — use brand gradient dimmed
     return [
-      `<defs><linearGradient id="cx-g" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#B1A7FF"/><stop offset="48%" stop-color="#7A9DFF"/><stop offset="100%" stop-color="#3941FF"/></linearGradient></defs>`,
-      `<g transform="translate(72,72) scale(3) translate(-12,-12)" opacity="${opacity}"><path d="${CODEX_LOGO_PATH}" fill="url(#cx-g)"/></g>`,
+      `<defs><linearGradient id="cx-g" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="${dimColor('#B1A7FF', 0.5)}"/><stop offset="48%" stop-color="${dimColor('#7A9DFF', 0.5)}"/><stop offset="100%" stop-color="${dimColor('#3941FF', 0.5)}"/></linearGradient></defs>`,
+      `<g transform="translate(72,72) scale(3) translate(-12,-12)" opacity="${markOpacity}"><path d="${CODEX_LOGO_PATH}" fill="url(#cx-g)"/></g>`,
     ].join('');
   }
   if (agent === 'opencode') {
-    // Nested square: 72px outer, gap, inner square
     const s = 72;
     const half = s / 2;
     const ring = s * 0.18;
     const inner = s * 0.5;
     return [
-      `<g opacity="${opacity}">`,
-      `<rect x="${72 - half}" y="${72 - half}" width="${s}" height="${s}" fill="#F1ECEC"/>`,
-      `<rect x="${72 - half + ring}" y="${72 - half + ring}" width="${s - ring * 2}" height="${s - ring * 2}" fill="#4B4646"/>`,
-      `<rect x="${72 - inner / 2}" y="${72 - inner / 2}" width="${inner}" height="${inner}" fill="#4B4646"/>`,
+      `<g opacity="${markOpacity}">`,
+      `<rect x="${72 - half}" y="${72 - half}" width="${s}" height="${s}" fill="${dimColor('#F1ECEC', 0.6)}"/>`,
+      `<rect x="${72 - half + ring}" y="${72 - half + ring}" width="${s - ring * 2}" height="${s - ring * 2}" fill="${dimColor('#4B4646', 0.5)}"/>`,
+      `<rect x="${72 - inner / 2}" y="${72 - inner / 2}" width="${inner}" height="${inner}" fill="${dimColor('#4B4646', 0.5)}"/>`,
       `</g>`,
     ].join('');
   }
-  // OpenClaw lobster: original brand colors, scaled to ~72px
+  // OpenClaw lobster: brand reds dimmed for watermark
+  const ocFill1 = dimColor('#ff4d4d', 0.4);
+  const ocFill2 = dimColor('#991b1b', 0.4);
   return [
-    `<defs><linearGradient id="oc-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff4d4d"/><stop offset="100%" stop-color="#991b1b"/></linearGradient></defs>`,
-    `<g transform="translate(36,36) scale(0.6)" opacity="${opacity}">`,
+    `<defs><linearGradient id="oc-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${ocFill1}"/><stop offset="100%" stop-color="${ocFill2}"/></linearGradient></defs>`,
+    `<g transform="translate(36,36) scale(0.6)" opacity="${markOpacity}">`,
     `<path d="${OC_BODY}" fill="url(#oc-g)"/>`,
     `<path d="${OC_CLAW_L}" fill="url(#oc-g)"/>`,
     `<path d="${OC_CLAW_R}" fill="url(#oc-g)"/>`,
-    `<path d="${OC_ANTENNA_L}" stroke="#ff4d4d" stroke-width="3" stroke-linecap="round" fill="none"/>`,
-    `<path d="${OC_ANTENNA_R}" stroke="#ff4d4d" stroke-width="3" stroke-linecap="round" fill="none"/>`,
-    `<circle cx="45" cy="35" r="6" fill="#050810"/>`,
-    `<circle cx="75" cy="35" r="6" fill="#050810"/>`,
-    `<circle cx="46" cy="34" r="2.5" fill="#00e5cc"/>`,
-    `<circle cx="76" cy="34" r="2.5" fill="#00e5cc"/>`,
+    `<path d="${OC_ANTENNA_L}" stroke="${ocFill1}" stroke-width="3" stroke-linecap="round" fill="none"/>`,
+    `<path d="${OC_ANTENNA_R}" stroke="${ocFill1}" stroke-width="3" stroke-linecap="round" fill="none"/>`,
+    `<circle cx="45" cy="35" r="6" fill="#0a0a14"/>`,
+    `<circle cx="75" cy="35" r="6" fill="#0a0a14"/>`,
+    `<circle cx="46" cy="34" r="2.5" fill="${dimColor('#00e5cc', 0.3)}"/>`,
+    `<circle cx="76" cy="34" r="2.5" fill="${dimColor('#00e5cc', 0.3)}"/>`,
     `</g>`,
   ].join('');
 }

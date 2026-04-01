@@ -483,6 +483,16 @@ export async function openOrFocusBrowserTab(urlPrefix: string): Promise<void> {
   });
 }
 
+export async function openAgentDeckAppOrGitHub(): Promise<void> {
+  const appOpened = await new Promise<boolean>((resolve) => {
+    execFile('open', ['-a', 'AgentDeck'], { timeout: 3000 }, (err) => {
+      resolve(!err);
+    });
+  });
+  if (appOpened) return;
+  await openOrFocusBrowserTab('https://github.com/puritysb/AgentDeck');
+}
+
 // ---- Notification ----
 
 export async function showNotification(title: string, message: string): Promise<void> {
