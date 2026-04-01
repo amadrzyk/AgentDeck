@@ -245,17 +245,26 @@ agentdeck wifi-setup --ssid "MyNetwork" --password "secret"
 - **Display sleep/wake sync**: `DisplayMonitor` (python3 `CGDisplayIsAsleep()` 2s poll) → `display_state` BridgeEvent → all devices dim/restore. `DISPLAY_FORWARDED_EVENTS` includes `display_state` (auto-propagates to `SERIAL_FORWARDED_EVENTS`). **Pixoo**: `setBrightness(0)` + stream pause (saves HTTP), wake restores `dev.brightness`. **SD+ Plugin**: `displayDimmed` flag → black SVG on all buttons/LCDs, wake → `broadcastStateUpdate()` re-render, `broadcastStateUpdate()` guard skips while dimmed. **Apple iOS**: `DisplaySyncService` — `UIScreen.main.brightness` save/0/restore, background queuing, disconnect safety restore, Settings toggle. **Android**: `BrightnessController.dim()/restore()` — LCD: `WRITE_SETTINGS` 특수 권한 필수 (manifest 선언만으로 부족, `adb shell appops set dev.agentdeck WRITE_SETTINGS allow` 또는 Settings UI에서 "Modify system settings" 허용 필요, 앱 재설치 시 초기화됨), brightness→0 + SCREEN_OFF_TIMEOUT→2s. E-ink: sysfs `/sys/class/backlight/{device}/brightness` 동적 탐색 (`KNOWN_BACKLIGHT_DEVICES` probe) — Crema S(warm/white) 동작, **Pantone 6 sysfs는 SELinux 차단으로 dim 스킵** (proc `/proc/aw99703/led_*`도 앱 context에서 읽기/쓰기 불가, root 필요). **ESP32**: event delivered via serial, firmware handler TBD
 - **Setup-required UI**: Plugin detects `agentdeck` not installed → INSTALL button → `npx @agentdeck/setup` via iTerm
 
-## v3 Layout (0.3.0)
+## v4 Layout (0.4.0) — Session-Per-Button
 
-**Keypad (8 actions):**
+**Manifest actions** (5 total): `session-slot` (Keypad ×8) + 4 encoders (`option-dial`, `voice-dial`, `utility-dial`, `iterm-dial`). v3 keypad actions (mode/session/usage/response/stop) removed.
 
-| Slot | Action | Description |
-|------|--------|-------------|
-| 0 | Mode | Mode toggle (Default/Plan/Accept) |
-| 1 | Session | Project + state + session switch |
-| 2 | Usage | Usage dashboard (5h/7d/extra/session/models/oc-usage/qr pages) |
-| 3-6 | Quick Action ×4 | GO ON/REVIEW/COMMIT/CLEAR (idle) or up to 4 options (permission/select). 5+ options → 3 + MORE ▼ |
-| 7 | Stop | Interrupt (processing) or Escape (awaiting prompt) |
+**Keypad (8 slots, all `session-slot`):**
+
+List view: each button = one session (OpenClaw first, then coding agents by port). Detail view (press to enter):
+
+| Slot | List View | Detail View |
+|------|-----------|-------------|
+| 0 | Session 1 | BACK |
+| 1 | Session 2 | Session Info (project+model+state+watermark) |
+| 2-3 | Session 3-4 | Content (options/presets) |
+| 4 | Session 5 | ESC/STOP (always visible, state-aware dimming) |
+| 5-6 | Session 6-7 | Content (options/presets) |
+| 7 | NEXT (paginate) | NEXT (5+ options) or empty |
+
+No daemon: slot 0 = **▶ START** (launches AgentDeck Dashboard app), rest dark.
+
+**OpenClaw presets** (detail view, IDLE/PROCESSING): STATUS, MODEL (dynamic model name + switch), GATEWAY (browser).
 
 **Encoders (4 slots):**
 
@@ -274,12 +283,13 @@ agentdeck wifi-setup --ssid "MyNetwork" --password "secret"
 - **Plugin Samples**: https://github.com/elgatosf/streamdeck-plugin-samples (layouts, cat-keys, hello-world, data-sources, lights-out)
 - **Local SDK reference** (manifest schema, layout items, API methods): `memory/streamdeck-sdk.md`
 
-## v3 Changes from v2
+## v4 Changes from v3
 
-- **Encoder LCD fix**: Stale action references → string ID + `getActionById()` pattern
-- **Session**: One button shows project/mode/model (idle) or state labels (running/permission/etc)
-- **SEND removed**: Replaced with /compact quick button
-- **Extra Usage**: API usage page for pay-per-use billing (`extra_usage`)
-- **Terminal dial**: iTerm session switcher on E3
-- **Voice UX**: Min recording time, pulsing indicator bar, error clear, scroll transcription
-- **Mode debounce**: 100ms bridge debounce + 2s parser timeout fallback for default mode detection
+- **Session-per-button**: All 8 keypad slots use `session-slot` action (v3 individual actions removed)
+- **v3 actions removed**: mode-button, session-button, usage-button, response-button, stop-button, expanded-actions
+- **Detail view**: Press session → BACK + INFO + options/presets + ESC/STOP layout
+- **OpenClaw presets**: STATUS, MODEL (dynamic name + switch animation), GATEWAY (browser launch)
+- **Agent watermark**: `dimColor()` approach — high opacity + muted tones for visible but non-intrusive marks
+- **State-aware ESC/STOP**: Active=bright, idle=dimmed, always accessible
+- **No-daemon START**: ▶ START button launches macOS app (replaces "agentdeck daemon start" text)
+- **Plugin icon**: Monochrome terrarium+octopus SVG (transparent bg, white — SD convention)
