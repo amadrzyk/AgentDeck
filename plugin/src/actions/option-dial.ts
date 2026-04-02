@@ -25,6 +25,7 @@ import {
   renderSetupPrompt,
 } from '../renderers/response-renderer.js';
 import { isPickerActive, scrollPicker, selectProject, closePicker } from '../project-picker.js';
+import { isInDetailView, getFocusedSession } from './session-slot-button.js';
 import { timelineStore } from '../timeline-store.js';
 import { renderTimeline } from '../renderers/timeline-renderer.js';
 import { dlog } from '../log.js';
@@ -71,9 +72,9 @@ export function setOptionSetupRequired(value: boolean): void {
 
 export function initOptionDial(b: AgentLink): void {
   bridge = b;
-  // Timeline store change → re-render left panel when in OC non-interactive mode
+  // Timeline store change → re-render left panel when in OC detail view non-interactive mode
   timelineStore.onChange(() => {
-    if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive() && !isVoiceTextTakeoverActive() && !isEncoderTakeoverActive()) {
+    if (isOcDetailView() && !isInteractive() && !isVoiceTextTakeoverActive() && !isEncoderTakeoverActive()) {
       renderTimelineLeftPanel();
     }
   });
@@ -147,6 +148,12 @@ export function getSelectedIndex(): number {
   return selectedIndex;
 }
 
+function isOcDetailView(): boolean {
+  if (!isInDetailView()) return false;
+  const session = getFocusedSession();
+  return session?.agentType === 'openclaw';
+}
+
 function isInteractive(): boolean {
   return (
     currentState === State.AWAITING_OPTION ||
@@ -196,8 +203,8 @@ function refreshOptionDials(): void {
     return;
   }
 
-  // No-terminal mode: show timeline when not in interactive mode
-  if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive()) {
+  // OC detail view: show timeline when not in interactive mode
+  if (isOcDetailView() && !isInteractive()) {
     renderTimelineLeftPanel();
     return;
   }
@@ -357,8 +364,8 @@ export class ResponseDialAction extends SingletonAction {
     if (isPickerActive()) { scrollPicker(ev.payload.ticks); return; }
     if (isVoiceTextTakeoverActive()) { handleVtRotate(ev.payload.ticks); return; }
 
-    // No-terminal non-interactive: scroll timeline
-    if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive()) {
+    // OC detail view non-interactive: scroll timeline
+    if (isOcDetailView() && !isInteractive()) {
       timelineStore.scroll(ev.payload.ticks);
       return;
     }
@@ -409,8 +416,8 @@ export class ResponseDialAction extends SingletonAction {
   override async onDialDown(_ev: DialDownEvent): Promise<void> {
     if (isPickerActive()) { void selectProject(); return; }
     if (isVoiceTextTakeoverActive()) { handleVtDown(); return; }
-    // No-terminal non-interactive: toggle detail view
-    if (currentCapabilities && !currentCapabilities.hasTerminal && !isInteractive()) {
+    // OC detail view non-interactive: toggle detail view
+    if (isOcDetailView() && !isInteractive()) {
       timelineStore.toggleDetail();
       return;
     }

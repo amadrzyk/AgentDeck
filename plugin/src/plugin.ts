@@ -59,9 +59,10 @@ import {
   setUtilitySetupRequired,
 } from './actions/utility-dial.js';
 import {
-  ItermDialAction,
-  initItermDial,
-  updateItermDialState,
+  UsageDialAction,
+  initUsageDial,
+  updateUsageDialData,
+  updateUsageDialState,
 } from './actions/iterm-dial.js';
 import {
   SessionSlotButtonAction,
@@ -132,7 +133,7 @@ const connMgr = new ConnectionManager();
 initOptionDial(connMgr);
 initVoiceDial(connMgr);
 initUtilityDial();
-initItermDial(connMgr);
+initUsageDial(connMgr);
 
 // ---- Initialize v4 utility mode callbacks ----
 setUsageRefreshCallback(() => {
@@ -162,11 +163,13 @@ initSessionSlots((result) => {
 
       // Update detail view with current state (will be refreshed on state_update)
       updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string);
+      broadcastStateUpdate();  // refresh encoders (timeline ↔ normal)
       break;
     }
 
     case 'exit-detail':
       exitDetailView();
+      broadcastStateUpdate();  // refresh encoders (timeline ↔ normal)
       break;
 
     case 'select-option':
@@ -214,7 +217,7 @@ setVoiceTextExitCallback(() => {
   const vtCaps = capsForProxiedAgent();
   updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, vtCaps);
   updateUtilityDialState(currentState);
-  updateItermDialState(currentState, agentType, currentSessionStatus, vtCaps);
+  updateUsageDialState(currentState, agentType, currentSessionStatus, vtCaps);
 });
 
 // ---- Bridge event handlers ----
@@ -316,8 +319,8 @@ connMgr.on('prompt_options', (ev: PromptOptionsEvent) => {
 connMgr.on('usage_update', (ev: UsageEvent) => {
   dlog('Plugin', `usage_update: 5h=${ev.fiveHourPercent ?? '-'}% 7d=${ev.sevenDayPercent ?? '-'}% extra=${ev.extraUsageEnabled ? 'on' : 'off'} tokens=${ev.inputTokens + ev.outputTokens}`);
 
-  // v4: Feed usage data to E1 utility mode
-  updateUsageModeData({
+  // Feed usage data to shared store + dedicated E3 Usage Dial
+  const usageData = {
     fiveHourPercent: ev.fiveHourPercent,
     fiveHourResetsAt: ev.fiveHourResetsAt,
     sevenDayPercent: ev.sevenDayPercent,
@@ -328,7 +331,9 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
     sessionDurationSec: ev.sessionDurationSec,
     extraUsageEnabled: ev.extraUsageEnabled,
     extraUsageUtilization: ev.extraUsageUtilization,
-  });
+  };
+  updateUsageModeData(usageData);
+  updateUsageDialData(usageData);
 });
 
 connMgr.on('connection', (ev: ConnectionEvent) => {
@@ -496,7 +501,7 @@ function broadcastStateUpdate(): void {
       if (exitGen !== takeoverGeneration) return; // superseded by newer transition
       updateVoiceDialState(currentState);
       updateUtilityDialState(currentState);
-      updateItermDialState(currentState, agentType, currentSessionStatus, caps);
+      updateUsageDialState(currentState, agentType, currentSessionStatus, caps);
     });
     updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, caps);
   } else if (shouldTakeover) {
@@ -511,7 +516,7 @@ function broadcastStateUpdate(): void {
     updateOptionDialState(currentState, currentOptions, undefined, undefined, undefined, undefined, undefined, currentSuggestedPrompt, agentType, currentSessionStatus, caps);
     updateVoiceDialState(currentState);
     updateUtilityDialState(currentState);
-    updateItermDialState(currentState, agentType, currentSessionStatus, caps);
+    updateUsageDialState(currentState, agentType, currentSessionStatus, caps);
   }
 }
 
@@ -519,7 +524,7 @@ function broadcastStateUpdate(): void {
 streamDeck.actions.registerAction(new ResponseDialAction());
 streamDeck.actions.registerAction(new VoiceDialAction());
 streamDeck.actions.registerAction(new UtilityDialAction());
-streamDeck.actions.registerAction(new ItermDialAction());
+streamDeck.actions.registerAction(new UsageDialAction());
 streamDeck.actions.registerAction(new SessionSlotButtonAction());
 
 // ---- Slot Map Reporting (Phase A7) ----
