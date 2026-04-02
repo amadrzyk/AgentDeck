@@ -50,6 +50,34 @@ actor ESP32Serial {
     private var lastWriteError: String?
     private var failedPorts: [String: PortFailure] = [:]
     private static let permanentBlockDuration: TimeInterval = 300  // 5 minutes
+
+    /// Thread-safe queue for incoming serial data (read thread → actor)
+    private struct PendingRead: @unchecked Sendable {
+        let port: String
+        let data: String
+    }
+    nonisolated(unsafe) private let pendingReadsLock = NSLock()
+    nonisolated(unsafe) private var pendingReads: [PendingRead] = []
+
+    private nonisolated func enqueuePendingRead(port: String, data: String) {
+        pendingReadsLock.lock()
+        pendingReads.append(PendingRead(port: port, data: data))
+        pendingReadsLock.unlock()
+    }
+
+    private func drainPendingReads() {
+        pendingReadsLock.lock()
+        let reads = pendingReads
+        pendingReads.removeAll()
+        pendingReadsLock.unlock()
+        for r in reads {
+            if r.data == "<<EOF>>" {
+                markReadFailure(port: r.port, message: "EOF on \(r.port)")
+            } else {
+                handleReadData(port: r.port, data: r.data)
+            }
+        }
+    }
     private static let transientMaxBackoff: TimeInterval = 60
 
     nonisolated(unsafe) private var stateProvider: (() -> [String: Any]?)?
@@ -89,6 +117,8 @@ actor ESP32Serial {
 
     // MARK: - Lifecycle
 
+    private var drainTask: Task<Void, Never>?
+
     func start() {
         pollTask = Task { [weak self] in
             await self?.pollForDevices()
@@ -105,12 +135,21 @@ actor ESP32Serial {
             }
         }
 
+        // Drain incoming serial data every 100ms
+        drainTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                await self?.drainPendingReads()
+            }
+        }
+
         DaemonLogger.shared.debug("ESP32", "Serial bridge started")
     }
 
     func stop() {
         pollTask?.cancel()
         heartbeatTask?.cancel()
+        drainTask?.cancel()
         for var conn in connections {
             conn.connected = false
             try? conn.writeHandle?.close()
@@ -191,15 +230,26 @@ actor ESP32Serial {
                 }
             }
 
-            if let conn = openPort(port) {
-                connections.append(conn)
-            }
+            openAndRegisterPort(port)
         }
     }
 
     // MARK: - Port Open
 
+    private func openAndRegisterPort(_ port: String) {
+        guard let conn = openPort(port) else { return }
+        // IMPORTANT: append to connections array BEFORE starting read thread,
+        // otherwise handleReadData won't find the connection by port name
+        connections.append(conn)
+        guard let readHandle = conn.readHandle else {
+            DaemonLogger.shared.debug("ESP32", "No read handle for \(port), skipping")
+            return
+        }
+        startReading(port: port, handle: readHandle)
+    }
+
     private func openPort(_ port: String) -> SerialConnection? {
+        // O_NONBLOCK needed to avoid blocking on DCD during open; cleared after termios config
         let descriptor = open(port, O_RDWR | O_NOCTTY | O_NONBLOCK)
         guard descriptor >= 0 else {
             let errNo = errno
@@ -222,54 +272,43 @@ actor ESP32Serial {
         }
         failedPorts.removeValue(forKey: port)
 
-        // Configure termios: raw mode (no echo, no canonical, no signal chars)
-        let isCDC = port.contains("usbmodem")
+        // Configure termios: raw mode, blocking read
         var options = termios()
         tcgetattr(descriptor, &options)
         cfmakeraw(&options)
         options.c_cflag |= UInt(CLOCAL | CREAD)
-        if !isCDC {
-            cfsetispeed(&options, speed_t(B115200))
-            cfsetospeed(&options, speed_t(B115200))
-        }
-        // Non-blocking read: return immediately with whatever is available
+        cfsetispeed(&options, speed_t(B115200))
+        cfsetospeed(&options, speed_t(B115200))
         withUnsafeMutablePointer(to: &options.c_cc) { ptr in
             let cc = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: UInt8.self)
-            cc[Int(VMIN)] = 0
+            cc[Int(VMIN)] = 1   // block until 1+ byte available
             cc[Int(VTIME)] = 0
         }
         tcsetattr(descriptor, TCSANOW, &options)
+        tcflush(descriptor, TCIOFLUSH)
+        // Keep O_NONBLOCK set — matches pyserial behavior (read returns EAGAIN when no data)
 
-        // Clear O_NONBLOCK after termios config (FileHandle needs blocking reads)
-        let flags = fcntl(descriptor, F_GETFL)
-        _ = fcntl(descriptor, F_SETFL, flags & ~O_NONBLOCK)
-
-        let writeFD = dup(descriptor)
-        if writeFD < 0 {
-            let message = String(cString: strerror(errno))
-            close(descriptor)
-            lastOpenError = "failed to dup write handle for \(port): \(message)"
-            return nil
-        }
-        let readFD = dup(descriptor)
-        close(descriptor)
-        guard readFD >= 0 else {
-            let message = String(cString: strerror(errno))
-            close(writeFD)
-            lastOpenError = "failed to dup read handle for \(port): \(message)"
-            return nil
-        }
-        let writeHandle = FileHandle(fileDescriptor: writeFD, closeOnDealloc: true)
-        let readHandle = FileHandle(fileDescriptor: readFD, closeOnDealloc: true)
+        // Use single fd for both read and write (no dup — simpler, avoids fd management issues)
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        let writeHandle = handle
+        let readHandle = handle
 
         lastOpenError = nil
 
         var conn = SerialConnection(port: port, writeHandle: writeHandle, readHandle: readHandle)
 
-        DaemonLogger.shared.debug("ESP32", "Opened: \(port) [\(isCDC ? "CDC" : "UART")]")
+        DaemonLogger.shared.debug("ESP32", "Opened: \(port) [\(port.contains("usbmodem") ? "CDC" : "UART")]")
 
         // Request device info
         sendToConnection(&conn, json: #"{"type":"device_info_request"}"#)
+
+        // Brief delay to let ESP32 process and respond, then read initial data
+        Thread.sleep(forTimeInterval: 0.5)
+        var initBuf = [UInt8](repeating: 0, count: 2048)
+        let initN = Darwin.read(descriptor, &initBuf, initBuf.count)
+        if initN > 0, let initStr = String(bytes: initBuf[0..<initN], encoding: .utf8) {
+            enqueuePendingRead(port: port, data: initStr)
+        }
 
         // Send initial state
         if let events = initialStateProvider?() {
@@ -284,24 +323,39 @@ actor ESP32Serial {
             }
         }
 
-        // Start reading in background
-        startReading(port: port, handle: readHandle)
-
         return conn
     }
 
     private func startReading(port: String, handle: FileHandle) {
-        handle.readabilityHandler = { [weak self] fh in
-            let data = fh.availableData
-            guard !data.isEmpty else {
-                Task { await self?.markReadFailure(port: port, message: "EOF on \(port)") }
-                return
+        // Use a dedicated thread for serial reading — FileHandle.readabilityHandler
+        // uses dispatch sources which don't reliably trigger for serial port fds.
+        let fd = handle.fileDescriptor
+        // Read on a dispatch queue — poll fd with O_NONBLOCK
+        let readQueue = DispatchQueue(label: "esp32.read.\(port)", qos: .default)
+        readQueue.async { [weak self] in
+            let bufSize = 1024
+            let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+            defer { buf.deallocate() }
+
+            while true {
+                let n = Darwin.read(fd, buf, bufSize)
+                if n > 0 {
+                    if let str = String(bytes: UnsafeBufferPointer(start: buf, count: n), encoding: .utf8) {
+                        self?.enqueuePendingRead(port: port, data: str)
+                    }
+                } else if n < 0 {
+                    let errNo = errno
+                    if errNo == EAGAIN || errNo == EWOULDBLOCK {
+                        Thread.sleep(forTimeInterval: 0.05)
+                        continue
+                    }
+                    DaemonLogger.shared.debug("ESP32", "Read exit \(port): errno=\(errNo)")
+                    self?.enqueuePendingRead(port: port, data: "<<EOF>>")
+                    break
+                } else {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
             }
-            guard let str = String(data: data, encoding: .utf8) else {
-                Task { await self?.markReadFailure(port: port, message: "non-UTF8 read on \(port)") }
-                return
-            }
-            Task { await self?.handleReadData(port: port, data: str) }
         }
     }
 
@@ -315,6 +369,11 @@ actor ESP32Serial {
     private func handleReadData(port: String, data: String) {
         guard let idx = connections.firstIndex(where: { $0.port == port }) else { return }
         connections[idx].readBuffer += data
+        // Normalize CR/CRLF to LF — ESP32 Serial.println() sends \r\n,
+        // cfmakeraw disables ICRNL so \r arrives as-is
+        connections[idx].readBuffer = connections[idx].readBuffer
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
 
         while let newlineIdx = connections[idx].readBuffer.firstIndex(of: "\n") {
             let line = String(connections[idx].readBuffer[..<newlineIdx]).trimmingCharacters(in: .whitespaces)
@@ -348,6 +407,7 @@ actor ESP32Serial {
     // MARK: - Heartbeat
 
     private func sendHeartbeat() {
+        drainPendingReads()
         guard !connections.isEmpty else { return }
 
         if let event = stateProvider?() {
@@ -377,7 +437,11 @@ actor ESP32Serial {
     private func sendToConnection(_ conn: inout SerialConnection, json: String) {
         guard conn.connected, let handle = conn.writeHandle else { return }
         do {
-            try handle.write(contentsOf: Data((json + "\n").utf8))
+            let payload = Array((json + "\n").utf8)
+            let written = Darwin.write(handle.fileDescriptor, payload, payload.count)
+            guard written == payload.count else {
+                throw NSError(domain: "ESP32", code: -1, userInfo: [NSLocalizedDescriptionKey: "write returned \(written), expected \(payload.count), errno=\(errno)"])
+            }
             lastWriteError = nil
         } catch {
             conn.connected = false
