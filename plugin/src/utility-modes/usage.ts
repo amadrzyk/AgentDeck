@@ -14,6 +14,8 @@ export interface UsageModeData {
   sessionDurationSec?: number;
   extraUsageEnabled?: boolean;
   extraUsageUtilization?: number;
+  extraUsageMonthlyLimit?: number;
+  extraUsageUsedCredits?: number;
 }
 
 let sharedData: UsageModeData = {};

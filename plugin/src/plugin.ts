@@ -331,6 +331,8 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
     sessionDurationSec: ev.sessionDurationSec,
     extraUsageEnabled: ev.extraUsageEnabled,
     extraUsageUtilization: ev.extraUsageUtilization,
+    extraUsageMonthlyLimit: ev.extraUsageMonthlyLimit,
+    extraUsageUsedCredits: ev.extraUsageUsedCredits,
   };
   updateUsageModeData(usageData);
   updateUsageDialData(usageData);

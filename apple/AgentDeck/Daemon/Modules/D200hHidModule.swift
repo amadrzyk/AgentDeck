@@ -328,8 +328,10 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
 
         switch currentMode {
         case .sessionList:
-            // All 13 slots are sessions
-            let startIdx = sessionPage * 13
+            // Slot 12 = usage monitor (no action)
+            if index == 12 { return nil }
+            // Slots 0-11 are sessions (12 per page)
+            let startIdx = sessionPage * 12
             let sessionIdx = startIdx + index
             guard sessionIdx < sessions.count else { return nil }
             let session = sessions[sessionIdx]
@@ -435,9 +437,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             )
             slots = s
             updateAnimationTimer(needsAnimation: anim)
-            // Track which buttons have border animation
-            let startIdx = sessionPage * 13
-            for i in 0..<13 {
+            // Track which buttons have border animation (slots 0-11 = sessions)
+            let startIdx = sessionPage * 12
+            for i in 0..<12 {
                 let sessionIdx = startIdx + i
                 guard sessionIdx < allSessions.count else { break }
                 if allSessions[sessionIdx].isAwaiting || allSessions[sessionIdx].isProcessing {
@@ -778,9 +780,9 @@ private enum D200hRenderer {
         var slots = [ButtonSlot](repeating: .dim, count: 13)
         var needsAnim = false
 
-        // All 13 slots for sessions (13 per page, no control buttons)
-        let startIdx = page * 13
-        for i in 0..<13 {
+        // Slots 0-11: sessions (12 per page), slot 12: usage monitor
+        let startIdx = page * 12
+        for i in 0..<12 {
             let sessionIdx = startIdx + i
             guard sessionIdx < sessions.count else { break }
             let session = sessions[sessionIdx]
@@ -819,7 +821,41 @@ private enum D200hRenderer {
             )
         }
 
+        // Slot 12: Usage monitor (bottom-right)
+        let pct5 = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double ?? 0
+        let pct7 = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double ?? 0
+        let reset5 = formatResetTime(usageEvent?["fiveHourResetsAt"] as? String ?? stateEvent?["fiveHourResetsAt"] as? String)
+        let reset7 = formatResetTime(usageEvent?["sevenDayResetsAt"] as? String ?? stateEvent?["sevenDayResetsAt"] as? String)
+        let usageTitle = "5H \(Int(pct5))%\(reset5.isEmpty ? "" : " \(reset5)")"
+        let usageSub = "7D \(Int(pct7))%\(reset7.isEmpty ? "" : " \(reset7)")"
+        let maxPct = max(pct5, pct7)
+        let usageBorderColor = maxPct > 80 ? rgb(239, 68, 68) : maxPct > 50 ? rgb(234, 179, 8) : rgb(34, 197, 94)
+        slots[12] = ButtonSlot(
+            title: usageTitle, subtitle: usageSub,
+            bg: cDetailBg, enabled: true, borderStyle: .solid(color: usageBorderColor)
+        )
+
         return (slots, needsAnim)
+    }
+
+    // MARK: - Reset Time Formatting
+
+    private static func formatResetTime(_ iso: String?) -> String {
+        guard let iso, !iso.isEmpty else { return "" }
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = fmt.date(from: iso) ?? {
+            let basic = ISO8601DateFormatter()
+            basic.formatOptions = [.withInternetDateTime]
+            return basic.date(from: iso)
+        }()
+        guard let d = date else { return "" }
+        let diff = d.timeIntervalSinceNow
+        if diff <= 0 { return "now" }
+        let h = Int(diff) / 3600
+        let m = (Int(diff) % 3600) / 60
+        if h > 0 { return "\(h)h\(m)m" }
+        return "\(m)m"
     }
 
     // MARK: - Mode B: Option Select
