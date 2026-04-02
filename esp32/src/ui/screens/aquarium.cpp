@@ -16,6 +16,11 @@ static lv_obj_t* connSpinner = nullptr;
 static lv_obj_t* connStatusLabel = nullptr;
 static bool lastHostDisplayOn = true;
 
+#if defined(BOARD_IPS_35)
+static lv_obj_t* btnRotate = nullptr;
+static lv_obj_t* lblRotate = nullptr;
+#endif
+
 // Gesture state for swipe detection
 static lv_point_t touchStart;
 static bool tracking = false;
@@ -112,6 +117,34 @@ lv_obj_t* aquariumCreate() {
     // Gesture detection for swipe up → timeline
     lv_obj_add_event_cb(screen, gestureEvent, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(screen, touchEvent, LV_EVENT_SHORT_CLICKED, NULL);
+
+#if defined(BOARD_IPS_35)
+    // Rotation button — bottom-right corner, small and unobtrusive
+    btnRotate = lv_btn_create(screen);
+    lv_obj_set_size(btnRotate, 36, 36);
+    lv_obj_align(btnRotate, LV_ALIGN_BOTTOM_LEFT, 8, -8);
+    lv_obj_set_style_bg_color(btnRotate, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(btnRotate, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(btnRotate, 1, 0);
+    lv_obj_set_style_border_color(btnRotate, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_border_opa(btnRotate, LV_OPA_40, 0);
+    lv_obj_set_style_radius(btnRotate, 8, 0);
+    lv_obj_set_style_shadow_width(btnRotate, 0, 0);
+    lv_obj_set_style_pad_all(btnRotate, 0, 0);
+    lv_obj_add_event_cb(btnRotate, [](lv_event_t* e) {
+        lockState();
+        g_state.pendingLandscape = !UI::isLandscape();
+        g_state.orientationChanged = true;
+        unlockState();
+    }, LV_EVENT_CLICKED, NULL);
+
+    // Rotation icon: ↻ symbol
+    lblRotate = lv_label_create(btnRotate);
+    lv_obj_set_style_text_color(lblRotate, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_set_style_text_font(lblRotate, &lv_font_montserrat_20, 0);
+    lv_label_set_text(lblRotate, LV_SYMBOL_REFRESH);
+    lv_obj_center(lblRotate);
+#endif
 
     return screen;
 }

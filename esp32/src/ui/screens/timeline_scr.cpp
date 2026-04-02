@@ -17,6 +17,7 @@ static lv_obj_t* hint = nullptr;
 // Timeline entry labels (recycled)
 constexpr int MAX_VISIBLE = 12;
 static lv_obj_t* entryLabels[MAX_VISIBLE] = {nullptr};
+static lv_obj_t* emptyMsg = nullptr;
 
 static uint32_t typeColor(const char* type) {
     if (strcmp(type, "chat_start") == 0 || strcmp(type, "user_action") == 0)
@@ -111,6 +112,15 @@ lv_obj_t* timelineCreate() {
         lv_label_set_text(entryLabels[i], "");
     }
 
+    // Empty state message (shown when no timeline data)
+    emptyMsg = lv_label_create(listPanel);
+    lv_obj_set_width(emptyMsg, g_screenW - 32);
+    lv_obj_set_style_text_font(emptyMsg, &font_kr_12, 0);
+    lv_obj_set_style_text_color(emptyMsg, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_align(emptyMsg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(emptyMsg, "No timeline events\nConnect to daemon to see activity");
+    lv_obj_add_flag(emptyMsg, LV_OBJ_FLAG_HIDDEN);
+
     // Bottom hint
     hint = lv_label_create(screen);
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
@@ -150,6 +160,16 @@ void timelineUpdate() {
 
     // Timeline entries (most recent first)
     int visible = min((int)g_state.timelineCount, MAX_VISIBLE);
+
+    // Show/hide empty state message
+    if (emptyMsg) {
+        if (visible == 0) {
+            lv_obj_clear_flag(emptyMsg, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(emptyMsg, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     for (int i = 0; i < MAX_VISIBLE; i++) {
         if (i >= visible) {
             lv_label_set_text(entryLabels[i], "");

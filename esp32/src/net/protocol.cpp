@@ -270,8 +270,8 @@ static void handleSessionsList(JsonObject& obj) {
     }
 
     // Populate cloudNames for cloud creature name tags (same dedup logic)
-#if MAX_CLOUD > 0
-    char cloudRawNames[MAX_CLOUD][24];
+    if (MAX_CLOUD > 0) {
+    char cloudRawNames[MAX_CLOUD > 0 ? MAX_CLOUD : 1][24];
     uint8_t cloudNameIdx = 0;
     for (uint8_t i = 0; i < g_state.sessionCount && cloudNameIdx < MAX_CLOUD; i++) {
         if (g_state.sessions[i].alive &&
@@ -307,11 +307,11 @@ static void handleSessionsList(JsonObject& obj) {
             g_state.cloudNames[i][sizeof(g_state.cloudNames[i]) - 1] = '\0';
         }
     }
-#endif  // MAX_CLOUD > 0
+    }  // MAX_CLOUD > 0
 
     // Populate opencodeNames for opencode creature name tags (same dedup logic)
-#if MAX_OPENCODE > 0
-    char opencodeRawNames[MAX_OPENCODE][24];
+    if (MAX_OPENCODE > 0) {
+    char opencodeRawNames[MAX_OPENCODE > 0 ? MAX_OPENCODE : 1][24];
     uint8_t opencodeNameIdx = 0;
     for (uint8_t i = 0; i < g_state.sessionCount && opencodeNameIdx < MAX_OPENCODE; i++) {
         if (g_state.sessions[i].alive &&
@@ -347,7 +347,7 @@ static void handleSessionsList(JsonObject& obj) {
             g_state.opencodeNames[i][sizeof(g_state.opencodeNames[i]) - 1] = '\0';
         }
     }
-#endif  // MAX_OPENCODE > 0
+    }  // MAX_OPENCODE > 0
 
     // No OpenClaw sessions: check gateway availability
     if (g_state.crayfishCount == 0) {

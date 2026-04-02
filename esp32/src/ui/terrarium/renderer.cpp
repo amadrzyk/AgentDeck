@@ -169,9 +169,7 @@ void init(lv_obj_t* parent) {
     Kelp::init();
     Octopus::init();
     Cloud::init();
-#if MAX_OPENCODE > 0
-    OpenCode::init();
-#endif
+    if (MAX_OPENCODE > 0) OpenCode::init();
     Crayfish::init();
     Particles::init();
     Tetra::init();
@@ -223,8 +221,8 @@ void render(float dt) {
     static uint32_t lastDbg = 0;
     if (isDaemon && millis() - lastDbg > 3000) {
         lastDbg = millis();
-        Serial.printf("[Terrarium] isDaemon=%d octCount=%d cloudCount=%d sessionCount=%d cState=%d\n",
-                      isDaemon, octCount, cloudCount, g_state.sessionCount, (int)cState);
+        Serial.printf("[Terrarium] isDaemon=%d octCount=%d cloudCount=%d opencodeCount=%d sessionCount=%d cState=%d MAX_OC=%d\n",
+                      isDaemon, octCount, cloudCount, opencodeCount, g_state.sessionCount, (int)cState, MAX_OPENCODE);
         for (uint8_t s = 0; s < g_state.sessionCount; s++) {
             Serial.printf("  session[%d] type=%s state=%s alive=%d\n",
                           s, g_state.sessions[s].agentType, g_state.sessions[s].state,
@@ -260,11 +258,9 @@ void render(float dt) {
             } else if (strcmp(g_state.sessions[s].agentType, "codex-cli") == 0 && cloudIdx < MAX_CLOUD) {
                 cloudStates[cloudIdx] = mapSessionState(g_state.sessions[s].state);
                 cloudIdx++;
-#if MAX_OPENCODE > 0
-            } else if (strcmp(g_state.sessions[s].agentType, "opencode") == 0 && ocIdx < MAX_OPENCODE) {
+            } else if (MAX_OPENCODE > 0 && strcmp(g_state.sessions[s].agentType, "opencode") == 0 && ocIdx < MAX_OPENCODE) {
                 opencodeStates[ocIdx] = mapSessionState(g_state.sessions[s].state);
                 ocIdx++;
-#endif
             }
         }
         // Fill remaining with daemon's own state
@@ -274,11 +270,9 @@ void render(float dt) {
         for (; cloudIdx < MAX_CLOUD; cloudIdx++) {
             cloudStates[cloudIdx] = cState;
         }
-#if MAX_OPENCODE > 0
         for (; ocIdx < MAX_OPENCODE; ocIdx++) {
             opencodeStates[ocIdx] = cState;
         }
-#endif
         // Also update the "overall" cState for particles/bubbles/tetra
         // Use the most active sibling state (across octopus + cloud)
         if (octCount > 0 || cloudCount > 0) {
@@ -299,11 +293,9 @@ void render(float dt) {
         for (uint8_t i = 0; i < MAX_CLOUD; i++) {
             cloudStates[i] = cState;
         }
-#if MAX_OPENCODE > 0
         for (uint8_t i = 0; i < MAX_OPENCODE; i++) {
             opencodeStates[i] = cState;
         }
-#endif
     }
     unlockState();
 
@@ -340,11 +332,9 @@ void render(float dt) {
     }
 
     // 7c. OpenCode creatures
-#if MAX_OPENCODE > 0
     for (uint8_t i = 0; i < opencodeCount && i < MAX_OPENCODE; i++) {
         OpenCode::render(canvas_buf, g_screenW, g_screenH, totalTime, dt, opencodeStates[i], i, opencodeCount);
     }
-#endif
 
     // 8. Data particles (food crumbs from working agents)
     Particles::update(dt, totalTime, cState, octCount, cfState, showCrayfish, octStates);

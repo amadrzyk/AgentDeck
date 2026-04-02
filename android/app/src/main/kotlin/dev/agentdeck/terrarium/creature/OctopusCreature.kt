@@ -128,6 +128,7 @@ class OctopusCreature(
                 currentY += (myStandingY - currentY) * dt * 4f
             }
             OctopusVisualState.WORKING -> {
+                val lane = swimLane()
                 // WORKING: free swimming with waypoints
                 waypointTimer += dt
                 if (waypointTimer >= waypointInterval) {
@@ -143,20 +144,43 @@ class OctopusCreature(
                 currentY += (targetY - currentY) * rate
 
                 // Clamp to swim boundaries
-                currentX = currentX.coerceIn(TerrariumLayout.SWIM_MIN_X, TerrariumLayout.SWIM_MAX_X)
-                currentY = currentY.coerceIn(TerrariumLayout.SWIM_MIN_Y, TerrariumLayout.SWIM_MAX_Y)
+                currentX = currentX.coerceIn(lane.minX, lane.maxX)
+                currentY = currentY.coerceIn(lane.minY, lane.maxY)
             }
         }
     }
 
     private fun pickNewWaypoint() {
+        val lane = swimLane()
         val angle = kotlin.random.Random.nextFloat() * 2f * PI.toFloat()
-        val wanderRadius = 0.12f
-        val radius = kotlin.random.Random.nextFloat() * wanderRadius
-        targetX = (homeX + cos(angle) * radius)
-            .coerceIn(TerrariumLayout.SWIM_MIN_X, TerrariumLayout.SWIM_MAX_X)
-        targetY = (homeY + sin(angle) * radius * 0.7f)  // prefer horizontal movement
-            .coerceIn(TerrariumLayout.SWIM_MIN_Y, TerrariumLayout.SWIM_MAX_Y)
+        val radiusX = maxOf(0.06f, (lane.maxX - lane.minX) * 0.46f)
+        val radiusY = maxOf(0.04f, (lane.maxY - lane.minY) * 0.42f)
+        targetX = (lane.centerX + cos(angle) * radiusX).coerceIn(lane.minX, lane.maxX)
+        targetY = (lane.centerY + sin(angle) * radiusY).coerceIn(lane.minY, lane.maxY)
+    }
+
+    private data class SwimLane(
+        val minX: Float,
+        val maxX: Float,
+        val minY: Float,
+        val maxY: Float,
+        val centerX: Float,
+        val centerY: Float,
+    )
+
+    private fun swimLane(): SwimLane {
+        val halfWidth = minOf(0.15f, maxOf(0.08f, 0.08f + scaleFactor * 0.05f))
+        val verticalSlack = minOf(0.09f, maxOf(0.05f, 0.05f + scaleFactor * 0.03f))
+        val centerX = homeX.coerceIn(TerrariumLayout.SWIM_MIN_X + 0.06f, TerrariumLayout.SWIM_MAX_X - 0.06f)
+        val centerY = homeY.coerceIn(TerrariumLayout.SWIM_MIN_Y + 0.08f, TerrariumLayout.SWIM_MAX_Y - 0.08f)
+        return SwimLane(
+            minX = maxOf(TerrariumLayout.SWIM_MIN_X, centerX - halfWidth),
+            maxX = minOf(TerrariumLayout.SWIM_MAX_X, centerX + halfWidth),
+            minY = maxOf(TerrariumLayout.SWIM_MIN_Y, centerY - verticalSlack),
+            maxY = minOf(TerrariumLayout.SWIM_MAX_Y, centerY + verticalSlack),
+            centerX = centerX,
+            centerY = centerY,
+        )
     }
 
     override fun draw(scope: DrawScope) {
