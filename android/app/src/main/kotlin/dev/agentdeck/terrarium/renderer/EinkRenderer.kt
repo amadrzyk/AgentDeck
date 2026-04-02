@@ -35,20 +35,20 @@ private const val EINK_ANIM_FRAME_MS = 400L
 /** Total animation cycle frames — fish patrol uses the full range, creatures use % 4. */
 private const val EINK_ANIM_CYCLE = 32
 
-// --- E-ink octopus pixel grid (14×5, matching OctopusCreature) ---
+// --- E-ink Claude Code robot SVG path (from claudecode.svg, viewBox 0 0 24 24) ---
 
-private const val EINK_OCTOPUS_COLS = 14
-private const val EINK_OCTOPUS_ROWS = 5
-private const val EINK_PIXEL_ASPECT = 2.0f
+private const val EINK_CLAUDE_VIEWBOX = 24f
 private const val EINK_OPENCODE_PIXEL_ASPECT = 1.2f  // OpenCode: near-square (10×9 grid)
 private const val EINK_PIXEL_GAP = 0.5f
-private val EINK_OCTOPUS_GRID = arrayOf(
-    intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0), // row 0: head (10w)
-    intArrayOf(0, 0, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 0, 0), // row 1: eyes at 4,9 (10w)
-    intArrayOf(3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4), // row 2: body + arms (14w)
-    intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0), // row 3: waist (10w)
-    intArrayOf(0, 0, 0, 5, 0, 5, 0, 0, 6, 0, 6, 0, 0, 0), // row 4: tentacles ×4
-)
+
+private val einkClaudeRobotPath: android.graphics.Path by lazy {
+    @Suppress("DEPRECATION")
+    android.util.PathParser.createPathFromPathData(
+        "M20.998,10.949L24,10.949L24,14.051L21,14.051L21,17.079L19.513,17.079L19.513,20L18,20L18,17.079L16.513,17.079L16.513,20L15,20L15,17.079L9,17.079L9,20L7.488,20L7.488,17.079L6,17.079L6,20L4.487,20L4.487,17.079L3,17.079L3,14.05L0,14.05L0,10.95L3,10.95L3,5L20.998,5L20.998,10.949zM6,10.949L7.488,10.949L7.488,8.102L6,8.102L6,10.949zM16.51,10.949L18,10.949L18,8.102L16.51,8.102L16.51,10.949z"
+    ).apply {
+        fillType = android.graphics.Path.FillType.EVEN_ODD
+    }
+}
 
 // OpenCode nested-square grid (simulator SSOT) — 10x9
 // Cell values: 8=outer frame (#F1ECEC), 9=inner square (#4B4646), 0=gap
@@ -629,162 +629,55 @@ private fun drawEinkOctopus(
     displayName: String? = null,
 ) {
     // WORKING: slow horizontal wander (sin-based, stateless)
-    // ±8% wander, swimFrame is full 0-31 cycle (not 0-3 creatureFrame)
-    // Per-instance phase offset via centerXFraction
     val wanderX = if (state == OctopusVisualState.WORKING) {
         val phase = swimFrame + ((centerXFraction * 100).toInt() * 13)
         0.08f * kotlin.math.sin(phase * kotlin.math.PI / 16.0).toFloat()
     } else 0f
 
-    if (state == OctopusVisualState.WORKING) {
-        Log.d("EinkOctopus", "WORKING swimFrame=$swimFrame wanderX=$wanderX cx=${(centerXFraction + wanderX)}")
-    }
-
     val cx = w * (centerXFraction + wanderX)
     // Y-position by state — staggered by X position for natural multi-session variety
-    // Stronger multiplier (0.25) ensures visible separation on small e-ink screens
     val standingOffset = (centerXFraction - 0.38f) * 0.25f
     val cy = when (state) {
         OctopusVisualState.SLEEPING -> h * (0.78f + standingOffset * 0.5f)
         OctopusVisualState.FLOATING -> h * (0.74f + standingOffset)
         OctopusVisualState.ASKING -> h * (0.74f + standingOffset)
-        // WORKING: subtle vertical bob (4-frame cycle) like floating while busy
         OctopusVisualState.WORKING -> h * (centerYFraction +
             0.02f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat())
     }
 
-    // Pixel block grid — 14×5, portrait-rectangle pixels
+    // SVG robot body — scale from 24×24 viewBox to bodyWidth
     val bodyWidth = w * 0.11f * scaleFactor
-    val pixelW = bodyWidth / EINK_OCTOPUS_COLS
-    val pixelH = pixelW * EINK_PIXEL_ASPECT
-    val gridW = EINK_OCTOPUS_COLS * pixelW
-    val gridH = EINK_OCTOPUS_ROWS * pixelH
-    val startX = cx - gridW / 2f
-    val startY = cy - gridH / 2f
+    val svgScale = bodyWidth / EINK_CLAUDE_VIEWBOX
 
-    // Animation (4-frame, left/right opposite phase)
-    // WORKING: full amplitude for e-ink visibility; ASKING: moderate; FLOATING: near-static (match tablet)
-    val tentacleScale = when (state) {
-        OctopusVisualState.WORKING -> 1.0f
-        OctopusVisualState.ASKING -> 0.3f
-        OctopusVisualState.FLOATING -> 0f
-        OctopusVisualState.SLEEPING -> 0f
-    }
-    val leftTentacleStretch = if (tentacleScale > 0f) tentacleScale * when (animFrame % 4) {
-        0 -> pixelH * 0.3f
-        1 -> pixelH * 0.8f
-        2 -> -pixelH * 0.3f
-        3 -> -pixelH * 0.7f
-        else -> 0f
-    } else 0f
-    val rightTentacleStretch = -leftTentacleStretch
-    val armScale = when (state) {
-        OctopusVisualState.WORKING -> 1.0f
-        OctopusVisualState.ASKING -> 0.3f
-        OctopusVisualState.FLOATING -> 0f
-        OctopusVisualState.SLEEPING -> 0f
-    }
-    val leftArmOffset = if (armScale > 0f) armScale * when (animFrame % 4) {
-        0 -> pixelH * 0.4f
-        1 -> pixelH * 0.15f
-        2 -> -pixelH * 0.4f
-        3 -> -pixelH * 0.15f
-        else -> 0f
-    } else 0f
-    val rightArmOffset = -leftArmOffset
-    val gap = EINK_PIXEL_GAP
-
-    // SLEEPING: dimmer body (lighter gray = closer to background)
-    val bodyGray = if (state == OctopusVisualState.SLEEPING) {
+    // SLEEPING: dimmer body
+    val bodyColor = if (state == OctopusVisualState.SLEEPING) {
         einkPick(GRAY_SEAWEED, COLOR_OCTO_SLEEP)
     } else {
         einkPick(GRAY_OCTO_BODY, COLOR_OCTO_BODY)
     }
-    val limbGray = if (state == OctopusVisualState.SLEEPING) {
-        einkPick(GRAY_GRAVEL, COLOR_OCTO_SLEEP)
-    } else {
-        einkPick(GRAY_OCTO_LIMB, COLOR_OCTO_LIMB)
-    }
 
     paint.style = Paint.Style.FILL
-    for (row in 0 until EINK_OCTOPUS_ROWS) {
-        for (col in 0 until EINK_OCTOPUS_COLS) {
-            val cell = EINK_OCTOPUS_GRID[row][col]
-            if (cell == 0) continue
+    paint.color = bodyColor
 
-            val px = startX + col * pixelW
-            var py = startY + row * pixelH
-
-            // Arm Y-offset
-            when (cell) {
-                3 -> py += leftArmOffset
-                4 -> py += rightArmOffset
-            }
-
-            when (cell) {
-                2 -> { // EYE — white background + black pupil for e-ink visibility
-                    if (state == OctopusVisualState.SLEEPING) {
-                        // Closed eyes — thin horizontal slit
-                        paint.color = android.graphics.Color.BLACK
-                        canvas.drawRect(
-                            px + gap, py + pixelH * 0.4f,
-                            px + pixelW - gap, py + pixelH * 0.6f, paint,
-                        )
-                    } else {
-                        // White eye background
-                        paint.color = android.graphics.Color.WHITE
-                        canvas.drawRect(
-                            px + gap, py + gap,
-                            px + pixelW - gap, py + pixelH - gap, paint,
-                        )
-                        // Black pupil (center dot)
-                        paint.color = android.graphics.Color.BLACK
-                        val pupilR = minOf(pixelW, pixelH) * 0.22f
-                        canvas.drawCircle(
-                            px + pixelW / 2f, py + pixelH / 2f, pupilR, paint,
-                        )
-                    }
-                }
-                3, 4 -> { // ARMS — darker limb gray
-                    paint.color = limbGray
-                    canvas.drawRect(
-                        px + gap, py + gap,
-                        px + pixelW - gap, py + pixelH - gap, paint,
-                    )
-                }
-                5 -> { // LEFT_LEG — stretch height, darker limb gray
-                    paint.color = limbGray
-                    val legH = (pixelH + leftTentacleStretch - gap).coerceAtLeast(pixelH * 0.3f)
-                    canvas.drawRect(px + gap, py, px + pixelW - gap, py + legH, paint)
-                }
-                6 -> { // RIGHT_LEG — stretch height, darker limb gray
-                    paint.color = limbGray
-                    val legH = (pixelH + rightTentacleStretch - gap).coerceAtLeast(pixelH * 0.3f)
-                    canvas.drawRect(px + gap, py, px + pixelW - gap, py + legH, paint)
-                }
-                else -> { // BODY (cell=1) — lighter body gray
-                    paint.color = bodyGray
-                    canvas.drawRect(
-                        px + gap, py + gap,
-                        px + pixelW - gap, py + pixelH - gap, paint,
-                    )
-                }
-            }
-        }
-    }
+    canvas.save()
+    // Position: center the 24×24 SVG at (cx, cy)
+    canvas.translate(cx - EINK_CLAUDE_VIEWBOX / 2f * svgScale, cy - EINK_CLAUDE_VIEWBOX / 2f * svgScale)
+    canvas.scale(svgScale, svgScale)
+    canvas.drawPath(einkClaudeRobotPath, paint)
+    canvas.restore()
 
     // Name tag FIRST (behind bubble) — multi-session only
+    val nameTagY = cy - bodyWidth / 2f
     if (displayName != null) {
-        drawEinkNameTag(canvas, paint, cx, startY, scaleFactor, displayName, w)
+        drawEinkNameTag(canvas, paint, cx, nameTagY, scaleFactor, displayName, w)
     }
 
-    // ASKING: speech bubble with "?" — beside body center (not above, to avoid name tag overlap)
+    // ASKING: speech bubble with "?" — beside body center
     if (state == OctopusVisualState.ASKING) {
-        val bubbleR = gridW * 0.25f * scaleFactor
-        val bubbleX = cx + gridW * 0.6f
-        val bubbleY = cy  // Body center — clear of name tag above
+        val bubbleR = bodyWidth * 0.25f * scaleFactor
+        val bubbleX = cx + bodyWidth * 0.6f
+        val bubbleY = cy
 
-        // Bubble circle
         paint.color = einkPick(GRAY_AIR, COLOR_AIR)
         paint.style = Paint.Style.FILL
         canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
@@ -793,7 +686,6 @@ private fun drawEinkOctopus(
         paint.strokeWidth = 1.5f * scaleFactor
         canvas.drawCircle(bubbleX, bubbleY, bubbleR, paint)
 
-        // "?" text
         paint.color = android.graphics.Color.BLACK
         paint.style = Paint.Style.FILL
         paint.textSize = bubbleR * 1.4f
@@ -927,15 +819,20 @@ private fun drawEinkCloud(
     } else 0f
 
     val cx = w * (centerXFraction + wanderX)
-    // Y-position by state: idle=0.58, processing=0.12, asking=0.40, sleeping=0.75
-    val standingOffset = (centerXFraction - 0.55f) * 0.20f
-    val cy = when (state) {
-        OctopusVisualState.SLEEPING -> h * (0.75f + standingOffset * 0.5f)
-        OctopusVisualState.FLOATING -> h * (0.58f + standingOffset)
-        OctopusVisualState.ASKING -> h * (0.40f + standingOffset)
-        OctopusVisualState.WORKING -> h * (0.12f +
-            0.02f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat())
+    // Keep the caller-provided layout slot stable across states.
+    // The previous implementation hard-coded idle/sleep Y positions, which caused
+    // Codex clouds to collapse onto the same lower area regardless of layout.
+    val bobY = when (state) {
+        OctopusVisualState.SLEEPING -> h * 0.01f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 12).toFloat()
+        OctopusVisualState.FLOATING -> h * 0.01f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
+        OctopusVisualState.ASKING -> h * 0.006f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 6).toFloat()
+        OctopusVisualState.WORKING -> h * 0.02f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
     }
+    val cy = h * centerYFraction + bobY
 
     // Cloud body radius — similar sizing to octopus bodyWidth
     val bodyRadius = w * 0.055f * scaleFactor
@@ -1053,16 +950,21 @@ private fun drawEinkOpenCode(
     } else 0f
 
     val cx = w * (centerXFraction + wanderX)
-    val standingOffset = (centerXFraction - 0.48f) * 0.20f
-    val cy = when (state) {
-        OctopusVisualState.SLEEPING -> h * (0.75f + standingOffset * 0.5f)
-        OctopusVisualState.FLOATING -> h * (0.70f + standingOffset)
-        OctopusVisualState.ASKING -> h * (0.40f + standingOffset)
-        OctopusVisualState.WORKING -> h * (centerYFraction +
-            0.02f * kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat())
+    // Respect the layout slot for all states so multiple OpenCode sessions do not
+    // stack on the rocks when idle.
+    val bobY = when (state) {
+        OctopusVisualState.SLEEPING -> h * 0.006f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 14).toFloat()
+        OctopusVisualState.FLOATING -> h * 0.008f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
+        OctopusVisualState.ASKING -> h * 0.005f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 6).toFloat()
+        OctopusVisualState.WORKING -> h * 0.02f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
     }
+    val cy = h * centerYFraction + bobY
 
-    val bodyWidth = w * 0.14f * scaleFactor
+    val bodyWidth = w * 0.11f * scaleFactor
     val pixelW = bodyWidth / EINK_OPENCODE_COLS
     val pixelH = pixelW * EINK_OPENCODE_PIXEL_ASPECT
     val gridW = EINK_OPENCODE_COLS * pixelW
@@ -1878,4 +1780,3 @@ private val COLOR_FISH_STRIPE  = 0xFFD4A040.toInt()  // golden neon stripe
 private val COLOR_BUBBLE       = 0xFFD8E8F0.toInt()  // light blue bubbles
 private val COLOR_STARBURST    = 0xFFDDAA44.toInt()  // golden working glow
 private val COLOR_PARTICLE     = 0xFF55AACC.toInt()  // cyan particles
-

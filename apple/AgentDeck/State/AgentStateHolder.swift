@@ -2,12 +2,12 @@
 // Ported from android AgentState.kt (AgentStateHolder)
 
 import Foundation
+import Combine
 
-@Observable
-final class AgentStateHolder: @unchecked Sendable {
+final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     // MARK: - State
 
-    private(set) var state = DashboardState()
+    @Published private(set) var state = DashboardState()
     private var lastKnownState: DashboardState?
 
     // MARK: - Dependencies
@@ -19,7 +19,7 @@ final class AgentStateHolder: @unchecked Sendable {
     private(set) var timelineGenerator: StateTimelineGenerator!
 
     /// Bump to trigger SwiftUI re-render for nested timelineStore changes
-    private(set) var timelineVersion: Int = 0
+    @Published private(set) var timelineVersion: Int = 0
 
     // MARK: - URL Persistence
 
@@ -42,13 +42,14 @@ final class AgentStateHolder: @unchecked Sendable {
 
     // MARK: - Connection Waterfall State
 
-    private(set) var isAutoConnecting = false
+    @Published private(set) var isAutoConnecting = false
     private var waterfallStage: WaterfallStage = .idle
 
     /// Bridges that failed to connect — skip them until browseResults refresh
     private var failedBridgeIds: Set<String> = []
     /// Track last browseResults count to detect mDNS refresh and clear blacklist
     private var lastBrowseCount: Int = 0
+    private var cancellables = Set<AnyCancellable>()
 
     private enum WaterfallStage {
         case idle
@@ -59,6 +60,23 @@ final class AgentStateHolder: @unchecked Sendable {
     // MARK: - Init
 
     init() {
+        connection.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        discovery.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        timelineStore.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        displaySync.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
         timelineGenerator = StateTimelineGenerator(store: timelineStore)
         connection.onEvent = { [weak self] event in
             self?.handleEvent(event)
@@ -277,7 +295,7 @@ final class AgentStateHolder: @unchecked Sendable {
                 if hasUnresolved && self.autoConnectPollCount < 8 {
                     print("[AutoConnect] waiting for health info (\(candidates.count) bridges, some unresolved)")
                 } else {
-                    let bridge = candidates.first!
+                    guard let bridge = candidates.first else { return }
                     print("[AutoConnect] connecting to bridge: \(bridge.wsUrl) (agent=\(bridge.agentType ?? "?"))")
                     timer.invalidate()
                     self.autoConnectTimer = nil
@@ -370,6 +388,9 @@ final class AgentStateHolder: @unchecked Sendable {
         state.pairingUrl = e.pairingUrl ?? state.pairingUrl
         state.workerSessionCount = e.workerSessionCount ?? state.workerSessionCount
         if let os = e.ollamaStatus { state.ollamaStatus = os }
+        state.mlxModels = e.mlxModels ?? state.mlxModels
+        state.subscriptions = e.subscriptions ?? state.subscriptions
+        state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
         state.gatewayAvailable = e.gatewayAvailable ?? state.gatewayAvailable
         state.gatewayHasError = e.gatewayHasError ?? state.gatewayHasError
         state.voiceAssistantState = e.voiceAssistantState ?? state.voiceAssistantState
@@ -425,6 +446,16 @@ final class AgentStateHolder: @unchecked Sendable {
         state.oauthConnected = e.oauthConnected ?? state.oauthConnected
         if let os = e.ollamaStatus { state.ollamaStatus = os }
         state.usageStale = e.usageStale ?? state.usageStale
+        state.codexAuthMode = e.codexAuthMode ?? state.codexAuthMode
+        state.codexWebAuthConnected = e.codexWebAuthConnected ?? state.codexWebAuthConnected
+        state.codexPlanType = e.codexPlanType ?? state.codexPlanType
+        state.codexAccountId = e.codexAccountId ?? state.codexAccountId
+        state.codexSubscriptionActiveUntil = e.codexSubscriptionActiveUntil ?? state.codexSubscriptionActiveUntil
+        state.codexLastRefreshAt = e.codexLastRefreshAt ?? state.codexLastRefreshAt
+        state.modelCatalog = e.modelCatalog ?? state.modelCatalog
+        state.mlxModels = e.mlxModels ?? state.mlxModels
+        state.subscriptions = e.subscriptions ?? state.subscriptions
+        state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
     }
 
     // MARK: - Connection

@@ -3,7 +3,8 @@
 import SwiftUI
 
 struct MonitorScreen: View {
-    @Environment(AgentStateHolder.self) private var stateHolder
+    @EnvironmentObject private var stateHolder: AgentStateHolder
+    @EnvironmentObject private var preferences: AppPreferences
 
     @State private var terrariumState = TerrariumState()
     @State private var showSettingsSheet = false
@@ -32,54 +33,60 @@ struct MonitorScreen: View {
                     MonitorHUD()
 
                     // Timeline in sand area
-                    VStack {
-                        Spacer()
-                        TimelineStripView()
-                            .frame(height: geo.size.height * sandFraction)
+                    if preferences.showTimeline {
+                        VStack {
+                            Spacer()
+                            TimelineStripView()
+                                .frame(height: geo.size.height * sandFraction)
+                        }
                     }
 
                 }
 
                 // Layer 3: Settings gear + rotation toggle (always visible)
-                VStack {
-                    Spacer()
-                    HStack {
+                if preferences.showSettingsButton {
+                    VStack {
                         Spacer()
-                        #if os(iOS)
-                        Button {
-                            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-                            let geometryPreferences: UIWindowScene.GeometryPreferences.iOS
-                            if scene.interfaceOrientation.isLandscape {
-                                geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .portrait)
-                            } else {
-                                geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .landscapeRight)
+                        HStack {
+                            Spacer()
+                            #if os(iOS)
+                            Button {
+                                guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+                                let geometryPreferences: UIWindowScene.GeometryPreferences.iOS
+                                if scene.interfaceOrientation.isLandscape {
+                                    geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .portrait)
+                                } else {
+                                    geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: .landscapeRight)
+                                }
+                                scene.requestGeometryUpdate(geometryPreferences)
+                            } label: {
+                                Image(systemName: "rectangle.portrait.rotate")
+                                    .font(.title3)
+                                    .foregroundStyle(.white.opacity(0.35))
+                                    .padding(.vertical, 16)
+                                    .padding(.trailing, 4)
                             }
-                            scene.requestGeometryUpdate(geometryPreferences)
-                        } label: {
-                            Image(systemName: "rectangle.portrait.rotate")
-                                .font(.title3)
-                                .foregroundStyle(.white.opacity(0.35))
-                                .padding(.vertical, 16)
-                                .padding(.trailing, 4)
+                            .buttonStyle(.plain)
+                            #endif
+                            Button {
+                                showSettingsSheet = true
+                            } label: {
+                                Image(systemName: "gearshape")
+                                    .font(.title2)
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .padding(.vertical, 16)
+                                    .padding(.trailing, 24)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        #endif
-                        Button {
-                            showSettingsSheet = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                                .font(.title2)
-                                .foregroundStyle(.white.opacity(0.6))
-                                .padding(.vertical, 16)
-                                .padding(.trailing, 24)
-                        }
-                        .buttonStyle(.plain)
                     }
                 }
             }
         }
         .sheet(isPresented: $showSettingsSheet) {
             SettingsScreen()
+                .environmentObject(stateHolder)
+                .environmentObject(preferences)
         }
         .onChange(of: stateHolder.state.state) {
             updateTerrariumState()

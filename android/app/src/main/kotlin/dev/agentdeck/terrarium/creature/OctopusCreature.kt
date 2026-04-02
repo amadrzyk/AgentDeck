@@ -11,10 +11,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.vector.PathParser
 import dev.agentdeck.terrarium.OctopusVisualState
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.terrarium.TerrariumLayout
@@ -24,16 +27,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Claude Code pixel mascot — 14×5 portrait-rectangle character (terracotta).
- * Each pixel is 1:2 (w:h) ratio. Thin gap between blocks for visual separation.
- * Rounded body with protruding animated arms and 4 stretch-animated tentacles.
+ * Claude Code mascot — Antigravity robot from claudecode.svg (terracotta).
+ * SVG viewBox 0 0 24 24, fill-rule evenodd (eyes are transparent cutouts).
+ * Rectangular body with protruding legs and two square eye holes.
  *
- * Pixel cell types:
- *   0=transparent, 1=body, 2=eye, 3=left arm, 4=right arm,
- *   5=left tentacle, 6=right tentacle
- *
- * Arms bob vertically. Tentacles stretch height (no position shift, no gaps).
- * THINKING state shows rotating Anthropic starburst behind the body.
+ * WORKING state shows rotating Anthropic starburst behind the body.
  */
 class OctopusCreature(
     centerXFraction: Float = TerrariumLayout.OCTOPUS_CENTER_X_FRACTION,
@@ -175,129 +173,74 @@ class OctopusCreature(
             else -> 0f
         }
         val centerY = h * currentY + bobOffset
-        val effectiveCenterY = centerY  // currentY already handles all positions in update()
 
         val bodyAlpha = if (visualState == OctopusVisualState.SLEEPING) 0.4f else 1f
 
-        // Draw pixel body with animated tentacles
-        drawPixelBody(scope, centerX, effectiveCenterY, bodyRadius, bodyAlpha)
+        // Draw SVG robot body
+        drawSvgBody(scope, centerX, centerY, bodyRadius, bodyAlpha)
 
-        // WORKING: compact starburst sparkle in front of pixel body
+        // WORKING: compact starburst sparkle in front of body
         if (visualState == OctopusVisualState.WORKING) {
-            drawStarburst(scope, centerX, effectiveCenterY, bodyRadius * 0.55f, bodyAlpha * 0.7f)
+            drawStarburst(scope, centerX, centerY, bodyRadius * 0.55f, bodyAlpha * 0.7f)
         }
 
         // ASKING: speech bubble with "?"
         if (visualState == OctopusVisualState.ASKING) {
-            drawSpeechBubble(scope, centerX, effectiveCenterY, bodyRadius)
+            drawSpeechBubble(scope, centerX, centerY, bodyRadius)
         }
 
         // Name tag (multi-session only)
         if (showNameTag && nameTag != null) {
-            drawNameTag(scope, centerX, effectiveCenterY, bodyRadius, nameTag!!)
+            drawNameTag(scope, centerX, centerY, bodyRadius, nameTag!!)
         }
     }
 
-    // --- Tentacle animation offsets ---
+    // --- SVG Robot Body ---
 
-    /** Y-offset for tentacle animation. Left and right pairs sway in opposite phase. */
-    private fun tentacleOffset(isLeft: Boolean, pixelSize: Float): Float {
-        val phase = if (isLeft) PI.toFloat() else 0f
-
-        val (speed, amplitude) = when (visualState) {
-            OctopusVisualState.WORKING -> 1.5f to 0.08f   // swimming — moderate
-            OctopusVisualState.FLOATING -> 0.8f to 0.04f   // standing — very subtle
-            OctopusVisualState.ASKING -> 1.0f to 0.05f     // waiting — slight fidget
-            OctopusVisualState.SLEEPING -> return 0f
-        }
-
-        return sin(time * speed + phase) * pixelSize * amplitude
-    }
-
-    /** Y-offset for arm animation. Gentle bob, opposite phase from tentacles. */
-    private fun armOffset(isLeft: Boolean, pixelSize: Float): Float {
-        val phase = if (isLeft) 0f else PI.toFloat()
-
-        val (speed, amplitude) = when (visualState) {
-            OctopusVisualState.WORKING -> 1.0f to 0.06f    // swimming — moderate
-            OctopusVisualState.FLOATING -> 0.5f to 0.02f   // standing — barely perceptible
-            OctopusVisualState.ASKING -> 0.8f to 0.04f     // waiting — slight
-            OctopusVisualState.SLEEPING -> return 0f
-        }
-
-        return sin(time * speed + phase) * pixelSize * amplitude
-    }
-
-    private fun drawPixelBody(
+    private fun drawSvgBody(
         scope: DrawScope,
         cx: Float, cy: Float,
         bodyRadius: Float,
         alpha: Float,
     ) {
-        val pixelW = bodyRadius * 2f / GRID_COLS
-        val pixelH = pixelW * PIXEL_ASPECT
-        val gridW = GRID_COLS * pixelW
-        val gridH = GRID_ROWS * pixelH
-        val startX = cx - gridW / 2f
-        val startY = cy - gridH / 2f
-
         val bodyColor = bodyColorForState()
-        val gap = PIXEL_GAP
+        // The SVG viewBox is 24×24. The robot occupies roughly 24×15 (y: 5→20).
+        // Scale so the robot width = bodyRadius * 2
+        val svgScale = (bodyRadius * 2f) / SVG_VIEWBOX
+        // Center the path: the SVG center is (12, 12.5) approx
+        val offsetX = cx - SVG_VIEWBOX / 2f * svgScale
+        val offsetY = cy - SVG_VIEWBOX / 2f * svgScale
 
-        for (row in 0 until GRID_ROWS) {
-            for (col in 0 until GRID_COLS) {
-                val cell = PIXEL_GRID[row][col]
-                if (cell == EMPTY) continue
+        // Subtle breath scale when not sleeping
+        val breathScale = when (visualState) {
+            OctopusVisualState.SLEEPING -> 1f
+            OctopusVisualState.WORKING -> 1f + sin(time * 2f) * 0.015f
+            else -> 1f + sin(time * 0.6f) * 0.008f
+        }
 
-                val px = startX + col * pixelW
-                var py = startY + row * pixelH
+        scope.withTransform({
+            translate(left = offsetX, top = offsetY)
+            scale(scaleX = svgScale * breathScale, scaleY = svgScale * breathScale,
+                pivot = Offset(SVG_VIEWBOX / 2f, SVG_VIEWBOX / 2f))
+        }) {
+            drawPath(robotPath, color = bodyColor, alpha = alpha)
 
-                // Arm Y-offset (bob up/down)
-                when (cell) {
-                    LEFT_ARM -> py += armOffset(isLeft = true, pixelH)
-                    RIGHT_ARM -> py += armOffset(isLeft = false, pixelH)
-                }
-
-                when (cell) {
-                    EYE -> {
-                        if (visualState == OctopusVisualState.SLEEPING) {
-                            scope.drawRect(
-                                color = TerrariumColors.ClaudeEye,
-                                alpha = alpha * 0.6f,
-                                topLeft = Offset(px + gap, py + pixelH * 0.4f),
-                                size = Size(pixelW - gap * 2, pixelH * 0.2f),
-                            )
-                        } else {
-                            scope.drawRect(
-                                color = TerrariumColors.ClaudeEye,
-                                alpha = alpha,
-                                topLeft = Offset(px + gap, py + gap),
-                                size = Size(pixelW - gap * 2, pixelH - gap * 2),
-                            )
-                        }
-                    }
-                    LEFT_LEG, RIGHT_LEG -> {
-                        // Tentacles: stretch height, stay connected to body (no top gap)
-                        val stretch = tentacleOffset(cell == LEFT_LEG, pixelH)
-                        scope.drawRect(
-                            color = bodyColor,
-                            alpha = alpha,
-                            topLeft = Offset(px + gap, py),
-                            size = Size(
-                                pixelW - gap * 2,
-                                (pixelH + stretch - gap).coerceAtLeast(pixelH * 0.3f),
-                            ),
-                        )
-                    }
-                    else -> {
-                        scope.drawRect(
-                            color = bodyColor,
-                            alpha = alpha,
-                            topLeft = Offset(px + gap, py + gap),
-                            size = Size(pixelW - gap * 2, pixelH - gap * 2),
-                        )
-                    }
-                }
+            // Eye glow when sleeping (half-closed effect: overlay rectangles on eye cutouts)
+            if (visualState == OctopusVisualState.SLEEPING) {
+                // Left eye (6, 8.102) to (7.488, 10.949) — cover top half
+                drawRect(
+                    color = bodyColor,
+                    alpha = alpha * 0.7f,
+                    topLeft = Offset(6f, 8.102f),
+                    size = Size(1.488f, 1.4f),
+                )
+                // Right eye (10.51, 8.102) to (18, 10.949) — cover top half
+                drawRect(
+                    color = bodyColor,
+                    alpha = alpha * 0.7f,
+                    topLeft = Offset(10.51f, 8.102f),
+                    size = Size(1.49f, 1.4f),
+                )
             }
         }
     }
@@ -313,8 +256,8 @@ class OctopusCreature(
     }
 
     /**
-     * Anthropic sparkle/starburst — 10 radiating arms behind the pixel body.
-     * Slowly rotates and pulses during THINKING state.
+     * Anthropic sparkle/starburst — 10 radiating arms behind the robot body.
+     * Slowly rotates and pulses during WORKING state.
      */
     private fun drawStarburst(scope: DrawScope, cx: Float, cy: Float, radius: Float, alpha: Float) {
         val rotation = time * 0.5f
@@ -342,9 +285,6 @@ class OctopusCreature(
 
     /** Speech bubble with "?" — shown during ASKING state. */
     private fun drawSpeechBubble(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float) {
-        val pixelW = bodyRadius * 2f / GRID_COLS
-        val gridH = GRID_ROWS * pixelW * PIXEL_ASPECT
-
         // Position: right side at body center — avoids overlapping name tag above
         val bubbleX = cx + bodyRadius * 1.2f
         val bubbleY = cy  // Body center — clear of name tag above
@@ -394,11 +334,9 @@ class OctopusCreature(
         val lines: List<String>, val lineHeight: Float, val hatHeight: Float,
     )
 
-    /** Name tag hat above the octopus — only shown in multi-session mode. */
+    /** Name tag hat above the robot — only shown in multi-session mode. */
     private fun drawNameTag(scope: DrawScope, cx: Float, cy: Float, bodyRadius: Float, name: String) {
-        val pixelW = bodyRadius * 2f / GRID_COLS
-        val gridH = GRID_ROWS * pixelW * PIXEL_ASPECT
-        val hatY = cy - gridH / 2f - bodyRadius * 0.15f
+        val hatY = cy - bodyRadius - bodyRadius * 0.15f
 
         val hatWidth = bodyRadius * 1.8f
         val baseFontSize = bodyRadius * 0.5f
@@ -525,33 +463,21 @@ class OctopusCreature(
         /** Deep sleeping position Y — lower, partially hidden. */
         private const val STANDING_Y_DEEP = 0.75f
 
-        // Pixel cell types
-        private const val EMPTY = 0
-        private const val BODY = 1
-        private const val EYE = 2
-        private const val LEFT_ARM = 3
-        private const val RIGHT_ARM = 4
-        private const val LEFT_LEG = 5
-        private const val RIGHT_LEG = 6
+        /** SVG viewBox dimension (24×24). */
+        private const val SVG_VIEWBOX = 24f
 
-        private const val GRID_COLS = 14
-        private const val GRID_ROWS = 5
+        /**
+         * Antigravity robot path from claudecode.svg.
+         * fill-rule: evenodd — the two inner rects are transparent eye cutouts.
+         */
+        private const val CLAUDE_PATH_DATA =
+            "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
 
-        /** Portrait pixel aspect ratio (height/width). */
-        private const val PIXEL_ASPECT = 2.0f
-
-        /** Gap between adjacent blocks for visual separation. */
-        private const val PIXEL_GAP = 0.5f
-
-        // Claude Code pixel mascot — 14 cols × 5 rows, portrait-rectangle pixels
-        // 10w body + 2-block arm protrusion each side + 4 tentacles
-        private val PIXEL_GRID = arrayOf(
-            intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0), // row 0: head (10w)
-            intArrayOf(0, 0, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 0, 0), // row 1: eyes at 4,9 (10w)
-            intArrayOf(3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4), // row 2: body + arms (14w)
-            intArrayOf(0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0), // row 3: waist (10w)
-            intArrayOf(0, 0, 0, 5, 0, 5, 0, 0, 6, 0, 6, 0, 0, 0), // row 4: tentacles ×4
-        )
+        private val robotPath: Path by lazy {
+            PathParser().parsePathString(CLAUDE_PATH_DATA).toPath().apply {
+                fillType = PathFillType.EvenOdd
+            }
+        }
 
         // Starburst (Anthropic sparkle) — 10 arms with varying lengths
         private const val STARBURST_ARM_COUNT = 10

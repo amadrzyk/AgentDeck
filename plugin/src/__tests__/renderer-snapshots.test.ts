@@ -34,12 +34,14 @@ import {
   type UtilityRenderData,
 } from '../renderers/utility-renderer.js';
 
-// ===== iterm-renderer =====
+// ===== usage-dial-renderer =====
 import {
-  renderItermReady,
-  renderItermPanel,
-  renderItermDisabled,
-} from '../renderers/iterm-renderer.js';
+  renderUsageOverview,
+  renderUsageDetail,
+  renderUsageSession,
+  renderUsageExtra,
+  renderUsageDisconnected,
+} from '../renderers/usage-dial-renderer.js';
 
 // ===== response-renderer =====
 import {
@@ -221,24 +223,50 @@ describe('utility-renderer snapshots', () => {
 });
 
 // ===================================================================
-// iTerm Renderer
+// Usage Dial Renderer
 // ===================================================================
 
-describe('iterm-renderer snapshots', () => {
-  it('renderItermReady', () => {
-    expect(renderItermReady()).toMatchSnapshot();
+describe('usage-dial-renderer snapshots', () => {
+  // Use fixed far-future dates so reset time formatting is deterministic
+  const sampleData = {
+    fiveHourPercent: 45,
+    fiveHourResetsAt: '2099-01-01T00:00:00Z',
+    sevenDayPercent: 32,
+    sevenDayResetsAt: '2099-01-02T00:00:00Z',
+    inputTokens: 12500,
+    outputTokens: 8300,
+    estimatedCostUsd: 0.42,
+    sessionDurationSec: 3720,
+    extraUsageEnabled: true,
+    extraUsageUtilization: 15,
+  };
+
+  it('renderUsageOverview', () => {
+    expect(renderUsageOverview(sampleData)).toMatchSnapshot();
   });
 
-  it('renderItermPanel short name', () => {
-    expect(renderItermPanel({ name: 'AgentDeck', index: 0, total: 3 })).toMatchSnapshot();
+  it('renderUsageDetail 5h', () => {
+    expect(renderUsageDetail(sampleData, '5h')).toMatchSnapshot();
   });
 
-  it('renderItermPanel long name wrapping', () => {
-    expect(renderItermPanel({ name: 'very-long-project-name-that-needs-wrapping', index: 2, total: 5 })).toMatchSnapshot();
+  it('renderUsageDetail 7d', () => {
+    expect(renderUsageDetail(sampleData, '7d')).toMatchSnapshot();
   });
 
-  it('renderItermDisabled', () => {
-    expect(renderItermDisabled()).toMatchSnapshot();
+  it('renderUsageSession', () => {
+    expect(renderUsageSession(sampleData)).toMatchSnapshot();
+  });
+
+  it('renderUsageExtra enabled', () => {
+    expect(renderUsageExtra(sampleData)).toMatchSnapshot();
+  });
+
+  it('renderUsageExtra disabled', () => {
+    expect(renderUsageExtra({ extraUsageEnabled: false })).toMatchSnapshot();
+  });
+
+  it('renderUsageDisconnected', () => {
+    expect(renderUsageDisconnected()).toMatchSnapshot();
   });
 });
 

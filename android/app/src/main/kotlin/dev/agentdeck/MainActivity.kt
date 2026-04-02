@@ -163,6 +163,10 @@ class MainActivity : ComponentActivity() {
 
 private const val TAG = "MainActivity"
 
+private fun shouldPersistBridgeUrl(url: String?): Boolean {
+    return url != null && !url.contains("127.0.0.1") && !url.contains("localhost")
+}
+
 @Composable
 fun TabletDashboard(
     stateHolder: AgentStateHolder,
@@ -173,19 +177,23 @@ fun TabletDashboard(
     val currentUrl by connection.url.collectAsState()
     val context = LocalContext.current
 
-    // Auto-connect: saved URL → localhost (USB) → mDNS (WiFi)
+    // Auto-connect: localhost (USB) → saved URL → mDNS (WiFi)
     LaunchedEffect(Unit) {
-        val savedUrl = displayPrefs.lastBridgeUrlFlow.first()
-        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
-        if (savedUrl != null) {
-            connection.autoConnect(savedUrl)
-            delay(5000)
+        val rawSavedUrl = displayPrefs.lastBridgeUrlFlow.first()
+        val savedUrl = rawSavedUrl?.takeUnless { !shouldPersistBridgeUrl(it) }
+        if (rawSavedUrl != null && savedUrl == null) {
+            displayPrefs.setLastBridgeUrl(null)
         }
+        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
         // Try localhost (adb reverse USB connection) before mDNS
         if (connection.status.value != ConnectionStatus.CONNECTED) {
             Log.i(TAG, "Trying localhost:${BridgeConstants.WS_PORT} (USB)...")
             connection.connect(BridgeConstants.LOCALHOST_WS_URL)
             delay(3000)
+        }
+        if (savedUrl != null && connection.status.value != ConnectionStatus.CONNECTED) {
+            connection.autoConnect(savedUrl)
+            delay(5000)
         }
         // If still disconnected, try mDNS discovery
         if (connection.status.value != ConnectionStatus.CONNECTED) {
@@ -214,7 +222,7 @@ fun TabletDashboard(
     LaunchedEffect(connectionStatus) {
         if (connectionStatus == ConnectionStatus.CONNECTED) {
             val url = currentUrl
-            if (url != null) displayPrefs.setLastBridgeUrl(url)
+            if (shouldPersistBridgeUrl(url)) displayPrefs.setLastBridgeUrl(url)
         }
     }
 

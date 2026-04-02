@@ -3,6 +3,9 @@
 // Ported from bridge/src/usage-api.ts
 
 import Foundation
+import SQLite3
+
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 struct ApiUsageData: Sendable {
     var fiveHourPercent: Double?
@@ -25,6 +28,12 @@ struct CodexAuthStatus: Sendable {
     var lastRefreshAt: String?
 }
 
+struct AntigravityStatus: Sendable {
+    var planName: String?
+    var availableCredits: Int?
+    var minimumCreditAmountForUsage: Int?
+}
+
 enum TokenStatus: String, Sendable {
     case valid, expired, missing, unknown
 }
@@ -45,6 +54,7 @@ final class UsageAPIClient: Sendable {
 
     var tokenStatus: TokenStatus { lastTokenStatus }
     var codexAuthStatus: CodexAuthStatus? { readCodexAuthStatus() }
+    var antigravityStatus: AntigravityStatus? { readAntigravityStatus() }
 
     // MARK: - Fetch
 
@@ -198,6 +208,8 @@ final class UsageAPIClient: Sendable {
         let tokens = json["tokens"] as? [String: Any]
         let accessPayload = decodeJWT(string(tokens, key: "access_token"))
         let idPayload = decodeJWT(string(tokens, key: "id_token"))
+        let accessAuth = authNamespace(accessPayload)
+        let idAuth = authNamespace(idPayload)
         let authMode = string(json, key: "auth_mode")
 
         return CodexAuthStatus(
@@ -205,6 +217,8 @@ final class UsageAPIClient: Sendable {
             webAuthConnected: authMode == "chatgpt" && string(tokens, key: "access_token") != nil,
             planType: firstString([
                 string(json, key: "chatgpt_plan_type"),
+                string(accessAuth, key: "chatgpt_plan_type"),
+                string(idAuth, key: "chatgpt_plan_type"),
                 string(accessPayload, key: "chatgpt_plan_type"),
                 string(idPayload, key: "chatgpt_plan_type"),
                 string(accessPayload, key: "plan_type"),
@@ -212,14 +226,20 @@ final class UsageAPIClient: Sendable {
             ]),
             accountId: firstString([
                 string(json, key: "chatgpt_account_id"),
+                string(accessAuth, key: "chatgpt_account_id"),
+                string(idAuth, key: "chatgpt_account_id"),
                 string(accessPayload, key: "chatgpt_account_id"),
                 string(idPayload, key: "chatgpt_account_id"),
+                string(accessAuth, key: "account_id"),
+                string(idAuth, key: "account_id"),
                 string(accessPayload, key: "account_id"),
                 string(idPayload, key: "account_id"),
                 string(json, key: "account_id"),
             ]),
             subscriptionActiveUntil: firstString([
                 string(json, key: "chatgpt_subscription_active_until"),
+                string(accessAuth, key: "chatgpt_subscription_active_until"),
+                string(idAuth, key: "chatgpt_subscription_active_until"),
                 string(accessPayload, key: "chatgpt_subscription_active_until"),
                 string(idPayload, key: "chatgpt_subscription_active_until"),
                 string(accessPayload, key: "subscription_active_until"),
@@ -247,6 +267,10 @@ final class UsageAPIClient: Sendable {
         return json
     }
 
+    private func authNamespace(_ dict: [String: Any]?) -> [String: Any]? {
+        dict?["https://api.openai.com/auth"] as? [String: Any]
+    }
+
     private func string(_ dict: [String: Any]?, key: String) -> String? {
         guard let raw = dict?[key] as? String else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -255,6 +279,132 @@ final class UsageAPIClient: Sendable {
 
     private func firstString(_ values: [String?]) -> String? {
         values.first(where: { $0?.isEmpty == false }) ?? nil
+    }
+
+    // MARK: - Antigravity Local Status
+
+    private func readAntigravityStatus() -> AntigravityStatus? {
+        AppPreferences.shared.withAntigravityDatabaseAccess { dbURL in
+            guard FileManager.default.fileExists(atPath: dbURL.path) else { return nil }
+
+            let authStatusText = sqliteValue(forKey: "antigravityAuthStatus", dbURL: dbURL)
+            guard let planName = parseAntigravityPlanName(authStatusText) else { return nil }
+
+            return AntigravityStatus(
+                planName: planName,
+                availableCredits: nil,
+                minimumCreditAmountForUsage: nil
+            )
+        }
+    }
+
+    private func sqliteValue(forKey key: String, dbURL: URL) -> String? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            if let db { sqlite3_close(db) }
+            return sqliteValueViaShell(forKey: key, dbURL: dbURL)
+        }
+        defer { sqlite3_close(db) }
+
+        var stmt: OpaquePointer?
+        let sql = "SELECT value FROM ItemTable WHERE key = ? LIMIT 1"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            if let stmt { sqlite3_finalize(stmt) }
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let bindResult = key.withCString { cString in
+            sqlite3_bind_text(stmt, 1, cString, -1, SQLITE_TRANSIENT)
+        }
+        guard bindResult == SQLITE_OK else {
+            return sqliteValueViaShell(forKey: key, dbURL: dbURL)
+        }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+
+        if let blob = sqlite3_column_blob(stmt, 0) {
+            let len = Int(sqlite3_column_bytes(stmt, 0))
+            let data = Data(bytes: blob, count: len)
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
+
+    private func sqliteValueViaShell(forKey key: String, dbURL: URL) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        let escapedKey = key.replacingOccurrences(of: "'", with: "''")
+        process.arguments = [dbURL.path, "select hex(value) from ItemTable where key = '\(escapedKey)' limit 1;"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let hex = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !hex.isEmpty else { return nil }
+            var data = Data()
+            var index = hex.startIndex
+            while index < hex.endIndex {
+                let next = hex.index(index, offsetBy: 2, limitedBy: hex.endIndex) ?? hex.endIndex
+                guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
+                data.append(byte)
+                index = next
+            }
+            return String(data: data, encoding: .utf8)
+        } catch {
+            return nil
+        }
+    }
+
+    private func parseAntigravityPlanName(_ authStatusText: String?) -> String? {
+        guard let authStatusText,
+              let data = authStatusText.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let protoB64 = json["userStatusProtoBinaryBase64"] as? String,
+              let proto = Data(base64Encoded: protoB64)
+        else {
+            return nil
+        }
+
+        let ascii = extractASCIIStrings(from: proto)
+        let preferred = [
+            "Google AI Ultra",
+            "Google AI Pro",
+            "Google AI Standard",
+            "Google AI Free",
+        ]
+        for match in preferred where ascii.contains(match) {
+            return match
+        }
+        return ascii.first(where: { $0.hasPrefix("Google AI ") })
+    }
+
+    private func extractASCIIStrings(from data: Data, minimumLength: Int = 6) -> [String] {
+        let bytes = [UInt8](data)
+        var buffer: [UInt8] = []
+        var strings: [String] = []
+
+        func flush() {
+            defer { buffer.removeAll(keepingCapacity: true) }
+            guard buffer.count >= minimumLength,
+                  let string = String(bytes: buffer, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !string.isEmpty else { return }
+            strings.append(string)
+        }
+
+        for byte in bytes {
+            if (32...126).contains(byte) {
+                buffer.append(byte)
+            } else {
+                flush()
+            }
+        }
+        flush()
+        return strings
     }
 
     // MARK: - File Cache

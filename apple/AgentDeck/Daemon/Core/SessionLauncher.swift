@@ -6,34 +6,73 @@ import Foundation
 import AppKit
 
 enum SessionLauncher {
-    /// Launch a Claude Code session in Terminal.app using bundled or installed bridge
-    static func launchSession(project: String? = nil) {
-        // Priority: 1) installed CLI 2) bundled in app Resources
+    enum LaunchMode: Equatable {
+        case agentdeckCli
+        case bundledBridge
+        case plainClaude
+    }
+
+    struct LaunchPlan: Equatable {
+        let mode: LaunchMode
         let command: String
-        if let installedPath = findInstalledBridge() {
-            command = "\(installedPath) claude"
-        } else if let bundledPath = findBundledBridge() {
-            let nodePath = findBundledNode() ?? "node"
-            command = "\(nodePath) \(bundledPath) claude"
-        } else {
-            // No bridge available — open install instructions
-            DaemonLogger.shared.info("Session bridge not found, showing install prompt")
-            showInstallPrompt()
+    }
+
+    /// Launch a Claude Code session in Terminal.app using bundled or installed bridge
+    static func launchSession(project: String? = nil, daemonPort: UInt16? = nil) {
+        guard let plan = resolveLaunchPlan(
+            project: project,
+            daemonPort: daemonPort.flatMap { Int($0) } ?? SessionRegistry.shared.findDaemonPort(),
+            installedBridgePath: findInstalledBridge(),
+            bundledBridgePath: findBundledBridge(),
+            bundledNodePath: findBundledNode(),
+            claudePath: findClaude()
+        ) else {
+            DaemonLogger.shared.info("Claude Code CLI not found, showing install prompt")
+            showClaudeInstallPrompt()
             return
         }
 
-        let fullCommand = project != nil ? "\(command) --project \(project!)" : command
-        openInTerminal(fullCommand)
+        openInTerminal(plan.command)
     }
 
     /// Check if Claude Code CLI is installed
     static func isClaudeInstalled() -> Bool {
-        shell("which", "claude") != nil
+        findClaude() != nil
     }
 
     /// Check if agentdeck bridge CLI is installed
     static func isBridgeInstalled() -> Bool {
         findInstalledBridge() != nil
+    }
+
+    static func resolveLaunchPlan(
+        project: String?,
+        daemonPort: Int?,
+        installedBridgePath: String?,
+        bundledBridgePath: String?,
+        bundledNodePath: String?,
+        claudePath: String?
+    ) -> LaunchPlan? {
+        let projectPrefix = project.map { "cd \(shellEscape($0)) && " } ?? ""
+        let daemonPrefix = daemonPort.map { "AGENTDECK_PORT=\($0) " } ?? ""
+
+        if let installedBridgePath {
+            let command = "\(projectPrefix)\(daemonPrefix)\(shellEscape(installedBridgePath)) claude"
+            return LaunchPlan(mode: .agentdeckCli, command: command)
+        }
+
+        if let bundledBridgePath {
+            let nodePath = bundledNodePath ?? "node"
+            let command = "\(projectPrefix)\(daemonPrefix)\(shellEscape(nodePath)) \(shellEscape(bundledBridgePath)) claude"
+            return LaunchPlan(mode: .bundledBridge, command: command)
+        }
+
+        if let claudePath {
+            let command = "\(projectPrefix)\(daemonPrefix)\(shellEscape(claudePath))"
+            return LaunchPlan(mode: .plainClaude, command: command)
+        }
+
+        return nil
     }
 
     // MARK: - Bridge Discovery
@@ -49,6 +88,10 @@ enum SessionLauncher {
         }
         // Try which
         return shell("which", "agentdeck")
+    }
+
+    private static func findClaude() -> String? {
+        shell("which", "claude")
     }
 
     private static func findBundledBridge() -> String? {
@@ -84,15 +127,15 @@ enum SessionLauncher {
 
     // MARK: - Install Prompt
 
-    private static func showInstallPrompt() {
+    private static func showClaudeInstallPrompt() {
         let alert = NSAlert()
-        alert.messageText = "Session Bridge Not Found"
+        alert.messageText = "Claude Code CLI Not Found"
         alert.informativeText = """
-        To launch Claude Code sessions with full Stream Deck control, install the AgentDeck bridge:
+        To launch Claude Code sessions from AgentDeck, install the Claude Code CLI:
 
-        npm install -g @agentdeck/bridge
+        npm install -g @anthropic-ai/claude-code
 
-        Without it, you can still use Claude Code normally — monitoring and permissions work via hooks.
+        The AgentDeck bridge is optional. Monitoring and permissions still work through hooks when Claude runs directly.
         """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Copy Install Command")
@@ -100,7 +143,7 @@ enum SessionLauncher {
 
         if alert.runModal() == .alertFirstButtonReturn {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString("npm install -g @agentdeck/bridge", forType: .string)
+            NSPasteboard.general.setString("npm install -g @anthropic-ai/claude-code", forType: .string)
         }
     }
 
@@ -120,6 +163,11 @@ enum SessionLauncher {
             return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch { return nil }
+    }
+
+    private static func shellEscape(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+        return "'\(escaped)'"
     }
 }
 #endif

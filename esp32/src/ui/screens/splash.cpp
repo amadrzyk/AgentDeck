@@ -1,9 +1,10 @@
 #include "splash.h"
 #include "../theme.h"
+#include "../assets/logo.h"
 #include "config.h"
 
 static lv_obj_t* screen = nullptr;
-static lv_obj_t* lblIcon = nullptr;
+static lv_obj_t* imgLogo = nullptr;
 static lv_obj_t* lblTitle = nullptr;
 static lv_obj_t* lblStatus = nullptr;
 static lv_obj_t* lblWifiStatus = nullptr;
@@ -16,12 +17,10 @@ lv_obj_t* splashCreate() {
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x163B5C), 0);  // ShallowWater — brighter
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Brand icon — simple styled label with octopus emoji
-    lblIcon = lv_label_create(screen);
-    lv_obj_set_style_text_color(lblIcon, lv_color_hex(0xC07058), 0);
-    lv_obj_set_style_text_font(lblIcon, &lv_font_montserrat_20, 0);
-    lv_label_set_text(lblIcon, "{ }");
-    lv_obj_align(lblIcon, LV_ALIGN_CENTER, 0, -55);
+    // Brand icon — AD shield logo
+    imgLogo = lv_image_create(screen);
+    lv_image_set_src(imgLogo, &img_logo_48);
+    lv_obj_align(imgLogo, LV_ALIGN_CENTER, 0, -55);
 
     // Title
     lblTitle = lv_label_create(screen);

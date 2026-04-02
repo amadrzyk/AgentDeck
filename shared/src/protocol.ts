@@ -50,7 +50,7 @@ export interface ButtonStateEvent {
 
 export interface EncoderSlotState {
   slot: number; // 0-3 (E1~E4)
-  encoderType: 'utility' | 'action' | 'terminal' | 'voice';
+  encoderType: 'utility' | 'action' | 'usage' | 'voice';
   header: string;         // "VOLUME", "PROMPT", "SESSION", "VOICE"
   value?: string;         // "65%", "go on", session name, "Ready"
   icon?: string;          // emoji
@@ -97,6 +97,17 @@ export interface OllamaStatus {
   models: OllamaModel[];
 }
 
+export interface SubscriptionInfo {
+  name: string;
+  until?: string;
+}
+
+export interface AntigravityStatusInfo {
+  planName?: string;
+  availableCredits?: number;
+  minimumCreditAmountForUsage?: number;
+}
+
 // ===== Bridge → Plugin (State Updates) =====
 
 export interface StateUpdateEvent {
@@ -127,6 +138,12 @@ export interface StateUpdateEvent {
   workerSessionCount?: number;
   /** Ollama process status + running models */
   ollamaStatus?: OllamaStatus;
+  /** MLX local server model list */
+  mlxModels?: string[];
+  /** Subscription-backed authenticated services */
+  subscriptions?: SubscriptionInfo[];
+  /** Local Antigravity IDE quota summary, when available */
+  antigravityStatus?: AntigravityStatusInfo;
   /** OpenClaw Gateway reachability (port 18789) */
   gatewayAvailable?: boolean;
   /** OpenClaw Gateway has doctor warnings/errors */
@@ -177,6 +194,18 @@ export interface UsageEvent {
   usageStale?: boolean;
   // OAuth token status: valid/expired/missing/unknown
   tokenStatus?: 'valid' | 'expired' | 'missing' | 'unknown';
+  // Codex / ChatGPT web-auth metadata
+  codexAuthMode?: string;
+  codexWebAuthConnected?: boolean;
+  codexPlanType?: string;
+  codexAccountId?: string;
+  codexSubscriptionActiveUntil?: string;
+  codexLastRefreshAt?: string;
+  // Local model/runtime summaries
+  modelCatalog?: ModelCatalogEntry[];
+  mlxModels?: string[];
+  subscriptions?: SubscriptionInfo[];
+  antigravityStatus?: AntigravityStatusInfo;
 }
 
 export interface ConnectionEvent {

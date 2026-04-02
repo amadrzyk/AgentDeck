@@ -77,11 +77,11 @@
       "UUID": "bound.serendipity.agentdeck.utility-dial"
     },
     {
-      "Icon": "static/imgs/terminal",
-      "Name": "Terminal",
+      "Icon": "static/imgs/utility",
+      "Name": "Usage",
       "States": [
         {
-          "Name": "Terminal",
+          "Name": "Usage",
           "ShowTitle": false
         }
       ],
@@ -89,8 +89,9 @@
       "Encoder": {
         "layout": "layouts/voice-layout.json",
         "TriggerDescription": {
-          "Rotate": "Switch session",
-          "Push": "Refresh sessions"
+          "Rotate": "Cycle usage pages",
+          "Push": "Refresh usage data",
+          "Touch": "Next page"
         }
       },
       "UUID": "bound.serendipity.agentdeck.iterm-dial"

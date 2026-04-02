@@ -21,6 +21,9 @@ struct DaemonSessionEntry: Codable, Sendable, Identifiable {
     var tty: String?
     var parentTty: String?
     var startedAt: String?
+    // Enriched fields (from /health probe, not persisted to sessions.json)
+    var state: String?
+    var modelName: String?
 }
 
 final class SessionRegistry: Sendable {
@@ -54,7 +57,7 @@ final class SessionRegistry: Sendable {
         let tmpFile = dataDir.appendingPathComponent(".sessions.\(UUID().uuidString).tmp")
         if let data = try? JSONEncoder.pretty.encode(sessions) {
             try? data.write(to: tmpFile)
-            try? FileManager.default.moveItem(at: tmpFile, to: sessionsFile)
+            replaceFile(at: sessionsFile, with: tmpFile)
         }
     }
 
@@ -90,7 +93,7 @@ final class SessionRegistry: Sendable {
         let tmpFile = dataDir.appendingPathComponent(".daemon.\(UUID().uuidString).tmp")
         if let data = try? JSONEncoder.pretty.encode(info) {
             try? data.write(to: tmpFile)
-            try? FileManager.default.moveItem(at: tmpFile, to: daemonFile)
+            replaceFile(at: daemonFile, with: tmpFile)
         }
         DaemonLogger.shared.debug("SessionRegistry", "Wrote daemon.json: port=\(info.port)")
     }
@@ -128,10 +131,14 @@ final class SessionRegistry: Sendable {
         return nil
     }
 
+    func isPortBindable(_ port: Int) async -> Bool {
+        await isPortFree(port)
+    }
+
     // MARK: - Health Probe
 
     func probeDaemonHealth(port: Int) async -> [String: Any]? {
-        let url = URL(string: "http://127.0.0.1:\(port)/health")!
+        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
         do {
@@ -172,6 +179,18 @@ final class SessionRegistry: Sendable {
             }
         }
         return result == 0
+    }
+
+    private func replaceFile(at destination: URL, with source: URL) {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination.path) {
+            _ = try? fm.replaceItemAt(destination, withItemAt: source)
+        } else {
+            try? fm.moveItem(at: source, to: destination)
+        }
+        if fm.fileExists(atPath: source.path) {
+            try? fm.removeItem(at: source)
+        }
     }
 }
 

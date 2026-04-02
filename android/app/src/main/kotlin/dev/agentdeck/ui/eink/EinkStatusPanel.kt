@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.SessionMetrics
 import dev.agentdeck.util.formatCount
@@ -23,7 +24,7 @@ import dev.agentdeck.util.gaugeBar
 
 /**
  * RIGHT zone (32%) — Status panel for e-ink 3-zone layout.
- * OAuth, Connection, rate limits with reset times, Ollama, tokens, cost, uptime.
+ * Rate limits + engine/runtime sections.
  */
 @Composable
 fun EinkStatusPanel(
@@ -40,14 +41,6 @@ fun EinkStatusPanel(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // OAuth status
-        val oauthLabel = when {
-            state.oauthConnected == true -> "connected"
-            state.billingType == "api" -> "API key"
-            else -> "\u2014"
-        }
-        Text(text = "OAuth: $oauthLabel", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
-
         // Connection
         val connIcon = if (state.bridgeConnected) "\u25CF" else "\u25CB"
         val connLabel = if (state.bridgeConnected) "CONNECTED" else "DISCONNECTED"
@@ -71,13 +64,39 @@ fun EinkStatusPanel(
 
         HorizontalDivider(thickness = 1.dp, color = Color.Black)
 
-        // Ollama
-        state.ollamaStatus?.let { olla ->
-            val label = if (olla.available) "running (${olla.models.size})" else "stopped"
-            Text(text = "Ollama: $label", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
+        val openClaw = openClawDisplayLines(state.modelCatalog.orEmpty())
+        if (openClaw.isNotEmpty()) {
+            Text(text = "OpenClaw", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = openClaw.joinToString(", "), style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
         }
 
-        HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        val ollama = state.ollamaStatus?.takeIf { it.available }?.models.orEmpty()
+        val runningOllama = ollama.filter { it.sizeVram > 0 }
+        val ollamaSource = if (runningOllama.isNotEmpty()) runningOllama else ollama
+        if (ollamaSource.isNotEmpty()) {
+            Text(text = "OLLAMA", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = ollamaSource.joinToString(", ") { it.name }, style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        }
+
+        if (state.mlxModels.isNotEmpty()) {
+            Text(text = "MLX", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = state.mlxModels.joinToString(", "), style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        }
+
+        antigravityDisplayLine(state)?.let { line ->
+            Text(text = "AG", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = line, style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        }
+
+        if (state.subscriptions.isNotEmpty()) {
+            Text(text = "Subs", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = state.subscriptions.joinToString(", ") { it.name }, style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        }
 
         // Tokens
         val totalTok = usage.inputTokens.toLong() + usage.outputTokens.toLong()
@@ -93,4 +112,15 @@ fun EinkStatusPanel(
         val uptime = formatUptime(metricsSnapshot.connectedSince ?: 0L)
         Text(text = "Msg: $msgCount  UP: $uptime", style = monoStyle, color = MaterialTheme.colorScheme.onSurface)
     }
+}
+
+private fun openClawDisplayLines(modelCatalog: List<ModelCatalogEntry>): List<String> {
+    val primary = modelCatalog.firstOrNull { it.available && it.role == "default" }
+        ?: modelCatalog.firstOrNull { it.available }
+    return primary?.let { listOf(it.name) } ?: emptyList()
+}
+
+private fun antigravityDisplayLine(state: DashboardState): String? {
+    val status = state.antigravityStatus ?: return null
+    return status.planName?.replace("Google AI ", "")?.takeIf { it.isNotBlank() }
 }

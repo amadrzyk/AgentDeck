@@ -13,11 +13,11 @@
 		07B804BD8A367595E8FF639F /* ActivityPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6186E147F760B85461F02022 /* ActivityPanel.swift */; };
 		0AC3F569F362D121D985EA52 /* KelpField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0815111538C63CAF8766B367 /* KelpField.swift */; };
 		0B04CA71C040BE9955B8C032 /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
-		D200HHID0002A0B1C2D3E4F5 /* D200hHidModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D200HHID0001A0B1C2D3E4F5 /* D200hHidModule.swift */; };
 		0B12EC87653840EF7BA4555C /* SessionAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */; };
 		1055170019B2376B38A0B8FE /* SessionAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */; };
 		10B201D2AF96C0838CCEC4CF /* SerialModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F618D3253FD55D4DD7D5AF /* SerialModule.swift */; };
 		10DE349A3E6CF8732C19FB99 /* AgentDeckApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */; };
+		121A92B4D4F8446EA2F5F0C1 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121A92B4D4F8446EA2F5F0C0 /* AppPreferences.swift */; };
 		13675372BAD515B5A8447296 /* BridgeConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */; };
 		151F41C1C4B7DF78558D546D /* SessionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF788F02F06C01E401DC8EA6 /* SessionRegistry.swift */; };
 		189B8DE0AF541394BFDFA664 /* DaemonVoiceAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF3E9B667BE141F81917F89 /* DaemonVoiceAssistant.swift */; };
@@ -58,12 +58,12 @@
 		4492EC65271E1C630601393F /* UsageAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBBD731AC01994F5C7C1A78A /* UsageAPIClient.swift */; };
 		46086D1358BD25389E304052 /* OpenCodeCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2005980598D651492006A3 /* OpenCodeCreature.swift */; };
 		46184E81DD69399DC187E6B6 /* Creature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A9A073192C93C1277AE490 /* Creature.swift */; };
+		4AA7D220242CD3041FB589D8 /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */; };
 		4B34D6CBC040FE9BE5E51856 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
 		4B88BF545E6DD2320A7FDE60 /* TankStatusPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4F61CE4842A567D1BC861E /* TankStatusPanel.swift */; };
 		4D0E6511F2638CDF14C798AD /* MdnsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D130EAC9287841A5BC8770DC /* MdnsModule.swift */; };
 		4D4A0A6C0120C440966AEFB3 /* DisplaySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89F9A134A1BC3EDEE8309695 /* DisplaySyncService.swift */; };
 		4D7595686B60FDBDE4A5210D /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
-		D200HHID0003A0B1C2D3E4F5 /* D200hHidModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D200HHID0001A0B1C2D3E4F5 /* D200hHidModule.swift */; };
 		4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7847FA7381FB8075331B0F12 /* TimelineTests.swift */; };
 		4FF0657D874D06594ED97850 /* BridgeDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F34DE9E44936BAC6D96F19 /* BridgeDiscovery.swift */; };
 		50C1853357255E13C2F9EB93 /* DaemonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BD296835DE366BFDBB15B9 /* DaemonService.swift */; };
@@ -82,7 +82,9 @@
 		6517B9BB944ABB74DCC81642 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB8FA0272112623E20C79FDC /* VoiceRecorder.swift */; };
 		6678969903C6A061CFE809EA /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5D17A24E0C5B16A097D62E9 /* AuthManager.swift */; };
 		67FA80518E8F347B39576FCC /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */; };
+		6B7D9C0CB606C5E9796123F8 /* D200hHidModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F15B92A652880A05BEE9213 /* D200hHidModule.swift */; };
 		6BFB8392D79D133C46111364 /* DaemonServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B857A690693DD802AA05429D /* DaemonServer.swift */; };
+		6D2EA7E15F98B8510CF048E9 /* SessionLauncherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */; };
 		70568489EF1BE34061D43FEA /* AgentStateHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */; };
 		70DE32174B7BEFF31C75CE87 /* CreatureLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDD4BFFE8B182F5EEBC3365 /* CreatureLayout.swift */; };
 		735366686F5871F13134E843 /* JellyfishCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73BFE04CFE5ABF5AC2F23E3F /* JellyfishCreature.swift */; };
@@ -108,9 +110,11 @@
 		94B29531B163BDB547232F79 /* MdnsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D130EAC9287841A5BC8770DC /* MdnsModule.swift */; };
 		981C289DD626CAD0B9900C39 /* SandDisturbance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9B51FC480E3419A6334A20 /* SandDisturbance.swift */; };
 		996C92E310F9A7E69C40C803 /* OpenCodeCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2005980598D651492006A3 /* OpenCodeCreature.swift */; };
+		9B1DF1D553619B6728566E86 /* SessionLauncherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */; };
 		9BDD2E63001C50AA554E516F /* ModuleManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1DDCB822B1DC56875875388 /* ModuleManager.swift */; };
 		9E30D4D0BEE3CB402E8741D8 /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
 		9ED5461741C1FC0A6ADC249F /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
+		9F873E9EA03C9927B275638C /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */; };
 		A14FF06EAC0C5B5CCFC81875 /* DaemonTimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE17EFB01F43FCB1A53F644D /* DaemonTimelineStore.swift */; };
 		A50EA56C00F6A51F498DD20E /* MonitorScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */; };
 		A8293F557BD8D3FB91BF4CF4 /* StateTimelineGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C2485BC8700CBDD9EDE70E /* StateTimelineGenerator.swift */; };
@@ -122,7 +126,6 @@
 		B5479F2C2CBAE673EB1C3D93 /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
 		B777A61FBB6AD6F51B165DA5 /* SessionListPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40755F64E4C39A49B99D88CA /* SessionListPanel.swift */; };
 		B8830354996DCFC054A9AD5A /* TimelineRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8884FD5EE02A0EDAF5D6C448 /* TimelineRelay.swift */; };
-		377CB26F3E6A7530D47EE2AF /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F78C7F038636BDFD0B37F4 /* SessionFocusRelay.swift */; };
 		BC49C2373BC5C90CE4076E5E /* TerrariumState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 593C80232028E1DBC0227E17 /* TerrariumState.swift */; };
 		BC74AE57E83DCC133989A7C9 /* TerrariumRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 481253E76BD28E883C65121F /* TerrariumRenderer.swift */; };
 		BC7898764CE415919C2E81AC /* BridgeEventParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C930EA1785B14EE276FC29A /* BridgeEventParser.swift */; };
@@ -132,10 +135,10 @@
 		C71587998379ED779ADFF54F /* ESP32Serial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */; };
 		C8DE7EFB8EAFBD9E0BAD7852 /* CreatureLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDD4BFFE8B182F5EEBC3365 /* CreatureLayout.swift */; };
 		C9A93A44534B81815553F80B /* TimelineRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8884FD5EE02A0EDAF5D6C448 /* TimelineRelay.swift */; };
-		4EE34429144D5C8DA98E3E62 /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F78C7F038636BDFD0B37F4 /* SessionFocusRelay.swift */; };
 		CBB9FC921D8EFD210A80BC6D /* DisplayMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F43DCAC6100C73B98139EA /* DisplayMonitor.swift */; };
 		CCB2A2848DDAADBEB6F7BB53 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
 		D169DFD5EA54C323E1128E7B /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15F55435772A15B8F0E92C1 /* AgentState.swift */; };
+		D2DDF34B3F564ED80D1F51E4 /* D200hHidModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F15B92A652880A05BEE9213 /* D200hHidModule.swift */; };
 		D4EA545B7FD41B8A5032F515 /* ESP32Serial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */; };
 		D53BC123AAE467EB342A5041 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */; };
 		D80DDBEF3EDB811EFF6B834A /* DaemonService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BD296835DE366BFDBB15B9 /* DaemonService.swift */; };
@@ -151,6 +154,7 @@
 		DEBCF013EEAB22462CF0044C /* MonitorHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19949AA33CE27D478B358976 /* MonitorHUD.swift */; };
 		DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */; };
 		E082EDBFACADF5992BE8A9E0 /* AgentDeckApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */; };
+		E1825C3A81E648D995A91E56 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121A92B4D4F8446EA2F5F0C0 /* AppPreferences.swift */; };
 		E35D8D73F3FFFCD795B1236A /* LocalSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FD383032B3C47C9B547426 /* LocalSessionDiscovery.swift */; };
 		E5B1774D921E5B4C508D73A0 /* AgentStateHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */; };
 		E940E2714946D07856C8FB37 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5200B4548DFE9F98AEE8D504 /* ContentView.swift */; };
@@ -189,6 +193,7 @@
 		05A9A073192C93C1277AE490 /* Creature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Creature.swift; sourceTree = "<group>"; };
 		0815111538C63CAF8766B367 /* KelpField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KelpField.swift; sourceTree = "<group>"; };
 		0DD3A6826EADF11BB4C4F139 /* BubbleSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleSystem.swift; sourceTree = "<group>"; };
+		121A92B4D4F8446EA2F5F0C0 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
 		19949AA33CE27D478B358976 /* MonitorHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorHUD.swift; sourceTree = "<group>"; };
 		1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ESP32Serial.swift; sourceTree = "<group>"; };
 		1F9ACDDF739DF572C9280B38 /* BridgeLogStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeLogStream.swift; sourceTree = "<group>"; };
@@ -201,6 +206,7 @@
 		3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayfishCreature.swift; sourceTree = "<group>"; };
 		403CDDF7DDFCF5D8702491EA /* TerrariumConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumConfig.swift; sourceTree = "<group>"; };
 		40755F64E4C39A49B99D88CA /* SessionListPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListPanel.swift; sourceTree = "<group>"; };
+		41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLauncherTests.swift; sourceTree = "<group>"; };
 		427B912EBD043285F0A0008D /* OpenClawAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawAdapter.swift; sourceTree = "<group>"; };
 		478F84014DFA2BC1E6E82110 /* TimelineSummarizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineSummarizer.swift; sourceTree = "<group>"; };
 		481253E76BD28E883C65121F /* TerrariumRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumRenderer.swift; sourceTree = "<group>"; };
@@ -213,6 +219,7 @@
 		57722317EDF1D567981112DE /* DataParticleSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataParticleSystem.swift; sourceTree = "<group>"; };
 		593C80232028E1DBC0227E17 /* TerrariumState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumState.swift; sourceTree = "<group>"; };
 		5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
+		5F15B92A652880A05BEE9213 /* D200hHidModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D200hHidModule.swift; sourceTree = "<group>"; };
 		6186E147F760B85461F02022 /* ActivityPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityPanel.swift; sourceTree = "<group>"; };
 		61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAggregator.swift; sourceTree = "<group>"; };
 		69BCA057209786EF62993762 /* TerrariumView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumView.swift; sourceTree = "<group>"; };
@@ -223,15 +230,15 @@
 		73BFE04CFE5ABF5AC2F23E3F /* JellyfishCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JellyfishCreature.swift; sourceTree = "<group>"; };
 		776467350B975D0CA1A18E84 /* OctopusCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OctopusCreature.swift; sourceTree = "<group>"; };
 		7847FA7381FB8075331B0F12 /* TimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineTests.swift; sourceTree = "<group>"; };
+		788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFocusRelay.swift; sourceTree = "<group>"; };
 		7AC67585E8BFBBB8B0250FF2 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		7BCC68BE56702DFD637FFE02 /* GatewayProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayProbe.swift; sourceTree = "<group>"; };
 		7FF390BEA92326B1152B55A9 /* HTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServer.swift; sourceTree = "<group>"; };
 		80BD296835DE366BFDBB15B9 /* DaemonService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonService.swift; sourceTree = "<group>"; };
 		83589BA4C41B89C8EF1A46FD /* AdbModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdbModule.swift; sourceTree = "<group>"; };
-		D200HHID0001A0B1C2D3E4F5 /* D200hHidModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D200hHidModule.swift; sourceTree = "<group>"; };
 		83E77BCD933FB80831B3E6FD /* AgentDeck.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AgentDeck.entitlements; sourceTree = "<group>"; };
+		83E77BCE933FB80831B3E6FE /* AgentDeck-Debug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "AgentDeck-Debug.entitlements"; sourceTree = "<group>"; };
 		8884FD5EE02A0EDAF5D6C448 /* TimelineRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineRelay.swift; sourceTree = "<group>"; };
-		25F78C7F038636BDFD0B37F4 /* SessionFocusRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFocusRelay.swift; sourceTree = "<group>"; };
 		89F9A134A1BC3EDEE8309695 /* DisplaySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaySyncService.swift; sourceTree = "<group>"; };
 		8A5A10C1FD79BB64BD2BB8D5 /* ConnectionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionOverlay.swift; sourceTree = "<group>"; };
 		8A702CCCE11B4450E9EED163 /* BridgeConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeConnection.swift; sourceTree = "<group>"; };
@@ -321,6 +328,7 @@
 			isa = PBXGroup;
 			children = (
 				5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */,
+				41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */,
 				7847FA7381FB8075331B0F12 /* TimelineTests.swift */,
 			);
 			path = AgentDeckTests;
@@ -438,6 +446,7 @@
 			isa = PBXGroup;
 			children = (
 				6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */,
+				121A92B4D4F8446EA2F5F0C0 /* AppPreferences.swift */,
 				5200B4548DFE9F98AEE8D504 /* ContentView.swift */,
 			);
 			path = App;
@@ -463,6 +472,7 @@
 			isa = PBXGroup;
 			children = (
 				83E77BCD933FB80831B3E6FD /* AgentDeck.entitlements */,
+				83E77BCE933FB80831B3E6FE /* AgentDeck-Debug.entitlements */,
 				2D2F35C5E4DF5DAE1C93F54B /* Assets.xcassets */,
 				4D7EC34DCAF26B2F39F5257B /* Info.plist */,
 				3FEDAA4E272EEE41D0DB9FAE /* LaunchAgents */,
@@ -474,9 +484,9 @@
 			isa = PBXGroup;
 			children = (
 				61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */,
+				788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */,
 				CF788F02F06C01E401DC8EA6 /* SessionRegistry.swift */,
 				8884FD5EE02A0EDAF5D6C448 /* TimelineRelay.swift */,
-				25F78C7F038636BDFD0B37F4 /* SessionFocusRelay.swift */,
 			);
 			path = Session;
 			sourceTree = "<group>";
@@ -526,7 +536,7 @@
 			isa = PBXGroup;
 			children = (
 				83589BA4C41B89C8EF1A46FD /* AdbModule.swift */,
-				D200HHID0001A0B1C2D3E4F5 /* D200hHidModule.swift */,
+				5F15B92A652880A05BEE9213 /* D200hHidModule.swift */,
 				1C62F7ABA6BDEE39F39DBDFA /* ESP32Serial.swift */,
 				D130EAC9287841A5BC8770DC /* MdnsModule.swift */,
 				D1DDCB822B1DC56875875388 /* ModuleManager.swift */,
@@ -642,6 +652,7 @@
 			buildConfigurationList = 42C2CA2A040E2C6132174542 /* Build configuration list for PBXNativeTarget "AgentDeck_macOS" */;
 			buildPhases = (
 				8E44C96C113CBB97CA764F0B /* Sources */,
+				220E22A85381FE94F2C2BA98 /* Bundle ADB Helper */,
 				D764BEAE054E73967069EFBD /* Resources */,
 			);
 			buildRules = (
@@ -715,12 +726,35 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		220E22A85381FE94F2C2BA98 /* Bundle ADB Helper */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle ADB Helper";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PROJECT_DIR}/scripts/copy-adb.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		4DC542605209BA53C7858E07 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				27F0FAF7D849BC85134C3333 /* ProtocolTests.swift in Sources */,
+				6D2EA7E15F98B8510CF048E9 /* SessionLauncherTests.swift in Sources */,
 				DBE7242898F7F03CB3463B6D /* TimelineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -730,6 +764,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */,
+				9B1DF1D553619B6728566E86 /* SessionLauncherTests.swift in Sources */,
 				4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -741,8 +776,8 @@
 				07B804BD8A367595E8FF639F /* ActivityPanel.swift in Sources */,
 				7DBB3B78D2F8A74614C9047E /* Adapter.swift in Sources */,
 				4D7595686B60FDBDE4A5210D /* AdbModule.swift in Sources */,
-				D200HHID0003A0B1C2D3E4F5 /* D200hHidModule.swift in Sources */,
 				10DE349A3E6CF8732C19FB99 /* AgentDeckApp.swift in Sources */,
+				121A92B4D4F8446EA2F5F0C1 /* AppPreferences.swift in Sources */,
 				B5479F2C2CBAE673EB1C3D93 /* AgentState.swift in Sources */,
 				70568489EF1BE34061D43FEA /* AgentStateHolder.swift in Sources */,
 				313772161048869FB5896E3A /* AuthManager.swift in Sources */,
@@ -756,6 +791,7 @@
 				3C2668742A6920AB392BA3EA /* CrayfishCreature.swift in Sources */,
 				46184E81DD69399DC187E6B6 /* Creature.swift in Sources */,
 				C8DE7EFB8EAFBD9E0BAD7852 /* CreatureLayout.swift in Sources */,
+				6B7D9C0CB606C5E9796123F8 /* D200hHidModule.swift in Sources */,
 				263F5BDD1FD0077BCCCA5DE8 /* DaemonServer.swift in Sources */,
 				D80DDBEF3EDB811EFF6B834A /* DaemonService.swift in Sources */,
 				F87FAB4C9CC261368ED37DEA /* DaemonTimelineStore.swift in Sources */,
@@ -789,6 +825,7 @@
 				981C289DD626CAD0B9900C39 /* SandDisturbance.swift in Sources */,
 				10B201D2AF96C0838CCEC4CF /* SerialModule.swift in Sources */,
 				0B12EC87653840EF7BA4555C /* SessionAggregator.swift in Sources */,
+				9F873E9EA03C9927B275638C /* SessionFocusRelay.swift in Sources */,
 				812F3BFFE7AA293804D39234 /* SessionLauncher.swift in Sources */,
 				EB83962F2BDBC13AB130DD6B /* SessionListPanel.swift in Sources */,
 				34444319598506828DE09006 /* SessionRegistry.swift in Sources */,
@@ -803,7 +840,6 @@
 				B1B90826D46626CD1211ED7A /* TerrariumView.swift in Sources */,
 				9ED5461741C1FC0A6ADC249F /* Timeline.swift in Sources */,
 				B8830354996DCFC054A9AD5A /* TimelineRelay.swift in Sources */,
-				377CB26F3E6A7530D47EE2AF /* SessionFocusRelay.swift in Sources */,
 				DCD31A20E9139F8661F0E321 /* TimelineStore.swift in Sources */,
 				C2EE2077BC999B5E03141F89 /* TimelineStripView.swift in Sources */,
 				22242F96E921D3043AD847E5 /* TimelineSummarizer.swift in Sources */,
@@ -824,8 +860,8 @@
 				590D75801E10021127334F88 /* ActivityPanel.swift in Sources */,
 				1D193B9524AA5E561A899882 /* Adapter.swift in Sources */,
 				0B04CA71C040BE9955B8C032 /* AdbModule.swift in Sources */,
-				D200HHID0002A0B1C2D3E4F5 /* D200hHidModule.swift in Sources */,
 				E082EDBFACADF5992BE8A9E0 /* AgentDeckApp.swift in Sources */,
+				E1825C3A81E648D995A91E56 /* AppPreferences.swift in Sources */,
 				D169DFD5EA54C323E1128E7B /* AgentState.swift in Sources */,
 				E5B1774D921E5B4C508D73A0 /* AgentStateHolder.swift in Sources */,
 				6678969903C6A061CFE809EA /* AuthManager.swift in Sources */,
@@ -839,6 +875,7 @@
 				5A90801088DFF80C8E0EDED6 /* CrayfishCreature.swift in Sources */,
 				2113C540FF031F83DBA1139F /* Creature.swift in Sources */,
 				70DE32174B7BEFF31C75CE87 /* CreatureLayout.swift in Sources */,
+				D2DDF34B3F564ED80D1F51E4 /* D200hHidModule.swift in Sources */,
 				6BFB8392D79D133C46111364 /* DaemonServer.swift in Sources */,
 				50C1853357255E13C2F9EB93 /* DaemonService.swift in Sources */,
 				A14FF06EAC0C5B5CCFC81875 /* DaemonTimelineStore.swift in Sources */,
@@ -872,6 +909,7 @@
 				86F7FE3919CB9698A247E2A3 /* SandDisturbance.swift in Sources */,
 				27B40D64FC2129FD8370BA77 /* SerialModule.swift in Sources */,
 				1055170019B2376B38A0B8FE /* SessionAggregator.swift in Sources */,
+				4AA7D220242CD3041FB589D8 /* SessionFocusRelay.swift in Sources */,
 				2E8F7A4A759E6BE13F311440 /* SessionLauncher.swift in Sources */,
 				B777A61FBB6AD6F51B165DA5 /* SessionListPanel.swift in Sources */,
 				151F41C1C4B7DF78558D546D /* SessionRegistry.swift in Sources */,
@@ -886,7 +924,6 @@
 				3F707E15A1A8E2707F36796D /* TerrariumView.swift in Sources */,
 				9E30D4D0BEE3CB402E8741D8 /* Timeline.swift in Sources */,
 				C9A93A44534B81815553F80B /* TimelineRelay.swift in Sources */,
-				4EE34429144D5C8DA98E3E62 /* SessionFocusRelay.swift in Sources */,
 				EA32929C78C6088451DDF476 /* TimelineStore.swift in Sources */,
 				447BEA00A4A2B8DA5DEC15AF /* TimelineStripView.swift in Sources */,
 				73859B0A0D1506EC122979DB /* TimelineSummarizer.swift in Sources */,
@@ -1168,7 +1205,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = AgentDeck/Resources/AgentDeck.entitlements;
+				CODE_SIGN_ENTITLEMENTS = AgentDeck/Resources/AgentDeck-Debug.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;

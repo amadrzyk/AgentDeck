@@ -8,7 +8,10 @@ import { OllamaProbe, type OllamaStatus } from './ollama-probe.js';
 import { DisplayMonitor } from './display-monitor.js';
 import { BridgeTimelineStore } from './timeline-store.js';
 import type { BridgeLogStream } from './log-stream.js';
-import { buildUsageEvent } from './usage-event.js';
+import { readAntigravityLocalStatus } from './antigravity-local.js';
+import { buildSubscriptions, buildUsageEvent } from './usage-event.js';
+import { readCodexAuthStatus } from './codex-auth.js';
+import { fetchMlxModels } from './mlx-probe.js';
 import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
 import { fetchUsageFromApi, hasOAuthToken, getTokenStatus, type ApiUsageData } from './usage-api.js';
 import { buildEnrichedSessionsList } from './session-aggregator.js';
@@ -75,7 +78,11 @@ export class BridgeCore {
   lastApiFetchTime = 0;
   oauthConnected: boolean;
   apiUsageStale = false;
+  /** True when cachedApiUsage was synced from relay's already-adjusted values */
+  apiUsagePreAdjusted = false;
   cachedOllamaStatus: OllamaStatus | null = null;
+  cachedMlxModels: string[] | null = null;
+  cachedAntigravityStatus = readAntigravityLocalStatus() ?? null;
   cachedGatewayAvailable = false;
   cachedGatewayHasError = false;
   cachedModelCatalog: ModelCatalogEntry[] | null = null;
@@ -169,6 +176,8 @@ export class BridgeCore {
     snapshot?: StateSnapshot;
   }): BridgeEvent {
     const snapshot = opts.snapshot ?? this.stateMachine.getSnapshot();
+    const codexAuth = readCodexAuthStatus();
+    const subscriptions = buildSubscriptions(codexAuth, this.cachedApiUsage, snapshot.billingType);
 
     // Compute promptType
     let promptType: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review' | undefined;
@@ -207,6 +216,9 @@ export class BridgeCore {
       remoteUrl: snapshot.remoteUrl ?? undefined,
       pairingUrl: this.wsUrl,
       ollamaStatus: this.cachedOllamaStatus ?? undefined,
+      mlxModels: this.cachedMlxModels ?? undefined,
+      subscriptions: subscriptions ?? undefined,
+      antigravityStatus: this.cachedAntigravityStatus ?? undefined,
       gatewayAvailable: this.cachedGatewayAvailable,
       gatewayHasError: this.cachedGatewayHasError,
       voiceAssistantState: this.cachedVoiceAssistantState !== 'disabled' ? this.cachedVoiceAssistantState : undefined,
@@ -231,7 +243,19 @@ export class BridgeCore {
   /** Build and return a usage event */
   buildUsage(): BridgeEvent {
     const snapshot = this.stateMachine.getSnapshot();
-    return buildUsageEvent(snapshot, this.cachedApiUsage, this.oauthConnected, this.cachedOllamaStatus, this.apiUsageStale);
+    return buildUsageEvent(
+      snapshot,
+      this.cachedApiUsage,
+      this.oauthConnected,
+      this.cachedOllamaStatus,
+      this.cachedMlxModels,
+      this.apiUsageStale,
+      readCodexAuthStatus(),
+      snapshot.billingType,
+      this.cachedModelCatalog,
+      this.cachedAntigravityStatus,
+      this.apiUsagePreAdjusted,
+    );
   }
 
   /** Broadcast current usage to all clients */
@@ -250,6 +274,7 @@ export class BridgeCore {
     this.lastApiFetchTime = Date.now();
     this.oauthConnected = true;
     this.apiUsageStale = false;
+    this.apiUsagePreAdjusted = false; // raw data from API, needs adjustment
     if (usage.inferredBillingType) {
       this.stateMachine.inferBillingType(usage.inferredBillingType);
     }
@@ -285,9 +310,38 @@ export class BridgeCore {
   // ===== Probes =====
 
   startOllamaProbe(intervalMs = 5000): void {
-    this.ollamaProbe.getStatus().then((s) => { this.cachedOllamaStatus = s; }).catch(() => {});
+    this.ollamaProbe.getStatus().then((s) => {
+      this.cachedOllamaStatus = s;
+    }).catch(() => {});
     this.addInterval(setInterval(() => {
-      this.ollamaProbe.getStatus().then((s) => { this.cachedOllamaStatus = s; }).catch(() => {});
+      this.ollamaProbe.getStatus().then((s) => {
+        const changed = JSON.stringify(this.cachedOllamaStatus) !== JSON.stringify(s);
+        this.cachedOllamaStatus = s;
+        if (changed) this.stateMachine.emit('state_changed', this.stateMachine.getSnapshot());
+      }).catch(() => {});
+    }, intervalMs));
+  }
+
+  startMlxProbe(intervalMs = 5000): void {
+    fetchMlxModels().then((models) => {
+      this.cachedMlxModels = models;
+    }).catch(() => {});
+    this.addInterval(setInterval(() => {
+      fetchMlxModels().then((models) => {
+        const changed = JSON.stringify(this.cachedMlxModels) !== JSON.stringify(models);
+        this.cachedMlxModels = models;
+        if (changed) this.stateMachine.emit('state_changed', this.stateMachine.getSnapshot());
+      }).catch(() => {});
+    }, intervalMs));
+  }
+
+  startAntigravityProbe(intervalMs = 15_000): void {
+    this.cachedAntigravityStatus = readAntigravityLocalStatus() ?? null;
+    this.addInterval(setInterval(() => {
+      const next = readAntigravityLocalStatus() ?? null;
+      const changed = JSON.stringify(this.cachedAntigravityStatus) !== JSON.stringify(next);
+      this.cachedAntigravityStatus = next;
+      if (changed) this.stateMachine.emit('state_changed', this.stateMachine.getSnapshot());
     }, intervalMs));
   }
 
@@ -339,12 +393,10 @@ export class BridgeCore {
   startUsageTick(intervalMs = 5000): void {
     this.addInterval(setInterval(() => {
       if (!this.hasClients()) return;
-      // TTL: clear stale cache
+      // TTL: keep last good cache, but mark it stale
       if (this.cachedApiUsage && this.lastApiFetchTime > 0 &&
           (Date.now() - this.lastApiFetchTime) > BridgeCore.USAGE_STALE_TTL) {
-        debug('core', `API usage cache expired, clearing`);
-        this.cachedApiUsage = null;
-        this.apiUsageStale = false;
+        this.apiUsageStale = true;
       }
       this.broadcastUsage();
     }, intervalMs));

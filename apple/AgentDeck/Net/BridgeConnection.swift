@@ -4,8 +4,20 @@
 import Foundation
 import Combine
 
-@Observable
-final class BridgeConnection: @unchecked Sendable {
+final class BridgeConnection: ObservableObject, @unchecked Sendable {
+    private final class HealthCheckBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var completed = false
+
+        func tryComplete() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !completed else { return false }
+            completed = true
+            return true
+        }
+    }
+
     // MARK: - Constants
 
     private static let initialBackoffMs = 1000
@@ -16,11 +28,11 @@ final class BridgeConnection: @unchecked Sendable {
 
     // MARK: - Observable State
 
-    private(set) var status: ConnectionStatus = .disconnected
-    private(set) var url: String?
-    private(set) var lastError: String?
-    private(set) var isReconnecting = false
-    private(set) var reconnectAttempt = 0
+    @Published private(set) var status: ConnectionStatus = .disconnected
+    @Published private(set) var url: String?
+    @Published private(set) var lastError: String?
+    @Published private(set) var isReconnecting = false
+    @Published private(set) var reconnectAttempt = 0
 
     // MARK: - Event callback
 
@@ -241,10 +253,11 @@ final class BridgeConnection: @unchecked Sendable {
         let source = DispatchSource.makeTimerSource(queue: queue)
         source.schedule(deadline: .now() + Self.pingIntervalSec, repeating: Self.pingIntervalSec)
         source.setEventHandler { [weak self] in
-            self?.webSocket?.sendPing { error in
+            guard let owner = self else { return }
+            owner.webSocket?.sendPing { error in
                 if let error {
                     print("[BridgeConnection] Ping failed: \(error)")
-                    self?.handleDisconnect(error: error)
+                    owner.handleDisconnect(error: error)
                 }
             }
         }
@@ -255,29 +268,22 @@ final class BridgeConnection: @unchecked Sendable {
     // MARK: - Health Check & Force Reconnect
 
     /// Send an immediate ping with a short timeout to check if the socket is alive.
-    func forceHealthCheck(completion: @escaping (Bool) -> Void) {
+    func forceHealthCheck(completion: @escaping @Sendable (Bool) -> Void) {
         guard let ws = webSocket else {
             completion(false)
             return
         }
 
-        var completed = false
-        let lock = NSLock()
+        let box = HealthCheckBox()
 
         ws.sendPing { error in
-            lock.lock()
-            guard !completed else { lock.unlock(); return }
-            completed = true
-            lock.unlock()
+            guard box.tryComplete() else { return }
             DispatchQueue.main.async { completion(error == nil) }
         }
 
         // Timeout
         DispatchQueue.global().asyncAfter(deadline: .now() + Self.healthCheckTimeoutSec) {
-            lock.lock()
-            guard !completed else { lock.unlock(); return }
-            completed = true
-            lock.unlock()
+            guard box.tryComplete() else { return }
             print("[BridgeConnection] health check timed out")
             DispatchQueue.main.async { completion(false) }
         }

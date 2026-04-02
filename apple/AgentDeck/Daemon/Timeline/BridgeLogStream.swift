@@ -149,7 +149,14 @@ actor BridgeLogStream {
     // MARK: - Binary Resolution
 
     private static func resolveOpenClawBin() -> String? {
-        let candidates = ["/usr/local/bin/openclaw", "/opt/homebrew/bin/openclaw"]
+        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
+        let candidates = [
+            "\(realHome)/Library/pnpm/openclaw",
+            "\(realHome)/.local/bin/openclaw",
+            "\(realHome)/bin/openclaw",
+            "/usr/local/bin/openclaw",
+            "/opt/homebrew/bin/openclaw",
+        ]
         for path in candidates {
             if FileManager.default.isExecutableFile(atPath: path) { return path }
         }
@@ -157,6 +164,11 @@ actor BridgeLogStream {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["which", "openclaw"]
+        var env = ProcessInfo.processInfo.environment
+        env["HOME"] = realHome
+        let pathParts = candidates.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path } + ["/usr/bin", "/bin"]
+        env["PATH"] = pathParts.joined(separator: ":")
+        process.environment = env
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

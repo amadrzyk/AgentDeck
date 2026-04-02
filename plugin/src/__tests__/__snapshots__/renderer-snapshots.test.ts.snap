@@ -14,49 +14,6 @@ exports[`button-renderer snapshots > loading button 1`] = `"<svg xmlns="http://w
 
 exports[`button-renderer snapshots > long text that needs abbreviation 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="12" fill="#14532d"/><text x="72" y="56" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#86efac" opacity="1">Yes, allow</text><text x="72" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#86efac" opacity="1">and don&apos;t</text><text x="72" y="112" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#86efac" opacity="1">ask again</text></svg>"`;
 
-exports[`iterm-renderer snapshots > renderItermDisabled 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#475569">iTERM</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">💻</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">Offline</text>
-  </svg>"
-`;
-
-exports[`iterm-renderer snapshots > renderItermPanel long name wrapping 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">iTERM</text>
-    <text x="190" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#475569">3/5</text>
-    <text x="100" y="43" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#e2e8f0">very-long-project-na</text>
-    <text x="100" y="60" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#e2e8f0">me-that-needs-wrappi</text>
-    <text x="100" y="77" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#e2e8f0">ng</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="90" height="2" rx="1" fill="#06b6d4" opacity="0.6"/>
-  </svg>"
-`;
-
-exports[`iterm-renderer snapshots > renderItermPanel short name 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">iTERM</text>
-    <text x="190" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#475569">1/3</text>
-    <text x="100" y="61" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" font-weight="bold" fill="#e2e8f0">AgentDeck</text>
-    <rect x="10" y="90" width="180" height="2" rx="1" fill="#1e293b"/>
-    <rect x="10" y="90" width="2" height="2" rx="1" fill="#06b6d4" opacity="0.6"/>
-  </svg>"
-`;
-
-exports[`iterm-renderer snapshots > renderItermReady 1`] = `
-"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
-    <rect width="200" height="100" fill="#0f172a"/>
-    <text x="100" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">iTERM</text>
-    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#67e8f9" opacity="0.8">💻</text>
-    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#67e8f9" opacity="0.6">No sessions</text>
-    <rect x="60" y="90" width="80" height="2" rx="1" fill="#06b6d4" opacity="0.2"/>
-  </svg>"
-`;
-
 exports[`option-renderer snapshots > renderContextPanel diff 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#78350f"/><stop offset="100%" stop-color="#451a03"/></linearGradient></defs>
     <rect width="200" height="100" fill="url(#cg)"/>
@@ -182,6 +139,82 @@ exports[`timeline-renderer snapshots > multiple entries fisheye 1`] = `"<svg xml
 exports[`timeline-renderer snapshots > single entry 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><defs><clipPath id="evtClip"><rect x="0" y="26" width="400" height="74"/></clipPath></defs><g transform="translate(0,0)"><rect width="400" height="100" fill="#000000"/><text x="200" y="18" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">TIMELINE</text><g clip-path="url(#evtClip)"><text x="10" y="63.0" font-family="Arial,sans-serif" font-size="15.0" fill="#4ade80" opacity="1.00">07:13 ▶ Hello world</text></g><rect x="0" y="98" width="400" height="2" fill="#c084fc" opacity="0.05"/></g></svg>"`;
 
 exports[`timeline-renderer snapshots > with session status 1`] = `"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g transform="translate(0,0)"><rect width="400" height="100" fill="#000000"/><text x="15" y="18" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#c084fc">▶ CHAT START</text><text x="385" y="18" text-anchor="end" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">07:13</text><text x="15" y="32" font-family="Arial,sans-serif" font-size="11" fill="#e2e8f0">Working</text></g></svg>"`;
+
+exports[`usage-dial-renderer snapshots > renderUsageDetail 5h 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+    <rect width="200" height="100" fill="#0f172a"/>
+    <text x="100" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">5H LIMIT</text>
+    <text x="100" y="48" text-anchor="middle" font-family="monospace" font-size="14" fill="#22c55e">█████░░░░░░░</text>
+    <text x="100" y="74" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">45% · 658585h45m</text>
+    <rect x="0" y="96" width="200" height="4" rx="2" fill="#22c55e" opacity="0.6"/>
+  </svg>"
+`;
+
+exports[`usage-dial-renderer snapshots > renderUsageDetail 7d 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+    <rect width="200" height="100" fill="#0f172a"/>
+    <text x="100" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">7D LIMIT</text>
+    <text x="100" y="48" text-anchor="middle" font-family="monospace" font-size="14" fill="#22c55e">████░░░░░░░░</text>
+    <text x="100" y="74" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">32% · 658609h45m</text>
+    <rect x="0" y="96" width="200" height="4" rx="2" fill="#22c55e" opacity="0.6"/>
+  </svg>"
+`;
+
+exports[`usage-dial-renderer snapshots > renderUsageDisconnected 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+    <rect width="200" height="100" fill="#0f172a"/>
+    <text x="100" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#475569">USAGE</text>
+    <text x="100" y="55" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" fill="#475569" opacity="0.5">📊</text>
+    <text x="100" y="78" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#475569">Waiting...</text>
+    <rect x="60" y="90" width="80" height="2" rx="1" fill="#475569" opacity="0.2"/>
+  </svg>"
+`;
+
+exports[`usage-dial-renderer snapshots > renderUsageExtra disabled 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+      <rect width="200" height="100" fill="#0f172a"/>
+      <text x="100" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">EXTRA USAGE</text>
+      <text x="100" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#475569">disabled</text>
+      <rect x="0" y="96" width="200" height="4" rx="2" fill="#6b7280" opacity="0.4"/>
+    </svg>"
+`;
+
+exports[`usage-dial-renderer snapshots > renderUsageExtra enabled 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+    <rect width="200" height="100" fill="#0f172a"/>
+    <text x="100" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">EXTRA USAGE</text>
+    <text x="100" y="48" text-anchor="middle" font-family="monospace" font-size="14" fill="#60a5fa">██░░░░░░░░░░</text>
+    <text x="100" y="74" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#ffffff">15%</text>
+    <rect x="0" y="96" width="200" height="4" rx="2" fill="#60a5fa" opacity="0.6"/>
+  </svg>"
+`;
+
+exports[`usage-dial-renderer snapshots > renderUsageOverview 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+    <rect width="200" height="100" fill="#0f172a"/>
+    <text x="100" y="16" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#94a3b8">USAGE</text>
+    <text x="18" y="38" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">5H</text>
+    <text x="42" y="38" font-family="monospace" font-size="12" fill="#22c55e">████░░░░</text>
+    <text x="155" y="38" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#ffffff">45%</text>
+    <text x="190" y="38" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#64748b">658585h45m</text>
+    <text x="18" y="62" font-family="Arial,sans-serif" font-size="11" fill="#94a3b8">7D</text>
+    <text x="42" y="62" font-family="monospace" font-size="12" fill="#22c55e">███░░░░░</text>
+    <text x="155" y="62" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#ffffff">32%</text>
+    <text x="190" y="62" text-anchor="end" font-family="Arial,sans-serif" font-size="10" fill="#64748b">658609h45m</text>
+    <rect x="0" y="96" width="200" height="4" rx="2" fill="#22c55e" opacity="0.6"/>
+  </svg>"
+`;
+
+exports[`usage-dial-renderer snapshots > renderUsageSession 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+    <rect width="200" height="100" fill="#0f172a"/>
+    <text x="100" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#94a3b8">SESSION</text>
+    <text x="100" y="48" text-anchor="middle" font-family="monospace" font-size="14" fill="#60a5fa">▲12.5K  ▼8.3K</text>
+    <text x="100" y="74" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#ffffff">$0.42</text>
+    <text x="100" y="90" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="#64748b">1h 2m</text>
+    <rect x="0" y="96" width="200" height="4" rx="2" fill="#60a5fa" opacity="0.6"/>
+  </svg>"
+`;
 
 exports[`utility-renderer snapshots > renderSetupUtility 1`] = `
 "<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">

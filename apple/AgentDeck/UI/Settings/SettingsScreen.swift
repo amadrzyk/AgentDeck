@@ -3,7 +3,8 @@
 import SwiftUI
 
 struct SettingsScreen: View {
-    @Environment(AgentStateHolder.self) private var stateHolder
+    @EnvironmentObject private var stateHolder: AgentStateHolder
+    @EnvironmentObject private var preferences: AppPreferences
     @Environment(\.dismiss) private var dismiss
     @State private var manualUrl = ""
 
@@ -45,6 +46,14 @@ struct SettingsScreen: View {
                     // Display Card
                     settingsCard(title: "Display") {
                         displayContent
+                    }
+
+                    settingsCard(title: "Dashboard") {
+                        dashboardContent
+                    }
+
+                    settingsCard(title: "Services") {
+                        servicesContent
                     }
 
                     // About Card
@@ -101,6 +110,16 @@ struct SettingsScreen: View {
                     .padding(8)
             }
 
+            GroupBox("Dashboard") {
+                dashboardContent
+                    .padding(8)
+            }
+
+            GroupBox("Services") {
+                servicesContent
+                    .padding(8)
+            }
+
             GroupBox("About") {
                 aboutContent
                     .padding(8)
@@ -109,7 +128,7 @@ struct SettingsScreen: View {
             Spacer()
         }
         .padding(20)
-        .frame(width: 420, height: 440)
+        .frame(width: 460, height: 620)
     }
 
     // MARK: - Settings Card (Android Card style)
@@ -249,7 +268,10 @@ struct SettingsScreen: View {
     private var displayContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             #if os(iOS)
-            Toggle(isOn: Bindable(stateHolder.displaySync).enabled) {
+            Toggle(isOn: Binding(
+                get: { stateHolder.displaySync.enabled },
+                set: { stateHolder.displaySync.enabled = $0 }
+            )) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Sync Display Sleep")
                         .font(.system(size: 13))
@@ -291,6 +313,90 @@ struct SettingsScreen: View {
             infoRow("App", "AgentDeck")
             infoRow("Version", "1.0.0")
             infoRow("Bundle", "bound.serendipity.agentdeck.dashboard")
+        }
+    }
+
+    private var dashboardContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Open dashboard on launch", isOn: $preferences.openDashboardOnLaunch)
+
+            Picker("Menu bar icon", selection: $preferences.menuBarIconStyle) {
+                ForEach(AppPreferences.MenuBarIconStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+
+            Divider()
+
+            Text("Visible Panels")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(TerrariumHUD.subtext)
+
+            Toggle("Session list", isOn: $preferences.showSessionList)
+            Toggle("Tank status", isOn: $preferences.showTankStatus)
+            Toggle("Timeline strip", isOn: $preferences.showTimeline)
+            Toggle("Settings button", isOn: $preferences.showSettingsButton)
+
+            Divider()
+
+            Text("Tank Status Sections")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(TerrariumHUD.subtext)
+
+            Toggle("OpenClaw", isOn: $preferences.showOpenClawSection)
+            Toggle("MLX", isOn: $preferences.showMLXSection)
+            Toggle("OLLAMA", isOn: $preferences.showOllamaSection)
+            Toggle("Subscriptions", isOn: $preferences.showSubscriptionsSection)
+            Toggle("Antigravity", isOn: $preferences.showAntigravitySection)
+                .disabled(!preferences.antigravityAccessEnabled)
+
+            if !preferences.antigravityAccessEnabled {
+                Text("Antigravity is hidden until you explicitly grant access below.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
+        }
+    }
+
+    private var servicesContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Antigravity")
+                .font(.system(size: 13, weight: .semibold))
+
+            Text("Off by default for App Store compatibility. Grant access only if you want AgentDeck to read Antigravity's local plan state.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
+
+            if let path = preferences.antigravitySelectedPath, preferences.antigravityAccessEnabled {
+                Text(path)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            } else {
+                Text("No Antigravity database selected")
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+            }
+
+            #if os(macOS)
+            HStack {
+                Button("Choose state.vscdb") {
+                    _ = preferences.chooseAntigravityDatabase()
+                }
+                .buttonStyle(.borderedProminent)
+
+                if preferences.antigravityAccessEnabled {
+                    Button("Remove Access") {
+                        preferences.clearAntigravityAccess()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            #else
+            Text("This integration can only be configured on macOS.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
+            #endif
         }
     }
 

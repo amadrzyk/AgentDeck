@@ -3,13 +3,14 @@
 #include "../widgets/hud_bar.h"
 #include "../display.h"
 #include "../theme.h"
+#include "../assets/logo.h"
 #include "../../state/agent_state.h"
 #include "config.h"
 
 static lv_obj_t* screen = nullptr;
 static lv_obj_t* connScrim = nullptr;
 static lv_obj_t* connCard = nullptr;
-static lv_obj_t* connIconLabel = nullptr;
+static lv_obj_t* connLogoImg = nullptr;
 static lv_obj_t* connTitleLabel = nullptr;
 static lv_obj_t* connSpinner = nullptr;
 static lv_obj_t* connStatusLabel = nullptr;
@@ -83,11 +84,9 @@ lv_obj_t* aquariumCreate() {
     lv_obj_set_flex_align(connCard, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(connCard, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Icon "{ }" — terracotta branding
-    connIconLabel = lv_label_create(connCard);
-    lv_obj_set_style_text_color(connIconLabel, lv_color_hex(0xC07058), 0);
-    lv_obj_set_style_text_font(connIconLabel, &lv_font_montserrat_20, 0);
-    lv_label_set_text(connIconLabel, "{ }");
+    // Brand logo — AD shield icon
+    connLogoImg = lv_image_create(connCard);
+    lv_image_set_src(connLogoImg, &img_logo_48);
 
     // Title "AgentDeck"
     connTitleLabel = lv_label_create(connCard);

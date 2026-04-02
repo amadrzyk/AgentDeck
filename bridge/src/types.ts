@@ -31,6 +31,8 @@ export {
 
 export {
   type ModelCatalogEntry,
+  type AntigravityStatusInfo,
+  type SubscriptionInfo,
   type EncoderSlotState,
   type EncoderStateEvent,
   type ButtonSlotState,
@@ -58,15 +60,17 @@ export {
   type UtilityCommand,
   type PluginCommand,
   type HookEvent,
-  type TimelineEntry,
-  type TimelineEntryType,
-  parseLogLine,
   BRIDGE_WS_PORT,
   BRIDGE_HTTP_PORT,
   RECONNECT_INTERVAL_MS,
   STUCK_TIMEOUT_MS,
-} from '@agentdeck/shared';
+} from '@agentdeck/shared/protocol';
 
+export {
+  type TimelineEntry,
+  type TimelineEntryType,
+  parseLogLine,
+} from '@agentdeck/shared';
 // ===== Bridge-specific types =====
 
 export interface VoiceState {

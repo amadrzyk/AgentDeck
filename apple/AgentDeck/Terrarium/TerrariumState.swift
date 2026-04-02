@@ -92,16 +92,17 @@ extension DashboardState {
     func toTerrariumState(previous: TerrariumState? = nil) -> TerrariumState {
         var result = TerrariumState()
 
-        // Primary session creature (skip daemon, openclaw, codex-cli — they're not octopuses)
+        // Primary session creature (skip daemon/openclaw/codex-cli/opencode — they're not octopuses)
         let primaryIsOctopus = state != .disconnected
             && agentType != "daemon"
             && agentType != "openclaw"
             && agentType != "codex-cli"
+            && agentType != "opencode"
 
-        // Octopus siblings (exclude daemon + openclaw + codex-cli), sorted by ID for stable positioning
+        // Octopus siblings (exclude daemon/openclaw/codex-cli/opencode), sorted by ID for stable positioning
         let siblings = siblingSessions
-            .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" }
-            .sorted { ($0.id ?? "") < ($1.id ?? "") }
+            .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" && $0.agentType != "opencode" }
+            .sorted { $0.id < $1.id }
 
         let octopusCount = (primaryIsOctopus ? 1 : 0) + siblings.count
         let slots = CreatureLayout.layoutOctopuses(count: octopusCount)
@@ -170,9 +171,9 @@ extension DashboardState {
 
         // Jellyfish (Codex CLI sessions)
         let primaryIsJellyfish = state != .disconnected && agentType == "codex-cli"
-        let jellyfishSiblings = siblingSessions.filter { $0.agentType == "codex-cli" }.sorted { ($0.id ?? "") < ($1.id ?? "") }
+        let jellyfishSiblings = siblingSessions.filter { $0.agentType == "codex-cli" }.sorted { $0.id < $1.id }
         let jellyfishCount = (primaryIsJellyfish ? 1 : 0) + jellyfishSiblings.count
-        let jellySlots = CreatureLayout.layoutOctopuses(count: jellyfishCount) // reuse octopus layout
+        let jellySlots = CreatureLayout.layoutCloudCreatures(count: jellyfishCount)
 
         var jellyfishCreatures: [JellyfishCreatureState] = []
         var jellySlotIdx = 0
@@ -198,6 +199,37 @@ extension DashboardState {
             ))
         }
         result.jellyfishCreatures = jellyfishCreatures
+
+        // OpenCode creatures
+        let primaryIsOpenCode = state != .disconnected && agentType == "opencode"
+        let openCodeSiblings = siblingSessions.filter { $0.agentType == "opencode" }.sorted { $0.id < $1.id }
+        let openCodeCount = (primaryIsOpenCode ? 1 : 0) + openCodeSiblings.count
+        let openCodeSlots = CreatureLayout.layoutOpenCodeCreatures(count: openCodeCount)
+
+        var openCodeCreatures: [OpenCodeCreatureState] = []
+        var openCodeSlotIdx = 0
+        if primaryIsOpenCode {
+            let s = openCodeSlots.first ?? CreatureSlot(x: 0.48, y: 0.40, scale: 1.0)
+            openCodeCreatures.append(OpenCodeCreatureState(
+                id: sessionId ?? "oc-primary",
+                projectName: projectName,
+                state: mapToOpenCodeState(state),
+                homeX: s.x, homeY: s.y, scale: s.scale
+            ))
+            openCodeSlotIdx = 1
+        }
+        for (i, sibling) in openCodeSiblings.enumerated() {
+            guard !openCodeSlots.isEmpty else { break }
+            let idx = min(openCodeSlotIdx + i, openCodeSlots.count - 1)
+            let s = openCodeSlots[idx]
+            openCodeCreatures.append(OpenCodeCreatureState(
+                id: sibling.id,
+                projectName: sibling.projectName,
+                state: mapSiblingToOpenCodeState(sibling.state),
+                homeX: s.x, homeY: s.y, scale: s.scale
+            ))
+        }
+        result.opencodeCreatures = openCodeCreatures
 
         // Environment state — in daemon mode, derive from most active sibling
         let isDaemonLike = agentType == "daemon" ||
@@ -271,6 +303,24 @@ extension DashboardState {
     }
 
     private func mapSiblingToJellyfishState(_ stateStr: String?) -> JellyfishVisualState {
+        switch stateStr {
+        case "processing": .pulsing
+        case "awaiting_permission", "awaiting_option", "awaiting_diff": .waiting
+        case "idle": .drifting
+        default: .dormant
+        }
+    }
+
+    private func mapToOpenCodeState(_ connState: AgentConnectionState) -> OpenCodeVisualState {
+        switch connState {
+        case .disconnected: .dormant
+        case .idle: .drifting
+        case .processing: .pulsing
+        case .awaitingPermission, .awaitingOption, .awaitingDiff: .waiting
+        }
+    }
+
+    private func mapSiblingToOpenCodeState(_ stateStr: String?) -> OpenCodeVisualState {
         switch stateStr {
         case "processing": .pulsing
         case "awaiting_permission", "awaiting_option", "awaiting_diff": .waiting

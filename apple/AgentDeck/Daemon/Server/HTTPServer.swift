@@ -9,6 +9,7 @@ actor HTTPServer {
     private var listener: NWListener?
     private(set) var boundPort: UInt16?
     private var routes: [(method: String, path: String, handler: @Sendable (HTTPRequest) async -> HTTPResponse)] = []
+    private var streamRoutes: [(method: String, path: String, handler: @Sendable (HTTPRequest, StreamConnection) async -> Void)] = []
 
     struct HTTPRequest: Sendable {
         let method: String
@@ -44,6 +45,24 @@ actor HTTPServer {
         static let notFound = HTTPResponse(status: 404, headers: [:], body: Data("Not Found".utf8))
     }
 
+    final class StreamConnection: @unchecked Sendable {
+        fileprivate let raw: NWConnection
+
+        fileprivate init(raw: NWConnection) {
+            self.raw = raw
+        }
+
+        func send(_ data: Data, completion: @escaping @Sendable (Bool) -> Void) {
+            raw.send(content: data, completion: .contentProcessed { error in
+                completion(error == nil)
+            })
+        }
+
+        func cancel() {
+            raw.cancel()
+        }
+    }
+
     // MARK: - Route Registration
 
     func get(_ path: String, handler: @escaping @Sendable (HTTPRequest) async -> HTTPResponse) {
@@ -54,11 +73,18 @@ actor HTTPServer {
         routes.append((method: "POST", path: path, handler: handler))
     }
 
+    func stream(_ path: String, handler: @escaping @Sendable (HTTPRequest, StreamConnection) async -> Void) {
+        streamRoutes.append((method: "GET", path: path, handler: handler))
+    }
+
     // MARK: - Lifecycle
 
     func start(port: UInt16) throws {
         let params = NWParameters.tcp
-        let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            throw NSError(domain: "HTTPServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid port \(port)"])
+        }
+        let listener = try NWListener(using: params, on: nwPort)
         self.listener = listener
         self.boundPort = port
 
@@ -91,13 +117,27 @@ actor HTTPServer {
             Task {
                 guard let self else { return }
                 let request = Self.parseHTTPRequest(data, remoteIP: conn.endpoint.debugDescription)
-                let response = await self.route(request)
-                let raw = Self.formatHTTPResponse(response)
-                conn.send(content: raw, completion: .contentProcessed({ _ in
+                let handled = await self.handle(request, on: conn)
+                if !handled {
                     conn.cancel()
-                }))
+                }
             }
         }
+    }
+
+    /// Route a request, including long-lived stream routes. Returns true if handled.
+    func handle(_ request: HTTPRequest, on conn: NWConnection) async -> Bool {
+        for route in streamRoutes where route.method == request.method && route.path == request.path {
+            await route.handler(request, StreamConnection(raw: conn))
+            return true
+        }
+
+        let response = await route(request)
+        let raw = Self.formatHTTPResponse(response)
+        conn.send(content: raw, completion: .contentProcessed({ _ in
+            conn.cancel()
+        }))
+        return true
     }
 
     /// Route a request to matching handler (used by WebSocketServer for HTTP delegation)
@@ -164,20 +204,7 @@ actor HTTPServer {
     }
 
     static func formatHTTPResponse(_ response: HTTPResponse) -> Data {
-        let statusText: String
-        switch response.status {
-        case 200: statusText = "OK"
-        case 404: statusText = "Not Found"
-        case 401: statusText = "Unauthorized"
-        case 500: statusText = "Internal Server Error"
-        default: statusText = "Unknown"
-        }
-
-        var header = "HTTP/1.1 \(response.status) \(statusText)\r\n"
-        header += "Access-Control-Allow-Origin: *\r\n"
-        for (key, value) in response.headers {
-            header += "\(key): \(value)\r\n"
-        }
+        var header = formatHTTPHeaders(status: response.status, headers: response.headers)
         let bodyData = response.body ?? Data()
         header += "Content-Length: \(bodyData.count)\r\n"
         header += "Connection: close\r\n"
@@ -186,6 +213,28 @@ actor HTTPServer {
         var result = Data(header.utf8)
         result.append(bodyData)
         return result
+    }
+
+    static func formatHTTPHeaders(status: Int, headers: [String: String]) -> String {
+        let statusText: String
+        switch status {
+        case 200: statusText = "OK"
+        case 204: statusText = "No Content"
+        case 400: statusText = "Bad Request"
+        case 401: statusText = "Unauthorized"
+        case 404: statusText = "Not Found"
+        case 500: statusText = "Internal Server Error"
+        case 501: statusText = "Not Implemented"
+        case 503: statusText = "Service Unavailable"
+        default: statusText = "Unknown"
+        }
+
+        var header = "HTTP/1.1 \(status) \(statusText)\r\n"
+        header += "Access-Control-Allow-Origin: *\r\n"
+        for (key, value) in headers {
+            header += "\(key): \(value)\r\n"
+        }
+        return header
     }
 }
 #endif

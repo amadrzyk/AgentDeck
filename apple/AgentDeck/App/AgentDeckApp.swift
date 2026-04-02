@@ -8,6 +8,7 @@ import ServiceManagement
 @main
 struct AgentDeckApp: App {
     @StateObject private var stateHolder = AgentStateHolder()
+    @StateObject private var preferences = AppPreferences.shared
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var daemonService = DaemonService()
@@ -15,25 +16,31 @@ struct AgentDeckApp: App {
     #endif
 
     var body: some Scene {
+        #if os(macOS)
+        Window("AgentDeck Dashboard", id: "dashboard") {
+            ContentView()
+                .environmentObject(stateHolder)
+                .environmentObject(preferences)
+                .task { configureDaemonConnection() }
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 1280, height: 840)
+        #else
         WindowGroup("AgentDeck Dashboard", id: "dashboard") {
             ContentView()
                 .environmentObject(stateHolder)
-                #if os(macOS)
-                .task { configureDaemonConnection() }
-                #endif
+                .environmentObject(preferences)
         }
+        #endif
         #if os(macOS)
         Settings {
             SettingsScreen()
                 .environmentObject(stateHolder)
+                .environmentObject(preferences)
         }
-        MenuBarExtra("AgentDeck", systemImage: daemonService.isRunning
-            ? "antenna.radiowaves.left.and.right"
-            : "antenna.radiowaves.left.and.right.slash"
-        ) {
-            Button("Show Dashboard") {
-                openWindow(id: "dashboard")
-                NSApplication.shared.activate(ignoringOtherApps: true)
+        MenuBarExtra("AgentDeck", systemImage: menuBarSystemImage) {
+            Button(isDashboardVisible ? "Hide Dashboard" : "Show Dashboard") {
+                toggleDashboardVisibility()
             }.keyboardShortcut("d")
 
             if daemonService.isRunning {
@@ -84,6 +91,45 @@ struct AgentDeckApp: App {
                 stateHolder.connectTo(url: wsUrl)
             }
         }
+
+        if preferences.openDashboardOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                openWindow(id: "dashboard")
+            }
+        }
+    }
+
+    private var isDashboardVisible: Bool {
+        NSApplication.shared.windows.contains {
+            $0.isVisible && $0.title.contains("AgentDeck Dashboard")
+        }
+    }
+
+    private var menuBarSystemImage: String {
+        switch preferences.menuBarIconStyle {
+        case .status:
+            return daemonService.isRunning
+                ? "antenna.radiowaves.left.and.right"
+                : "antenna.radiowaves.left.and.right.slash"
+        case .app:
+            return "dial.medium"
+        case .minimal:
+            return "circle.grid.2x2.fill"
+        }
+    }
+
+    private func toggleDashboardVisibility() {
+        if let window = NSApplication.shared.windows.first(where: { $0.title.contains("AgentDeck Dashboard") }) {
+            if window.isVisible {
+                window.orderOut(nil)
+            } else {
+                window.makeKeyAndOrderFront(nil)
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
+            return
+        }
+        openWindow(id: "dashboard")
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
     #endif
 }

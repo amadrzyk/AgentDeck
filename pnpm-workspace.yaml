@@ -8,6 +8,4 @@ packages:
 ignoredBuiltDependencies:
   - esbuild
 
-onlyBuiltDependencies:
-  - node-pty
-  - sharp
+onlyBuiltDependencies: '[\"node-hid\"]'

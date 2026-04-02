@@ -3,7 +3,7 @@
 import SwiftUI
 
 struct ConnectionOverlay: View {
-    @Environment(AgentStateHolder.self) private var stateHolder
+    @EnvironmentObject private var stateHolder: AgentStateHolder
     @State private var manualUrl = ""
     @State private var showManualEntry = false
     @State private var searchingElapsed: TimeInterval = 0

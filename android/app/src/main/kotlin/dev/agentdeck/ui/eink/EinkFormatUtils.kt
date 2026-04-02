@@ -77,6 +77,7 @@ fun agentIcon(agentType: String?): String = when (agentType) {
     "claude-code" -> "\u273B"         // ✻ (Claude sparkle)
     "openclaw" -> "\uD83E\uDD9E"     // 🦞 (crayfish)
     "codex-cli" -> "\u276F"           // ❯ (terminal prompt)
+    "opencode" -> "\u25A3"            // ▣ (nested square)
     else -> "\u25CF"                   // ● bullet
 }
 

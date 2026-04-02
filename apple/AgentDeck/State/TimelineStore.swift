@@ -2,16 +2,16 @@
 // Ported from plugin/src/timeline-store.ts + android TimelineStore.kt
 
 import Foundation
+import Combine
 
-@Observable
-final class TimelineStore: @unchecked Sendable {
-    private(set) var entries: [TimelineEntry] = []
-    private(set) var grouped: [GroupedEntry] = []
+final class TimelineStore: ObservableObject, @unchecked Sendable {
+    @Published private(set) var entries: [TimelineEntry] = []
+    @Published private(set) var grouped: [GroupedEntry] = []
 
     private let maxEntries = 200
 
     /// Whether we're receiving timeline from bridge (suppress local generation)
-    var receivingBridgeTimeline = false
+    @Published var receivingBridgeTimeline = false
 
     // MARK: - Add Entry
 

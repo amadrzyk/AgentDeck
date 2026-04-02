@@ -152,14 +152,24 @@ static Arduino_Canvas* gfx_canvas = nullptr;  // Canvas wrapper (used for drawin
 static Arduino_GFX* gfx = nullptr;            // Points to gfx_canvas
 
 // AXS15231B integrated touch read via I2C (addr 0x3B)
+// Uses 11-byte command preamble protocol (NOT register addressing like CST816S)
 static bool touch_read_axs15231b(uint16_t* x, uint16_t* y) {
+    static const uint8_t read_cmd[] = {
+        0xB5, 0xAB, 0xA5, 0x5A, 0x00, 0x00, 0x00, 0x08,
+        0x00, 0x00, 0x00
+    };
+
     Wire.beginTransmission(BOARD_TOUCH_ADDR);  // 0x3B
-    Wire.write(0x01);  // Touch count register
-    Wire.endTransmission(false);
-    if (Wire.requestFrom((uint8_t)BOARD_TOUCH_ADDR, (uint8_t)6) < 6) return false;
-    uint8_t buf[6];
-    for (int i = 0; i < 6; i++) buf[i] = Wire.read();
-    if (buf[0] == 0) return false;  // No touch
+    Wire.write(read_cmd, sizeof(read_cmd));
+    if (Wire.endTransmission() != 0) return false;  // Full stop (NOT repeated start)
+
+    if (Wire.requestFrom((uint8_t)BOARD_TOUCH_ADDR, (uint8_t)8) != 8) return false;
+    uint8_t buf[8];
+    for (int i = 0; i < 8; i++) buf[i] = Wire.read();
+
+    // buf[0] = gesture, buf[1] = num_touches
+    if (buf[0] != 0 || buf[1] == 0) return false;  // No valid touch
+
     uint16_t raw_x = ((buf[2] & 0x0F) << 8) | buf[3];
     uint16_t raw_y = ((buf[4] & 0x0F) << 8) | buf[5];
     // Orientation-aware coordinate transform
@@ -522,13 +532,14 @@ void displayInit() {
     gfx_canvas->flush();
     Serial.println("[Display] Canvas initialized and flushed");
 
-    // Touch I2C init
+    // Touch I2C init (AXS15231B integrated touch)
+    pinMode(BOARD_PIN_TOUCH_INT, INPUT_PULLUP);
     pinMode(BOARD_PIN_TOUCH_RST, OUTPUT);
     digitalWrite(BOARD_PIN_TOUCH_RST, LOW);
     delay(10);
     digitalWrite(BOARD_PIN_TOUCH_RST, HIGH);
     delay(50);
-    Wire.begin(BOARD_PIN_TOUCH_SDA, BOARD_PIN_TOUCH_SCL);
+    Wire.begin(BOARD_PIN_TOUCH_SDA, BOARD_PIN_TOUCH_SCL, 400000);
     Serial.println("[Display] Touch AXS15231B initialized");
 
 #else

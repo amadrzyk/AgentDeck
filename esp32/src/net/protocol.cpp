@@ -5,6 +5,10 @@
 #include <ArduinoJson.h>
 #include <Arduino.h>
 #include <WiFi.h>
+#if defined(BOARD_IPS_35) || defined(BOARD_ROUND_AMOLED)
+#include <Wire.h>
+#include "../boards/board_config.h"
+#endif
 
 // Reusable JSON document — sized for typical bridge messages
 static JsonDocument doc;
@@ -305,6 +309,46 @@ static void handleSessionsList(JsonObject& obj) {
     }
 #endif  // MAX_CLOUD > 0
 
+    // Populate opencodeNames for opencode creature name tags (same dedup logic)
+#if MAX_OPENCODE > 0
+    char opencodeRawNames[MAX_OPENCODE][24];
+    uint8_t opencodeNameIdx = 0;
+    for (uint8_t i = 0; i < g_state.sessionCount && opencodeNameIdx < MAX_OPENCODE; i++) {
+        if (g_state.sessions[i].alive &&
+            strcmp(g_state.sessions[i].agentType, "opencode") == 0) {
+            const char* name = g_state.sessions[i].projectName;
+            if (name[0]) {
+                strncpy(opencodeRawNames[opencodeNameIdx], name, sizeof(opencodeRawNames[opencodeNameIdx]) - 1);
+                opencodeRawNames[opencodeNameIdx][sizeof(opencodeRawNames[opencodeNameIdx]) - 1] = '\0';
+            } else {
+                snprintf(opencodeRawNames[opencodeNameIdx], sizeof(opencodeRawNames[opencodeNameIdx]), "OpenCode %d", opencodeNameIdx + 1);
+            }
+            opencodeNameIdx++;
+        }
+    }
+    for (uint8_t i = 0; i < opencodeNameIdx; i++) {
+        bool hasDup = false;
+        for (uint8_t j = 0; j < opencodeNameIdx; j++) {
+            if (j != i && strcmp(opencodeRawNames[i], opencodeRawNames[j]) == 0) {
+                hasDup = true;
+                break;
+            }
+        }
+        if (hasDup) {
+            uint8_t occurrence = 1;
+            for (uint8_t j = 0; j < i; j++) {
+                if (strcmp(opencodeRawNames[i], opencodeRawNames[j]) == 0) occurrence++;
+            }
+            snprintf(g_state.opencodeNames[i], sizeof(g_state.opencodeNames[i]),
+                     "%s #%d", opencodeRawNames[i], occurrence);
+        } else {
+            strncpy(g_state.opencodeNames[i], opencodeRawNames[i],
+                    sizeof(g_state.opencodeNames[i]) - 1);
+            g_state.opencodeNames[i][sizeof(g_state.opencodeNames[i]) - 1] = '\0';
+        }
+    }
+#endif  // MAX_OPENCODE > 0
+
     // No OpenClaw sessions: check gateway availability
     if (g_state.crayfishCount == 0) {
         if (g_state.gatewayAvailable) {
@@ -483,6 +527,54 @@ void parseMessage(const char* json, size_t length) {
         unlockState();
     } else if (strcmp(type, "connection") == 0) {
         // Connection status is handled by WS event callbacks
+    } else if (strcmp(type, "touch_diag") == 0) {
+#if defined(BOARD_IPS_35)
+        Serial.println("[TouchDiag] === I2C scan ===");
+        for (uint8_t addr = 1; addr < 127; addr++) {
+            Wire.beginTransmission(addr);
+            if (Wire.endTransmission() == 0) {
+                Serial.printf("[TouchDiag] Found device at 0x%02X\n", addr);
+            }
+        }
+        // AXS15231B command protocol touch read
+        static const uint8_t cmd[] = {
+            0xB5, 0xAB, 0xA5, 0x5A, 0x00, 0x00, 0x00, 0x08,
+            0x00, 0x00, 0x00
+        };
+        for (int attempt = 0; attempt < 5; attempt++) {
+            Wire.beginTransmission(BOARD_TOUCH_ADDR);
+            Wire.write(cmd, sizeof(cmd));
+            uint8_t err = Wire.endTransmission();
+            int n = Wire.requestFrom((uint8_t)BOARD_TOUCH_ADDR, (uint8_t)8);
+            Serial.printf("[TouchDiag] Attempt %d: CMD err=%d, read %d bytes: ", attempt, err, n);
+            for (int i = 0; i < n; i++) {
+                Serial.printf("%02X ", Wire.read());
+            }
+            Serial.println();
+            delay(100);
+        }
+        // Also try old register-style read for comparison
+        Wire.beginTransmission(BOARD_TOUCH_ADDR);
+        Wire.write((uint8_t)0x01);
+        uint8_t err2 = Wire.endTransmission(false);
+        int n2 = Wire.requestFrom((uint8_t)BOARD_TOUCH_ADDR, (uint8_t)6);
+        Serial.printf("[TouchDiag] Old-style reg 0x01: err=%d, read %d bytes: ", err2, n2);
+        for (int i = 0; i < n2; i++) {
+            Serial.printf("%02X ", Wire.read());
+        }
+        Serial.println();
+        Serial.printf("[TouchDiag] INT pin (GPIO %d) = %d\n", BOARD_PIN_TOUCH_INT, digitalRead(BOARD_PIN_TOUCH_INT));
+#elif defined(BOARD_ROUND_AMOLED)
+        Serial.println("[TouchDiag] Round AMOLED — CST816S scan");
+        for (uint8_t addr = 1; addr < 127; addr++) {
+            Wire.beginTransmission(addr);
+            if (Wire.endTransmission() == 0) {
+                Serial.printf("[TouchDiag] Found device at 0x%02X\n", addr);
+            }
+        }
+#else
+        Serial.println("[TouchDiag] Not supported on this board");
+#endif
     }
     // Ignore: encoder_state, button_state, deck_slot_map, voice_state
     // (not needed for display-only client)

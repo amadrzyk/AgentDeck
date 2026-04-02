@@ -3,6 +3,7 @@
 
 import Foundation
 import Network
+import Combine
 
 struct DiscoveredBridge: Identifiable, Sendable {
     let name: String
@@ -23,10 +24,9 @@ struct DiscoveredBridge: Identifiable, Sendable {
     }
 }
 
-@Observable
-final class BridgeDiscovery: @unchecked Sendable {
-    private(set) var bridges: [DiscoveredBridge] = []
-    private(set) var isSearching = false
+final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
+    @Published private(set) var bridges: [DiscoveredBridge] = []
+    @Published private(set) var isSearching = false
 
     private var browser: NWBrowser?
     private let queue = DispatchQueue(label: "dev.agentdeck.discovery")
@@ -219,10 +219,14 @@ final class BridgeDiscovery: @unchecked Sendable {
         let localToken: String? = nil
         #endif
 
-        let url = URL(string: "http://\(host):\(port)/health")!
+        guard let url = makeHealthURL(host: host, port: port) else {
+            print("[Discovery] invalid health URL host=\(host) port=\(port)")
+            completion(HealthInfo(token: localToken, agentType: nil))
+            return
+        }
         var request = URLRequest(url: url, timeoutInterval: 3)
         request.httpMethod = "GET"
-        print("[Discovery] fetching health from http://\(host):\(port)/health")
+        print("[Discovery] fetching health from \(url.absoluteString)")
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
                 print("[Discovery] /health fetch error: \(error.localizedDescription)")
@@ -240,6 +244,22 @@ final class BridgeDiscovery: @unchecked Sendable {
             print("[Discovery] /health got token: \(token?.prefix(8) ?? "nil")... mode: \(mode ?? "nil")")
             completion(HealthInfo(token: token, agentType: mode))
         }.resume()
+    }
+
+    private func makeHealthURL(host: String, port: Int) -> URL? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return nil }
+
+        var components = URLComponents()
+        components.scheme = "http"
+        if trimmedHost.contains(":") && !trimmedHost.hasPrefix("[") && !trimmedHost.hasSuffix("]") {
+            components.host = "[\(trimmedHost)]"
+        } else {
+            components.host = trimmedHost
+        }
+        components.port = port
+        components.path = "/health"
+        return components.url
     }
 
     // MARK: - Endpoint Resolution

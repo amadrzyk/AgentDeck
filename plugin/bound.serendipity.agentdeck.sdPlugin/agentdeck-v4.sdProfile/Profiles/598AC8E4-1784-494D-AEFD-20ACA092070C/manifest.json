@@ -15,7 +15,6 @@
           "Settings": {
             "enabledModes": [
               "volume",
-              "usage",
               "mode"
             ]
           },
@@ -47,7 +46,7 @@
         "2,0": {
           "ActionID": "ad0f20d8-d667-4c6b-8418-bb2ed457e412",
           "LinkedTitle": true,
-          "Name": "Terminal",
+          "Name": "Usage",
           "Plugin": {
             "Name": "AgentDeck",
             "UUID": "bound.serendipity.agentdeck",

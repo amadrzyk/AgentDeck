@@ -8,6 +8,7 @@ final class TerrariumRenderer {
 
     private var octopuses: [String: OctopusCreature] = [:]
     private var jellyfish: [String: JellyfishCreature] = [:]
+    private var opencodeCreatures: [String: OpenCodeCreature] = [:]
     private let crayfish = CrayfishCreature()
     private let tetra = DataParticleSystem()
     private let bubbles = BubbleSystem()
@@ -33,6 +34,7 @@ final class TerrariumRenderer {
     // Creature bubble exhale timers
     private var octoBubbleTimer: Float = 0
     private var crayfishBubbleTimer: Float = 0
+    private var opencodeBubbleTimer: Float = 0
 
     // MARK: - Delta Time
 
@@ -63,6 +65,7 @@ final class TerrariumRenderer {
         // Sync creature lifecycles
         syncOctopuses(state: state)
         syncJellyfish(state: state)
+        syncOpenCode(state: state)
 
         // Update all subsystems
         waterEffect.update(dt: dt)
@@ -79,6 +82,9 @@ final class TerrariumRenderer {
 
         // Sand disturbance
         sand.creaturePositions = octPositions
+        for oc in opencodeCreatures.values where oc.visualState != .dormant {
+            sand.creaturePositions.append(oc.currentPosition())
+        }
         if crayfish.visible {
             sand.creaturePositions.append(crayfish.currentPosition())
         }
@@ -106,12 +112,23 @@ final class TerrariumRenderer {
             let pos = crayfish.currentPosition()
             bubbles.emitCreatureBubbles(x: pos.x, y: pos.y - 0.02, count: 1)
         }
+        opencodeBubbleTimer += dt
+        if opencodeBubbleTimer >= TerrariumTiming.octoBubbleInterval {
+            opencodeBubbleTimer = 0
+            for oc in opencodeCreatures.values where oc.visualState != .dormant {
+                let pos = oc.currentPosition()
+                bubbles.emitCreatureBubbles(x: pos.x, y: pos.y - 0.02, count: 1)
+            }
+        }
 
         // Tetra coupling — working octopi + pulsing jellyfish attract fish
         var workingPositions = state.creatures
             .filter { $0.state == .working }
             .map { ($0.homeX, $0.homeY) }
         workingPositions += state.jellyfishCreatures
+            .filter { $0.state == .pulsing }
+            .map { ($0.homeX, $0.homeY) }
+        workingPositions += state.opencodeCreatures
             .filter { $0.state == .pulsing }
             .map { ($0.homeX, $0.homeY) }
         tetra.octopusPositions = workingPositions
@@ -125,6 +142,9 @@ final class TerrariumRenderer {
         }
         for jf in jellyfish.values {
             jf.update(dt: dt, state: state)
+        }
+        for oc in opencodeCreatures.values {
+            oc.update(dt: dt, state: state)
         }
         crayfish.update(dt: dt, state: state)
 
@@ -172,6 +192,11 @@ final class TerrariumRenderer {
         // Layer 9.2: Jellyfish (between octopuses and front fish)
         for jf in jellyfish.values {
             jf.draw(context: &context, size: size)
+        }
+
+        // Layer 9.3: OpenCode creatures
+        for oc in opencodeCreatures.values {
+            oc.draw(context: &context, size: size)
         }
 
         // Layer 9.5: Front-layer fish
@@ -250,6 +275,39 @@ final class TerrariumRenderer {
                 jf.homeY = creature.homeY
                 jf.scale = creature.scale
                 jf.displayName = creature.projectName
+            }
+        }
+    }
+
+    private func syncOpenCode(state: TerrariumState) {
+        let currentIds = Set(state.opencodeCreatures.map(\.id))
+        let existingIds = Set(opencodeCreatures.keys)
+
+        // Remove departed
+        for id in existingIds.subtracting(currentIds) {
+            opencodeCreatures.removeValue(forKey: id)
+        }
+
+        // Add new or update existing
+        for creature in state.opencodeCreatures {
+            if opencodeCreatures[creature.id] == nil {
+                let oc = OpenCodeCreature(
+                    sessionId: creature.id,
+                    homeX: creature.homeX,
+                    homeY: creature.homeY,
+                    scale: creature.scale
+                )
+                oc.displayName = creature.projectName
+                oc.onWaitingExit = { [weak self] in
+                    self?.bubbles.emitPopBurst(x: creature.homeX, y: creature.homeY)
+                }
+                opencodeCreatures[creature.id] = oc
+            } else {
+                let oc = opencodeCreatures[creature.id]!
+                oc.homeX = creature.homeX
+                oc.homeY = creature.homeY
+                oc.scale = creature.scale
+                oc.displayName = creature.projectName
             }
         }
     }

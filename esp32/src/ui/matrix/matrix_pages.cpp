@@ -104,19 +104,33 @@ static void drawSprite(CRGB* leds, int x0, int y0, const uint8_t* sprite,
 static const uint8_t SPR_OCTOPUS[6] = {
     0b01110, 0b11111, 0b10101, 0b11111, 0b01010, 0b10101
 };
+static const uint8_t SPR_JELLYFISH[6] = {
+    0b01110, 0b11111, 0b11011, 0b01110, 0b01010, 0b10001
+};
+static const uint8_t SPR_OPENCODE[6] = {
+    0b11111, 0b10001, 0b10101, 0b10001, 0b10001, 0b11111
+};
 static const uint8_t SPR_CRAYFISH[6] = {
     0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010
 };
 
-// Format reset time like Pixoo: "1h 23m" → "1H23", "2d 4h" → "2D4"
+// Format reset time compact: "3h 22m" → "3H22", "2d 4h" → "2D4", "20m" → "20M"
+// First unit letter kept, subsequent unit letters dropped to save width.
 static int formatResetCompact(const char* reset, char* out, int maxLen) {
     int ri = 0;
+    bool hasUnit = false;
     for (int i = 0; reset[i] && ri < maxLen - 1; i++) {
         char c = reset[i];
-        if (c >= '0' && c <= '9') out[ri++] = c;
-        else if (c == 'h' || c == 'H') out[ri++] = 'H';
-        else if (c == 'd' || c == 'D') out[ri++] = 'D';
-        else if (c == 'm' && (reset[i+1] == 0 || reset[i+1] == ' ')) out[ri++] = 'M';
+        if (c >= '0' && c <= '9') {
+            out[ri++] = c;
+        } else if (c == 'h' || c == 'H' || c == 'd' || c == 'D' ||
+                   (c == 'm' && (reset[i+1] == 0 || reset[i+1] == ' '))) {
+            if (!hasUnit) {
+                out[ri++] = (c == 'm') ? 'M' : (c == 'h' || c == 'H') ? 'H' : 'D';
+                hasUnit = true;
+            }
+            // subsequent unit letters are dropped
+        }
         // skip spaces
     }
     out[ri] = '\0';
@@ -141,30 +155,32 @@ static void drawFullScreenGauge(CRGB* leds, float percent,
     if (percent > 100) percent = 100;
 
     CRGB fillColor = gaugeColor(percent, animTime);
+    // Dimmed fill (20% brightness) — maximizes contrast for bright text on LED matrix
+    CRGB dimFill = CRGB(fillColor.r / 5, fillColor.g / 5, fillColor.b / 5);
 
-    // Fill entire screen: used portion = color, unused = dark
+    // Fill entire screen: used portion = dimmed color, unused = near-black
     int fillPx = (int)(percent / 100.0f * MATRIX_W);
     for (int x = 0; x < MATRIX_W; x++) {
         int sx = x + slideX;
         if (sx < 0 || sx >= MATRIX_W) continue;
-        CRGB c = (x < fillPx) ? fillColor : CRGB(15, 15, 20);
+        CRGB c = (x < fillPx) ? dimFill : CRGB(4, 4, 6);
         for (int y = 0; y < MATRIX_H; y++) {
             setPixel(leds, sx, y, c);
         }
     }
 
-    // Percentage in gauge color (left) — replaces old "5H"/"7D" label
+    // Percentage in bright white — maximum contrast on both filled and empty areas
     char pctBuf[5];
     snprintf(pctBuf, sizeof(pctBuf), "%d%%", (int)(percent + 0.5f));
     bool dim = isDimMode();
-    CRGB pctColor = dim ? fillColor : CRGB(0, 0, 0);
+    CRGB pctColor = CRGB(255, 255, 255);
     MatrixFont::drawScrollText(leds, pctBuf, 1 + slideX, 1, pctColor, MATRIX_W, MATRIX_H);
 
     // Reset time in muted gray (right-aligned)
     char timeBuf[8];
     if (formatResetCompact(resetStr, timeBuf, sizeof(timeBuf)) > 0) {
         int tw = MatrixFont::textWidth(timeBuf);
-        CRGB timeColor = dim ? CRGB(0xA0, 0xA0, 0xA0) : CRGB(0x30, 0x30, 0x40);
+        CRGB timeColor = dim ? CRGB(0xA0, 0xA0, 0xA0) : CRGB(0x60, 0x70, 0x80);
         MatrixFont::drawScrollText(leds, timeBuf, MATRIX_W - tw - 1 + slideX, 1, timeColor, MATRIX_W, MATRIX_H);
     }
 }
@@ -232,25 +248,34 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
     bool gatewayError = g_state.gatewayHasError;
     CrayfishState cfState = g_state.crayfishState;
 
-    // Collect non-openclaw sessions
-    struct OctoInfo {
+    // Collect non-openclaw sessions with agent type
+    enum AgentKind { AGENT_CLAUDE, AGENT_CODEX, AGENT_OPENCODE };
+    struct AgentInfo {
         char state[20];
-        bool isCodex;  // codex-cli = true, claude-code = false
+        AgentKind kind;
         int instanceIdx;
     };
-    OctoInfo octos[6];
-    int octoCount = 0;
-    int claudeSeen = 0, codexSeen = 0;
+    AgentInfo agents[6];
+    int agentCount = 0;
+    int claudeSeen = 0, codexSeen = 0, opencodeSeen = 0;
 
-    for (int i = 0; i < sessionCount && octoCount < 6; i++) {
+    for (int i = 0; i < sessionCount && agentCount < 6; i++) {
         if (!g_state.sessions[i].alive) continue;
         if (strcmp(g_state.sessions[i].agentType, "openclaw") == 0) continue;
         if (strcmp(g_state.sessions[i].agentType, "daemon") == 0) continue;
-        strncpy(octos[octoCount].state, g_state.sessions[i].state, 19);
-        octos[octoCount].state[19] = '\0';
-        octos[octoCount].isCodex = (strcmp(g_state.sessions[i].agentType, "codex-cli") == 0);
-        octos[octoCount].instanceIdx = octos[octoCount].isCodex ? codexSeen++ : claudeSeen++;
-        octoCount++;
+        strncpy(agents[agentCount].state, g_state.sessions[i].state, 19);
+        agents[agentCount].state[19] = '\0';
+        if (strcmp(g_state.sessions[i].agentType, "codex-cli") == 0) {
+            agents[agentCount].kind = AGENT_CODEX;
+            agents[agentCount].instanceIdx = codexSeen++;
+        } else if (strcmp(g_state.sessions[i].agentType, "opencode") == 0) {
+            agents[agentCount].kind = AGENT_OPENCODE;
+            agents[agentCount].instanceIdx = opencodeSeen++;
+        } else {
+            agents[agentCount].kind = AGENT_CLAUDE;
+            agents[agentCount].instanceIdx = claudeSeen++;
+        }
+        agentCount++;
     }
     unlockState();
 
@@ -272,13 +297,12 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         drawSprite(leds, 27, 1, SPR_CRAYFISH, 5, 6, cfColor);
     }
 
-    // === Octopuses: left area (x 0 to cfX-2) ===
+    // === Agents: left area (x 0 to cfX-2) ===
     int cfX = (connected && gatewayAvail) ? 27 : 32;  // crayfish position (or off-screen)
-    int octoMaxX = cfX - 7;            // rightmost octopus start (5px sprite + 2px gap)
+    int agentMaxX = cfX - 7;            // rightmost sprite start (5px sprite + 2px gap)
 
-    if (octoCount == 0) {
+    if (agentCount == 0) {
         if (!connected) {
-            // Not connected — scrolling text matching usage page
             CRGB dimColor = CRGB(40, 25, 5);
             const char* msg = "SEARCHING...";
             int textW = MatrixFont::textWidth(msg);
@@ -287,23 +311,27 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             MatrixFont::drawScrollText(leds, msg, scrollX, 1, dimColor, MATRIX_W, MATRIX_H);
             return;
         }
-        // Gateway alive → crayfish already rendered, no phantom octopus needed
         if (gatewayAvail) return;
-        // Connected but no sessions — dim bobbing octopus
         int bobY = 1 + (int)(0.3f * sinf(animTime * 1.0f));
         drawSprite(leds, 8, bobY, SPR_OCTOPUS, 5, 6, CRGB(30, 18, 14));
         return;
     }
 
-    // Claude = terracotta (#C07058), Codex = indigo (#6366F1, approx CRGB(99, 102, 241))
-    auto octoColor = [&](const char* state, bool isCodex, int instanceIdx) -> CRGB {
+    // Per-agent-type color: Claude=terracotta, Codex=indigo, OpenCode=cyan
+    auto agentColor = [&](const char* state, AgentKind kind, int instanceIdx) -> CRGB {
         CRGB baseColor;
         if (strcmp(state, "processing") == 0) {
             float pulse = 0.5f + 0.5f * sinf(animTime * 8.0f);
-            if (isCodex) {
-                baseColor = CRGB(30 + (uint8_t)(70 * pulse), 30 + (uint8_t)(70 * pulse), 80 + (uint8_t)(160 * pulse));
-            } else {
-                baseColor = CRGB(50 + (uint8_t)(150 * pulse), 30 + (uint8_t)(90 * pulse), 22 + (uint8_t)(68 * pulse));
+            switch (kind) {
+                case AGENT_CODEX:
+                    baseColor = CRGB(30 + (uint8_t)(70 * pulse), 30 + (uint8_t)(70 * pulse), 80 + (uint8_t)(160 * pulse));
+                    break;
+                case AGENT_OPENCODE:
+                    baseColor = CRGB(0, 60 + (uint8_t)(140 * pulse), 80 + (uint8_t)(160 * pulse));
+                    break;
+                default: // AGENT_CLAUDE
+                    baseColor = CRGB(50 + (uint8_t)(150 * pulse), 30 + (uint8_t)(90 * pulse), 22 + (uint8_t)(68 * pulse));
+                    break;
             }
         }
         else if (strstr(state, "awaiting")) {
@@ -311,14 +339,15 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             baseColor = CRGB((uint8_t)(200 * pulse), (uint8_t)(120 * pulse), 0);
         }
         else if (strcmp(state, "idle") == 0) {
-            if (isCodex) baseColor = CRGB(30, 30, 80);
-            else         baseColor = CRGB(80, 45, 35);
+            switch (kind) {
+                case AGENT_CODEX:    baseColor = CRGB(30, 30, 80);  break;  // dim indigo
+                case AGENT_OPENCODE: baseColor = CRGB(0, 40, 55);   break;  // dim cyan
+                default:             baseColor = CRGB(80, 45, 35);  break;  // dim terracotta
+            }
         }
         else {
-            baseColor = CRGB(25, 25, 25);  // disconnected
+            baseColor = CRGB(25, 25, 25);
         }
-        
-        // Darken for additional instances
         if (instanceIdx > 0) {
             baseColor.r = (baseColor.r * (10 - instanceIdx * 2)) / 10;
             baseColor.g = (baseColor.g * (10 - instanceIdx * 2)) / 10;
@@ -327,36 +356,55 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         return baseColor;
     };
 
+    // Sprite selection per agent type
+    auto agentSprite = [](AgentKind kind) -> const uint8_t* {
+        switch (kind) {
+            case AGENT_CODEX:    return SPR_JELLYFISH;
+            case AGENT_OPENCODE: return SPR_OPENCODE;
+            default:             return SPR_OCTOPUS;
+        }
+    };
+
     int visibleSlots = 3;
     int spacing = 7;  // 5px sprite + 2px gap
 
-    if (octoCount <= visibleSlots) {
-        // 1-3: fixed positions starting from x=1
-        for (int i = 0; i < octoCount; i++) {
+    if (agentCount <= visibleSlots) {
+        for (int i = 0; i < agentCount; i++) {
             int x = 1 + i * spacing;
             int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.5f));
-            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state, octos[i].isCodex, octos[i].instanceIdx));
+            drawSprite(leds, x, bobY, agentSprite(agents[i].kind), 5, 6,
+                       agentColor(agents[i].state, agents[i].kind, agents[i].instanceIdx));
         }
     } else {
-        // 4+: show 3, pause 2s, scroll left to reveal more
-        float scrollDur = (octoCount - visibleSlots) * 2.0f;
-        float cycleTime = 2.0f + scrollDur + 2.0f;  // pause + scroll + pause
+        // Ping-pong scroll: pause → slide right → pause → slide back left
+        int maxScroll = (agentCount - visibleSlots) * spacing;
+        float scrollDur = (agentCount - visibleSlots) * 2.0f;
+        // pause(3s) → scroll right(dur) → pause(3s) → scroll back(dur)
+        float cycleTime = 3.0f + scrollDur + 3.0f + scrollDur;
         float phase = fmodf(animTime, cycleTime);
 
         int scrollOffset = 0;
-        if (phase > 2.0f && phase < 2.0f + scrollDur) {
-            float t = (phase - 2.0f) / scrollDur;
-            int maxScroll = (octoCount - visibleSlots) * spacing;
+        if (phase < 3.0f) {
+            scrollOffset = 0;  // pause at start
+        } else if (phase < 3.0f + scrollDur) {
+            float t = (phase - 3.0f) / scrollDur;
+            // ease-in-out: smooth cubic
+            t = t * t * (3.0f - 2.0f * t);
             scrollOffset = (int)(t * maxScroll);
-        } else if (phase >= 2.0f + scrollDur) {
-            scrollOffset = (octoCount - visibleSlots) * spacing;
+        } else if (phase < 6.0f + scrollDur) {
+            scrollOffset = maxScroll;  // pause at end
+        } else {
+            float t = (phase - 6.0f - scrollDur) / scrollDur;
+            t = t * t * (3.0f - 2.0f * t);
+            scrollOffset = maxScroll - (int)(t * maxScroll);
         }
 
-        for (int i = 0; i < octoCount; i++) {
+        for (int i = 0; i < agentCount; i++) {
             int x = 1 + i * spacing - scrollOffset;
-            if (x > octoMaxX || x < -5) continue;
+            if (x > agentMaxX || x < -5) continue;
             int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.2f));
-            drawSprite(leds, x, bobY, SPR_OCTOPUS, 5, 6, octoColor(octos[i].state, octos[i].isCodex, octos[i].instanceIdx));
+            drawSprite(leds, x, bobY, agentSprite(agents[i].kind), 5, 6,
+                       agentColor(agents[i].state, agents[i].kind, agents[i].instanceIdx));
         }
     }
 }

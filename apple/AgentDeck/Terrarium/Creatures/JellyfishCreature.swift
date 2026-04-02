@@ -196,9 +196,6 @@ final class JellyfishCreature: Creature {
         let allMinY = lobeRects.map(\.minY).min() ?? cy
         let allMaxX = lobeRects.map(\.maxX).max() ?? cx
         let allMaxY = lobeRects.map(\.maxY).max() ?? cy
-        let boundingRect = CGRect(x: allMinX, y: allMinY,
-                                  width: allMaxX - allMinX, height: allMaxY - allMinY)
-
         // 0. Outer edge glow — slightly expanded, behind body
         context.drawLayer { glowCtx in
             glowCtx.opacity = alpha * 0.12

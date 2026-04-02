@@ -37,7 +37,7 @@ actor TimelineRelay {
         subscriptions.removeAll()
     }
 
-    private func sync() {
+    func sync() {
         let sessions = SessionRegistry.shared.listActive()
         let siblingPorts = Set(sessions
             .filter { $0.port != selfPort && $0.agentType != "daemon" }
@@ -57,7 +57,7 @@ actor TimelineRelay {
     }
 
     private func subscribe(port: Int) {
-        let url = URL(string: "ws://127.0.0.1:\(port)")!
+        guard let url = URL(string: "ws://127.0.0.1:\(port)") else { return }
         let task = URLSession.shared.webSocketTask(with: url)
         subscriptions[port] = task
         task.resume()
@@ -92,7 +92,14 @@ actor TimelineRelay {
                     }
                     await self.receiveLoop(port: port, task: task)
                 case .failure:
-                    // Reconnect after delay
+                    // Only reconnect if port is still a known sibling (not a dead session)
+                    guard await self.knownPorts.contains(port) else { return }
+                    // Verify session is still alive before reconnecting
+                    let alive = SessionRegistry.shared.listActive().contains { $0.port == port }
+                    guard alive else {
+                        await self.unsubscribe(port: port)
+                        return
+                    }
                     try? await Task.sleep(for: .seconds(5))
                     await self.subscribe(port: port)
                 }

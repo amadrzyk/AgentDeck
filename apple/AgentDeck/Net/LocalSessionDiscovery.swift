@@ -5,6 +5,7 @@
 #if os(macOS)
 import Foundation
 import Darwin
+import Combine
 
 /// Session entry matching bridge/src/session-registry.ts SessionEntry
 private struct SessionEntry: Decodable {
@@ -16,14 +17,14 @@ private struct SessionEntry: Decodable {
     let startedAt: String?
 }
 
-@Observable
-final class LocalSessionDiscovery: @unchecked Sendable {
-    private(set) var sessions: [DiscoveredBridge] = []
+final class LocalSessionDiscovery: ObservableObject, @unchecked Sendable {
+    @Published private(set) var sessions: [DiscoveredBridge] = []
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "dev.agentdeck.local-discovery")
 
     private var sessionsFilePath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let home = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
         return "\(home)/.agentdeck/sessions.json"
     }
 

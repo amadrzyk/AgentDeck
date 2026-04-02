@@ -308,9 +308,6 @@ final class OctopusCreature: Creature {
     // MARK: - Speech Bubble
 
     private func drawSpeechBubble(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyRadius: CGFloat) {
-        let pixelW = bodyRadius * 2 / CGFloat(Self.gridCols)
-        let gridH = CGFloat(Self.gridRows) * pixelW * CGFloat(Self.pixelAspect)
-
         // Position: right side at body center — avoids overlapping name tag above
         let bubbleX = cx + bodyRadius * 1.2
         let bubbleY = cy

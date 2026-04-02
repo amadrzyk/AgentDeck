@@ -159,7 +159,7 @@ function getVtPanelIds(): string[][] {
   const panels: string[][] = [];
   if (encoderRegistry.utilityIds.length > 0) panels.push(encoderRegistry.utilityIds);
   panels.push(encoderRegistry.optionIds);
-  if (encoderRegistry.itermIds.length > 0) panels.push(encoderRegistry.itermIds);
+  if (encoderRegistry.usageIds.length > 0) panels.push(encoderRegistry.usageIds);
   panels.push(encoderRegistry.voiceIds);
   return panels;
 }

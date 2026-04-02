@@ -34,7 +34,9 @@ enum SessionAggregator {
     }
 
     private static func probeSession(_ session: DaemonSessionEntry) async -> EnrichedSession {
-        let url = URL(string: "http://127.0.0.1:\(session.port)/health")!
+        guard let url = URL(string: "http://127.0.0.1:\(session.port)/health") else {
+            return EnrichedSession(entry: session, alive: false)
+        }
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
 

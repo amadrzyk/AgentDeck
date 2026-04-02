@@ -145,7 +145,7 @@ final class StateMachine {
             stuckTimer = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(self?.stuckTimeoutMs ?? 300_000))
                 guard !Task.isCancelled else { return }
-                self?.transition(trigger: "stuck_timeout", source: .internal)
+                _ = self?.transition(trigger: "stuck_timeout", source: .internal)
             }
         }
     }

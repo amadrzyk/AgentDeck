@@ -53,7 +53,7 @@ actor GatewayProbe {
         // Non-blocking connect with 2s timeout
         var flags = fcntl(fd, F_GETFL, 0)
         flags |= O_NONBLOCK
-        fcntl(fd, F_SETFL, flags)
+        _ = fcntl(fd, F_SETFL, flags)
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)

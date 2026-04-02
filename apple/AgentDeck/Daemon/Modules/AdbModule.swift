@@ -10,6 +10,9 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
 
     private let daemonPort: Int
     private var pollTask: Task<Void, Never>?
+    private var lastKnownDevices: [String] = []
+    private var lastError: String?
+    private var reverseReadyCount = 0
 
     nonisolated(unsafe) var commandHandler: (([String: Any]) -> Void)?
 
@@ -19,6 +22,7 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
 
     func start() async {
         guard adbAvailable() else {
+            lastError = "adb not found"
             DaemonLogger.shared.debug("ADB", "adb not found in PATH, skipping")
             return
         }
@@ -45,23 +49,48 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
         // No-op — ADB reverse tunnel doesn't need state broadcasts
     }
 
+    func statusSnapshot() -> [String: Any] {
+        [
+            "available": adbAvailable(),
+            "devices": lastKnownDevices,
+            "reverseReadyCount": reverseReadyCount,
+            "lastError": lastError as Any,
+        ]
+    }
+
     // MARK: - ADB Reverse
 
     private func setupAdbReverse() {
         let devices = getConnectedDevices()
+        lastKnownDevices = devices
+        reverseReadyCount = 0
         for serial in devices {
-            _ = shell(timeout: 5, "adb", "-s", serial, "reverse", "tcp:\(daemonPort)", "tcp:\(daemonPort)")
-            DaemonLogger.shared.debug("ADB", "Reverse tunnel set: \(serial)")
+            if shell(timeout: 5, "adb", "-s", serial, "reverse", "tcp:\(daemonPort)", "tcp:\(daemonPort)") != nil {
+                reverseReadyCount += 1
+                lastError = nil
+                DaemonLogger.shared.debug("ADB", "Reverse tunnel set: \(serial)")
+            } else {
+                lastError = "adb reverse failed for \(serial)"
+            }
         }
     }
 
     private func pollAdbReverse() {
         let devices = getConnectedDevices()
+        lastKnownDevices = devices
+        reverseReadyCount = 0
         for serial in devices {
             if let existing = shell(timeout: 5, "adb", "-s", serial, "reverse", "--list"),
-               !existing.contains("tcp:\(daemonPort)") {
-                _ = shell(timeout: 5, "adb", "-s", serial, "reverse", "tcp:\(daemonPort)", "tcp:\(daemonPort)")
-                DaemonLogger.shared.debug("ADB", "Reverse re-established: \(serial)")
+               existing.contains("tcp:\(daemonPort)") {
+                reverseReadyCount += 1
+            } else {
+                if shell(timeout: 5, "adb", "-s", serial, "reverse", "tcp:\(daemonPort)", "tcp:\(daemonPort)") != nil {
+                    reverseReadyCount += 1
+                    lastError = nil
+                    DaemonLogger.shared.debug("ADB", "Reverse re-established: \(serial)")
+                } else {
+                    lastError = "adb reverse re-establish failed for \(serial)"
+                }
             }
         }
     }
@@ -90,24 +119,41 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
         adbPath != nil
     }
 
-    /// Search common locations for adb binary (GUI apps have restricted PATH)
+    /// Search common locations for adb binary (GUI apps have restricted PATH).
+    /// Prioritizes bundled adb in Contents/Helpers/ for App Sandbox compatibility.
     private static func findAdb() -> String? {
+        // 1. Bundled adb (copied by copy-adb.sh build script) — Sandbox-safe
+        let bundledPath = Bundle.main.bundlePath + "/Contents/Helpers/adb"
+        if FileManager.default.isExecutableFile(atPath: bundledPath) {
+            DaemonLogger.shared.debug("ADB", "Using bundled adb at \(bundledPath)")
+            return bundledPath
+        }
+
+        // 2. Fallback: external paths (works outside Sandbox / development builds)
+        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let candidates = [
-            "\(NSHomeDirectory())/Library/Android/sdk/platform-tools/adb",
+            "\(realHome)/Library/Android/sdk/platform-tools/adb",
+            "\(realHome)/Android/sdk/platform-tools/adb",
+            "\(realHome)/Library/Developer/Android/sdk/platform-tools/adb",
             "/usr/local/bin/adb",
             "/opt/homebrew/bin/adb",
             "/usr/bin/adb",
         ]
         for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
+            // isExecutableFile may fail in App Sandbox even when file exists — fall back to fileExists
+            if FileManager.default.isExecutableFile(atPath: path) || FileManager.default.fileExists(atPath: path) {
                 DaemonLogger.shared.debug("ADB", "Found adb at \(path)")
                 return path
             }
         }
+        DaemonLogger.shared.debug("ADB", "adb not found — checked bundled path and \(candidates.count) external paths")
         // Fallback: try which via shell (works from terminal, not GUI)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["which", "adb"]
+        process.arguments = [
+            "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:\(realHome)/Library/Android/sdk/platform-tools:\(realHome)/Android/sdk/platform-tools:\(realHome)/Library/Developer/Android/sdk/platform-tools",
+            "which", "adb"
+        ]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -132,6 +178,7 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
     }
 
     private func runProcess(timeout: TimeInterval, _ args: [String]) -> (status: Int32?, stdout: Data) {
+        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let process = Process()
         // Use resolved adb path for adb commands, /usr/bin/env for others
         if let adb = adbPath, args.first == "adb" {
@@ -141,6 +188,18 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = args
         }
+        var env = ProcessInfo.processInfo.environment
+        env["HOME"] = realHome
+        env["PATH"] = [
+            "\(realHome)/Library/Android/sdk/platform-tools",
+            "\(realHome)/Android/sdk/platform-tools",
+            "\(realHome)/Library/Developer/Android/sdk/platform-tools",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        ].joined(separator: ":")
+        process.environment = env
 
         let stdoutPipe = Pipe()
         process.standardOutput = stdoutPipe

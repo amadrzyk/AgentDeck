@@ -132,6 +132,15 @@ struct DashboardState: Sendable {
     var oauthConnected: Bool?
     var ollamaStatus: OllamaStatus?
     var usageStale: Bool?
+    var codexAuthMode: String?
+    var codexWebAuthConnected: Bool?
+    var codexPlanType: String?
+    var codexAccountId: String?
+    var codexSubscriptionActiveUntil: String?
+    var codexLastRefreshAt: String?
+    var mlxModels: [String] = []
+    var subscriptions: [SubscriptionInfo] = []
+    var antigravityStatus: AntigravityStatusInfo?
 
     // Voice
     var voiceState: String?  // idle | recording | transcribing | error

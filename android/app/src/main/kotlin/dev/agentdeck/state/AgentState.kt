@@ -10,6 +10,8 @@ import dev.agentdeck.net.OllamaStatus
 import dev.agentdeck.net.PermissionMode
 import dev.agentdeck.net.PromptOption
 import dev.agentdeck.net.SessionInfo
+import dev.agentdeck.net.SubscriptionInfo
+import dev.agentdeck.net.AntigravityStatusInfo
 import dev.agentdeck.net.StateUpdate
 import dev.agentdeck.net.UsageUpdate
 import dev.agentdeck.net.VoiceState
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 private const val TAG = "Terrarium"
+private val AGGREGATE_AGENT_TYPES = setOf("daemon", "openclaw")
 
 data class DashboardState(
     val agentState: AgentState = AgentState.DISCONNECTED,
@@ -58,6 +61,9 @@ data class DashboardState(
     val voiceAssistantState: String? = null,
     val voiceAssistantText: String? = null,
     val voiceAssistantResponseText: String? = null,
+    val mlxModels: List<String> = emptyList(),
+    val subscriptions: List<SubscriptionInfo> = emptyList(),
+    val antigravityStatus: AntigravityStatusInfo? = null,
 )
 
 class AgentStateHolder private constructor() {
@@ -83,7 +89,15 @@ class AgentStateHolder private constructor() {
             is BridgeEvent.State -> {
                 Log.d(TAG, "StateEvent: state=${event.data.state}, agentType=${event.data.agentType}, tool=${event.data.currentTool}")
                 _state.update { current ->
-                    val resolvedAgentType = event.data.agentType ?: current.agentType
+                    val keepAggregateIdentity =
+                        current.agentType in AGGREGATE_AGENT_TYPES &&
+                            event.data.agentType != null &&
+                            event.data.agentType !in AGGREGATE_AGENT_TYPES &&
+                            current.siblingSessions.isNotEmpty()
+                    val resolvedAgentType = when {
+                        keepAggregateIdentity -> current.agentType
+                        else -> event.data.agentType ?: current.agentType
+                    }
                     Log.d(TAG, "AgentType resolve: event=${event.data.agentType}, current=${current.agentType}, resolved=$resolvedAgentType")
                     current.copy(
                         agentState = event.data.state,
@@ -92,9 +106,9 @@ class AgentStateHolder private constructor() {
                         currentTool = event.data.currentTool,
                         toolInput = event.data.toolInput,
                         toolProgress = event.data.toolProgress,
-                        projectName = event.data.projectName ?: current.projectName,
-                        modelName = event.data.modelName ?: current.modelName,
-                        effortLevel = event.data.effortLevel ?: current.effortLevel,
+                        projectName = if (keepAggregateIdentity) current.projectName else event.data.projectName ?: current.projectName,
+                        modelName = if (keepAggregateIdentity) current.modelName else event.data.modelName ?: current.modelName,
+                        effortLevel = if (keepAggregateIdentity) current.effortLevel else event.data.effortLevel ?: current.effortLevel,
                         billingType = event.data.billingType ?: current.billingType,
                         options = event.data.options ?: emptyList(),
                         promptType = event.data.promptType,
@@ -109,6 +123,9 @@ class AgentStateHolder private constructor() {
                         cursorIndex = event.data.cursorIndex,
                         workerSessionCount = event.data.workerSessionCount ?: current.workerSessionCount,
                         ollamaStatus = event.data.ollamaStatus ?: current.ollamaStatus,
+                        mlxModels = event.data.mlxModels ?: current.mlxModels,
+                        subscriptions = event.data.subscriptions ?: current.subscriptions,
+                        antigravityStatus = event.data.antigravityStatus ?: current.antigravityStatus,
                         gatewayAvailable = event.data.gatewayAvailable ?: current.gatewayAvailable,
                         gatewayHasError = event.data.gatewayHasError ?: current.gatewayHasError,
                         voiceAssistantState = event.data.voiceAssistantState ?: current.voiceAssistantState,
@@ -130,6 +147,10 @@ class AgentStateHolder private constructor() {
                     usage = event.data,
                     oauthConnected = event.data.oauthConnected ?: it.oauthConnected,
                     ollamaStatus = event.data.ollamaStatus ?: it.ollamaStatus,
+                    modelCatalog = event.data.modelCatalog ?: it.modelCatalog,
+                    mlxModels = event.data.mlxModels ?: it.mlxModels,
+                    subscriptions = event.data.subscriptions ?: it.subscriptions,
+                    antigravityStatus = event.data.antigravityStatus ?: it.antigravityStatus,
                 ) }
                 lastKnownState = _state.value
                 SessionMetrics.instance.onMessageReceived()

@@ -96,6 +96,9 @@ data class StateUpdate(
     val pairingUrl: String? = null,
     val workerSessionCount: Int? = null,
     val ollamaStatus: OllamaStatus? = null,
+    val mlxModels: List<String>? = null,
+    val subscriptions: List<SubscriptionInfo>? = null,
+    val antigravityStatus: AntigravityStatusInfo? = null,
     val gatewayAvailable: Boolean? = null,
     val gatewayHasError: Boolean? = null,
     val voiceAssistantState: String? = null,
@@ -127,6 +130,29 @@ data class UsageUpdate(
     val ollamaStatus: OllamaStatus? = null,
     val usageStale: Boolean? = null,
     val tokenStatus: String? = null,  // "valid" | "expired" | "missing" | "unknown"
+    val codexAuthMode: String? = null,
+    val codexWebAuthConnected: Boolean? = null,
+    val codexPlanType: String? = null,
+    val codexAccountId: String? = null,
+    val codexSubscriptionActiveUntil: String? = null,
+    val codexLastRefreshAt: String? = null,
+    val modelCatalog: List<ModelCatalogEntry>? = null,
+    val mlxModels: List<String>? = null,
+    val subscriptions: List<SubscriptionInfo>? = null,
+    val antigravityStatus: AntigravityStatusInfo? = null,
+)
+
+@Serializable
+data class SubscriptionInfo(
+    val name: String,
+    val until: String? = null,
+)
+
+@Serializable
+data class AntigravityStatusInfo(
+    val planName: String? = null,
+    val availableCredits: Int? = null,
+    val minimumCreditAmountForUsage: Int? = null,
 )
 
 @Serializable

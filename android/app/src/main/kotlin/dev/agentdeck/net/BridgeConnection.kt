@@ -31,8 +31,9 @@ class BridgeConnection private constructor() {
         val instance: BridgeConnection by lazy { BridgeConnection() }
         private const val INITIAL_BACKOFF_MS = 1000L
         private const val MAX_BACKOFF_MS = 8_000L
-        /** Stop reconnecting to localhost after this many failures (allow mDNS fallback). */
+        /** After a short burst, keep retrying localhost at a slower cadence instead of giving up. */
         private const val MAX_LOCALHOST_ATTEMPTS = 5
+        private const val LOCALHOST_STEADY_RETRY_MS = 30_000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -112,6 +113,10 @@ class BridgeConnection private constructor() {
         }
     }
 
+    private fun isLocalhostUrl(url: String): Boolean {
+        return url.contains("127.0.0.1") || url.contains("localhost")
+    }
+
     private fun doConnect(wsUrl: String) {
         if (_status.value == ConnectionStatus.CONNECTING) {
             Log.d(TAG, "doConnect($wsUrl) — skipped, already CONNECTING")
@@ -182,22 +187,26 @@ class BridgeConnection private constructor() {
         _isReconnecting.value = true
         _reconnectAttempt.value++
 
-        // Give up reconnecting to localhost after MAX_LOCALHOST_ATTEMPTS —
-        // adb reverse tunnel is likely broken, let user choose WiFi/mDNS instead
-        val isLocalhost = currentUrl.contains("127.0.0.1") || currentUrl.contains("localhost")
-        if (isLocalhost && _reconnectAttempt.value > MAX_LOCALHOST_ATTEMPTS) {
-            Log.w(TAG, "Giving up localhost reconnect after ${_reconnectAttempt.value} attempts — adb reverse likely broken")
-            shouldReconnect = false
-            _isReconnecting.value = false
-            _url.value = null  // Clear URL so mDNS discovery activates
-            _lastError.value = "USB connection lost"
-            return
+        val isLocalhost = isLocalhostUrl(currentUrl)
+        val delayMs = if (isLocalhost && _reconnectAttempt.value > MAX_LOCALHOST_ATTEMPTS) {
+            Log.w(
+                TAG,
+                "localhost reconnect still failing after ${_reconnectAttempt.value} attempts — switching to steady ${LOCALHOST_STEADY_RETRY_MS}ms retries"
+            )
+            _lastError.value = "Waiting for USB bridge"
+            LOCALHOST_STEADY_RETRY_MS
+        } else {
+            backoffMs
         }
 
-        Log.d(TAG, "scheduleReconnect — attempt=${_reconnectAttempt.value} backoff=${backoffMs}ms url=$currentUrl")
+        Log.d(TAG, "scheduleReconnect — attempt=${_reconnectAttempt.value} backoff=${delayMs}ms url=$currentUrl")
         scope.launch {
-            delay(backoffMs)
-            backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)
+            delay(delayMs)
+            backoffMs = if (isLocalhost && _reconnectAttempt.value >= MAX_LOCALHOST_ATTEMPTS) {
+                MAX_BACKOFF_MS
+            } else {
+                min(backoffMs * 2, MAX_BACKOFF_MS)
+            }
             if (shouldReconnect && _status.value == ConnectionStatus.DISCONNECTED) {
                 doConnect(currentUrl)
             }

@@ -3,7 +3,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(AgentStateHolder.self) private var stateHolder
+    @EnvironmentObject private var stateHolder: AgentStateHolder
+    @EnvironmentObject private var preferences: AppPreferences
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {

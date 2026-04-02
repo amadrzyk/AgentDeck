@@ -5,13 +5,13 @@
 // Safety: auto-restores after timeout to prevent permanently dimmed screen.
 
 import Foundation
+import Combine
 #if canImport(UIKit)
 import UIKit
 #endif
 
-@Observable
-final class DisplaySyncService: @unchecked Sendable {
-    var enabled = true
+final class DisplaySyncService: ObservableObject, @unchecked Sendable {
+    @Published var enabled = true
 
     #if os(iOS)
     private var savedBrightness: CGFloat?

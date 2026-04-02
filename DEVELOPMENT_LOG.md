@@ -2,6 +2,149 @@
 
 ---
 
+## 2026-04-03 — App Store-Safe Optional Antigravity Access + Dashboard Preferences
+
+### 문제
+Antigravity 상태 표시는 `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb`를 직접 읽는 방식이었다. 이 경로는 개발 환경에서는 동작할 수 있어도, Mac App Store 배포 기준의 App Sandbox와 맞지 않는다. 또한 Dashboard와 메뉴바 동작, Tank Status 섹션 노출 여부를 사용자가 조정할 방법이 부족했다.
+
+### 해결
+- `apple/AgentDeck/App/AppPreferences.swift`
+  - 앱 전역 환경설정 객체 추가
+  - Dashboard 자동 열기, 메뉴바 아이콘 스타일, Session list / Tank status / Timeline / Settings button 노출 여부 저장
+  - `OpenClaw / MLX / OLLAMA / Antigravity / Subscriptions` 섹션별 표시 여부 저장
+  - Antigravity DB는 보안 범위 북마크(security-scoped bookmark) 기반 opt-in 접근으로 전환
+  - 기본값은 `showAntigravitySection = false`
+- `apple/AgentDeck/Daemon/Core/UsageAPIClient.swift`
+  - 더 이상 사용자 홈 경로를 직접 훑지 않음
+  - `AppPreferences.shared.withAntigravityDatabaseAccess`를 통해 사용자가 승인한 `state.vscdb`에만 접근
+  - Antigravity 정보는 확실한 `planName`을 읽을 수 있을 때만 생성
+- `apple/AgentDeck/App/AgentDeckApp.swift`
+  - 메뉴바에서 Dashboard show/hide 토글 제공
+  - 메뉴바 아이콘 스타일을 `Status / App / Minimal`로 선택 가능하게 함
+- `apple/AgentDeck/UI/Settings/SettingsScreen.swift`
+  - Dashboard 패널/섹션 표시 제어 UI 추가
+  - Antigravity 접근 허용/제거 UI 추가
+
+### 원칙
+- **App Store-safe by default**: Antigravity는 기본적으로 꺼져 있고, 사용자가 직접 파일 접근을 허용해야만 표시
+- **정보를 못 읽으면 표시하지 않음**: 애매한 fallback이나 추정값 없이, 확실한 로컬 상태만 노출
+- **Dashboard는 사용자 취향에 맞게 조정 가능**: 메뉴바 아이콘, Dashboard 자동 열기, Tank Status 섹션을 환경설정으로 제어
+
+## 2026-04-03 — CLI Daemon Parity for Engine Snapshot + Antigravity + MLX
+
+### 문제
+최근 엔진 상태 섹션(`OpenClaw / OLLAMA / MLX / Subscriptions / Antigravity`)과 MLX/Antigravity probe 보강은 주로 Swift daemon 경로에 먼저 반영돼 있었다. 그 결과 기존 Node CLI daemon은 같은 Dashboard를 띄워도 다음 차이가 남아 있었다.
+
+- `usage_update`에 `modelCatalog`와 `antigravityStatus`가 빠져 초기 동기화가 약했음
+- `state_update`에 `mlxModels`, `subscriptions`, `antigravityStatus`가 없어 Dashboard 섹션이 경로마다 다르게 채워졌음
+- MLX probe가 `/v1/models`만 가정해, `/models`를 쓰는 로컬 MLX 서버를 빈 상태로 오인했음
+- Antigravity 로컬 quota는 Swift daemon에서만 보이고 CLI daemon에서는 비어 있었음
+- OpenClaw model catalog / Ollama / MLX 값이 바뀌어도 partial event만 보내 초기 화면이 엇갈릴 수 있었음
+
+### 해결
+- `bridge/src/mlx-probe.ts`
+  - MLX probe를 `/v1/models` 우선, `/models` fallback으로 확장
+- `bridge/src/antigravity-local.ts`
+  - `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb`를 직접 읽는 local-only Antigravity parser 추가
+  - `planName`, `availableCredits`, `minimumCreditAmountForUsage` 추출
+- `bridge/src/usage-event.ts`
+  - `buildUsageEvent()`가 `modelCatalog`, `antigravityStatus`까지 포함하도록 확장
+  - `buildSubscriptions()`를 공용 helper로 분리
+- `bridge/src/bridge-core.ts`
+  - `state_update`와 `usage_update` 양쪽에 공통 엔진 스냅샷이 실리도록 정리
+  - `mlxModels`, `subscriptions`, `antigravityStatus`를 state payload에 포함
+  - `cachedAntigravityStatus` 캐시 추가
+  - `startOllamaProbe()` / `startMlxProbe()`가 값 변경 시 즉시 `state_changed`를 emit하도록 보강
+  - `startAntigravityProbe()` 추가
+- `bridge/src/index.ts`, `bridge/src/daemon-server.ts`
+  - `model_catalog` 수신 시 partial `state_update` 대신 `core.buildStateEvent()` + `broadcastUsage()`로 full snapshot 재전송
+  - CLI session / daemon startup 모두 `startAntigravityProbe()` 시작
+- `bridge/src/types.ts`
+  - protocol 타입은 `@agentdeck/shared/protocol`에서 직접 재수출하도록 정리해 workspace 타입 해석 안정화
+
+### 핵심 설계 결정
+- **Swift와 CLI daemon은 같은 엔진 상태 스냅샷 규약을 써야 한다.** 특정 UI가 어느 daemon에 붙느냐에 따라 `OpenClaw / MLX / Subscriptions / Antigravity` 표시가 달라지면 안 된다.
+- **Antigravity는 local-only 유지**: cloud/API fallback 없이, 로컬 IDE가 저장한 상태가 있을 때만 표시한다.
+- **probe 변화는 partial patch가 아니라 full snapshot으로 재브로드캐스트**: 초기 연결 이후에 들어온 model catalog / MLX / Antigravity 값도 Dashboard 전체가 일관되게 갱신되도록 맞췄다.
+
+### 검증
+- `pnpm --filter @agentdeck/shared typecheck`
+- `pnpm --filter @agentdeck/shared build`
+- `pnpm --filter @agentdeck/bridge typecheck`
+- `pnpm --filter @agentdeck/bridge build`
+- 결과: 모두 통과
+
+---
+
+## 2026-04-03 — Antigravity Local-Only Quota Surface in Swift Daemon + Dashboard Panels
+
+### 문제
+Antigravity 사용량은 외부 유틸리티(`antigravity-usage`)로는 확인할 수 있었지만, AgentDeck Dashboard 기본 기능으로는 보이지 않았다. 또한 cloud/API fallback 없이, Antigravity IDE가 이미 가진 로컬 상태만 이용해 가능한 경우에만 표시하고 싶었다.
+
+### 해결
+- `apple/AgentDeck/Daemon/Core/UsageAPIClient.swift`
+  - Antigravity 로컬 DB `~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb`를 직접 읽는 local-only parser 추가
+  - `antigravityAuthStatus`의 `userStatusProtoBinaryBase64`에서 `Google AI Pro/Ultra/...` 플랜 문자열 복구
+  - `antigravityUnifiedStateSync.modelCredits` protobuf/base64 sentinel 값을 풀어 `availableCredits`, `minimumCreditAmountForUsage` 복구
+- `apple/AgentDeck/Daemon/Server/DaemonServer.swift`
+  - `state_update`와 `usage_update`에 `antigravityStatus`를 함께 실어 대시보드 초기 연결 시점에도 엔진 정보가 빠지지 않도록 연결
+- `shared/src/protocol.ts`, `apple/AgentDeck/Model/Protocol.swift`, `android/.../Protocol.kt`
+  - 공용 `AntigravityStatusInfo` 필드 추가
+- `TankStatusPanel.swift`, `EnginePanel.kt`, `EinkStatusPanel.kt`, `EinkStatusCompact.kt`
+  - 값이 실제로 있을 때만 `Antigravity`/`AG` 섹션 표시
+  - 큰 화면은 `Google AI Pro · 1000 cr · min 50`, e-ink는 `Pro · 1000cr`처럼 더 압축된 표현 사용
+
+### 핵심 설계 결정
+- **fallback 없이 local-only**: Google Cloud API나 별도 로그인 경로는 붙이지 않고, Antigravity IDE가 이미 가진 로컬 상태가 있을 때만 표시
+- **프로토콜은 optional 확장**: Node daemon이 아직 이 값을 생산하지 않아도, Swift daemon 경로에서만 우선 표시 가능하도록 optional 필드로 추가
+- **구독 정보와 사용량 정보 분리**: `Subscriptions`와 별개로 `Antigravity` 섹션에서 플랜과 크레딧을 함께 보여 usage 성격을 더 명확히 함
+
+### 검증
+- `pnpm --filter @agentdeck/shared typecheck`
+- `./gradlew :app:compileDebugKotlin`
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataAntigravity build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`
+
+## 2026-04-03 — TC001 SEARCHING Flap 조사 및 Swift Serial 안정화
+
+### 문제
+Ulanzi TC-001가 정상 화면과 `SEARCHING...` 오버레이 사이를 반복했다. Swift daemon `/health`에서는 `/dev/cu.wchusbserial211340`가 반복적으로 `connected: false`로 떨어졌고, `~/.agentdeck/swift-daemon.log`에는 약 10초 간격으로 `Opened` → `device_info` → `Read exit ... errno=9` 패턴이 계속 남았다.
+
+### 해결
+- `apple/AgentDeck/Daemon/Modules/ESP32Serial.swift`
+  - UART(CH340/CP210x) termios 설정에서 `HUPCL`을 명시적으로 끄도록 변경해 Node serial bridge의 `stty ... -hupcl` 동작과 맞춤
+  - serial read thread가 `FileHandle`을 명시적으로 retain 하도록 변경해 reader lifetime이 connection struct/ARC 타이밍에 간접 의존하지 않게 보강
+  - `<<EOF>>` 단일 sentinel 대신 `errno`와 strerror를 포함한 read failure 메시지를 health/log에 남기도록 개선
+
+### 핵심 설계 결정
+- **Swift daemon은 Node serial bridge와 포트 제어 parity를 유지해야 한다.** 특히 UART 계열 ESP32는 `hupcl` 여부에 민감하고, Node 구현에서 이미 안정화된 termios 차이를 그대로 두면 보드별로만 재현되는 플랩이 생길 수 있다.
+- **fd lifetime은 암묵적 보장에 맡기지 않는다.** read thread가 raw fd만 들고 돌면 handle 소유권이 struct copy/cleanup 경로에 묻히기 쉽다. reader가 직접 handle을 붙잡아 두는 편이 안전하다.
+
+## 2026-04-03 — Android E-ink Terrarium Multi-Agent Consistency Fix
+
+### 문제
+CremaS에서 ADB를 수동 활성화한 뒤에도 terrarium 표시가 세션 목록과 일치하지 않았다. 상단에는 `OpenClaw`, `Codex CLI`, `OpenCode`, 일반 coding agent 세션이 보이는데, 수조에는 일부 생물만 보이거나 idle 생물들이 한 지점에 겹쳐 보였다. 또한 저장된 WiFi URL이 있으면 USB `adb reverse`보다 먼저 그 주소로 재접속을 시도해, USB 연결을 켠 직후에도 경로가 일관되지 않았다.
+
+### 해결
+- `android/.../EinkRenderer.kt`
+  - `drawEinkCloud()`와 `drawEinkOpenCode()`가 idle/sleep 상태에서 전달받은 레이아웃 슬롯을 무시하고 고정 Y 좌표로 내려앉던 문제를 수정
+  - 모든 상태에서 `centerXFraction` / `centerYFraction` 기반으로 배치하고, 상태별로는 작은 bob 애니메이션만 더하도록 변경
+- `android/.../MainActivity.kt`
+- `android/.../ui/screen/EinkMonitorScreen.kt`
+  - 자동 연결 순서를 `saved URL → localhost → mDNS`에서 `localhost → saved URL → mDNS`로 변경
+  - CremaS처럼 USB `adb reverse`가 가능한 기기에서 저장된 WiFi URL 때문에 경로가 흔들리지 않도록 정렬
+- `android/.../state/AgentState.kt`
+  - daemon/openclaw aggregate 상태에서 relayed child session `state_update`가 들어와도 primary `agentType`/project/model이 불필요하게 흔들리지 않도록 안정화
+
+### 검증
+- `./gradlew :app:compileDebugKotlin`
+- `bash scripts/build-android-release.sh`
+- `adb -s CREMAA21W09235 install -r dist/agentdeck-v0.3.0.apk`
+- 설치 후 CremaS 캡처에서 `OpenCode` square, `Codex CLI` cloud, `OpenClaw`, 일반 agent가 동시에 보이는지 확인
+- `adb shell ss -tan | rg 9120` 결과가 `127.0.0.1:9120` loopback 연결로 잡히는 것 확인
+
+---
+
 ## 2026-04-02 — Swift Daemon ESP32 Serial 통신 수정
 
 ### 문제
@@ -42,6 +185,30 @@ Codex / ChatGPT 웹 인증으로 Codex를 쓰는 경우, 공식 OpenAI usage/cos
 - 결과: 통과
 - `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS ...`
 - 결과: Swift 쪽 신규 필드 컴파일은 진행됐고, 최종 실패는 DerivedData dependency file 생성 환경 문제
+
+### 후속 수정
+- `~/.codex/auth.json`의 `chatgpt_plan_type`, `chatgpt_subscription_active_until`, `chatgpt_account_id`는 JWT payload 최상위가 아니라 `https://api.openai.com/auth` namespace 안에 들어 있었다.
+- `bridge/src/codex-auth.ts`와 `apple/AgentDeck/Daemon/Core/UsageAPIClient.swift`가 이 중첩 claim을 읽지 못해, 실제 Plus/Pro 계정이어도 UI에서 plan/until이 비어 보일 수 있었다.
+- 중첩 namespace 파싱을 추가해 `ChatGPT Plus/Pro`와 `Until`이 정상적으로 복구되도록 수정했다.
+
+### 추가 검증
+- `pnpm --filter @agentdeck/shared typecheck`
+- `pnpm --filter @agentdeck/bridge typecheck`
+- `pnpm --filter @agentdeck/plugin typecheck`
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataVerify build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`
+
+### UI 재구성 후속
+- `TankStatusPanel.swift`를 `OpenClaw / OLLAMA / MLX / Subscriptions` 섹션 구조로 재구성
+- `ChatGPT Plus · 2026-04-19`처럼 플랜과 만료일을 한 줄로 표시하도록 변경
+- `OAuth` 점 라벨은 제거하고, 구독형 인증 서비스는 `subscriptions` 배열로 별도 노출
+- `MLX`는 `http://127.0.0.1:8800/v1/models` probe를 추가해 모델 목록을 수집
+- `Ollama`는 `/api/ps` 기준으로 현재 실제 구동중인 모델 목록을 우선 노출
+- Android monitor / e-ink status panel도 같은 섹션 구조로 맞춤
+
+### 비고
+- Claude 쪽은 현재 daemon이 정확한 플랜명(`Claude Max`)을 항상 보장하지 못해 우선 `Claude Subscription`으로 노출
+- ChatGPT는 web auth JWT의 OpenAI auth namespace에서 정확한 plan/until을 복구
 
 ---
 
@@ -4137,3 +4304,31 @@ Swift daemon의 Pixoo는 HTTP 전송 자체는 되기 시작했지만, CLI daemo
 - Fixed a daemon startup race in the macOS app lifecycle.
   - When `DaemonServer` reports `alreadyRunning(port:)` during local startup, `DaemonService` now retries health probing for a short period before declaring the registry stale.
   - This avoids false-negative external-daemon detection during normal startup overlap.
+
+## 2026-04-03 — Dashboard Engine Sections Initial Sync Hardening
+
+### 문제
+macOS Dashboard의 `OpenClaw / OLLAMA / MLX / Subscriptions` 섹션이 의도한 구조로 렌더되더라도, 초기 연결 시점에는 일부 섹션이 비어 보일 수 있었다. 원인은 엔진 상태가 서로 다른 이벤트 경로에 흩어져 있었기 때문이다.
+
+- `modelCatalog`는 주로 `state_update`에만 실려 `OpenClaw` 섹션이 빈 채 남을 수 있었음
+- `OLLAMA / MLX / Subscriptions`는 `usage_update` 중심이라 probe가 이미 끝났더라도 UI 반영이 늦을 수 있었음
+- Gateway model catalog / Ollama / MLX probe 값이 바뀌어도 즉시 브로드캐스트되지 않는 경로가 있었음
+
+### 해결
+- `DaemonServer.swift`
+  - `modelCatalog + ollamaStatus + mlxModels + subscriptions`를 공통 엔진 상태 스냅샷으로 묶어 `state_update`와 `usage_update` 양쪽에 모두 포함
+  - Gateway `model_catalog` 수신 시 `broadcastStateUpdate()`와 함께 `broadcastUsage()`도 수행
+  - sibling relay를 통한 model catalog merge 시에도 즉시 두 이벤트를 모두 재브로드캐스트
+  - Gateway disconnect로 model catalog가 비워질 때도 상태/usage를 같이 갱신
+  - Ollama / MLX probe 결과가 이전 값과 달라지면 즉시 상태/usage를 같이 브로드캐스트
+- `Protocol.swift` / `shared/src/protocol.ts` / Android `Protocol.kt`
+  - `UsageEvent`/`UsageUpdate`에 `modelCatalog` 추가
+  - `StateUpdateEvent`/`StateUpdate`에 `mlxModels`, `subscriptions` 추가
+- `AgentStateHolder.swift` / Android `AgentState.kt`
+  - `state_update`와 `usage_update` 어느 쪽으로 오더라도 engine section 데이터가 상태에 반영되도록 처리
+
+### 검증
+- `pnpm --filter @agentdeck/shared typecheck`
+- 결과: 통과
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataDashboardSync build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`

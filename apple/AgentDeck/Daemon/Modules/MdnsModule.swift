@@ -23,7 +23,11 @@ final class MdnsModule: DeviceModule, @unchecked Sendable {
     func start() async {
         do {
             let params = NWParameters.tcp
-            let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+            guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+                DaemonLogger.shared.info("mDNS: Invalid port \(port)")
+                return
+            }
+            let listener = try NWListener(using: params, on: nwPort)
 
             // Advertise Bonjour service
             let txtRecord = NWTXTRecord([

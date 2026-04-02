@@ -36,7 +36,7 @@ function getActiveGroups(): string[][] {
   const groups: string[][] = [];
   if (encoderRegistry.utilityIds.length > 0) groups.push(encoderRegistry.utilityIds);
   if (encoderRegistry.optionIds.length > 0) groups.push(encoderRegistry.optionIds);
-  if (encoderRegistry.itermIds.length > 0) groups.push(encoderRegistry.itermIds);
+  if (encoderRegistry.usageIds.length > 0) groups.push(encoderRegistry.usageIds);
   if (encoderRegistry.voiceIds.length > 0) groups.push(encoderRegistry.voiceIds);
   return groups;
 }
@@ -46,7 +46,7 @@ function getAllIds(): string[] {
   return [
     ...encoderRegistry.utilityIds,
     ...encoderRegistry.optionIds,
-    ...encoderRegistry.itermIds,
+    ...encoderRegistry.usageIds,
     ...encoderRegistry.voiceIds,
   ];
 }
@@ -74,7 +74,7 @@ export async function enterEncoderTakeover(): Promise<void> {
   active = true;
   resetWideScroll();
   const groups = getActiveGroups();
-  dlog('Takeover', `enter ${groups.length} groups (util=${encoderRegistry.utilityIds.length} opt=${encoderRegistry.optionIds.length} iterm=${encoderRegistry.itermIds.length} voice=${encoderRegistry.voiceIds.length})`);
+  dlog('Takeover', `enter ${groups.length} groups (util=${encoderRegistry.utilityIds.length} opt=${encoderRegistry.optionIds.length} usage=${encoderRegistry.usageIds.length} voice=${encoderRegistry.voiceIds.length})`);
 
   const promises: Promise<void>[] = [];
   for (const id of getAllIds()) {

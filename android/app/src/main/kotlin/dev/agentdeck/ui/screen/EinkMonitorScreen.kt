@@ -84,6 +84,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "EinkMonitor"
 
+private fun shouldPersistBridgeUrl(url: String?): Boolean {
+    return url != null && !url.contains("127.0.0.1") && !url.contains("localhost")
+}
+
 @Composable
 fun EinkMonitorScreen(
     stateHolder: AgentStateHolder,
@@ -111,8 +115,10 @@ fun EinkMonitorScreen(
         when {
             connectionStatus == ConnectionStatus.CONNECTED -> {
                 discoveredBridges = emptyList()
-                // Persist URL on successful connection
-                currentUrl?.let { displayPrefs.setLastBridgeUrl(it) }
+                // Keep the last network URL stable; localhost is always known implicitly.
+                if (shouldPersistBridgeUrl(currentUrl)) {
+                    displayPrefs.setLastBridgeUrl(currentUrl)
+                }
             }
             else -> {
                 // DISCONNECTED or CONNECTING — run mDNS to show alternatives
@@ -123,19 +129,23 @@ fun EinkMonitorScreen(
         }
     }
 
-    // Auto-connect: saved URL → localhost (USB) → mDNS (WiFi)
+    // Auto-connect: localhost (USB) → saved URL → mDNS (WiFi)
     LaunchedEffect(Unit) {
-        val savedUrl = displayPrefs.lastBridgeUrlFlow.first()
-        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
-        if (savedUrl != null) {
-            connection.autoConnect(savedUrl)
-            delay(5000)
+        val rawSavedUrl = displayPrefs.lastBridgeUrlFlow.first()
+        val savedUrl = rawSavedUrl?.takeUnless { !shouldPersistBridgeUrl(it) }
+        if (rawSavedUrl != null && savedUrl == null) {
+            displayPrefs.setLastBridgeUrl(null)
         }
+        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
         // Try localhost (adb reverse USB connection) before mDNS
         if (connection.status.value != ConnectionStatus.CONNECTED) {
             Log.i(TAG, "Trying localhost:${BridgeConstants.WS_PORT} (USB)...")
             connection.connect(BridgeConstants.LOCALHOST_WS_URL)
             delay(3000)
+        }
+        if (savedUrl != null && connection.status.value != ConnectionStatus.CONNECTED) {
+            connection.autoConnect(savedUrl)
+            delay(5000)
         }
         // If still disconnected, try mDNS discovery with daemon grace period
         if (connection.status.value != ConnectionStatus.CONNECTED) {

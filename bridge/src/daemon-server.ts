@@ -353,6 +353,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (merged.length !== existing.length) {
       core.cachedModelCatalog = merged;
       debug('daemon', `Model catalog merged from sibling: ${merged.length} models total`);
+      const snap = core.stateMachine.getSnapshot();
+      const stateEvent = core.buildStateEvent({
+        agentType: gatewayAdapter?.isAlive() ? 'openclaw' : 'daemon' as any,
+        agentCapabilities: gatewayAdapter?.isAlive() ? OPENCLAW_CAPABILITIES : undefined,
+        snapshot: snap,
+      });
+      lastStateEvent = stateEvent;
+      core.broadcast(stateEvent);
+      core.broadcastUsage();
     }
   });
   timelineRelay.start();
@@ -371,8 +380,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       };
       lastStateEvent = merged;
       core.wsServer.broadcast(merged);
+    } else if (evt.type === 'usage_update') {
+      // Sync daemon cache with relay's already-adjusted values (prevents oscillation)
+      const u = evt as any;
+      if (core.cachedApiUsage && u.fiveHourPercent != null) {
+        core.cachedApiUsage.fiveHourPercent = u.fiveHourPercent;
+        core.cachedApiUsage.fiveHourResetsAt = u.fiveHourResetsAt ?? null;
+        core.cachedApiUsage.sevenDayPercent = u.sevenDayPercent ?? core.cachedApiUsage.sevenDayPercent;
+        core.cachedApiUsage.sevenDayResetsAt = u.sevenDayResetsAt ?? core.cachedApiUsage.sevenDayResetsAt ?? null;
+        core.apiUsagePreAdjusted = true;
+      }
+      core.wsServer.broadcast(evt);
     } else {
-      // prompt_options, usage_update — relay as-is
+      // prompt_options — relay as-is
       core.wsServer.broadcast(evt);
     }
   });
@@ -475,10 +495,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             if (models) {
               core.cachedModelCatalog = models;
               const snap = core.stateMachine.getSnapshot();
-              core.broadcast({
-                type: 'state_update', state: snap.state, permissionMode: snap.permissionMode,
-                agentType: 'openclaw', modelCatalog: core.cachedModelCatalog,
-              } as BridgeEvent);
+              const stateEvent = core.buildStateEvent({
+                agentType: 'openclaw',
+                agentCapabilities: OPENCLAW_CAPABILITIES,
+                snapshot: snap,
+              });
+              lastStateEvent = stateEvent;
+              core.broadcast(stateEvent);
+              core.broadcastUsage();
             }
           } else if (evt.event === 'gateway_health') {
             // Use real-time health event from Gateway WS instead of polling `openclaw doctor`
@@ -723,6 +747,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   // ===== Probes & polling =====
   core.startOllamaProbe();
+  core.startMlxProbe();
+  core.startAntigravityProbe();
   core.startGatewayProbe(5000,
     () => connectGatewayAdapter(),
     () => { if (gatewayAdapter && !gatewayAdapter.isAlive()) disconnectGatewayAdapter(); },

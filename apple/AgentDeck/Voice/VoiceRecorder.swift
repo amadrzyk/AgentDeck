@@ -1,10 +1,14 @@
 // VoiceRecorder.swift — AVAudioEngine recording → WAV → HTTP POST
 
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
+import Combine
 
-@Observable
-final class VoiceRecorder: @unchecked Sendable {
+final class VoiceRecorder: ObservableObject, @unchecked Sendable {
+    private final class ConversionInputBox: @unchecked Sendable {
+        var inputUsed = false
+    }
+
     enum State: Sendable {
         case idle
         case recording
@@ -12,9 +16,9 @@ final class VoiceRecorder: @unchecked Sendable {
         case error(String)
     }
 
-    private(set) var state: State = .idle
-    private(set) var transcription: String?
-    private(set) var recordingDuration: TimeInterval = 0
+    @Published private(set) var state: State = .idle
+    @Published private(set) var transcription: String?
+    @Published private(set) var recordingDuration: TimeInterval = 0
 
     private var audioEngine: AVAudioEngine?
     private var tempFileURL: URL?
@@ -142,13 +146,13 @@ final class VoiceRecorder: @unchecked Sendable {
                                                           frameCapacity: frameCount) else { continue }
 
             var error: NSError?
-            var inputUsed = false
+            let inputBox = ConversionInputBox()
             converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-                if inputUsed {
+                if inputBox.inputUsed {
                     outStatus.pointee = .noDataNow
                     return nil
                 }
-                inputUsed = true
+                inputBox.inputUsed = true
                 outStatus.pointee = .haveData
                 return buffer
             }

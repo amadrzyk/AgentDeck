@@ -3,7 +3,7 @@
 import SwiftUI
 
 struct ActivityPanel: View {
-    @Environment(AgentStateHolder.self) private var stateHolder
+    @EnvironmentObject private var stateHolder: AgentStateHolder
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

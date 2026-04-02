@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
 import dev.agentdeck.util.formatBytes
@@ -152,32 +153,47 @@ private fun GaugeText(label: String, percent: Double, resetTime: String, stale: 
 
 @Composable
 private fun ModelsColumn(state: DashboardState) {
-    SectionLabel("MODELS")
-
-    val catalog = state.modelCatalog
-    if (state.oauthConnected == true) {
-        val modelText = if (catalog != null && catalog.isNotEmpty()) {
-            val names = catalog.filter { it.available }.map { abbreviateModel(it.name) }
-            names.joinToString(", ")
-        } else {
-            "connected"
-        }
-        DataLine("OAuth: $modelText", maxLines = 2,
-            color = if (einkColorEnabled) Color(0xFF227733) else Color.Black)
-    } else if (state.oauthConnected == false) {
-        DataLine("OAuth: disconnected",
-            color = if (einkColorEnabled) Color(0xFFCC2222) else Color.Black)
+    val openClaw = openClawDisplayLines(state.modelCatalog.orEmpty())
+    if (openClaw.isNotEmpty()) {
+        SectionLabel("OPENCLAW")
+        DataLine(openClaw.joinToString(", "), maxLines = 1)
     }
 
-    val ollama = state.ollamaStatus
-    if (ollama != null && ollama.available && ollama.models.isNotEmpty()) {
-        val models = ollama.models.map { m ->
+    val ollama = state.ollamaStatus?.takeIf { it.available }?.models.orEmpty()
+    val runningOllama = ollama.filter { it.sizeVram > 0 }
+    val ollamaSource = if (runningOllama.isNotEmpty()) runningOllama else ollama
+    if (ollamaSource.isNotEmpty()) {
+        SectionLabel("OLLAMA")
+        val models = ollamaSource.map { m ->
             val sizeStr = if (m.sizeVram > 0) " ${formatBytes(m.sizeVram)}"
                 else if (m.size > 0) " ${formatBytes(m.size)}"
                 else ""
             "${m.name}$sizeStr"
         }
-        DataLine("Ollama: ${models.joinToString(", ")}")
+        DataLine(models.joinToString(", "), maxLines = 2)
+    }
+
+    if (state.mlxModels.isNotEmpty()) {
+        SectionLabel("MLX")
+        DataLine(state.mlxModels.joinToString(", "), maxLines = 1)
+    }
+
+    if (state.subscriptions.isNotEmpty()) {
+        SectionLabel("SUBS")
+        DataLine(
+            state.subscriptions.joinToString(", ") { it.name },
+            maxLines = 1,
+            color = if (einkColorEnabled) Color(0xFF227733) else Color.Black
+        )
+    }
+
+    antigravityDisplayLine(state)?.let { line ->
+        SectionLabel("AG")
+        DataLine(
+            line,
+            maxLines = 1,
+            color = if (einkColorEnabled) Color(0xFF335588) else Color.Black
+        )
     }
 }
 
@@ -186,6 +202,17 @@ private fun abbreviateModel(name: String): String {
     return name
         .replace("DeepSeek: DeepSeek ", "DS:")
         .replace("DeepSeek ", "DS:")
+}
+
+private fun openClawDisplayLines(modelCatalog: List<ModelCatalogEntry>): List<String> {
+    val primary = modelCatalog.firstOrNull { it.available && it.role == "default" }
+        ?: modelCatalog.firstOrNull { it.available }
+    return primary?.let { listOf(abbreviateModel(it.name)) } ?: emptyList()
+}
+
+private fun antigravityDisplayLine(state: DashboardState): String? {
+    val status = state.antigravityStatus ?: return null
+    return status.planName?.replace("Google AI ", "")?.takeIf { it.isNotBlank() }
 }
 
 // -- Shared --

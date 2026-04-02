@@ -63,7 +63,10 @@ actor WebSocketServer {
 
     func start(port: UInt16) throws {
         let params = NWParameters.tcp  // Raw TCP — no WebSocket protocol layer
-        let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            throw NSError(domain: "WebSocketServer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid port \(port)"])
+        }
+        let listener = try NWListener(using: params, on: nwPort)
         self.listener = listener
 
         // Attach Bonjour service for mDNS discovery
@@ -194,11 +197,7 @@ actor WebSocketServer {
         }
 
         let request = HTTPServer.parseHTTPRequest(data, remoteIP: nwConn.endpoint.debugDescription)
-        let httpResponse = await httpHandler.route(request)
-        let raw = HTTPServer.formatHTTPResponse(httpResponse)
-        nwConn.send(content: raw, completion: .contentProcessed({ _ in
-            nwConn.cancel()
-        }))
+        _ = await httpHandler.handle(request, on: nwConn)
     }
 
     // MARK: - WebSocket Message Handling

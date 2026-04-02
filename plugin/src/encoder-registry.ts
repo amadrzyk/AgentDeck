@@ -13,7 +13,7 @@ export const encoderRegistry = {
   utilityIds: [] as string[],  // Utility Dial    — takeover: Context view (4-encoder mode)
   optionIds: [] as string[],   // Response Dial   — takeover: Focus view
   voiceIds: [] as string[],    // Voice Input     — takeover: List view
-  itermIds: [] as string[],    // iTerm Dial      — standalone terminal switcher
+  usageIds: [] as string[],    // Usage Dial      — rate limit / token gauges
 };
 
 /**
@@ -77,7 +77,7 @@ export function handleVtUp(): void {
 
 // ─── Cross-module callbacks (break circular deps) ────────────────
 
-// Cycle 1: encoder-takeover → iterm-dial.resetItermLayout
+// Cycle 1: encoder-takeover → usage-dial.resetUsageLayout
 let _onTakeoverExitCb: (() => void) | null = null;
 export function setTakeoverExitCallback(cb: () => void): void { _onTakeoverExitCb = cb; }
 export function fireTakeoverExit(): void { _onTakeoverExitCb?.(); }
@@ -87,16 +87,12 @@ let _refreshTakeoverCb: ((...args: any[]) => void) | null = null;
 export function setRefreshTakeoverCallback(cb: (...args: any[]) => void): void { _refreshTakeoverCb = cb; }
 export function fireRefreshTakeover(...args: any[]): void { _refreshTakeoverCb?.(...args); }
 
-// Cycle 3: iterm-dial ↔ session-button
+// Cycle 3: usage-dial ↔ session-slot (switchToPort only)
 let _switchToPortCb: ((port: number) => void) | null = null;
-let _updateItermStateCb: ((...args: any[]) => void) | null = null;
-let _suppressAutoSwitchCb: (() => void) | null = null;
-
 export function setSwitchToPortCallback(cb: (port: number) => void): void { _switchToPortCb = cb; }
 export function fireSwitchToPort(port: number): void { _switchToPortCb?.(port); }
 
-export function setUpdateItermStateCallback(cb: (...args: any[]) => void): void { _updateItermStateCb = cb; }
-export function fireUpdateItermState(...args: any[]): void { _updateItermStateCb?.(...args); }
-
-export function setSuppressAutoSwitchCallback(cb: () => void): void { _suppressAutoSwitchCb = cb; }
-export function fireSuppressAutoSwitch(): void { _suppressAutoSwitchCb?.(); }
+// Cycle 4: plugin.ts → usage-dial.updateUsageDialState
+let _updateUsageDialStateCb: ((...args: any[]) => void) | null = null;
+export function setUpdateUsageDialStateCallback(cb: (...args: any[]) => void): void { _updateUsageDialStateCb = cb; }
+export function fireUpdateUsageDialState(...args: any[]): void { _updateUsageDialStateCb?.(...args); }

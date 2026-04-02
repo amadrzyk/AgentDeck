@@ -60,6 +60,17 @@ struct OllamaStatus: Codable, Sendable {
     let models: [OllamaModel]
 }
 
+struct SubscriptionInfo: Codable, Sendable {
+    let name: String
+    var until: String?
+}
+
+struct AntigravityStatusInfo: Codable, Sendable {
+    var planName: String?
+    var availableCredits: Int?
+    var minimumCreditAmountForUsage: Int?
+}
+
 // MARK: - Button / Encoder State (Bridge → Client)
 
 struct ButtonSlotState: Codable, Sendable {
@@ -134,6 +145,9 @@ struct StateUpdateEvent: Codable, Sendable {
     var pairingUrl: String?
     var workerSessionCount: Int?
     var ollamaStatus: OllamaStatus?
+    var mlxModels: [String]?
+    var subscriptions: [SubscriptionInfo]?
+    var antigravityStatus: AntigravityStatusInfo?
     var gatewayAvailable: Bool?
     var gatewayHasError: Bool?
     var voiceAssistantState: String?  // idle | listening | processing | speaking | disabled
@@ -165,6 +179,16 @@ struct UsageEvent: Codable, Sendable {
     var ollamaStatus: OllamaStatus?
     var usageStale: Bool?
     var tokenStatus: String?  // "valid" | "expired" | "missing" | "unknown"
+    var codexAuthMode: String?
+    var codexWebAuthConnected: Bool?
+    var codexPlanType: String?
+    var codexAccountId: String?
+    var codexSubscriptionActiveUntil: String?
+    var codexLastRefreshAt: String?
+    var modelCatalog: [ModelCatalogEntry]?
+    var mlxModels: [String]?
+    var subscriptions: [SubscriptionInfo]?
+    var antigravityStatus: AntigravityStatusInfo?
 }
 
 struct ConnectionEvent: Codable, Sendable {

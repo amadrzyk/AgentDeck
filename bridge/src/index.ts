@@ -464,13 +464,13 @@ export async function startSession(opts: SessionOptions): Promise<void> {
               core.cachedModelCatalog = models;
               debug('agentdeck', `Model catalog updated: ${models.length} models`);
               const snap = core.stateMachine.getSnapshot();
-              core.broadcast({
-                type: 'state_update',
-                state: snap.state,
-                permissionMode: snap.permissionMode,
+              const stateEvent = core.buildStateEvent({
                 agentType: adapter.capabilities.type,
-                modelCatalog: core.cachedModelCatalog ?? undefined,
-              } as BridgeEvent);
+                snapshot: snap,
+              });
+              core.broadcast(stateEvent);
+              lastStateEvent = stateEvent;
+              core.broadcastUsage();
             }
             break;
           }
@@ -762,6 +762,8 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   core.startUsageTick();
   core.startApiUsagePolling(90_000);
   core.startOllamaProbe();
+  core.startMlxProbe();
+  core.startAntigravityProbe();
   core.startGatewayProbe(800);
   core.startGatewayHealthCheck();
   core.startSessionsListPolling();
@@ -809,12 +811,16 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       e2.value = snapshot.suggestedPrompt;
     }
 
-    const sessions = listActiveSessions();
+    const pct5 = core.cachedApiUsage?.fiveHourPercent ?? null;
+    const pct7 = core.cachedApiUsage?.sevenDayPercent ?? null;
+    const worstPct = Math.max(pct5 ?? 0, pct7 ?? 0);
+    const usageColor = worstPct > 80 ? '#ef4444' : worstPct > 50 ? '#eab308' : '#22c55e';
     const e3: EncoderSlotState = {
-      slot: 2, encoderType: 'terminal',
-      header: 'SESSION', value: `${sessions.length} active`,
-      accentColor: '#22c55e',
-      counter: sessions.length > 1 ? `1/${sessions.length}` : undefined,
+      slot: 2, encoderType: 'usage',
+      header: 'USAGE',
+      value: pct5 != null ? `${Math.round(pct5)}% / ${Math.round(pct7 ?? 0)}%` : '\u2014',
+      accentColor: usageColor,
+      progress: worstPct / 100,
     };
 
     const isRec = voiceManager.isRecording();

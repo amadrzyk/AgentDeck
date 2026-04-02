@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.net.OllamaStatus
+import dev.agentdeck.net.SubscriptionInfo
+import dev.agentdeck.net.AntigravityStatusInfo
 import dev.agentdeck.net.UsageUpdate
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.TerrariumColors
@@ -47,9 +49,7 @@ fun TankStatusPanel(
 ) {
     val usage = state.usage
     val staleSuffix = if (usage.usageStale == true) " !" else ""
-    val oauthConnected = state.oauthConnected
     val ollamaStatus = state.ollamaStatus
-    val modelName = state.modelName
     val modelCatalog = state.modelCatalog ?: emptyList()
     Column(
         modifier = modifier
@@ -99,19 +99,29 @@ fun TankStatusPanel(
             )
         }
 
-        // Model info section
-        ModelInfoSection(
-            modelName = modelName,
-            modelCatalog = modelCatalog,
+        EngineSection(
+            title = "OpenClaw",
+            lines = openClawDisplayLines(modelCatalog),
         )
 
-        // Ollama info section
-        OllamaInfoSection(ollamaStatus = ollamaStatus)
+        EngineSection(
+            title = "MLX",
+            lines = state.mlxModels,
+        )
 
-        // Connection dots
-        ConnectionDots(
-            oauthConnected = oauthConnected,
-            ollamaStatus = ollamaStatus,
+        EngineSection(
+            title = "OLLAMA",
+            lines = ollamaDisplayLines(ollamaStatus),
+        )
+
+        EngineSection(
+            title = "Antigravity",
+            lines = antigravityDisplayLines(state.antigravityStatus),
+        )
+
+        EngineSection(
+            title = "Subscriptions",
+            lines = subscriptionDisplayLines(state.subscriptions),
         )
     }
 }
@@ -262,20 +272,17 @@ private fun ApiCostSection(
     }
 }
 
-/**
- * Current active model + available models from catalog.
- */
 @Composable
-private fun ModelInfoSection(
-    modelName: String?,
-    modelCatalog: List<ModelCatalogEntry>,
+private fun EngineSection(
+    title: String,
+    lines: List<String>,
 ) {
-    if (modelName == null && modelCatalog.isEmpty()) return
+    if (lines.isEmpty()) return
 
     val tightStyle = PlatformTextStyle(includeFontPadding = false)
     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
         Text(
-            text = "MODELS",
+            text = title,
             color = TerrariumColors.HUDSubtext,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -283,128 +290,113 @@ private fun ModelInfoSection(
             style = TextStyle(platformStyle = tightStyle),
         )
 
-        // Current active model
-        if (modelName != null) {
+        lines.forEach { line ->
             Text(
-                text = modelName,
+                text = line,
                 color = TerrariumColors.HUDText,
-                fontSize = 13.sp,
-                fontFamily = FontFamily.Monospace,
-                style = TextStyle(platformStyle = tightStyle),
-            )
-        }
-
-        // Other available models (excluding current)
-        val otherModels = modelCatalog
-            .filter { it.available && it.name != modelName }
-            .map { it.name }
-        if (otherModels.isNotEmpty()) {
-            Text(
-                text = otherModels.joinToString(" \u00B7 "),
-                color = TerrariumColors.HUDSubtext,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 style = TextStyle(platformStyle = tightStyle),
+                maxLines = 2,
             )
         }
     }
 }
 
-/**
- * Running ollama models with VRAM sizes.
- */
-@Composable
-private fun OllamaInfoSection(ollamaStatus: OllamaStatus?) {
-    if (ollamaStatus == null || !ollamaStatus.available || ollamaStatus.models.isEmpty()) return
-
-    val tightStyle2 = PlatformTextStyle(includeFontPadding = false)
-    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-        Text(
-            text = "OLLAMA",
-            color = TerrariumColors.HUDSubtext,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            style = TextStyle(platformStyle = tightStyle2),
-        )
-
-        ollamaStatus.models.forEach { model ->
-            val vramText = when {
-                model.sizeVram > 0 -> " ${formatBytes(model.sizeVram)}"
-                model.size > 0 -> " ${formatBytes(model.size)}"
-                else -> ""
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Spacer(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(TerrariumColors.LEDGreen),
-                )
-                Text(
-                    text = "${model.name}$vramText",
-                    color = TerrariumColors.HUDText,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    style = TextStyle(platformStyle = tightStyle2),
-                )
-            }
+private fun ollamaDisplayLines(ollamaStatus: OllamaStatus?): List<String> {
+    if (ollamaStatus == null || !ollamaStatus.available || ollamaStatus.models.isEmpty()) return emptyList()
+    val running = ollamaStatus.models.filter { it.sizeVram > 0 }
+    val source = if (running.isNotEmpty()) running else ollamaStatus.models
+    val items = source.map { model ->
+        val vramText = when {
+            model.sizeVram > 0 -> " ${formatBytes(model.sizeVram)}"
+            model.size > 0 -> " ${formatBytes(model.size)}"
+            else -> ""
         }
+        "${model.name}$vramText"
+    }
+    return if (items.isEmpty()) emptyList() else listOf(items.distinct().joinToString(", "))
+}
+
+private fun openClawDisplayLines(modelCatalog: List<ModelCatalogEntry>): List<String> {
+    val available = modelCatalog.filter { it.available }
+    if (available.isEmpty()) return emptyList()
+
+    val ordered = available.sortedWith(
+        compareByDescending<ModelCatalogEntry> { it.role == "default" }
+            .thenBy { normalizeOpenClawName(it.name) }
+    )
+
+    val grouped = linkedMapOf<String, MutableList<String>>()
+    ordered.forEach { entry ->
+        val normalized = normalizeOpenClawName(entry.name)
+        val family = openClawFamilyKey(normalized)
+        grouped.getOrPut(family) { mutableListOf() }.add(normalized)
+    }
+
+    return grouped.values.map { compactOpenClawFamily(it) }.filter { it.isNotBlank() }
+}
+
+private fun normalizeOpenClawName(name: String): String =
+    name
+        .replace("DeepSeek: DeepSeek ", "DeepSeek ")
+        .replace("DeepSeek:", "DeepSeek")
+        .replace("GPT: GPT ", "GPT ")
+        .replace("GLM: GLM ", "GLM ")
+        .trim()
+
+private fun openClawFamilyKey(name: String): String {
+    val lower = name.lowercase()
+    return when {
+        lower.startsWith("glm") -> "glm"
+        lower.startsWith("gpt") -> "gpt"
+        lower.startsWith("deepseek") -> "deepseek"
+        lower.startsWith("claude") -> "claude"
+        lower.startsWith("gemini") -> "gemini"
+        lower.startsWith("qwen") -> "qwen"
+        lower.startsWith("llama") -> "llama"
+        else -> name
     }
 }
 
-/**
- * Connection status LED dots — OAuth + Ollama.
- */
-@Composable
-private fun ConnectionDots(
-    oauthConnected: Boolean?,
-    ollamaStatus: OllamaStatus?,
-) {
-    val dots = mutableListOf<Pair<String, Color>>()
+private fun compactOpenClawFamily(names: List<String>): String {
+    val deduped = names.distinct()
+    val first = deduped.firstOrNull() ?: return ""
+    if (deduped.size == 1) return first
 
-    when (oauthConnected) {
-        true -> dots += "OAuth" to TerrariumColors.LEDGreen
-        false -> dots += "OAuth" to TerrariumColors.LEDRed.copy(alpha = 0.6f)
-        null -> {} // unknown — don't show
-    }
+    val prefix = familyDisplayPrefix(first)
+    if (prefix.isEmpty()) return deduped.joinToString(", ")
 
-    ollamaStatus?.let { olla ->
-        if (olla.available) {
-            dots += "Ollama" to TerrariumColors.LEDGreen
+    return deduped.mapIndexed { index, name ->
+        if (index > 0 && name.startsWith(prefix)) {
+            name.removePrefix(prefix).trim()
         } else {
-            dots += "Ollama" to TerrariumColors.HUDSubtext.copy(alpha = 0.4f)
+            name
         }
+    }.joinToString(", ")
+}
+
+private fun familyDisplayPrefix(name: String): String {
+    val lower = name.lowercase()
+    return when {
+        lower.startsWith("glm-") -> "GLM-"
+        lower.startsWith("gpt-") -> "GPT-"
+        lower.startsWith("deepseek ") -> "DeepSeek "
+        lower.startsWith("claude ") -> "Claude "
+        lower.startsWith("gemini ") -> "Gemini "
+        lower.startsWith("qwen ") -> "Qwen "
+        lower.startsWith("llama ") -> "Llama "
+        else -> ""
+    }
+}
+
+private fun subscriptionDisplayLines(subscriptions: List<SubscriptionInfo>): List<String> =
+    subscriptions.map { sub ->
+        val until = sub.until?.take(10)
+        if (until != null) "${sub.name} · $until" else sub.name
     }
 
-    if (dots.isNotEmpty()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            dots.forEach { (label, color) ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    // LED dot
-                    Spacer(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(color),
-                    )
-                    Text(
-                        text = label,
-                        color = TerrariumColors.HUDSubtext,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-            }
-        }
-    }
+private fun antigravityDisplayLines(status: AntigravityStatusInfo?): List<String> {
+    val planName = status?.planName?.takeIf { it.isNotBlank() } ?: return emptyList()
+    return listOf(planName)
 }

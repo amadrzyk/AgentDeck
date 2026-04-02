@@ -147,6 +147,8 @@ private fun typeColor(type: String, status: String?): Color? {
 private fun agentTag(agentType: String?): String = when (agentType) {
     "claude-code" -> "Claude "
     "openclaw" -> "OpenClaw "
+    "codex-cli" -> "Codex "
+    "opencode" -> "OpenCode "
     null -> ""
     else -> "Agent "
 }

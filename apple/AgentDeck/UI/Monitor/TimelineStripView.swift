@@ -3,7 +3,7 @@
 import SwiftUI
 
 struct TimelineStripView: View {
-    @Environment(AgentStateHolder.self) private var stateHolder
+    @EnvironmentObject private var stateHolder: AgentStateHolder
 
     @State private var focusedIndex: Int = -1
 
