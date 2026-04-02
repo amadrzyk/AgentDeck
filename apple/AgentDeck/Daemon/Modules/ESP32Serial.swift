@@ -131,7 +131,7 @@ actor ESP32Serial {
 
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(3))
                 await self?.sendHeartbeat()
             }
         }
@@ -243,7 +243,7 @@ actor ESP32Serial {
         // otherwise handleReadData won't find the connection by port name
         connections.append(conn)
         guard let readHandle = conn.readHandle else {
-            DaemonLogger.shared.debug("ESP32", "No read handle for \(port), skipping")
+            DaemonLogger.shared.throttledDebug("ESP32", key: "missing-read:\(port)", "No read handle for \(port), skipping", minInterval: 60)
             return
         }
         startReading(port: port, handle: readHandle)
@@ -265,7 +265,12 @@ actor ESP32Serial {
                     DaemonLogger.shared.error("ESP32: Permission denied opening \(port) — serial entitlement missing or App Sandbox. Suppressing for 5 min.")
                 }
             } else {
-                DaemonLogger.shared.debug("ESP32", "Failed to open serial: \(port) (\(message)) [attempt \(count)]")
+                DaemonLogger.shared.throttledDebug(
+                    "ESP32",
+                    key: "open-fail:\(port):\(message)",
+                    "Failed to open serial: \(port) (\(message)) [attempt \(count)]",
+                    minInterval: 30
+                )
             }
 
             lastOpenError = "failed to open serial handle for \(port): \(message)"
@@ -299,7 +304,7 @@ actor ESP32Serial {
 
         var conn = SerialConnection(port: port, writeHandle: writeHandle, readHandle: readHandle)
 
-        DaemonLogger.shared.debug("ESP32", "Opened: \(port) [\(port.contains("usbmodem") ? "CDC" : "UART")]")
+        DaemonLogger.shared.info("ESP32 opened: \(port) [\(port.contains("usbmodem") ? "CDC" : "UART")]")
 
         // Request device info
         sendToConnection(&conn, json: #"{"type":"device_info_request"}"#)
@@ -352,7 +357,7 @@ actor ESP32Serial {
                         Thread.sleep(forTimeInterval: 0.05)
                         continue
                     }
-                    DaemonLogger.shared.debug("ESP32", "Read exit \(port): errno=\(errNo)")
+                    DaemonLogger.shared.throttledDebug("ESP32", key: "read-exit:\(port):\(errNo)", "Read exit \(port): errno=\(errNo)", minInterval: 30)
                     let errText = String(cString: strerror(errNo))
                     self?.enqueuePendingRead(port: port, data: "<<READ_ERR:errno=\(errNo) \(errText)>>")
                     break
@@ -388,7 +393,7 @@ actor ESP32Serial {
                   let msg = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                   let type = msg["type"] as? String else { continue }
 
-            DaemonLogger.shared.debug("ESP32", "← \(port): \(type)")
+            DaemonLogger.shared.sampledDebug("ESP32", key: "recv:\(port):\(type)", every: 20, "← \(port): \(type)")
 
             if type == "device_info" {
                 connections[idx].deviceInfo = DeviceInfo(
@@ -414,6 +419,8 @@ actor ESP32Serial {
         drainPendingReads()
         guard !connections.isEmpty else { return }
 
+        var sentData = false
+
         if let event = stateProvider?() {
             let prepared = prepareForSerial(event)
             if let data = try? JSONSerialization.data(withJSONObject: prepared),
@@ -421,6 +428,7 @@ actor ESP32Serial {
                 for i in connections.indices where connections[i].connected {
                     sendToConnection(&connections[i], json: json)
                 }
+                sentData = true
             }
         }
 
@@ -432,6 +440,16 @@ actor ESP32Serial {
                 for i in connections.indices where connections[i].connected {
                     sendToConnection(&connections[i], json: json)
                 }
+                sentData = true
+            }
+        }
+
+        // Keepalive: if no state/usage data available, send minimal JSON
+        // so ESP32 doesn't hit its 10s serial timeout
+        if !sentData {
+            let keepalive = "{\"type\":\"keepalive\"}"
+            for i in connections.indices where connections[i].connected {
+                sendToConnection(&connections[i], json: keepalive)
             }
         }
     }

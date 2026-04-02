@@ -357,6 +357,11 @@ final class DaemonServer {
         // Start all
         await moduleManager.startAll()
 
+        // Seed initial state so serial heartbeat has data from the start
+        // (without this, lastStateEvent is nil until first WS client or hook event)
+        let gwAlive = gatewayAdapter != nil
+        lastStateEvent = buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
+
         // Wire serial broadcast hook
         let serialRef = serial
         let pixooRef = pixoo
@@ -1253,11 +1258,11 @@ final class DaemonServer {
     @MainActor
     private func fetchUsageRelayed() async {
         let sessions = registry.listActive().filter { $0.agentType != "daemon" && $0.id != sessionId }
-        DaemonLogger.shared.debug("Daemon", "fetchUsageRelayed: \(sessions.count) siblings")
+        DaemonLogger.shared.sampledDebug("Daemon", key: "usage-relay:start", every: 10, "fetchUsageRelayed: \(sessions.count) siblings")
 
         // Tier 1: HTTP relay from sibling
         for sibling in sessions {
-            DaemonLogger.shared.debug("Daemon", "Usage Tier 1: HTTP relay from port \(sibling.port)")
+            DaemonLogger.shared.sampledDebug("Daemon", key: "usage-relay:tier1-port-\(sibling.port)", every: 10, "Usage Tier 1: HTTP relay from port \(sibling.port)")
             if let usage = await fetchUsageViaHTTP(port: sibling.port) {
                 // Parse relayed dict back into ApiUsageData for caching
                 cachedApiUsage = parseRelayedUsage(usage)
@@ -1269,7 +1274,7 @@ final class DaemonServer {
                 if let inferred = cachedApiUsage?.inferredBillingType {
                     stateMachine.billingType = inferred
                 }
-                DaemonLogger.shared.debug("Daemon", "Usage Tier 1 OK: 5h=\(cachedApiUsage?.fiveHourPercent ?? -1)%")
+                DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier1-ok", "Usage Tier 1 OK: 5h=\(cachedApiUsage?.fiveHourPercent ?? -1)%", minInterval: 30)
                 broadcastUsage()
                 return
             }
@@ -1278,7 +1283,7 @@ final class DaemonServer {
         // Siblings exist but relay failed — do NOT call direct API (429 prevention)
         // But still broadcast cached data so clients aren't left empty
         if !sessions.isEmpty {
-            DaemonLogger.shared.debug("Daemon", "Usage Tier 1 failed for all \(sessions.count) siblings")
+            DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier1-failed", "Usage Tier 1 failed for all \(sessions.count) siblings", minInterval: 30)
             oauthConnected = usageAPI.hasOAuthToken()
             if cachedApiUsage != nil { apiUsageStale = true }
             broadcastUsage()
@@ -1286,7 +1291,7 @@ final class DaemonServer {
         }
 
         // Tier 3: Direct API (only if no siblings)
-        DaemonLogger.shared.debug("Daemon", "Usage Tier 3: direct API")
+        DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier3-start", "Usage Tier 3: direct API", minInterval: 30)
         if let usage = await usageAPI.fetchUsage() {
             cachedApiUsage = usage
             lastApiFetchTime = Date()
@@ -1296,10 +1301,10 @@ final class DaemonServer {
             if let inferred = usage.inferredBillingType {
                 stateMachine.billingType = inferred
             }
-            DaemonLogger.shared.debug("Daemon", "Usage Tier 3 OK: 5h=\(usage.fiveHourPercent ?? -1)%")
+            DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier3-ok", "Usage Tier 3 OK: 5h=\(usage.fiveHourPercent ?? -1)%", minInterval: 30)
             broadcastUsage()
         } else {
-            DaemonLogger.shared.debug("Daemon", "Usage Tier 3 failed (token: \(usageAPI.tokenStatus.rawValue))")
+            DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier3-failed:\(usageAPI.tokenStatus.rawValue)", "Usage Tier 3 failed (token: \(usageAPI.tokenStatus.rawValue))", minInterval: 30)
             oauthConnected = usageAPI.hasOAuthToken()
             if cachedApiUsage != nil { apiUsageStale = true }
             broadcastUsage()
@@ -1650,7 +1655,7 @@ final class DaemonServer {
                     if let id = row["id"] as? String, !id.isEmpty { return id }
                     if let name = row["name"] as? String, !name.isEmpty { return name }
                     return nil
-                })).sorted()
+                }.filter { !$0.lowercased().contains("nanollava") })).sorted()
                 if !resolved.isEmpty { break }
             } catch {
                 continue
