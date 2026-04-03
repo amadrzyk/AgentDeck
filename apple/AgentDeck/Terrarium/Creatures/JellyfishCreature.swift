@@ -99,11 +99,14 @@ final class JellyfishCreature: Creature {
     }
 
     private func updatePosition(dt: Float) {
+        let idleY = min(0.62, max(0.58, homeY + 0.30))
+        let waitingY = min(0.54, max(0.48, homeY + 0.18))
+        let pulseY = min(0.25, max(0.05, homeY))
         let targetY: Float = switch visualState {
         case .dormant: 0.70
-        case .drifting: 0.58   // rest near floor (like octopus idle)
-        case .pulsing: 0.12   // float near surface when processing
-        case .waiting: 0.50   // mid-water when awaiting
+        case .drifting: idleY
+        case .pulsing: pulseY
+        case .waiting: waitingY
         }
 
         let lerpRate: Float = visualState == .pulsing ? 2.0 : 1.5
@@ -113,13 +116,15 @@ final class JellyfishCreature: Creature {
         currentY += (targetY + pulseBob - currentY) * dt * lerpRate
 
         // Processing: wider horizontal drift (floating near surface, drifting side to side)
-        let driftAmp: Float = visualState == .pulsing ? 0.06 : 0.006
+        let driftAmp: Float = visualState == .pulsing ? min(0.05, 0.02 + scale * 0.03) : 0.006
         let driftSpeed: Float = visualState == .pulsing ? 0.15 : 0.3
         let driftX = sin((time + driftPhase) * driftSpeed) * driftAmp
         currentX += (homeX + driftX - currentX) * dt * lerpRate
 
-        currentX = min(0.70, max(0.12, currentX))
-        currentY = min(0.65, max(0.08, currentY))
+        let minX = max(0.18, homeX - 0.08)
+        let maxX = min(0.72, homeX + 0.08)
+        currentX = min(maxX, max(minX, currentX))
+        currentY = min(0.62, max(0.08, currentY))
     }
 
     func currentPosition() -> (x: Float, y: Float) { (currentX, currentY) }

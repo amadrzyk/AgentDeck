@@ -70,11 +70,14 @@ final class OpenCodeCreature: Creature {
     }
 
     private func updatePosition(dt: Float) {
+        let idleY = min(0.63, max(0.59, homeY + 0.18))
+        let waitingY = min(0.52, max(0.46, homeY + 0.10))
+        let pulseY = min(0.50, max(0.25, homeY - 0.02))
         let targetY: Float = switch visualState {
         case .dormant: 0.70
-        case .drifting: 0.56
-        case .pulsing: 0.14
-        case .waiting: 0.48
+        case .drifting: idleY
+        case .pulsing: pulseY
+        case .waiting: waitingY
         }
 
         let lerpRate: Float = visualState == .pulsing ? 2.0 : 1.5
@@ -83,13 +86,15 @@ final class OpenCodeCreature: Creature {
         let pulseBob = sin((time + phaseOffset) * pulseSpeed) * pulseAmp
         currentY += (targetY + pulseBob - currentY) * dt * lerpRate
 
-        let driftAmp: Float = visualState == .pulsing ? 0.05 : 0.005
+        let driftAmp: Float = visualState == .pulsing ? min(0.04, 0.015 + scale * 0.025) : 0.005
         let driftSpeed: Float = visualState == .pulsing ? 0.15 : 0.25
         let driftX = sin((time + driftPhase) * driftSpeed) * driftAmp
         currentX += (homeX + driftX - currentX) * dt * lerpRate
 
-        currentX = min(0.70, max(0.12, currentX))
-        currentY = min(0.65, max(0.08, currentY))
+        let minX = max(0.20, homeX - 0.07)
+        let maxX = min(0.70, homeX + 0.07)
+        currentX = min(maxX, max(minX, currentX))
+        currentY = min(0.60, max(0.10, currentY))
     }
 
     func currentPosition() -> (x: Float, y: Float) { (currentX, currentY) }

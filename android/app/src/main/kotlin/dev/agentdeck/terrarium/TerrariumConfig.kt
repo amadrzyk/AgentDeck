@@ -84,17 +84,17 @@ object TerrariumLayout {
     // Crayfish sizing
     const val CRAYFISH_WIDTH_FRACTION = 0.11f
     const val CRAYFISH_CENTER_X_FRACTION = 0.78f
-    const val CRAYFISH_CENTER_Y_FRACTION = 0.58f
+    const val CRAYFISH_CENTER_Y_FRACTION = 0.64f
 
     // Tetra sizing
     const val TETRA_SIZE_FRACTION = 0.015f
     const val TETRA_COUNT = 7
 
     // Octopus swimming boundaries (fraction of canvas)
-    const val SWIM_MIN_X = 0.20f   // clear of left HUD panel (~19%)
-    const val SWIM_MAX_X = 0.68f   // before crayfish area (0.78)
-    const val SWIM_MIN_Y = 0.10f   // below surface (0.05) margin
-    const val SWIM_MAX_Y = 0.61f   // above sand (0.65)
+    const val SWIM_MIN_X = 0.18f   // clear of left HUD panel (~19%)
+    const val SWIM_MAX_X = 0.55f   // before crayfish area (0.78)
+    const val SWIM_MIN_Y = 0.15f   // below surface (0.05) margin
+    const val SWIM_MAX_Y = 0.55f   // above sand (0.65)
 
     // Cloud creature sizing (Codex CLI)
     const val CLOUD_WIDTH_FRACTION = 0.09f

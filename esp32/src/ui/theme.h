@@ -98,12 +98,12 @@ constexpr float SandHeightFrac = 0.35f;
 // Round AMOLED: tighter swim boundaries to stay within circular mask
 // Octopus
 constexpr float OctBodyRadiusFrac = 0.060f;   // Slightly larger for small display
-constexpr float OctHomeX          = 0.42f;
+constexpr float OctHomeX          = 0.32f;
 constexpr float OctStandingY      = 0.62f;    // Just above sand (0.65)
 constexpr float OctSleepY         = 0.70f;
 constexpr float OctWorkingY       = 0.40f;
-constexpr float OctSwimMinX       = 0.25f;
-constexpr float OctSwimMaxX       = 0.75f;
+constexpr float OctSwimMinX       = 0.20f;
+constexpr float OctSwimMaxX       = 0.55f;
 constexpr float OctSwimMinY       = 0.15f;
 constexpr float OctSwimMaxY       = 0.58f;
 
@@ -116,23 +116,23 @@ constexpr float CfRoutingY   = 0.52f;
 
 // Cloud (Codex CLI)
 constexpr float CloudRadiusFrac = 0.050f;
-constexpr float CloudHomeX      = 0.55f;
+constexpr float CloudHomeX      = 0.50f;
 constexpr float CloudStandingY  = 0.62f;
 constexpr float CloudSleepY     = 0.70f;
-constexpr float CloudWorkingY   = 0.35f;
-constexpr float CloudSwimMinX   = 0.25f;
-constexpr float CloudSwimMaxX   = 0.75f;
+constexpr float CloudWorkingY   = 0.30f;
+constexpr float CloudSwimMinX   = 0.28f;
+constexpr float CloudSwimMaxX   = 0.65f;
 constexpr float CloudSwimMinY   = 0.15f;
 constexpr float CloudSwimMaxY   = 0.58f;
 
 // OpenCode (nested square)
 constexpr float OpenCodeRadiusFrac = 0.050f;
-constexpr float OpenCodeHomeX      = 0.60f;
+constexpr float OpenCodeHomeX      = 0.63f;
 constexpr float OpenCodeStandingY  = 0.62f;
 constexpr float OpenCodeSleepY     = 0.70f;
-constexpr float OpenCodeWorkingY   = 0.37f;
-constexpr float OpenCodeSwimMinX   = 0.25f;
-constexpr float OpenCodeSwimMaxX   = 0.75f;
+constexpr float OpenCodeWorkingY   = 0.42f;
+constexpr float OpenCodeSwimMinX   = 0.42f;
+constexpr float OpenCodeSwimMaxX   = 0.72f;
 constexpr float OpenCodeSwimMinY   = 0.15f;
 constexpr float OpenCodeSwimMaxY   = 0.58f;
 
@@ -153,12 +153,12 @@ constexpr uint8_t HudHeight = 20;
 // Rectangular displays (480x480, 480x320)
 // Octopus
 constexpr float OctBodyRadiusFrac = 0.055f;
-constexpr float OctHomeX          = 0.40f;
+constexpr float OctHomeX          = 0.30f;
 constexpr float OctStandingY      = 0.63f;    // Just above sand (0.65)
 constexpr float OctSleepY         = 0.75f;
 constexpr float OctWorkingY       = 0.42f;
-constexpr float OctSwimMinX       = 0.20f;
-constexpr float OctSwimMaxX       = 0.68f;
+constexpr float OctSwimMinX       = 0.15f;
+constexpr float OctSwimMaxX       = 0.50f;
 constexpr float OctSwimMinY       = 0.10f;
 constexpr float OctSwimMaxY       = 0.61f;
 
@@ -171,23 +171,23 @@ constexpr float CfRoutingY   = 0.55f;
 
 // Cloud (Codex CLI)
 constexpr float CloudRadiusFrac = 0.045f;
-constexpr float CloudHomeX      = 0.55f;
+constexpr float CloudHomeX      = 0.50f;
 constexpr float CloudStandingY  = 0.63f;
 constexpr float CloudSleepY     = 0.75f;
-constexpr float CloudWorkingY   = 0.38f;
-constexpr float CloudSwimMinX   = 0.20f;
-constexpr float CloudSwimMaxX   = 0.68f;
+constexpr float CloudWorkingY   = 0.30f;
+constexpr float CloudSwimMinX   = 0.25f;
+constexpr float CloudSwimMaxX   = 0.60f;
 constexpr float CloudSwimMinY   = 0.10f;
 constexpr float CloudSwimMaxY   = 0.61f;
 
 // OpenCode (nested square)
 constexpr float OpenCodeRadiusFrac = 0.045f;
-constexpr float OpenCodeHomeX      = 0.60f;
+constexpr float OpenCodeHomeX      = 0.65f;
 constexpr float OpenCodeStandingY  = 0.63f;
 constexpr float OpenCodeSleepY     = 0.75f;
-constexpr float OpenCodeWorkingY   = 0.37f;
-constexpr float OpenCodeSwimMinX   = 0.20f;
-constexpr float OpenCodeSwimMaxX   = 0.68f;
+constexpr float OpenCodeWorkingY   = 0.42f;
+constexpr float OpenCodeSwimMinX   = 0.40f;
+constexpr float OpenCodeSwimMaxX   = 0.70f;
 constexpr float OpenCodeSwimMinY   = 0.10f;
 constexpr float OpenCodeSwimMaxY   = 0.61f;
 

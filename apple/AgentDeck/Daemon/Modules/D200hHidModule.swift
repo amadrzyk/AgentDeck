@@ -141,6 +141,24 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         DaemonLogger.shared.debug("D200H", "Module stopped")
     }
 
+    func handleWake() async {
+        guard let manager = hidManager else { return }
+        DaemonLogger.shared.info("D200H wake recovery — forcing IOKit re-enumeration")
+
+        // Clean up stale HID references (USB may have re-enumerated)
+        disconnect()
+
+        // Cycle IOHIDManager run loop scheduling to force device re-enumeration
+        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+
+        // Wait for D200H firmware to boot into HID mode (~4s after USB re-power)
+        try? await Task.sleep(for: .seconds(5))
+
+        // Re-schedule — fires matching callback for already-present devices
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        DaemonLogger.shared.debug("D200H", "IOHIDManager re-scheduled after wake")
+    }
+
     // MARK: - Broadcast Handler
 
     func handleBroadcast(_ event: [String: Any]) {
@@ -328,10 +346,11 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
 
         switch currentMode {
         case .sessionList:
-            // Slot 12 = usage monitor (no action)
-            if index == 12 { return nil }
-            // Slots 0-11 are sessions (12 per page)
-            let startIdx = sessionPage * 12
+            // Slot 13 = usage monitor (big merged button, no action)
+            if index == 13 { return nil }
+            // Slots 0-12 are sessions (13 per page)
+            guard index <= 12 else { return nil }
+            let startIdx = sessionPage * 13
             let sessionIdx = startIdx + index
             guard sessionIdx < sessions.count else { return nil }
             let session = sessions[sessionIdx]
@@ -356,7 +375,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             }
 
             switch index {
-            case 0, 12:  // BACK
+            case 0, 13:  // BACK (slot 0 + big merged button)
                 currentMode = .sessionList
                 lastStateHash = ""
                 updateDisplay()
@@ -437,9 +456,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             )
             slots = s
             updateAnimationTimer(needsAnimation: anim)
-            // Track which buttons have border animation (slots 0-11 = sessions)
-            let startIdx = sessionPage * 12
-            for i in 0..<12 {
+            // Track which buttons have border animation (slots 0-12 = sessions)
+            let startIdx = sessionPage * 13
+            for i in 0..<13 {
                 let sessionIdx = startIdx + i
                 guard sessionIdx < allSessions.count else { break }
                 if allSessions[sessionIdx].isAwaiting || allSessions[sessionIdx].isProcessing {
@@ -454,7 +473,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             } else {
                 // Session disappeared — stay in option view with last known state
                 // User must press BACK to return to session list
-                slots = [ButtonSlot](repeating: .dim, count: 13)
+                slots = [ButtonSlot](repeating: .dim, count: 14)
                 slots[0] = ButtonSlot(title: "← BACK", subtitle: "", bg: D200hRenderer.cDark, enabled: true, borderStyle: .none)
                 slots[10] = ButtonSlot(title: "✖ ESC", subtitle: "", bg: D200hRenderer.cEscActive, enabled: true, borderStyle: .none)
             }
@@ -768,7 +787,7 @@ private enum D200hRenderer {
         KeyDef(id: 6, col: 1, row: 1), KeyDef(id: 7, col: 2, row: 1),
         KeyDef(id: 8, col: 3, row: 1), KeyDef(id: 9, col: 4, row: 1),
         KeyDef(id: 10, col: 0, row: 2), KeyDef(id: 11, col: 1, row: 2),
-        KeyDef(id: 12, col: 2, row: 2),
+        KeyDef(id: 12, col: 2, row: 2), KeyDef(id: 13, col: 3, row: 2),
     ]
 
     // MARK: - Mode A: Session List
@@ -777,12 +796,12 @@ private enum D200hRenderer {
         sessions: [D200hSessionInfo], stateEvent: [String: Any]?, usageEvent: [String: Any]?,
         page: Int, animFrame: Int
     ) -> ([ButtonSlot], Bool) {
-        var slots = [ButtonSlot](repeating: .dim, count: 13)
+        var slots = [ButtonSlot](repeating: .dim, count: 14)
         var needsAnim = false
 
-        // Slots 0-11: sessions (12 per page), slot 12: usage monitor
-        let startIdx = page * 12
-        for i in 0..<12 {
+        // Slots 0-12: sessions (13 per page), slot 13: usage monitor (big merged button)
+        let startIdx = page * 13
+        for i in 0..<13 {
             let sessionIdx = startIdx + i
             guard sessionIdx < sessions.count else { break }
             let session = sessions[sessionIdx]
@@ -821,7 +840,7 @@ private enum D200hRenderer {
             )
         }
 
-        // Slot 12: Usage monitor (bottom-right)
+        // Slot 13: Usage monitor (big merged button at col3+col4, row2)
         let pct5 = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double ?? 0
         let pct7 = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double ?? 0
         let reset5 = formatResetTime(usageEvent?["fiveHourResetsAt"] as? String ?? stateEvent?["fiveHourResetsAt"] as? String)
@@ -830,7 +849,7 @@ private enum D200hRenderer {
         let usageSub = "7D \(Int(pct7))%\(reset7.isEmpty ? "" : " \(reset7)")"
         let maxPct = max(pct5, pct7)
         let usageBorderColor = maxPct > 80 ? rgb(239, 68, 68) : maxPct > 50 ? rgb(234, 179, 8) : rgb(34, 197, 94)
-        slots[12] = ButtonSlot(
+        slots[13] = ButtonSlot(
             title: usageTitle, subtitle: usageSub,
             bg: cDetailBg, enabled: true, borderStyle: .solid(color: usageBorderColor)
         )
@@ -863,7 +882,7 @@ private enum D200hRenderer {
     static func computeOptionSelectSlots(
         session: D200hSessionInfo, page: Int
     ) -> [ButtonSlot] {
-        var slots = [ButtonSlot](repeating: .dim, count: 13)
+        var slots = [ButtonSlot](repeating: .dim, count: 14)
 
         // Slot 0: ← BACK
         slots[0] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none)
@@ -927,8 +946,8 @@ private enum D200hRenderer {
             slots[11] = ButtonSlot(title: "▶ MORE", subtitle: "", bg: cSessionDef, enabled: true, borderStyle: .none)
         }
 
-        // Slot 12: ← BACK
-        slots[12] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none)
+        // Slot 13: ← BACK (big merged button)
+        slots[13] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none)
 
         return slots
     }
@@ -957,20 +976,7 @@ private enum D200hRenderer {
             files.append((iconPath, png))
         }
 
-        // Small window: Usage visualization
-        let pct5h = usageEvent?["fiveHourPercent"] as? Double ?? stateEvent?["fiveHourPercent"] as? Double ?? 0
-        let pct7d = usageEvent?["sevenDayPercent"] as? Double ?? stateEvent?["sevenDayPercent"] as? Double ?? 0
-        let usageText: String
-        if pct5h >= 90 { usageText = "⚡5h:\(Int(pct5h))%" }
-        else if pct5h > 0 || pct7d > 0 { usageText = "5h:\(Int(pct5h))% 7d:\(Int(pct7d))%" }
-        else { usageText = "\(sessions.count) agents" }
-
-        manifest["3_2"] = [
-            "Action": "com.ulanzi.ulanzideck.smallwindow.window",
-            "ActionParam": [:] as [String: Any],
-            "State": 0,
-            "ViewParam": [["Text": usageText]],
-        ] as [String: Any]
+        // Slot 13 (big merged button at 3_2) is now rendered as a regular button via keyDefs
 
         if let manifestData = try? JSONSerialization.data(withJSONObject: manifest) {
             files.append(("manifest.json", manifestData))

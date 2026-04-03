@@ -98,7 +98,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
             break;
     }
     // X-correlated depth offset
-    homeY += (homeX - 0.4f) * 0.15f + jitterY[idx];
+    homeY += (homeX - 0.3f) * 0.15f + jitterY[idx];
 
     // --- Swimming logic (WORKING state) ---
     bool justEnteredWorking = (state == CreatureState::WORKING && prevState[idx] != CreatureState::WORKING);

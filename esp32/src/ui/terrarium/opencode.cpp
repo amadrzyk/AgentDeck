@@ -98,7 +98,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
             break;
     }
     // X-correlated depth offset
-    homeY += (homeX - 0.5f) * 0.10f + jitterY[idx];
+    homeY += (homeX - 0.65f) * 0.10f + jitterY[idx];
 
     prevState[idx] = state;
 
@@ -182,27 +182,13 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         Draw::circle(cx, cy, glowR, Theme::OpenCodeOuter, (uint8_t)(glow * 20));
     }
 
-    static uint32_t lastOcDbg = 0;
-    if (millis() - lastOcDbg > 3000) {
-        lastOcDbg = millis();
-        Serial.printf("[OpenCode] idx=%d state=%d cx=%d cy=%d cellW=%d glyphX=%d glyphY=%d bodyR=%.1f alpha=%d\n",
-                      idx, (int)state, cx, cy, cellW, glyphX, glyphY, bodyRadius, alpha);
-    }
-
-    // Render grid — use direct RGB565 rect for reliable rendering
+    // Render grid
     for (int row = 0; row < 9; row++) {
         for (int col = 0; col < 10; col++) {
             uint8_t cell = OPENCODE_GRID[row][col];
             if (cell == 0) continue;
-            if (alpha < 250) {
-                uint32_t color = (cell == 8) ? outerColor : innerColor;
-                fillRectA(glyphX + col * cellW, glyphY + row * cellH, cellW, cellH, color, alpha);
-            } else {
-                uint32_t c24 = (cell == 8) ? outerColor : innerColor;
-                uint8_t r = (c24 >> 16) & 0xFF, g = (c24 >> 8) & 0xFF, b = c24 & 0xFF;
-                uint16_t c565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-                Draw::rect(glyphX + col * cellW, glyphY + row * cellH, cellW, cellH, c565);
-            }
+            uint32_t color = (cell == 8) ? outerColor : innerColor;
+            fillRectA(glyphX + col * cellW, glyphY + row * cellH, cellW, cellH, color, alpha);
         }
     }
 

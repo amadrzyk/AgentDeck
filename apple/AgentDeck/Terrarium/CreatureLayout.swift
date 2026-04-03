@@ -12,122 +12,102 @@ struct CreatureSlot {
 enum CreatureLayout {
     /// Layout octopus positions for N agents
     static func layoutOctopuses(count: Int) -> [CreatureSlot] {
-        switch count {
-        case 0:
-            return []
-        case 1:
-            return [CreatureSlot(x: 0.4, y: 0.45, scale: 1.0)]
-        case 2:
-            return [
-                CreatureSlot(x: 0.28, y: 0.38, scale: 0.85),
-                CreatureSlot(x: 0.55, y: 0.50, scale: 0.85),
-            ]
-        case 3:
-            return [
-                CreatureSlot(x: 0.22, y: 0.35, scale: 0.75),
-                CreatureSlot(x: 0.52, y: 0.35, scale: 0.75),
-                CreatureSlot(x: 0.36, y: 0.52, scale: 0.75),
-            ]
-        default:
-            return layoutGrid(count: count)
-        }
+        layoutBand(
+            count: count,
+            xMin: 0.20,
+            xMax: 0.50,
+            frontY: 0.42,
+            backY: 0.52,
+            singleRowLimit: 4,
+            baseScale: 1.0,
+            minScale: 0.58
+        )
     }
 
     static func layoutCloudCreatures(count: Int) -> [CreatureSlot] {
-        switch count {
-        case 0:
-            return []
-        case 1:
-            return [CreatureSlot(x: 0.55, y: 0.20, scale: 1.0)]
-        case 2:
-            return [
-                CreatureSlot(x: 0.40, y: 0.18, scale: 0.85),
-                CreatureSlot(x: 0.62, y: 0.22, scale: 0.85),
-            ]
-        case 3:
-            return [
-                CreatureSlot(x: 0.35, y: 0.16, scale: 0.75),
-                CreatureSlot(x: 0.55, y: 0.20, scale: 0.75),
-                CreatureSlot(x: 0.45, y: 0.28, scale: 0.75),
-            ]
-        default:
-            let cols = count <= 4 ? 2 : 3
-            let rows = Int(ceil(Double(count) / Double(cols)))
-            let scale = max(0.50, 0.75 - Float(count - 3) * 0.05)
-            let startX: Float = 0.30
-            let endX: Float = 0.65
-            let startY: Float = 0.12
-            let endY: Float = 0.30
-
-            var slots: [CreatureSlot] = []
-            for i in 0..<count {
-                let col = i % cols
-                let row = i / cols
-                let x = startX + (cols > 1 ? Float(col) / Float(cols - 1) * (endX - startX) : (endX - startX) / 2)
-                let y = startY + (rows > 1 ? Float(row) / Float(rows - 1) * (endY - startY) : (endY - startY) / 2)
-                slots.append(CreatureSlot(x: x, y: y, scale: scale))
-            }
-            return slots
-        }
+        layoutBand(
+            count: count,
+            xMin: 0.30,
+            xMax: 0.55,
+            frontY: 0.16,
+            backY: 0.28,
+            singleRowLimit: 3,
+            baseScale: 0.98,
+            minScale: 0.56
+        )
     }
 
     static func layoutOpenCodeCreatures(count: Int) -> [CreatureSlot] {
-        switch count {
-        case 0:
-            return []
-        case 1:
-            return [CreatureSlot(x: 0.48, y: 0.40, scale: 1.0)]
-        case 2:
-            return [
-                CreatureSlot(x: 0.38, y: 0.38, scale: 0.85),
-                CreatureSlot(x: 0.58, y: 0.42, scale: 0.85),
-            ]
-        case 3:
-            return [
-                CreatureSlot(x: 0.33, y: 0.36, scale: 0.75),
-                CreatureSlot(x: 0.53, y: 0.36, scale: 0.75),
-                CreatureSlot(x: 0.43, y: 0.48, scale: 0.75),
-            ]
-        default:
-            let cols = count <= 4 ? 2 : 3
-            let rows = Int(ceil(Double(count) / Double(cols)))
-            let scale = max(0.50, 0.75 - Float(count - 3) * 0.05)
-            let startX: Float = 0.28
-            let endX: Float = 0.62
-            let startY: Float = 0.32
-            let endY: Float = 0.50
-
-            var slots: [CreatureSlot] = []
-            for i in 0..<count {
-                let col = i % cols
-                let row = i / cols
-                let x = startX + (cols > 1 ? Float(col) / Float(cols - 1) * (endX - startX) : (endX - startX) / 2)
-                let y = startY + (rows > 1 ? Float(row) / Float(rows - 1) * (endY - startY) : (endY - startY) / 2)
-                slots.append(CreatureSlot(x: x, y: y, scale: scale))
-            }
-            return slots
-        }
+        layoutBand(
+            count: count,
+            xMin: 0.45,
+            xMax: 0.68,
+            frontY: 0.34,
+            backY: 0.46,
+            singleRowLimit: 3,
+            baseScale: 0.96,
+            minScale: 0.56
+        )
     }
 
-    private static func layoutGrid(count: Int) -> [CreatureSlot] {
-        let cols = count <= 4 ? 2 : 3
-        let rows = Int(ceil(Double(count) / Double(cols)))
-        let scale = max(0.45, 0.75 - Float(count - 3) * 0.05)
+    private static func layoutBand(
+        count: Int,
+        xMin: Float,
+        xMax: Float,
+        frontY: Float,
+        backY: Float,
+        singleRowLimit: Int,
+        baseScale: Float,
+        minScale: Float
+    ) -> [CreatureSlot] {
+        guard count > 0 else { return [] }
 
-        // Respect swim boundaries: 0.20~0.62 X, 0.32~0.55 Y
-        let startX: Float = 0.20
-        let endX: Float = 0.62
-        let startY: Float = 0.32
-        let endY: Float = 0.55
-
-        var slots: [CreatureSlot] = []
-        for i in 0..<count {
-            let col = i % cols
-            let row = i / cols
-            let x = startX + (cols > 1 ? Float(col) / Float(cols - 1) * (endX - startX) : (endX - startX) / 2)
-            let y = startY + (rows > 1 ? Float(row) / Float(rows - 1) * (endY - startY) : (endY - startY) / 2)
-            slots.append(CreatureSlot(x: x, y: y, scale: scale))
+        let rows: Int
+        if count <= singleRowLimit {
+            rows = 1
+        } else if count <= singleRowLimit * 2 {
+            rows = 2
+        } else {
+            rows = 3
         }
+
+        let scale = max(minScale, baseScale - Float(max(0, count - 1)) * 0.055)
+        let rowCounts = distribute(count: count, rows: rows)
+        var slots: [CreatureSlot] = []
+        var absoluteIndex = 0
+
+        for row in 0..<rows {
+            let rowCount = rowCounts[row]
+            guard rowCount > 0 else { continue }
+
+            let rowT = rows == 1 ? 0 : Float(row) / Float(rows - 1)
+            let rowY = frontY + (backY - frontY) * rowT
+            let rowInset = 0.015 + Float(row) * 0.02
+            let rowMinX = xMin + rowInset
+            let rowMaxX = xMax - rowInset
+            let rowScale = max(minScale, scale - Float(row) * 0.04)
+
+            for col in 0..<rowCount {
+                let t = rowCount == 1 ? 0.5 : Float(col) / Float(rowCount - 1)
+                let baseX = rowMinX + (rowMaxX - rowMinX) * t
+                let spread = max(0.003, min(0.012, (rowMaxX - rowMinX) / Float(max(rowCount * 5, 1))))
+                let phase: Float = ((absoluteIndex + row) % 2 == 0) ? -1 : 1
+                let x = min(xMax, max(xMin, baseX + spread * phase))
+                let yJitter = Float((absoluteIndex % 3) - 1) * 0.008
+                slots.append(CreatureSlot(x: x, y: rowY + yJitter, scale: rowScale))
+                absoluteIndex += 1
+            }
+        }
+
         return slots
+    }
+
+    private static func distribute(count: Int, rows: Int) -> [Int] {
+        guard rows > 0 else { return [] }
+        var result = Array(repeating: count / rows, count: rows)
+        for index in 0..<(count % rows) {
+            result[index] += 1
+        }
+        return result
     }
 }

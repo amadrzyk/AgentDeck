@@ -122,7 +122,7 @@ final class PixooRenderer {
     private static let substrateTop = 60
     private static let surfaceY = 2
     private static let cfDefaultX = 0.72
-    private static let cfDefaultY = 0.76
+    private static let cfDefaultY = 0.74
     private static let transitionSec = 8.0
     private static let activeDwellSec = 6.0
     private static let wideCamera = Camera(cx: 0.5, cy: 0.5, zoom: 1.0)
@@ -437,7 +437,14 @@ final class PixooRenderer {
             for i in 0..<min(sessionCount, min(6, creatureOrder.count)) {
                 let dotX = 1 + i * 3
                 guard let creature = creatureInstances[creatureOrder[i]] else { continue }
-                let dotColor: RGB = creature.creatureType == .jellyfish ? jellyfishPalette(for: i).body : octopusPalette(for: i).body
+                let dotColor: RGB = switch creature.creatureType {
+                case .jellyfish:
+                    jellyfishPalette(for: i).body
+                case .opencode:
+                    Self.colors.white
+                case .octopus:
+                    octopusPalette(for: i).body
+                }
                 setPixel(&output, dotX, 1, dotColor)
                 setPixel(&output, dotX + 1, 1, dotColor)
                 setPixel(&output, dotX, 2, dotColor)
@@ -465,22 +472,35 @@ final class PixooRenderer {
         creatureInstances = creatureInstances.filter { aliveIds.contains($0.key) }
         creatureOrder.removeAll { !aliveIds.contains($0) }
 
+        let typeCounts = Dictionary(aliveCoding.map { (creatureType(for: $0.agentType), 1) }, uniquingKeysWith: +)
+        let octopusSlots = pixooSlots(for: .octopus, count: typeCounts[.octopus] ?? 0)
+        let jellyfishSlots = pixooSlots(for: .jellyfish, count: typeCounts[.jellyfish] ?? 0)
+        let opencodeSlots = pixooSlots(for: .opencode, count: typeCounts[.opencode] ?? 0)
+        var typeIndices: [CreatureKind: Int] = [.octopus: 0, .jellyfish: 0, .opencode: 0]
+
         for (index, session) in aliveCoding.enumerated() {
+            let kind = creatureType(for: session.agentType)
+            let slotIndex = typeIndices[kind, default: 0]
+            typeIndices[kind, default: 0] = slotIndex + 1
+            let slot = pixooSlot(for: kind, index: slotIndex, octopusSlots: octopusSlots, jellyfishSlots: jellyfishSlots, opencodeSlots: opencodeSlots)
+            let worldX = Double(slot.x)
+            let worldY = stateY(session.state, kind: kind, baseY: Double(slot.y))
+
             if var existing = creatureInstances[session.id] {
                 existing.state = session.state
                 existing.agentType = session.agentType
-                existing.creatureType = creatureType(for: session.agentType)
-                existing.worldY = stateY(session.state)
+                existing.creatureType = kind
+                existing.worldX = worldX
+                existing.worldY = worldY
                 creatureInstances[session.id] = existing
             } else {
-                let x = aliveCoding.count == 1 ? 0.38 : 0.15 + fmod(Double(index) * Self.phi, 1.0) * 0.70
                 creatureInstances[session.id] = CreatureInstance(
                     sessionId: session.id,
                     agentType: session.agentType,
-                    creatureType: creatureType(for: session.agentType),
+                    creatureType: kind,
                     state: session.state,
-                    worldX: x,
-                    worldY: stateY(session.state),
+                    worldX: worldX,
+                    worldY: worldY,
                     phaseOffset: index * 5
                 )
                 creatureOrder.append(session.id)
@@ -492,15 +512,50 @@ final class PixooRenderer {
         }
 
         if
-            isCreatureAgent(primaryAgentType),
-            !aliveCoding.isEmpty,
-            var primary = creatureInstances[aliveCoding[0].id]
+            let primaryIndex = aliveCoding.firstIndex(where: { $0.id == "_primary" }),
+            var primary = creatureInstances[aliveCoding[primaryIndex].id]
         {
             let preciseState = simplifiedState(dashboardState.state)
             primary.state = preciseState
-            primary.worldY = stateY(preciseState)
-            creatureInstances[aliveCoding[0].id] = primary
+            let primaryKind = creatureType(for: primary.agentType)
+            let slotIndex = max(0, (typeIndices[primaryKind] ?? 1) - 1)
+            let baseSlot = pixooSlot(
+                for: primaryKind,
+                index: slotIndex,
+                octopusSlots: octopusSlots,
+                jellyfishSlots: jellyfishSlots,
+                opencodeSlots: opencodeSlots
+            )
+            primary.worldY = stateY(preciseState, kind: primary.creatureType, baseY: Double(baseSlot.y))
+            creatureInstances[aliveCoding[primaryIndex].id] = primary
         }
+    }
+
+    private func pixooSlots(for kind: CreatureKind, count: Int) -> [CreatureSlot] {
+        switch kind {
+        case .octopus:
+            return CreatureLayout.layoutOctopuses(count: count)
+        case .jellyfish:
+            return CreatureLayout.layoutCloudCreatures(count: count)
+        case .opencode:
+            return CreatureLayout.layoutOpenCodeCreatures(count: count)
+        }
+    }
+
+    private func pixooSlot(
+        for kind: CreatureKind,
+        index: Int,
+        octopusSlots: [CreatureSlot],
+        jellyfishSlots: [CreatureSlot],
+        opencodeSlots: [CreatureSlot]
+    ) -> CreatureSlot {
+        let slots: [CreatureSlot] = switch kind {
+        case .octopus: octopusSlots
+        case .jellyfish: jellyfishSlots
+        case .opencode: opencodeSlots
+        }
+        guard !slots.isEmpty else { return CreatureSlot(x: 0.38, y: 0.42, scale: 1.0) }
+        return slots[min(index, slots.count - 1)]
     }
 
     private func updateDirector(
@@ -1187,12 +1242,31 @@ final class PixooRenderer {
         }
     }
 
-    private func stateY(_ state: CreatureState) -> Double {
-        switch state {
-        case .processing: return 0.42
-        case .awaiting: return 0.38
-        case .idle: return 0.78
+    private func stateY(_ state: CreatureState, kind: CreatureKind, baseY: Double) -> Double {
+        switch kind {
+        case .octopus:
+            switch state {
+            case .processing: return clamp(baseY, min: 0.40, max: 0.54)
+            case .awaiting: return clamp(baseY - 0.04, min: 0.35, max: 0.48)
+            case .idle: return 0.80
+            }
+        case .jellyfish:
+            switch state {
+            case .processing: return clamp(baseY, min: 0.16, max: 0.28)
+            case .awaiting: return clamp(baseY + 0.26, min: 0.52, max: 0.64)
+            case .idle: return clamp(baseY + 0.40, min: 0.80, max: 0.82)
+            }
+        case .opencode:
+            switch state {
+            case .processing: return clamp(baseY - 0.02, min: 0.20, max: 0.34)
+            case .awaiting: return clamp(baseY + 0.22, min: 0.50, max: 0.62)
+            case .idle: return clamp(baseY + 0.36, min: 0.79, max: 0.81)
+            }
         }
+    }
+
+    private func clamp(_ value: Double, min minValue: Double, max maxValue: Double) -> Double {
+        Swift.min(maxValue, Swift.max(minValue, value))
     }
 
     private func gaugeColor(_ pct: Double, animFrame: Int) -> RGB {
@@ -1220,6 +1294,14 @@ final class PixooRenderer {
         if hours > 0 && mins > 0 { return "\(hours)h\(mins)" }
         if hours > 0 { return "\(hours)h" }
         return "\(mins)m"
+    }
+
+    private func brightenColor(_ color: RGB, factor: Double) -> RGB {
+        (
+            UInt8(min(255, Int(round(Double(color.0) * factor)))),
+            UInt8(min(255, Int(round(Double(color.1) * factor)))),
+            UInt8(min(255, Int(round(Double(color.2) * factor)))),
+        )
     }
 
     private func parseISO8601Date(_ value: String) -> Date? {

@@ -117,15 +117,15 @@ enum TerrariumLayout {
     static let pixelGap: Float = 0.5
 
     // Standing positions
-    static let standingY: Float = 0.59
+    static let standingY: Float = 0.62
     static let standingYDeep: Float = 0.75
     static let jitterRange: Float = 0.03
 
     // Swim bounds (octopus)
-    static let swimMinX: Float = 0.20
-    static let swimMaxX: Float = 0.68
-    static let swimMinY: Float = 0.10
-    static let swimMaxY: Float = 0.61
+    static let swimMinX: Float = 0.18
+    static let swimMaxX: Float = 0.55
+    static let swimMinY: Float = 0.15
+    static let swimMaxY: Float = 0.55
 
     // Swim bounds (tetra)
     static let tetraMinX: Float = 0.03
@@ -136,8 +136,8 @@ enum TerrariumLayout {
     // Crayfish
     static let crayfishWidthFraction: Float = 0.11
     static let crayfishDefaultX: Float = 0.78
-    static let crayfishSittingY: Float = 0.57
-    static let crayfishRoutingY: Float = 0.45
+    static let crayfishSittingY: Float = 0.64
+    static let crayfishRoutingY: Float = 0.42
 
     // Jellyfish
     static let jellyfishBodyRadius: Float = 0.050

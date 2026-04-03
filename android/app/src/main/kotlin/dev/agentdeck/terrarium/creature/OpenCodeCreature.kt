@@ -111,6 +111,7 @@ class OpenCodeCreature(
                 currentY += (myStandingY - currentY) * dt * 4f
             }
             OctopusVisualState.WORKING -> {
+                val lane = swimLane()
                 waypointTimer += dt
                 if (waypointTimer >= waypointInterval) {
                     waypointTimer = 0f
@@ -121,20 +122,43 @@ class OpenCodeCreature(
                 val rate = TerrariumTiming.SWIM_LERP_RATE * dt
                 currentX += (targetX - currentX) * rate
                 currentY += (targetY - currentY) * rate
-                currentX = currentX.coerceIn(TerrariumLayout.SWIM_MIN_X, TerrariumLayout.SWIM_MAX_X)
-                currentY = currentY.coerceIn(WORKING_MIN_Y, WORKING_MAX_Y)
+                currentX = currentX.coerceIn(lane.minX, lane.maxX)
+                currentY = currentY.coerceIn(lane.minY, lane.maxY)
             }
         }
     }
 
     private fun pickNewWaypoint() {
+        val lane = swimLane()
         val angle = kotlin.random.Random.nextFloat() * 2f * PI.toFloat()
-        val wanderRadius = 0.12f
-        val radius = kotlin.random.Random.nextFloat() * wanderRadius
-        targetX = (homeX + cos(angle) * radius)
-            .coerceIn(TerrariumLayout.SWIM_MIN_X, TerrariumLayout.SWIM_MAX_X)
-        targetY = (WORKING_CENTER_Y + sin(angle) * radius * 0.5f)
-            .coerceIn(WORKING_MIN_Y, WORKING_MAX_Y)
+        val radiusX = maxOf(0.06f, (lane.maxX - lane.minX) * 0.45f)
+        val radiusY = maxOf(0.04f, (lane.maxY - lane.minY) * 0.40f)
+        targetX = (lane.centerX + cos(angle) * radiusX).coerceIn(lane.minX, lane.maxX)
+        targetY = (lane.centerY + sin(angle) * radiusY).coerceIn(lane.minY, lane.maxY)
+    }
+
+    private data class SwimLane(
+        val minX: Float,
+        val maxX: Float,
+        val minY: Float,
+        val maxY: Float,
+        val centerX: Float,
+        val centerY: Float,
+    )
+
+    private fun swimLane(): SwimLane {
+        val halfWidth = minOf(0.14f, maxOf(0.08f, 0.07f + scaleFactor * 0.05f))
+        val centerX = homeX.coerceIn(TerrariumLayout.SWIM_MIN_X + 0.06f, TerrariumLayout.SWIM_MAX_X - 0.06f)
+        val centerY = homeY.coerceIn(WORKING_MIN_Y + 0.04f, WORKING_MAX_Y - 0.04f)
+        val verticalSlack = minOf(0.08f, maxOf(0.04f, 0.04f + scaleFactor * 0.02f))
+        return SwimLane(
+            minX = maxOf(TerrariumLayout.SWIM_MIN_X, centerX - halfWidth),
+            maxX = minOf(TerrariumLayout.SWIM_MAX_X, centerX + halfWidth),
+            minY = maxOf(WORKING_MIN_Y, centerY - verticalSlack),
+            maxY = minOf(WORKING_MAX_Y, centerY + verticalSlack),
+            centerX = centerX,
+            centerY = centerY,
+        )
     }
 
     override fun draw(scope: DrawScope) {
@@ -403,12 +427,12 @@ class OpenCodeCreature(
         private const val BODY_SIZE_FRACTION = 0.08f
 
         // Positions
-        private const val STANDING_Y = 0.55f
+        private const val STANDING_Y = 0.61f
         private const val STANDING_Y_DEEP = 0.75f
-        private const val ASKING_Y = 0.38f
-        private const val WORKING_CENTER_Y = 0.15f
-        private const val WORKING_MIN_Y = 0.08f
-        private const val WORKING_MAX_Y = 0.30f
+        private const val ASKING_Y = 0.48f
+        private const val WORKING_CENTER_Y = 0.35f
+        private const val WORKING_MIN_Y = 0.25f
+        private const val WORKING_MAX_Y = 0.50f
 
         // Colors from opencode-logo-dark.svg
         private val OUTER_FRAME = Color(0xFFF1ECEC)   // light warm gray outer

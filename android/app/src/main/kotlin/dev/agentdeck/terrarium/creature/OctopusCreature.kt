@@ -483,7 +483,7 @@ class OctopusCreature(
 
     companion object {
         /** Standing position Y — just above the sand line (0.65). */
-        private const val STANDING_Y = 0.59f
+        private const val STANDING_Y = 0.62f
         /** Deep sleeping position Y — lower, partially hidden. */
         private const val STANDING_Y_DEEP = 0.75f
 

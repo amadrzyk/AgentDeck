@@ -19,47 +19,16 @@ data class CreatureSlot(
  * Distributes them across the left-center area of the terrarium.
  */
 fun layoutOctopuses(count: Int): List<CreatureSlot> {
-    return when (count) {
-        0 -> emptyList()
-        1 -> listOf(
-            CreatureSlot(
-                TerrariumLayout.OCTOPUS_CENTER_X_FRACTION,
-                TerrariumLayout.OCTOPUS_CENTER_Y_FRACTION,
-                1.0f,
-            )
-        )
-        2 -> listOf(
-            CreatureSlot(0.25f, 0.42f, 0.85f),
-            CreatureSlot(0.58f, 0.48f, 0.85f),
-        )
-        3 -> listOf(
-            CreatureSlot(0.24f, 0.36f, 0.75f),
-            CreatureSlot(0.54f, 0.36f, 0.75f),
-            CreatureSlot(0.38f, 0.54f, 0.75f),
-        )
-        else -> {
-            // Grid layout for 4+, shrinking as needed
-            val scale = max(0.45f, 0.75f - (count - 3) * 0.05f)
-            val cols = if (count <= 4) 2 else 3
-            val rows = (count + cols - 1) / cols
-            val startX = 0.20f
-            val endX = 0.62f
-            val startY = 0.32f
-            val endY = 0.55f
-            val dx = if (cols > 1) (endX - startX) / (cols - 1) else 0f
-            val dy = if (rows > 1) (endY - startY) / (rows - 1) else 0f
-
-            (0 until count).map { i ->
-                val col = i % cols
-                val row = i / cols
-                CreatureSlot(
-                    startX + col * dx,
-                    startY + row * dy,
-                    scale,
-                )
-            }
-        }
-    }
+    return layoutBand(
+        count = count,
+        xMin = 0.20f,
+        xMax = 0.50f,
+        frontY = 0.42f,
+        backY = 0.52f,
+        singleRowLimit = 4,
+        baseScale = 1.0f,
+        minScale = 0.58f,
+    )
 }
 
 /**
@@ -75,52 +44,7 @@ data class AgentLayoutInfo(
  * Same-project agents cluster together; groups are spaced apart.
  */
 fun layoutOctopusesByProject(agents: List<AgentLayoutInfo>): List<CreatureSlot> {
-    if (agents.isEmpty()) return emptyList()
-    if (agents.size == 1) return listOf(
-        CreatureSlot(
-            TerrariumLayout.OCTOPUS_CENTER_X_FRACTION,
-            TerrariumLayout.OCTOPUS_CENTER_Y_FRACTION,
-            1.0f,
-        )
-    )
-
-    // Group by project name (null groups separately)
-    val groups = agents.mapIndexed { i, a -> i to a }
-        .groupBy { it.second.projectName ?: "__null_${it.first}" }
-        .values.toList()
-
-    // Distribute group centers across swim area
-    val areaMinX = 0.22f   // clear of left HUD panel
-    val areaMaxX = 0.65f
-    val areaMinY = 0.30f
-    val areaMaxY = 0.58f
-    val clusterRadius = 0.07f
-
-    val result = Array<CreatureSlot?>(agents.size) { null }
-    val scale = max(0.50f, 0.85f - (agents.size - 1) * 0.05f)
-
-    for (gi in groups.indices) {
-        val group = groups[gi]
-        // Group center
-        val gt = if (groups.size == 1) 0.5f else gi.toFloat() / (groups.size - 1)
-        val gcx = areaMinX + (areaMaxX - areaMinX) * gt
-        val gcy = areaMinY + (areaMaxY - areaMinY) * (0.5f + (gi % 2) * 0.3f - 0.15f)
-
-        if (group.size == 1) {
-            val (idx, _) = group[0]
-            result[idx] = CreatureSlot(gcx, gcy, scale)
-        } else {
-            for (mi in group.indices) {
-                val (idx, _) = group[mi]
-                val angle = (2.0 * PI * mi / group.size).toFloat()
-                val cx = gcx + cos(angle) * clusterRadius
-                val cy = gcy + sin(angle) * clusterRadius * 0.7f
-                result[idx] = CreatureSlot(cx, cy, scale)
-            }
-        }
-    }
-
-    return result.map { it!! }
+    return layoutOctopuses(agents.size)
 }
 
 /**
@@ -128,43 +52,16 @@ fun layoutOctopusesByProject(agents: List<AgentLayoutInfo>): List<CreatureSlot> 
  * Clouds float in the upper-center area, above octopuses.
  */
 fun layoutCloudCreatures(count: Int): List<CreatureSlot> {
-    return when (count) {
-        0 -> emptyList()
-        1 -> listOf(
-            CreatureSlot(
-                TerrariumLayout.CLOUD_CENTER_X_FRACTION,
-                TerrariumLayout.CLOUD_CENTER_Y_FRACTION,
-                1.0f,
-            )
-        )
-        2 -> listOf(
-            CreatureSlot(0.40f, 0.18f, 0.85f),
-            CreatureSlot(0.62f, 0.22f, 0.85f),
-        )
-        3 -> listOf(
-            CreatureSlot(0.35f, 0.16f, 0.75f),
-            CreatureSlot(0.55f, 0.20f, 0.75f),
-            CreatureSlot(0.45f, 0.28f, 0.75f),
-        )
-        else -> {
-            val scale = max(0.50f, 0.75f - (count - 3) * 0.05f)
-            val cols = if (count <= 4) 2 else 3
-            val rows = (count + cols - 1) / cols
-            val startX = 0.30f
-            val endX = 0.65f
-            val startY = 0.12f
-            val endY = 0.30f
-            val dx = if (cols > 1) (endX - startX) / (cols - 1) else 0f
-            val dy = if (rows > 1) (endY - startY) / (rows - 1) else 0f
-            (0 until count).map { i ->
-                CreatureSlot(
-                    startX + (i % cols) * dx,
-                    startY + (i / cols) * dy,
-                    scale,
-                )
-            }
-        }
-    }
+    return layoutBand(
+        count = count,
+        xMin = 0.30f,
+        xMax = 0.55f,
+        frontY = 0.16f,
+        backY = 0.28f,
+        singleRowLimit = 3,
+        baseScale = 0.98f,
+        minScale = 0.56f,
+    )
 }
 
 /**
@@ -172,43 +69,71 @@ fun layoutCloudCreatures(count: Int): List<CreatureSlot> {
  * Similar to cloud creatures but positioned in the mid-center area.
  */
 fun layoutOpenCodeCreatures(count: Int): List<CreatureSlot> {
-    return when (count) {
-        0 -> emptyList()
-        1 -> listOf(
-            CreatureSlot(
-                TerrariumLayout.OPENCODE_CENTER_X_FRACTION,
-                TerrariumLayout.OPENCODE_CENTER_Y_FRACTION,
-                1.0f,
-            )
-        )
-        2 -> listOf(
-            CreatureSlot(0.38f, 0.38f, 0.85f),
-            CreatureSlot(0.58f, 0.42f, 0.85f),
-        )
-        3 -> listOf(
-            CreatureSlot(0.33f, 0.36f, 0.75f),
-            CreatureSlot(0.53f, 0.36f, 0.75f),
-            CreatureSlot(0.43f, 0.48f, 0.75f),
-        )
-        else -> {
-            val scale = max(0.50f, 0.75f - (count - 3) * 0.05f)
-            val cols = if (count <= 4) 2 else 3
-            val rows = (count + cols - 1) / cols
-            val startX = 0.28f
-            val endX = 0.62f
-            val startY = 0.32f
-            val endY = 0.50f
-            val dx = if (cols > 1) (endX - startX) / (cols - 1) else 0f
-            val dy = if (rows > 1) (endY - startY) / (rows - 1) else 0f
-            (0 until count).map { i ->
-                CreatureSlot(
-                    startX + (i % cols) * dx,
-                    startY + (i / cols) * dy,
-                    scale,
-                )
-            }
+    return layoutBand(
+        count = count,
+        xMin = 0.45f,
+        xMax = 0.68f,
+        frontY = 0.34f,
+        backY = 0.46f,
+        singleRowLimit = 3,
+        baseScale = 0.96f,
+        minScale = 0.56f,
+    )
+}
+
+private fun layoutBand(
+    count: Int,
+    xMin: Float,
+    xMax: Float,
+    frontY: Float,
+    backY: Float,
+    singleRowLimit: Int,
+    baseScale: Float,
+    minScale: Float,
+): List<CreatureSlot> {
+    if (count <= 0) return emptyList()
+
+    val rows = when {
+        count <= singleRowLimit -> 1
+        count <= singleRowLimit * 2 -> 2
+        else -> 3
+    }
+
+    val scale = max(minScale, baseScale - (count - 1) * 0.055f)
+    val rowCounts = distribute(count, rows)
+    val slots = mutableListOf<CreatureSlot>()
+    var absoluteIndex = 0
+
+    for (row in 0 until rows) {
+        val rowCount = rowCounts[row]
+        if (rowCount <= 0) continue
+
+        val rowT = if (rows == 1) 0f else row.toFloat() / (rows - 1).toFloat()
+        val rowY = frontY + (backY - frontY) * rowT
+        val rowInset = 0.015f + row * 0.02f
+        val rowMinX = xMin + rowInset
+        val rowMaxX = xMax - rowInset
+        val rowScale = max(minScale, scale - row * 0.04f)
+
+        for (col in 0 until rowCount) {
+            val t = if (rowCount == 1) 0.5f else col.toFloat() / (rowCount - 1).toFloat()
+            val baseX = rowMinX + (rowMaxX - rowMinX) * t
+            val spread = max(0.003f, minOf(0.012f, (rowMaxX - rowMinX) / (rowCount * 5).coerceAtLeast(1)))
+            val phase = if ((absoluteIndex + row) % 2 == 0) -1f else 1f
+            val x = (baseX + spread * phase).coerceIn(xMin, xMax)
+            val yJitter = ((absoluteIndex % 3) - 1) * 0.008f
+            slots += CreatureSlot(x, rowY + yJitter, rowScale)
+            absoluteIndex += 1
         }
     }
+
+    return slots
+}
+
+private fun distribute(count: Int, rows: Int): IntArray {
+    val result = IntArray(rows) { count / rows }
+    repeat(count % rows) { index -> result[index] += 1 }
+    return result
 }
 
 /**

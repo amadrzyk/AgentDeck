@@ -95,6 +95,7 @@ final class OctopusCreature: Creature {
 
     private func updatePosition(dt: Float) {
         let depthOffset = (homeX - 0.4) * 0.15
+        let lane = swimLane()
 
         switch visualState {
         case .sleeping:
@@ -120,8 +121,8 @@ final class OctopusCreature: Creature {
             let rate = TerrariumTiming.swimLerpRate * dt
             currentX += (targetX - currentX) * rate
             currentY += (targetY - currentY) * rate
-            currentX = min(TerrariumLayout.swimMaxX, max(TerrariumLayout.swimMinX, currentX))
-            currentY = min(TerrariumLayout.swimMaxY, max(TerrariumLayout.swimMinY, currentY))
+            currentX = min(lane.maxX, max(lane.minX, currentX))
+            currentY = min(lane.maxY, max(lane.minY, currentY))
 
         case .asking:
             let myStandingY = TerrariumLayout.standingY + standingJitter + depthOffset
@@ -132,13 +133,27 @@ final class OctopusCreature: Creature {
     }
 
     private func pickNewWaypoint() {
+        let lane = swimLane()
         let angle = Float.random(in: 0...Float.pi * 2)
-        let wanderRadius: Float = 0.12
-        let radius = Float.random(in: 0...wanderRadius)
-        targetX = min(TerrariumLayout.swimMaxX, max(TerrariumLayout.swimMinX,
-            homeX + cos(angle) * radius))
-        targetY = min(TerrariumLayout.swimMaxY, max(TerrariumLayout.swimMinY,
-            homeY + sin(angle) * radius * 0.7))
+        let radiusX = max(0.06, (lane.maxX - lane.minX) * 0.46)
+        let radiusY = max(0.04, (lane.maxY - lane.minY) * 0.42)
+        targetX = min(lane.maxX, max(lane.minX, lane.centerX + cos(angle) * radiusX))
+        targetY = min(lane.maxY, max(lane.minY, lane.centerY + sin(angle) * radiusY))
+    }
+
+    private func swimLane() -> (minX: Float, maxX: Float, minY: Float, maxY: Float, centerX: Float, centerY: Float) {
+        let halfWidth = min(0.15, max(0.08, 0.08 + scale * 0.05))
+        let verticalSlack = min(0.09, max(0.05, 0.05 + scale * 0.03))
+        let centerX = min(TerrariumLayout.swimMaxX - 0.06, max(TerrariumLayout.swimMinX + 0.06, homeX))
+        let centerY = min(TerrariumLayout.swimMaxY - 0.08, max(TerrariumLayout.swimMinY + 0.08, homeY))
+        return (
+            max(TerrariumLayout.swimMinX, centerX - halfWidth),
+            min(TerrariumLayout.swimMaxX, centerX + halfWidth),
+            max(TerrariumLayout.swimMinY, centerY - verticalSlack),
+            min(TerrariumLayout.swimMaxY, centerY + verticalSlack),
+            centerX,
+            centerY
+        )
     }
 
     /// Current live position for tetra attractor tracking
