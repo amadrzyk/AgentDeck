@@ -190,7 +190,7 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
           config.session,
           manager.detailState,
           undefined, // tool shown separately
-          config.session.modelName,
+          manager.detailModelName ?? config.session.modelName,
           undefined,
         );
       }

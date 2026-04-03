@@ -25,6 +25,10 @@ const STATE_COLORS: Record<string, string> = {
 
 function stateColor(state?: string, agentType?: AgentType): string {
   if (!state) return STATE_COLORS.disconnected;
+  // Claude Code: terracotta/orange brand identity
+  if (agentType === 'claude-code') {
+    if (state === 'idle') return '#f97316';
+  }
   // OpenClaw: cyan standby, green routing
   if (agentType === 'openclaw') {
     if (state === 'idle') return '#06b6d4';

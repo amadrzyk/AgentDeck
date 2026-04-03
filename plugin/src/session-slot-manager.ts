@@ -147,6 +147,7 @@ export class SessionSlotManager {
   get sessions(): SessionInfo[] { return this._sessions; }
   get detailState(): State { return this._detailState; }
   get detailOptions(): PromptOption[] { return this._detailOptions; }
+  get detailModelName(): string | undefined { return this._detailModelName; }
   get modelSwitching(): boolean { return this._modelSwitching; }
 
   startModelSwitch(): void {
@@ -209,6 +210,20 @@ export class SessionSlotManager {
 
     // Cap at MAX_SESSIONS
     this._sessions = ordered.slice(0, MAX_SESSIONS);
+
+    // Two-pass name dedup: number duplicate project names (#1, #2, ...)
+    const nameCounts = new Map<string, number>();
+    for (const s of this._sessions) {
+      nameCounts.set(s.projectName, (nameCounts.get(s.projectName) || 0) + 1);
+    }
+    const nameSeq = new Map<string, number>();
+    for (const s of this._sessions) {
+      const seq = (nameSeq.get(s.projectName) || 0) + 1;
+      nameSeq.set(s.projectName, seq);
+      if ((nameCounts.get(s.projectName) || 0) > 1) {
+        s.projectName = `${s.projectName} #${seq}`;
+      }
+    }
 
     // Clamp page
     const totalPages = this.totalPages();
