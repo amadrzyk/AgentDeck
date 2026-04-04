@@ -67,6 +67,7 @@ lv_obj_t* aquariumCreate() {
     lv_obj_align(connScrim, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(connScrim, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(connScrim, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(connScrim, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_clear_flag(connScrim, LV_OBJ_FLAG_SCROLLABLE);
 
     // Card container (centered in scrim)

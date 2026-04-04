@@ -218,17 +218,6 @@ void render(float dt) {
     CreatureState octStates[MAX_OCTOPUS];
     CreatureState cloudStates[(MAX_CLOUD > 0) ? MAX_CLOUD : 1];
     CreatureState opencodeStates[(MAX_OPENCODE > 0) ? MAX_OPENCODE : 1];
-    static uint32_t lastDbg = 0;
-    if (isDaemon && millis() - lastDbg > 3000) {
-        lastDbg = millis();
-        Serial.printf("[Terrarium] isDaemon=%d octCount=%d cloudCount=%d opencodeCount=%d sessionCount=%d cState=%d MAX_OC=%d\n",
-                      isDaemon, octCount, cloudCount, opencodeCount, g_state.sessionCount, (int)cState, MAX_OPENCODE);
-        for (uint8_t s = 0; s < g_state.sessionCount; s++) {
-            Serial.printf("  session[%d] type=%s state=%s alive=%d\n",
-                          s, g_state.sessions[s].agentType, g_state.sessions[s].state,
-                          g_state.sessions[s].alive);
-        }
-    }
 
     // Helper lambda to map session state string to CreatureState
     auto mapSessionState = [](const char* stateStr) -> CreatureState {
