@@ -11,8 +11,16 @@ struct AgentDeckApp: App {
     @StateObject private var preferences = AppPreferences.shared
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var daemonService = DaemonService()
+    @StateObject private var daemonService: DaemonService
     @Environment(\.openWindow) private var openWindow
+
+    init() {
+        // Enforce single-instance: activate existing instance and exit if one is running.
+        // Install cleanup handlers to remove daemon.json on any exit path (crash, signal).
+        _ = SingletonGuard.enforce()
+        SingletonGuard.installCleanupHandlers()
+        _daemonService = StateObject(wrappedValue: DaemonService())
+    }
     #endif
 
     var body: some Scene {
@@ -25,6 +33,15 @@ struct AgentDeckApp: App {
         }
         .defaultPosition(.center)
         .defaultSize(width: 1280, height: 840)
+
+        Window("Launch Session", id: "launch-session") {
+            LaunchSessionDialog(daemonPort: daemonService.port)
+                .environmentObject(daemonService)
+                .environmentObject(preferences)
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 420, height: 340)
+        .windowResizability(.contentSize)
         #else
         WindowGroup("AgentDeck Dashboard", id: "dashboard") {
             ContentView()
@@ -82,16 +99,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var daemonService: DaemonService?
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Remove daemon.json FIRST — it's a fast file op and prevents stale-guard
+        // deadlocks on the next app launch even if the async shutdown below hangs.
+        SingletonGuard.removeDaemonInfoFile()
+
         let semaphore = DispatchSemaphore(value: 0)
         Task {
             await daemonService?.stop()
             semaphore.signal()
         }
-        let result = semaphore.wait(timeout: .now() + 5)
+        let result = semaphore.wait(timeout: .now() + 10)
         if result == .timedOut {
-            // Fallback: force remove daemon.json to prevent stale guard on next launch
-            SessionRegistry.shared.removeDaemonInfo()
+            NSLog("[AgentDeck] Shutdown exceeded 10s — forcing exit")
+            // daemon.json already removed above; just exit
         }
+    }
+
+    /// Ensure clean exit when the last window closes if the app was launched
+    /// as a regular app (not via login item). Prevents zombie processes.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // MenuBarExtra keeps the app running — this only affects cases where no
+        // menu bar icon is active. Return false to keep the menu bar alive.
+        return false
     }
 }
 #endif

@@ -99,9 +99,12 @@ extension DashboardState {
             && agentType != "codex-cli"
             && agentType != "opencode"
 
-        // Octopus siblings (exclude daemon/openclaw/codex-cli/opencode), sorted by ID for stable positioning
+        // Octopus siblings (exclude daemon/openclaw/codex-cli/opencode), sorted by ID for stable positioning.
+        // Also exclude the currently-focused session's id to prevent double-rendering when focus relay
+        // promotes a sibling to primary (agentType → claude-code, sessionId → sibling.id).
         let siblings = siblingSessions
             .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" && $0.agentType != "opencode" }
+            .filter { !(primaryIsOctopus && $0.id == sessionId) }
             .sorted { $0.id < $1.id }
 
         let octopusCount = (primaryIsOctopus ? 1 : 0) + siblings.count
@@ -176,7 +179,10 @@ extension DashboardState {
 
         // Jellyfish (Codex CLI sessions)
         let primaryIsJellyfish = state != .disconnected && agentType == "codex-cli"
-        let jellyfishSiblings = siblingSessions.filter { $0.agentType == "codex-cli" }.sorted { $0.id < $1.id }
+        let jellyfishSiblings = siblingSessions
+            .filter { $0.agentType == "codex-cli" }
+            .filter { !(primaryIsJellyfish && $0.id == sessionId) }
+            .sorted { $0.id < $1.id }
         let jellyfishCount = (primaryIsJellyfish ? 1 : 0) + jellyfishSiblings.count
         let jellySlots = CreatureLayout.layoutCloudCreatures(count: jellyfishCount)
 
@@ -207,7 +213,10 @@ extension DashboardState {
 
         // OpenCode creatures
         let primaryIsOpenCode = state != .disconnected && agentType == "opencode"
-        let openCodeSiblings = siblingSessions.filter { $0.agentType == "opencode" }.sorted { $0.id < $1.id }
+        let openCodeSiblings = siblingSessions
+            .filter { $0.agentType == "opencode" }
+            .filter { !(primaryIsOpenCode && $0.id == sessionId) }
+            .sorted { $0.id < $1.id }
         let openCodeCount = (primaryIsOpenCode ? 1 : 0) + openCodeSiblings.count
         let openCodeSlots = CreatureLayout.layoutOpenCodeCreatures(count: openCodeCount)
 

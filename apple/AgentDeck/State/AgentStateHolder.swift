@@ -154,6 +154,46 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         displaySync.handleForegroundReturn(hostDisplayOn: state.hostDisplayOn)
         #endif
 
+        #if os(macOS)
+        if !state.bridgeConnected {
+            if let preferredLocalBridgeUrl,
+               connection.url != preferredLocalBridgeUrl || connection.status == .disconnected {
+                print("[Lifecycle] macOS reconnecting directly to preferred local bridge")
+                connectTo(url: preferredLocalBridgeUrl)
+            } else {
+                print("[Lifecycle] macOS skipping mDNS waterfall while waiting for daemon ready")
+            }
+            return
+        }
+
+        if suspendDuration > 15 {
+            print("[Lifecycle] long suspend (\(Int(suspendDuration))s) — socket dead, reconnect preferred local bridge")
+            connection.forceDisconnectAndRestart()
+            if let preferredLocalBridgeUrl {
+                connectTo(url: preferredLocalBridgeUrl)
+            }
+        } else if suspendDuration > 5 {
+            print("[Lifecycle] medium suspend (\(Int(suspendDuration))s) — health check")
+            connection.forceHealthCheck { [weak self] alive in
+                guard let self else { return }
+                if !alive {
+                    print("[Lifecycle] health check failed — reconnecting preferred local bridge")
+                    self.connection.forceDisconnectAndRestart()
+                    if let preferredLocalBridgeUrl = self.preferredLocalBridgeUrl {
+                        self.connectTo(url: preferredLocalBridgeUrl)
+                    }
+                } else {
+                    print("[Lifecycle] health check passed")
+                    self.connection.startPingTimer()
+                }
+            }
+            return
+        } else {
+            connection.startPingTimer()
+        }
+        return
+        #endif
+
         if !state.bridgeConnected {
             // Not connected — restart discovery
             restartWaterfall()

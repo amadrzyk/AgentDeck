@@ -503,7 +503,7 @@ struct ControlTowerPanel: View {
     private var actionsBar: some View {
         HStack(spacing: 8) {
             Button {
-                SessionLauncher.launchSession(daemonPort: daemonService.port)
+                openLaunchSession()
             } label: {
                 Label("Launch Session", systemImage: "play.fill")
                     .font(.system(size: 11))
@@ -629,6 +629,17 @@ struct ControlTowerPanel: View {
         } else {
             openWindow(id: "dashboard")
         }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func openLaunchSession() {
+        // Bring existing window forward if already open, else open new one
+        if let window = NSApplication.shared.windows.first(where: { $0.title == "Launch Session" }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openWindow(id: "launch-session")
+        }
+        // Activate app so window gets focus (menu bar apps default to .accessory)
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
