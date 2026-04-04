@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawn } from 'child_process';
 import { debug } from './logger.js';
 import type { UtilityCommand } from './types.js';
 
@@ -12,6 +12,49 @@ export interface UtilityState {
 type UtilityMode = 'volume' | 'brightness' | 'media';
 
 const MODES: UtilityMode[] = ['volume', 'brightness', 'media'];
+const POLL_INTERVAL_MS = 15000;
+const OSASCRIPT_TIMEOUT_MS = 2000;
+const OSASCRIPT_KILL_GRACE_MS = 1000;
+const FAILURE_THRESHOLD = 3;
+const MAX_SKIP_TICKS = 50;
+
+/**
+ * Runs an osascript command with a hard kill fallback.
+ * execSync()'s timeout only sends SIGTERM and returns, but osascript can hang
+ * indefinitely on AppleEvent IPC when System Events.app is unresponsive. Without
+ * a SIGKILL follow-up those children accumulate as zombies, dragging down
+ * launchservicesd/syspolicyd. This helper resolves only after the child has
+ * actually exited.
+ */
+function runOsascript(script: string, timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('osascript', ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let settled = false;
+    child.stdout?.on('data', (d) => { out += d.toString(); });
+    const termTimer = setTimeout(() => {
+      if (!settled) child.kill('SIGTERM');
+    }, timeoutMs);
+    const killTimer = setTimeout(() => {
+      if (!settled) child.kill('SIGKILL');
+    }, timeoutMs + OSASCRIPT_KILL_GRACE_MS);
+    child.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(termTimer);
+      clearTimeout(killTimer);
+      if (code === 0) resolve(out.trim());
+      else reject(new Error(`osascript exit ${code}`));
+    });
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(termTimer);
+      clearTimeout(killTimer);
+      reject(err);
+    });
+  });
+}
 
 export class UtilityProxy {
   private currentMode: UtilityMode = 'volume';
@@ -19,10 +62,13 @@ export class UtilityProxy {
   private cachedVolume = 50;
   private cachedMuted = false;
   private cachedBrightness = 50;
+  private polling = false;
+  private consecutiveFailures = 0;
+  private skipTicks = 0;
 
   constructor() {
-    this.poll();
-    this.pollTimer = setInterval(() => this.poll(), 5000);
+    void this.poll();
+    this.pollTimer = setInterval(() => { void this.poll(); }, POLL_INTERVAL_MS);
   }
 
   cycleMode(): void {
@@ -60,32 +106,32 @@ export class UtilityProxy {
   handleCommand(cmd: UtilityCommand): void {
     switch (cmd.action) {
       case 'adjust_volume':
-        this.adjustVolume(cmd.value ?? 1);
+        void this.adjustVolume(cmd.value ?? 1);
         break;
       case 'toggle_mute':
-        this.toggleMute();
+        void this.toggleMute();
         break;
       case 'adjust_brightness':
-        this.adjustBrightness(cmd.value ?? 1);
+        void this.adjustBrightness(cmd.value ?? 1);
         break;
       case 'media_play_pause':
-        this.mediaPlayPause();
+        void this.mediaPlayPause();
         break;
       case 'media_next':
-        this.mediaNext();
+        void this.mediaNext();
         break;
       case 'media_prev':
-        this.mediaPrev();
+        void this.mediaPrev();
         break;
     }
   }
 
-  adjustVolume(delta: number): void {
+  async adjustVolume(delta: number): Promise<void> {
     // Each tick ~6.25% (16 ticks = 0..100)
     const step = Math.round(delta * 6.25);
     const newVol = Math.max(0, Math.min(100, this.cachedVolume + step));
     try {
-      execSync(`osascript -e 'set volume output volume ${newVol}'`, { timeout: 2000, stdio: 'pipe' });
+      await runOsascript(`set volume output volume ${newVol}`);
       this.cachedVolume = newVol;
       if (newVol > 0) this.cachedMuted = false;
       debug('Utility', `Volume → ${newVol}%`);
@@ -94,10 +140,10 @@ export class UtilityProxy {
     }
   }
 
-  toggleMute(): void {
+  async toggleMute(): Promise<void> {
     try {
-      const script = `osascript -e 'set volume with output muted:${this.cachedMuted ? 'false' : 'true'}'`;
-      execSync(script, { timeout: 2000, stdio: 'pipe' });
+      const next = this.cachedMuted ? 'false' : 'true';
+      await runOsascript(`set volume with output muted:${next}`);
       this.cachedMuted = !this.cachedMuted;
       debug('Utility', `Mute → ${this.cachedMuted}`);
     } catch (err) {
@@ -105,14 +151,12 @@ export class UtilityProxy {
     }
   }
 
-  adjustBrightness(delta: number): void {
-    const step = delta * 6.25 / 100; // normalized 0-1 for brightness
+  async adjustBrightness(delta: number): Promise<void> {
     try {
-      const script = `osascript -e '
-        tell application "System Events"
-          key code ${delta > 0 ? 144 : 145}
-        end tell'`;
-      execSync(script, { timeout: 2000, stdio: 'pipe' });
+      const script = `tell application "System Events"
+  key code ${delta > 0 ? 144 : 145}
+end tell`;
+      await runOsascript(script);
       // Approximate new brightness
       this.cachedBrightness = Math.max(0, Math.min(100, this.cachedBrightness + Math.round(delta * 6.25)));
       debug('Utility', `Brightness → ~${this.cachedBrightness}%`);
@@ -121,54 +165,55 @@ export class UtilityProxy {
     }
   }
 
-  mediaPlayPause(): void {
+  async mediaPlayPause(): Promise<void> {
     try {
-      execSync(`osascript -e 'tell application "System Events" to key code 16 using {command down}'`, { timeout: 2000, stdio: 'pipe' });
+      await runOsascript(`tell application "System Events" to key code 16 using {command down}`);
       debug('Utility', 'Media: play/pause');
     } catch (err) {
       debug('Utility', `mediaPlayPause error: ${err}`);
     }
   }
 
-  mediaNext(): void {
+  async mediaNext(): Promise<void> {
     try {
-      execSync(`osascript -e 'tell application "System Events" to key code 124 using {command down}'`, { timeout: 2000, stdio: 'pipe' });
+      await runOsascript(`tell application "System Events" to key code 124 using {command down}`);
       debug('Utility', 'Media: next');
     } catch (err) {
       debug('Utility', `mediaNext error: ${err}`);
     }
   }
 
-  mediaPrev(): void {
+  async mediaPrev(): Promise<void> {
     try {
-      execSync(`osascript -e 'tell application "System Events" to key code 123 using {command down}'`, { timeout: 2000, stdio: 'pipe' });
+      await runOsascript(`tell application "System Events" to key code 123 using {command down}`);
       debug('Utility', 'Media: prev');
     } catch (err) {
       debug('Utility', `mediaPrev error: ${err}`);
     }
   }
 
-  private poll(): void {
-    // Poll volume
+  private async poll(): Promise<void> {
+    if (this.polling) return;
+    if (this.skipTicks > 0) {
+      this.skipTicks--;
+      return;
+    }
+    this.polling = true;
     try {
-      const vol = execSync(`osascript -e 'output volume of (get volume settings)'`, { timeout: 2000, encoding: 'utf8', stdio: 'pipe' }).trim();
+      const vol = await runOsascript(`output volume of (get volume settings)`);
       this.cachedVolume = parseInt(vol, 10) || 0;
-    } catch { /* ignore */ }
-
-    // Poll mute
-    try {
-      const muted = execSync(`osascript -e 'output muted of (get volume settings)'`, { timeout: 2000, encoding: 'utf8', stdio: 'pipe' }).trim();
+      const muted = await runOsascript(`output muted of (get volume settings)`);
       this.cachedMuted = muted === 'true';
-    } catch { /* ignore */ }
-
-    // Poll brightness (CoreBrightness via AppleScript)
-    try {
-      const br = execSync(
-        `osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode'`,
-        { timeout: 2000, encoding: 'utf8', stdio: 'pipe' },
-      ).trim();
-      // brightness is harder to read reliably; keep cached estimate
-    } catch { /* ignore */ }
+      this.consecutiveFailures = 0;
+    } catch (err) {
+      this.consecutiveFailures++;
+      if (this.consecutiveFailures >= FAILURE_THRESHOLD) {
+        this.skipTicks = Math.min(MAX_SKIP_TICKS, this.consecutiveFailures * 3);
+        debug('Utility', `osascript failures=${this.consecutiveFailures}, skipping ${this.skipTicks} ticks`);
+      }
+    } finally {
+      this.polling = false;
+    }
   }
 
   cleanup(): void {
