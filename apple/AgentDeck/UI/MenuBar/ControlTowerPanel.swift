@@ -624,21 +624,14 @@ struct ControlTowerPanel: View {
     }
 
     private func openDashboard() {
-        if let window = NSApplication.shared.windows.first(where: { $0.title.contains("AgentDeck Dashboard") }) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            openWindow(id: "dashboard")
-        }
+        // SwiftUI's openWindow brings an existing window of this scene to front
+        // if one exists, otherwise creates it. Avoids fragile title string matching.
+        openWindow(id: "dashboard")
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     private func openLaunchSession() {
-        // Bring existing window forward if already open, else open new one
-        if let window = NSApplication.shared.windows.first(where: { $0.title == "Launch Session" }) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            openWindow(id: "launch-session")
-        }
+        openWindow(id: "launch-session")
         // Activate app so window gets focus (menu bar apps default to .accessory)
         NSApplication.shared.activate(ignoringOtherApps: true)
     }

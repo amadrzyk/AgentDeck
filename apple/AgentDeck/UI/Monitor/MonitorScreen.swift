@@ -7,7 +7,9 @@ struct MonitorScreen: View {
     @EnvironmentObject private var preferences: AppPreferences
 
     @State private var terrariumState = TerrariumState()
+    #if os(iOS)
     @State private var showSettingsSheet = false
+    #endif
     @State private var previousAgentState: AgentConnectionState = .disconnected
     @StateObject private var toastManager = ToastManager()
 
@@ -22,11 +24,13 @@ struct MonitorScreen: View {
 
     var body: some View {
         mainContent
+            #if os(iOS)
             .sheet(isPresented: $showSettingsSheet) {
                 SettingsScreen()
                     .environmentObject(stateHolder)
                     .environmentObject(preferences)
             }
+            #endif
             .onAppear {
                 previousAgentState = stateHolder.state.state
                 updateTerrariumState()
@@ -97,7 +101,7 @@ struct MonitorScreen: View {
                     rotationButton
                     #endif
                     Button {
-                        showSettingsSheet = true
+                        openSettings()
                     } label: {
                         Image(systemName: "gearshape")
                             .font(.title2)
@@ -146,6 +150,19 @@ struct MonitorScreen: View {
     }
 
     // MARK: - Actions
+
+    private func openSettings() {
+        #if os(macOS)
+        NSApp.activate(ignoringOtherApps: true)
+        if #available(macOS 14.0, *) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } else {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        }
+        #else
+        showSettingsSheet = true
+        #endif
+    }
 
     private func handleCreatureTap(_ sessionId: String) {
         guard sessionId != "crayfish" else { return }
