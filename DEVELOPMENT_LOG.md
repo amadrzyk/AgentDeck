@@ -2,6 +2,54 @@
 
 ---
 
+## 2026-04-04 — ESP32 스와이프 제스처 차단 버그 + 디버그 로그 정리
+
+### 문제
+1. **86 Box 스와이프 미동작**: 연결 오버레이(`connScrim`)가 표시될 때 스와이프 제스처가 동작하지 않음
+2. **디버그 로그 잔류**: 이전 세션 `#if constexpr` 디버깅 중 추가한 `Serial.printf` 로그가 `renderer.cpp`와 `opencode.cpp`에 남아있음
+3. **86 Box + IPS 3.5" 부트루프**: 두 보드 모두 "No bootable app partitions" 부트루프 (이전 세션 플래시 실패 추정)
+
+### 해결
+1. **제스처 버그**: `connScrim`이 `LV_OBJ_FLAG_CLICKABLE`으로 전체 화면을 덮어 터치 이벤트를 가로챔. 제스처 핸들러는 `screen`에만 등록. `LV_OBJ_FLAG_EVENT_BUBBLE` 추가로 이벤트가 부모 `screen`으로 전파되도록 수정
+2. **디버그 로그**: `renderer.cpp` (terrarium 세션 덤프 3초 주기) + `opencode.cpp` (렌더 진단 로그 + `Draw::rect` RGB565 임시 분기) 제거. `opencode.cpp`는 `fillRectA` 통일
+3. **부트루프 복구**: bootloader + partitions + firmware full flash. IPS 3.5"는 `--flash_size 16MB` 필수
+
+### 핵심 교훈
+- **LVGL 9 이벤트 전파**: `LV_OBJ_FLAG_CLICKABLE` 오버레이는 제스처를 포함한 모든 입력 이벤트를 소비. 반투명 오버레이에는 `LV_OBJ_FLAG_EVENT_BUBBLE` 필수
+- **부트루프 시 CH340 포트는 살아있다**: 부팅 실패해도 CH340/Native USB 시리얼은 접속 가능. 시리얼 출력으로 부트루프 원인 확인 후 full flash로 복구
+
+---
+
+## 2026-04-03 — D200H Hybrid Icon Buttons (Firmware-Safe PNG + Native Text)
+
+### 문제
+D200H는 Stream Deck처럼 풍부한 시각 버튼 UX를 맞추고 싶지만, 지금 구현은 사실상 네이티브 텍스트 중심이었다. 과거 시도에서 CoreText로 긴 텍스트를 PNG에 직접 그리면 ZIP 크기와 경계 바이트 조건 때문에 D200H 펌웨어가 `SET_BUTTONS`를 거부하고 기본 시계 화면으로 되돌아가는 문제가 있었다.
+
+### 해결
+- `apple/AgentDeck/Daemon/Modules/D200hHidModule.swift`
+  - 버튼 구조체에 `icon` / `iconColor` 추가
+  - 세션 타입별 배지 추가:
+    - Claude Code = octopus
+    - Codex CLI = jellyfish/cloud
+    - OpenCode = nested square
+    - OpenClaw = crayfish
+  - 액션 버튼도 전용 glyph 추가:
+    - Back / Stop / More / Go On / Review / Commit / Clear / Tool / Usage
+  - PNG 렌더러는 더 이상 텍스트를 직접 그리지 않고, 상단의 **희소(sparse) 벡터형 아이콘**만 그린다
+  - 라벨은 계속 기기 네이티브 `manifest Text`로 처리
+  - 라벨 스타일은 `Size 14 / Weight 72`로 낮춰 아이콘과 텍스트 공존 공간 확보
+
+### 핵심 설계 결정
+- **완전 이미지 버튼보다 하이브리드가 안전하다.** D200H는 이미지 자체가 불가능한 게 아니라, 큰 텍스트 렌더가 포함된 PNG와 ZIP이 펌웨어 허용 범위를 쉽게 넘는다.
+- **아이콘은 sparse path로만 렌더한다.** 넓은 채움면과 텍스트 래스터를 피하면 PNG 압축률이 좋아지고 boundary padding 우회 성공 확률이 올라간다.
+- **텍스트는 계속 native renderer 사용**: 가독성과 펌웨어 안정성을 둘 다 지키기 위한 절충안.
+
+### 검증
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataD200Hybrid build CODE_SIGNING_ALLOWED=NO`
+- 결과: `BUILD SUCCEEDED`
+
+---
+
 ## 2026-04-03 — 크리처 배치 전면 개선: 지면 근접 + 타입 간 분리
 
 ### 문제
