@@ -185,9 +185,10 @@ internal fun EinkAgentBlock(
 ) {
     // Model + effort + state merged into one line: "  opus-4 · high · ◉ PROC" or "  ◉ PROC"
     val stateMarker = compactStateMarker(agentState)
+    val abbrevModel = modelName?.let { abbreviateModelName(it) }
     val modelEffort = when {
-        modelName != null && effortLevel != null && effortLevel != "medium" -> "$modelName \u00B7 $effortLevel"
-        modelName != null -> modelName
+        abbrevModel != null && effortLevel != null && effortLevel != "medium" -> "$abbrevModel \u00B7 $effortLevel"
+        abbrevModel != null -> abbrevModel
         else -> null
     }
     val subLine = if (modelEffort != null) {

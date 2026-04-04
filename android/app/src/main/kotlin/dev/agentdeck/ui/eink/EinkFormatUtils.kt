@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import dev.agentdeck.net.AgentState
+import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
 
 fun formatCount(n: Int): String = when {
@@ -89,6 +90,36 @@ fun mapSessionState(session: dev.agentdeck.net.SessionInfo): AgentState {
         "awaiting_permission", "awaiting_option", "awaiting_diff" -> AgentState.AWAITING_PERMISSION
         else -> AgentState.IDLE
     }
+}
+
+/** Abbreviate model names for space-constrained e-ink display. */
+fun abbreviateModelName(name: String): String {
+    return name
+        // Claude catalog full names → short form
+        .replace("Claude Opus 4", "opus-4")
+        .replace("Claude Sonnet 4", "sonnet-4")
+        .replace("Claude Haiku 4.5", "haiku-4.5")
+        .replace("Claude Haiku 3.5", "haiku-3.5")
+        // Claude Code bridge modelName: "claude-opus-4-6" → "opus-4"
+        .replace(Regex("claude-(opus|sonnet|haiku)-(\\d+)(?:-(\\d+))?(?:-\\d{8})?")) { m ->
+            "${m.groupValues[1]}-${m.groupValues[2]}"
+        }
+        // DeepSeek
+        .replace("DeepSeek: DeepSeek ", "DS:")
+        .replace("DeepSeek ", "DS:")
+        // Gemini
+        .replace(Regex("Gemini (\\S+) Pro")) { "Gem ${it.groupValues[1]}P" }
+        .replace(Regex("Gemini (\\S+) Flash")) { "Gem ${it.groupValues[1]}F" }
+        .replace("Gemini ", "Gem ")
+        // GPT
+        .replace("gpt-4o-mini", "4o-mini")
+        .replace("gpt-4o", "4o")
+        .replace("gpt-4-turbo", "4-turbo")
+}
+
+fun antigravityDisplayLine(state: DashboardState): String? {
+    val status = state.antigravityStatus ?: return null
+    return status.planName?.replace("Google AI ", "")?.takeIf { it.isNotBlank() }
 }
 
 @Composable

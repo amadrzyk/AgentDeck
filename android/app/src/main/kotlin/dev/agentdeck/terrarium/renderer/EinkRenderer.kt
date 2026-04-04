@@ -800,24 +800,15 @@ private fun einkWrapToTwoLines(text: String, paint: Paint, maxWidth: Float): Lis
     return listOf(text.substring(0, bestSplit), text.substring(bestSplit + 1))
 }
 
-// --- Cloud creature lobe offsets (matching CloudCreature 6-lobe layout) ---
-
-private val EINK_CLOUD_LOBE_OFFSETS = arrayOf(
-    -0.14f to -0.30f,  // top-left
-     0.16f to -0.26f,  // top-right
-     0.32f to -0.02f,  // right
-     0.14f to  0.26f,  // bottom-right
-    -0.16f to  0.26f,  // bottom-left
-    -0.32f to -0.02f,  // left
-)
-private val EINK_CLOUD_LOBE_RADII = floatArrayOf(
-    0.30f, 0.29f, 0.28f, 0.29f, 0.30f, 0.28f,
-)
-
 /**
- * E-ink cloud creature (Codex CLI) — 6 overlapping circles forming a cloud/clover shape.
- * Simpler than LCD version: no gradient, no glow particles.
- * ">_" terminal prompt rendered in darker gray.
+ * E-ink cloud creature (Codex CLI) — single pill-shaped blob approximating Codex logo silhouette.
+ * Uses drawOval primitives only (e-ink Canvas compat: no drawPath).
+ * ">_" terminal prompt rendered in darker gray inside.
+ *
+ * Y position depends on state:
+ *  - WORKING: hovers in the layout slot (upper swim area)
+ *  - IDLE/FLOATING/ASKING: rests near the ground so idle sessions don't clutter the sky
+ *  - SLEEPING: ground level, dim
  */
 private fun drawEinkCloud(
     canvas: android.graphics.Canvas, paint: Paint, w: Int, h: Int,
@@ -836,20 +827,27 @@ private fun drawEinkCloud(
     } else 0f
 
     val cx = w * (centerXFraction + wanderX)
-    // Keep the caller-provided layout slot stable across states.
-    // The previous implementation hard-coded idle/sleep Y positions, which caused
-    // Codex clouds to collapse onto the same lower area regardless of layout.
+    // State-based Y: WORKING uses layout swim slot (top),
+    // IDLE/SLEEPING rests near ground so idle sessions don't hover up top.
+    // X-correlated depth offset mimics the octopus "standingOffset" pattern.
+    val restY = 0.56f + (centerXFraction - 0.40f) * 0.08f
+    val baseYFraction = when (state) {
+        OctopusVisualState.WORKING -> centerYFraction
+        OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f
+        OctopusVisualState.FLOATING -> restY
+        OctopusVisualState.SLEEPING -> restY + 0.02f
+    }
     val bobY = when (state) {
-        OctopusVisualState.SLEEPING -> h * 0.01f *
+        OctopusVisualState.SLEEPING -> h * 0.006f *
             kotlin.math.sin(animFrame * kotlin.math.PI / 12).toFloat()
-        OctopusVisualState.FLOATING -> h * 0.01f *
-            kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
+        OctopusVisualState.FLOATING -> h * 0.008f *
+            kotlin.math.sin(animFrame * kotlin.math.PI / 10).toFloat()
         OctopusVisualState.ASKING -> h * 0.006f *
             kotlin.math.sin(animFrame * kotlin.math.PI / 6).toFloat()
         OctopusVisualState.WORKING -> h * 0.02f *
             kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
     }
-    val cy = h * centerYFraction + bobY
+    val cy = h * baseYFraction + bobY
 
     // Cloud body radius — similar sizing to octopus bodyWidth
     val bodyRadius = w * 0.055f * scaleFactor
@@ -871,32 +869,26 @@ private fun drawEinkCloud(
         einkPick(GRAY_CLOUD_BODY, COLOR_CLOUD_BODY)
     }
 
-    // Cloud body — individual circles (no Path.op/drawPath — e-ink Canvas compat)
+    // Body: single pill-shaped oval matching Codex blob silhouette (wider than tall)
+    val bodyWidth = bodyRadius * 1.50f * breathScale
+    val bodyHeight = bodyRadius * 1.15f * breathScale
     paint.style = Paint.Style.FILL
     paint.color = bodyColor
+    canvas.drawOval(
+        cx - bodyWidth, cy - bodyHeight,
+        cx + bodyWidth, cy + bodyHeight,
+        paint,
+    )
 
-    // Central fill
-    canvas.drawCircle(cx, cy, bodyRadius * 0.32f * breathScale, paint)
-    // 6 lobes
-    for (i in EINK_CLOUD_LOBE_OFFSETS.indices) {
-        val (dx, dy) = EINK_CLOUD_LOBE_OFFSETS[i]
-        val lobeRadius = bodyRadius * EINK_CLOUD_LOBE_RADII[i] * breathScale
-        val lobeCx = cx + bodyRadius * dx
-        val lobeCy = cy + bodyRadius * dy
-        canvas.drawCircle(lobeCx, lobeCy, lobeRadius, paint)
-    }
-
-    // Outline — draw each lobe circle stroke (internal seams visible but acceptable on e-ink)
+    // Single clean outline — no internal seams
     paint.style = Paint.Style.STROKE
     paint.strokeWidth = 1.5f * scaleFactor
     paint.color = einkPick(GRAY_CLOUD_PROMPT, COLOR_CLOUD_PROMPT)
-    for (i in EINK_CLOUD_LOBE_OFFSETS.indices) {
-        val (dx, dy) = EINK_CLOUD_LOBE_OFFSETS[i]
-        val lobeRadius = bodyRadius * EINK_CLOUD_LOBE_RADII[i] * breathScale
-        val lobeCx = cx + bodyRadius * dx
-        val lobeCy = cy + bodyRadius * dy
-        canvas.drawCircle(lobeCx, lobeCy, lobeRadius, paint)
-    }
+    canvas.drawOval(
+        cx - bodyWidth, cy - bodyHeight,
+        cx + bodyWidth, cy + bodyHeight,
+        paint,
+    )
 
     // ">_" terminal prompt text inside cloud body
     if (state != OctopusVisualState.SLEEPING) {
@@ -918,14 +910,14 @@ private fun drawEinkCloud(
 
     // Name tag above cloud (reuse the shared name tag renderer)
     if (displayName != null) {
-        val topY = cy - bodyRadius * 0.35f * breathScale - bodyRadius * EINK_CLOUD_LOBE_RADII[0]
+        val topY = cy - bodyHeight - bodyRadius * 0.15f
         drawEinkNameTag(canvas, paint, cx, topY, scaleFactor, displayName, w)
     }
 
     // ASKING: speech bubble with "?" beside body (same pattern as octopus)
     if (state == OctopusVisualState.ASKING) {
         val bubbleR = bodyRadius * 0.25f * scaleFactor
-        val bubbleX = cx + bodyRadius * 0.55f
+        val bubbleX = cx + bodyWidth + bubbleR * 0.8f
         val bubbleY = cy
 
         paint.color = einkPick(GRAY_AIR, COLOR_AIR)
@@ -967,19 +959,26 @@ private fun drawEinkOpenCode(
     } else 0f
 
     val cx = w * (centerXFraction + wanderX)
-    // Respect the layout slot for all states so multiple OpenCode sessions do not
-    // stack on the rocks when idle.
+    // State-based Y: WORKING uses layout swim slot (mid-upper),
+    // IDLE/SLEEPING rests near ground so idle sessions don't hover in the water.
+    val restY = 0.60f + (centerXFraction - 0.55f) * 0.06f
+    val baseYFraction = when (state) {
+        OctopusVisualState.WORKING -> centerYFraction
+        OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f
+        OctopusVisualState.FLOATING -> restY
+        OctopusVisualState.SLEEPING -> restY + 0.01f
+    }
     val bobY = when (state) {
         OctopusVisualState.SLEEPING -> h * 0.006f *
             kotlin.math.sin(animFrame * kotlin.math.PI / 14).toFloat()
         OctopusVisualState.FLOATING -> h * 0.008f *
-            kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
+            kotlin.math.sin(animFrame * kotlin.math.PI / 10).toFloat()
         OctopusVisualState.ASKING -> h * 0.005f *
             kotlin.math.sin(animFrame * kotlin.math.PI / 6).toFloat()
         OctopusVisualState.WORKING -> h * 0.02f *
             kotlin.math.sin(animFrame * kotlin.math.PI / 8).toFloat()
     }
-    val cy = h * centerYFraction + bobY
+    val cy = h * baseYFraction + bobY
 
     val bodyWidth = w * 0.052f * scaleFactor
     val outerSize = bodyWidth * 1.6f

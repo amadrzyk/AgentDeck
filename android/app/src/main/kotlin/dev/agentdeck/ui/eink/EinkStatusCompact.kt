@@ -14,12 +14,14 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
 import dev.agentdeck.util.formatBytes
@@ -149,70 +151,64 @@ private fun GaugeText(label: String, percent: Double, resetTime: String, stale: 
     }
 }
 
-// -- MODELS column --
+// -- MODELS column (inline label: "Label: data" on one line) --
 
 @Composable
 private fun ModelsColumn(state: DashboardState) {
-    val openClaw = openClawDisplayLines(state.modelCatalog.orEmpty())
-    if (openClaw.isNotEmpty()) {
-        SectionLabel("OPENCLAW")
-        DataLine(openClaw.joinToString(", "), maxLines = 1)
+    val labelColor = if (einkColorEnabled) Color(0xFF335588) else Color.DarkGray
+
+    // OpenClaw
+    val openClawPrimary = state.modelCatalog.orEmpty().let { catalog ->
+        val primary = catalog.firstOrNull { it.available && it.role == "default" }
+            ?: catalog.firstOrNull { it.available }
+        primary?.let { abbreviateModelName(it.name) }
+    }
+    if (openClawPrimary != null) {
+        InlineModelLine("Claw", openClawPrimary, labelColor = labelColor)
     }
 
+    // Ollama
     val ollama = state.ollamaStatus?.takeIf { it.available }?.models.orEmpty()
     val runningOllama = ollama.filter { it.sizeVram > 0 }
     val ollamaSource = if (runningOllama.isNotEmpty()) runningOllama else ollama
     if (ollamaSource.isNotEmpty()) {
-        SectionLabel("OLLAMA")
-        val models = ollamaSource.map { m ->
+        val models = ollamaSource.joinToString(", ") { m ->
             val sizeStr = if (m.sizeVram > 0) " ${formatBytes(m.sizeVram)}"
                 else if (m.size > 0) " ${formatBytes(m.size)}"
                 else ""
-            "${m.name}$sizeStr"
+            "${abbreviateModelName(m.name)}$sizeStr"
         }
-        DataLine(models.joinToString(", "), maxLines = 2)
+        InlineModelLine("OL", models, labelColor = labelColor, maxLines = 2)
     }
 
+    // MLX
     if (state.mlxModels.isNotEmpty()) {
-        SectionLabel("MLX")
-        DataLine(state.mlxModels.joinToString(", "), maxLines = 1)
+        InlineModelLine(
+            "MLX",
+            state.mlxModels.joinToString(", ") { abbreviateModelName(it) },
+            labelColor = labelColor,
+        )
     }
 
+    // Subscriptions
     if (state.subscriptions.isNotEmpty()) {
-        SectionLabel("SUBS")
-        DataLine(
-            state.subscriptions.joinToString(", ") { it.name },
-            maxLines = 1,
-            color = if (einkColorEnabled) Color(0xFF227733) else Color.Black
+        InlineModelLine(
+            "Subs",
+            state.subscriptions.joinToString(", ") { abbreviateModelName(it.name) },
+            labelColor = labelColor,
+            dataColor = if (einkColorEnabled) Color(0xFF227733) else Color.Black,
         )
     }
 
+    // Antigravity
     antigravityDisplayLine(state)?.let { line ->
-        SectionLabel("AG")
-        DataLine(
+        InlineModelLine(
+            "AG",
             line,
-            maxLines = 1,
-            color = if (einkColorEnabled) Color(0xFF335588) else Color.Black
+            labelColor = labelColor,
+            dataColor = if (einkColorEnabled) Color(0xFF335588) else Color.Black,
         )
     }
-}
-
-/** Abbreviate long model names for e-ink display */
-private fun abbreviateModel(name: String): String {
-    return name
-        .replace("DeepSeek: DeepSeek ", "DS:")
-        .replace("DeepSeek ", "DS:")
-}
-
-private fun openClawDisplayLines(modelCatalog: List<ModelCatalogEntry>): List<String> {
-    val primary = modelCatalog.firstOrNull { it.available && it.role == "default" }
-        ?: modelCatalog.firstOrNull { it.available }
-    return primary?.let { listOf(abbreviateModel(it.name)) } ?: emptyList()
-}
-
-private fun antigravityDisplayLine(state: DashboardState): String? {
-    val status = state.antigravityStatus ?: return null
-    return status.planName?.replace("Google AI ", "")?.takeIf { it.isNotBlank() }
 }
 
 // -- Shared --
@@ -227,7 +223,7 @@ private fun SectionLabel(text: String) {
         fontFamily = FontFamily.Monospace,
         letterSpacing = 1.sp,
         color = if (einkColorEnabled) Color(0xFF335588) else Color.DarkGray,
-        modifier = Modifier.padding(bottom = 3.dp),
+        modifier = Modifier.padding(bottom = 1.dp),
     )
 }
 
@@ -239,6 +235,33 @@ private fun DataLine(text: String, maxLines: Int = 1, color: Color = Color.Black
         lineHeight = 13.sp,
         fontFamily = FontFamily.Monospace,
         color = color,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** Inline label + data on a single line: "Label: data" with bold colored label. */
+@Composable
+private fun InlineModelLine(
+    label: String,
+    data: String,
+    labelColor: Color = Color.DarkGray,
+    dataColor: Color = Color.Black,
+    maxLines: Int = 1,
+) {
+    Text(
+        text = buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = labelColor, letterSpacing = 0.5.sp)) {
+                append("$label: ")
+            }
+            withStyle(SpanStyle(color = dataColor)) {
+                append(data)
+            }
+        },
+        fontSize = 11.sp,
+        lineHeight = 13.sp,
+        fontFamily = FontFamily.Monospace,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth(),

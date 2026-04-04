@@ -68,6 +68,7 @@ import dev.agentdeck.ui.eink.EinkAquariumFrame
 import dev.agentdeck.ui.eink.EinkSettingsOverlay
 import dev.agentdeck.ui.eink.EinkStatusCompact
 import dev.agentdeck.ui.component.BrandIcon
+import dev.agentdeck.ui.eink.abbreviateModelName
 import dev.agentdeck.ui.eink.compactStateMarker
 import dev.agentdeck.ui.eink.mapSessionState
 import dev.agentdeck.terrarium.toTerrariumState
@@ -849,10 +850,11 @@ private fun EinkPortraitHeader(
                 } else {
                     entry.projectName
                 }
+                val abbrevModel = entry.modelName?.let { abbreviateModelName(it) }
                 val modelPart = when {
-                    entry.modelName != null && entry.effortLevel != null && entry.effortLevel != "medium" ->
-                        "${entry.modelName}\u00B7${entry.effortLevel}"
-                    entry.modelName != null -> entry.modelName
+                    abbrevModel != null && entry.effortLevel != null && entry.effortLevel != "medium" ->
+                        "$abbrevModel\u00B7${entry.effortLevel}"
+                    abbrevModel != null -> abbrevModel
                     else -> null
                 }
                 val label = buildString {
