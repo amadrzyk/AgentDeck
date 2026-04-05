@@ -54,6 +54,7 @@ struct AgentDeckApp: App {
             SettingsScreen()
                 .environmentObject(stateHolder)
                 .environmentObject(preferences)
+                .environmentObject(daemonService)
         }
         MenuBarExtra {
             ControlTowerPanel()

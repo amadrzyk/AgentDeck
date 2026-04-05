@@ -23,16 +23,76 @@ enum SingletonGuard {
 
         guard !others.isEmpty else { return true }
 
+        // Filter out zombies and processes in the middle of exiting — they show
+        // up in NSRunningApplication as not-terminated but will never respond.
+        // Xcode Debug Stop frequently leaves such zombies behind (SIGSTOP'd
+        // process that launchd hasn't reaped yet).
+        let liveOthers = others.filter { !isProcessExiting(pid: $0.processIdentifier) }
+        if liveOthers.isEmpty {
+            NSLog("[AgentDeck] Detected \(others.count) sibling(s) but all are zombies/exiting — proceeding with launch")
+            // Purge any registry/state files the zombie left behind. Their
+            // daemon.json would otherwise point at a port nobody listens on,
+            // making the next startup burn ~8s on health-probe timeouts
+            // before it gives up and rebinds fresh.
+            purgeStaleRegistryFiles()
+            return true
+        }
+
         // Another instance is running — try to activate it
-        let other = others[0]
-        NSLog("[AgentDeck] Another instance detected (PID \(other.processIdentifier)) — activating it and exiting")
+        let other = liveOthers[0]
+        let otherPid = other.processIdentifier
+        NSLog("[AgentDeck] Another instance detected (PID \(otherPid))")
 
-        // Activate the existing instance so user sees a window come to front
+        // Unstick suspended/stopped processes (e.g. Debug builds waiting for debugger
+        // that never attached). Without this the existing instance stays frozen and
+        // the user sees what looks like a zombie.
+        if isProcessSuspended(pid: otherPid) {
+            NSLog("[AgentDeck] Existing instance is SUSPENDED (T state) — sending SIGCONT")
+            _ = Darwin.kill(otherPid, SIGCONT)
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+
+        // Activate existing instance so user sees a window come to front
         other.activate(options: [.activateAllWindows])
-
-        // Give activation a moment to complete, then exit
         Thread.sleep(forTimeInterval: 0.2)
+        NSLog("[AgentDeck] Activated existing instance — this instance exiting")
         exit(0)
+    }
+
+    /// Read BSD process info via sysctl. Returns (p_stat, p_flag) or nil if the
+    /// process is no longer in kernel tables.
+    private static func processInfo(pid: Int32) -> (stat: Int32, flag: Int32)? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        let result = sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0)
+        guard result == 0, size > 0 else { return nil }
+        return (Int32(info.kp_proc.p_stat), Int32(info.kp_proc.p_flag))
+    }
+
+    /// Check if a process is in T (stopped/traced) state using sysctl.
+    /// p_stat: SIDL=1, SRUN=2, SSLEEP=3, SSTOP=4, SZOMB=5
+    private static func isProcessSuspended(pid: Int32) -> Bool {
+        processInfo(pid: pid)?.stat == 4  // SSTOP
+    }
+
+    /// Check if a process is a zombie, exiting, or gone. NSRunningApplication
+    /// still lists such processes as non-terminated until launchd reaps them,
+    /// so we must check kernel state directly.
+    ///
+    /// Detects:
+    ///   - p_stat == SZOMB (5): fully zombied
+    ///   - P_WEXIT (0x2000) set in p_flag: process is in exit() but kernel
+    ///     hasn't finished tearing it down (common when Xcode debug Stop
+    ///     leaves SIGSTOP'd processes orphaned to launchd)
+    ///   - sysctl failure: process already gone from kernel tables
+    private static func isProcessExiting(pid: Int32) -> Bool {
+        guard let info = processInfo(pid: pid) else {
+            return true
+        }
+        if info.stat == 5 { return true }              // SZOMB
+        if (info.flag & 0x2000) != 0 { return true }   // P_WEXIT
+        return false
     }
 
     /// Atomic cleanup: remove daemon.json. Safe to call from signal handlers or atexit.
@@ -41,6 +101,16 @@ enum SingletonGuard {
         guard let home = getpwuid(getuid())?.pointee.pw_dir else { return }
         let path = String(cString: home) + "/.agentdeck/daemon.json"
         _ = unlink(path)
+    }
+
+    /// Remove daemon.json left behind by a crashed / killed previous instance.
+    /// Called when SingletonGuard determines all sibling processes are zombies,
+    /// so we know no live daemon owns that file. sessions.json is left alone
+    /// because it can contain entries from other agentdeck processes (e.g.
+    /// CLI sessions) that we shouldn't touch.
+    static func purgeStaleRegistryFiles() {
+        removeDaemonInfoFile()
+        NSLog("[AgentDeck] Purged stale daemon.json from zombie siblings")
     }
 
     /// Install atexit + signal handlers that remove daemon.json on any exit path.

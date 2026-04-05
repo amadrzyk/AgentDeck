@@ -98,7 +98,9 @@ actor WebSocketServer {
 
     // MARK: - Lifecycle
 
-    func start(port: UInt16) throws {
+    /// Start the listener and wait until it reaches `.ready` (success) or `.failed`/`.cancelled` (throws).
+    /// The `stateUpdateHandler` stays installed so post-bind failures still route to `onListenerFailed`.
+    func start(port: UInt16) async throws {
         let params = NWParameters.tcp  // Raw TCP — no WebSocket protocol layer
         params.allowLocalEndpointReuse = true  // SO_REUSEADDR — allows rebind after TIME_WAIT/crash
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
@@ -113,23 +115,39 @@ actor WebSocketServer {
         }
 
         let failedHandler = onListenerFailed
-        listener.stateUpdateHandler = { state in
-            switch state {
-            case .ready:
-                DaemonLogger.shared.info("Server listening on port \(port) (HTTP + WebSocket + mDNS)")
-            case .failed(let error):
-                DaemonLogger.shared.error("Server listener failed: \(error)")
-                failedHandler?(error)
-            default:
-                break
+        // stateUpdateHandler fires on .main queue; ResumeGate is only touched there.
+        let gate = ResumeGate()
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    if gate.tryResume() {
+                        DaemonLogger.shared.info("Server listening on port \(port) (HTTP + WebSocket + mDNS)")
+                        cont.resume()
+                    }
+                case .failed(let error):
+                    DaemonLogger.shared.error("Server listener failed: \(error)")
+                    if gate.tryResume() {
+                        cont.resume(throwing: error)
+                    } else {
+                        // Post-bind failure — route to external handler for teardown/retry.
+                        failedHandler?(error)
+                    }
+                case .cancelled:
+                    if gate.tryResume() {
+                        cont.resume(throwing: WebSocketServerError.listenerCancelled)
+                    }
+                default:
+                    break
+                }
             }
-        }
 
-        listener.newConnectionHandler = { [weak self] nwConn in
-            Task { await self?.handleNewConnection(nwConn) }
-        }
+            listener.newConnectionHandler = { [weak self] nwConn in
+                Task { await self?.handleNewConnection(nwConn) }
+            }
 
-        listener.start(queue: .main)
+            listener.start(queue: .main)
+        }
     }
 
     func stop() {
@@ -438,6 +456,22 @@ final class WebSocketFrameParser: @unchecked Sendable {
         }
 
         return frames
+    }
+}
+
+enum WebSocketServerError: Error {
+    case listenerCancelled
+}
+
+/// Single-use gate used from the listener's stateUpdateHandler to ensure the
+/// bind continuation is resumed at most once. Class-typed so it can be captured
+/// by the @Sendable state closure without triggering capture-of-mutable-var errors.
+final class ResumeGate: @unchecked Sendable {
+    private var done = false
+    func tryResume() -> Bool {
+        if done { return false }
+        done = true
+        return true
     }
 }
 #endif

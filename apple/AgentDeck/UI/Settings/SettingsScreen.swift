@@ -5,9 +5,15 @@ import SwiftUI
 struct SettingsScreen: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @EnvironmentObject private var preferences: AppPreferences
+    #if os(macOS)
+    @EnvironmentObject private var daemonService: DaemonService
+    #endif
     @Environment(\.dismiss) private var dismiss
     @State private var manualUrl = ""
     @State private var showRemoveAntigravityConfirm = false
+    #if os(macOS)
+    @State private var portInput: String = ""
+    #endif
 
     var body: some View {
         #if os(macOS)
@@ -98,6 +104,11 @@ struct SettingsScreen: View {
 
             GroupBox("Connection") {
                 connectionContent
+                    .padding(8)
+            }
+
+            GroupBox("Daemon") {
+                daemonContent
                     .padding(8)
             }
 
@@ -218,6 +229,97 @@ struct SettingsScreen: View {
             }
         }
     }
+
+    // MARK: - Daemon Content (macOS)
+
+    #if os(macOS)
+    private var daemonContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(daemonService.isRunning
+                          ? TerrariumHUD.ledGreen
+                          : (daemonService.bindFailureReason != nil
+                             ? TerrariumHUD.ledRed
+                             : TerrariumHUD.ledRed.opacity(0.6)))
+                    .frame(width: 8, height: 8)
+                Text(daemonStatusText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+
+            HStack(spacing: 8) {
+                Text("Port")
+                    .font(.system(size: 12))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                TextField("9120", text: $portInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(width: 80)
+                    .onSubmit(commitPortChange)
+                Button("Apply & Restart") {
+                    commitPortChange()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isPortInputDirty || !isPortInputValid)
+            }
+
+            Text("Default 9120. Range 1024–65535. Plugin/TUI discover via mDNS so any port works.")
+                .font(.system(size: 10))
+                .foregroundStyle(TerrariumHUD.subtext)
+
+            if let reason = daemonService.bindFailureReason {
+                Text(reason)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.ledRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let error = daemonService.errorMessage {
+                Text(error)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear {
+            if portInput.isEmpty {
+                portInput = String(preferences.daemonPort)
+            }
+        }
+    }
+
+    private var daemonStatusText: String {
+        if daemonService.isRunning {
+            return "Local daemon on port \(daemonService.port)"
+        }
+        if daemonService.isUsingExternalDaemon {
+            return "External daemon on port \(daemonService.port)"
+        }
+        if daemonService.bindFailureReason != nil {
+            return "Daemon bind failed"
+        }
+        return "Daemon starting…"
+    }
+
+    private var parsedPortInput: Int? {
+        Int(portInput.trimmingCharacters(in: .whitespaces))
+    }
+
+    private var isPortInputValid: Bool {
+        guard let p = parsedPortInput else { return false }
+        return p >= 1024 && p <= 65535
+    }
+
+    private var isPortInputDirty: Bool {
+        parsedPortInput != preferences.daemonPort
+    }
+
+    private func commitPortChange() {
+        guard isPortInputValid, let newPort = parsedPortInput else { return }
+        guard newPort != preferences.daemonPort else { return }
+        preferences.daemonPort = newPort
+        Task { await daemonService.restart() }
+    }
+    #endif
 
     // MARK: - Discovery Content
 

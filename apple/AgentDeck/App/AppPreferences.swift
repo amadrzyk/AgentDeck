@@ -24,6 +24,22 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Default daemon hub port. 9120 is the documented well-known port; users
+    /// can override when it's already held by something outside this app's
+    /// control (e.g. a lingering `agentdeck daemon` Node CLI process).
+    static let defaultDaemonPort: Int = 9120
+
+    @Published var daemonPort: Int {
+        didSet {
+            let clamped = Self.clampPort(daemonPort)
+            if clamped != daemonPort {
+                daemonPort = clamped  // triggers didSet again with valid value
+                return
+            }
+            defaults.set(daemonPort, forKey: Keys.daemonPort)
+        }
+    }
+
     @Published var openDashboardOnLaunch: Bool {
         didSet { defaults.set(openDashboardOnLaunch, forKey: Keys.openDashboardOnLaunch) }
     }
@@ -64,6 +80,8 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let storedPort = defaults.object(forKey: Keys.daemonPort) as? Int
+        self.daemonPort = Self.clampPort(storedPort ?? Self.defaultDaemonPort)
         self.openDashboardOnLaunch = defaults.object(forKey: Keys.openDashboardOnLaunch) as? Bool ?? true
         self.menuBarIconStyle = MenuBarIconStyle(rawValue: defaults.string(forKey: Keys.menuBarIconStyle) ?? "") ?? .status
         self.showSessionList = defaults.object(forKey: Keys.showSessionList) as? Bool ?? true
@@ -150,7 +168,14 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         return try body(url)
     }
 
+    /// Clamp user-supplied port to the safe range (avoid privileged <1024 and
+     /// out-of-range values that would crash NWEndpoint.Port).
+    static func clampPort(_ value: Int) -> Int {
+        min(65535, max(1024, value))
+    }
+
     private enum Keys {
+        static let daemonPort = "prefs.daemonPort"
         static let openDashboardOnLaunch = "prefs.openDashboardOnLaunch"
         static let menuBarIconStyle = "prefs.menuBarIconStyle"
         static let showSessionList = "prefs.showSessionList"

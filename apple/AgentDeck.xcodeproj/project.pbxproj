@@ -47,6 +47,7 @@
 		34444319598506828DE09006 /* SessionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF788F02F06C01E401DC8EA6 /* SessionRegistry.swift */; };
 		35AF9288525566A6DD2943DD /* JellyfishCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73BFE04CFE5ABF5AC2F23E3F /* JellyfishCreature.swift */; };
 		37445F34EE5090F24D59EB4A /* DataParticleSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57722317EDF1D567981112DE /* DataParticleSystem.swift */; };
+		37EFA4D2AFEB4DDBBABD4F93 /* SquatterCleaner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B120CABC9029C801CF0A77A2 /* SquatterCleaner.swift */; };
 		38E9C043A76BB267FCACB4B7 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */; };
 		3935F4C5BEE0F6FA479AB2A6 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 908DB05568DE4E828CD7FCE6 /* Logger.swift */; };
 		3A0913B4B8FD471CDFD77631 /* WifiConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DA1104DBFD7C9FA0C79A5D /* WifiConfig.swift */; };
@@ -164,6 +165,7 @@
 		DEBCF013EEAB22462CF0044C /* MonitorHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19949AA33CE27D478B358976 /* MonitorHUD.swift */; };
 		DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */; };
 		E082EDBFACADF5992BE8A9E0 /* AgentDeckApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D587189DB0E504028BE4BEF /* AgentDeckApp.swift */; };
+		E22E6C703C183F1E8C36E7D9 /* SquatterCleaner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B120CABC9029C801CF0A77A2 /* SquatterCleaner.swift */; };
 		E35D8D73F3FFFCD795B1236A /* LocalSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FD383032B3C47C9B547426 /* LocalSessionDiscovery.swift */; };
 		E5B1774D921E5B4C508D73A0 /* AgentStateHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */; };
 		E940E2714946D07856C8FB37 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5200B4548DFE9F98AEE8D504 /* ContentView.swift */; };
@@ -265,6 +267,7 @@
 		A70843624A0EEB9E63435EC5 /* PlanktonSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanktonSystem.swift; sourceTree = "<group>"; };
 		ACF3E9B667BE141F81917F89 /* DaemonVoiceAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonVoiceAssistant.swift; sourceTree = "<group>"; };
 		AE17EFB01F43FCB1A53F644D /* DaemonTimelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonTimelineStore.swift; sourceTree = "<group>"; };
+		B120CABC9029C801CF0A77A2 /* SquatterCleaner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SquatterCleaner.swift; sourceTree = "<group>"; };
 		B1F43DCAC6100C73B98139EA /* DisplayMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayMonitor.swift; sourceTree = "<group>"; };
 		B6E0B3C7EBBFFD8C2EB08F11 /* HookInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookInstaller.swift; sourceTree = "<group>"; };
 		B857A690693DD802AA05429D /* DaemonServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonServer.swift; sourceTree = "<group>"; };
@@ -446,6 +449,7 @@
 			isa = PBXGroup;
 			children = (
 				80BD296835DE366BFDBB15B9 /* DaemonService.swift */,
+				B120CABC9029C801CF0A77A2 /* SquatterCleaner.swift */,
 				1E53CD83EA46C13B1267699C /* Core */,
 				C5927A2D2AE9201CADC98CBE /* Gateway */,
 				E9DFCBFD316B725CDF9B9AD3 /* Modules */,
@@ -862,6 +866,7 @@
 				34444319598506828DE09006 /* SessionRegistry.swift in Sources */,
 				D53BC123AAE467EB342A5041 /* SettingsScreen.swift in Sources */,
 				62F20845F1953514EFB1C11B /* SingletonGuard.swift in Sources */,
+				37EFA4D2AFEB4DDBBABD4F93 /* SquatterCleaner.swift in Sources */,
 				F42F09D300661953D5F0EAFF /* StateMachine.swift in Sources */,
 				A8293F557BD8D3FB91BF4CF4 /* StateTimelineGenerator.swift in Sources */,
 				DF804392C56333041A3C2784 /* StatusBadge.swift in Sources */,
@@ -951,6 +956,7 @@
 				151F41C1C4B7DF78558D546D /* SessionRegistry.swift in Sources */,
 				38E9C043A76BB267FCACB4B7 /* SettingsScreen.swift in Sources */,
 				D036600F5679C1A191132F87 /* SingletonGuard.swift in Sources */,
+				E22E6C703C183F1E8C36E7D9 /* SquatterCleaner.swift in Sources */,
 				C1D4DE16F04DB0A3507F4AA0 /* StateMachine.swift in Sources */,
 				942DEF7F0BE77DF0FA264AF8 /* StateTimelineGenerator.swift in Sources */,
 				67FA80518E8F347B39576FCC /* StatusBadge.swift in Sources */,

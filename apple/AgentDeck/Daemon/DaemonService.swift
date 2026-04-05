@@ -33,7 +33,29 @@ final class DaemonService: ObservableObject {
     private var signalSource: DispatchSourceSignal?
     private var sigintSource: DispatchSourceSignal?
     private var listenerFailureRetries = 0
+    private var squatterCleanupAttempted = false
+    private var fallbackAttempted = false
+    private var sessionOverridePort: Int?
+    /// Ports that NWListener has observed to fail `.failed(EADDRINUSE)` this
+    /// launch. These may still look bindable via raw BSD sockets (NECP is a
+    /// higher-level check), so we exclude them explicitly from findAvailablePort.
+    private var failedBindPorts: Set<Int> = []
     private static let maxListenerFailureRetries = 3
+
+    /// Human-readable explanation for the last bind failure, shown in Settings.
+    /// Set when bind retries are exhausted; cleared on successful start.
+    @Published private(set) var bindFailureReason: String?
+
+    /// True while the daemon is running on a fallback port (user's configured
+    /// port was held by something we can't terminate). Surface this in the UI.
+    @Published private(set) var isOnFallbackPort = false
+
+    /// The port the daemon is attempting to bind. A session-scoped override
+    /// (set by auto-fallback when the configured port is stuck) takes
+    /// precedence; otherwise falls back to user's Settings value.
+    private var effectivePort: Int {
+        sessionOverridePort ?? AppPreferences.shared.daemonPort
+    }
 
     init() {
         start()
@@ -45,11 +67,19 @@ final class DaemonService: ObservableObject {
         guard !isRunning, !isUsingExternalDaemon, !isStarting else { return }
         isStarting = true
         errorMessage = nil
+        bindFailureReason = nil
 
+        let port = effectivePort
         Task {
             defer { self.isStarting = false }
             do {
-                let daemon = try await DaemonServer(port: nil, debug: false)
+                // Pass nil only when we're binding the default and the user
+                // didn't force an override; that preserves the singleton-guard
+                // path (health probe + stale registry cleanup). Otherwise we
+                // pass an explicit port and skip that path.
+                let usingDefault = (port == AppPreferences.defaultDaemonPort && sessionOverridePort == nil)
+                let portArg: Int? = usingDefault ? nil : port
+                let daemon = try await DaemonServer(port: portArg, debug: false)
                 self.server = daemon
                 self.port = daemon.port
                 self.isRunning = true
@@ -58,23 +88,41 @@ final class DaemonService: ObservableObject {
                 self.externalFailureCount = 0
                 self.errorMessage = nil
 
-                // Wire listener-failed callback BEFORE starting — catches bind errors
-                // (e.g. stale socket holding port 9120) immediately instead of waiting
-                // 10s for the health monitor to detect the broken daemon.
+                // Wire listener-failed callback BEFORE starting — catches POST-bind
+                // listener failures (network changes, system-sleep edge cases).
+                // Pre-bind/EADDRINUSE now surfaces as a throw from startServices().
                 await daemon.setListenerFailedHandler { [weak self] error in
                     Task { @MainActor [weak self] in
                         await self?.handleListenerFailure(error: error)
                     }
                 }
 
-                // Run daemon (sets up routes, handlers, polling — does NOT block)
-                await daemon.startServices()
+                // Run daemon (awaits NWListener `.ready`; throws on bind failure).
+                do {
+                    try await daemon.startServices()
+                } catch {
+                    // Bind failed — tear down partial state and route to startup-failure handler.
+                    await daemon.shutdown()
+                    self.server = nil
+                    self.isRunning = false
+                    self.port = 0
+                    self.readyUrl = nil
+                    await self.handleStartupBindFailure(error: error, attemptedPort: Int(daemon.port))
+                    return
+                }
                 self.startHealthMonitor()
 
-                // Notify dashboard to connect to local daemon
+                // Notify dashboard to connect to local daemon (listener is actually bound now).
                 let wsUrl = "ws://127.0.0.1:\(daemon.port)"
                 self.readyUrl = wsUrl
                 self.listenerFailureRetries = 0  // reset backoff on success
+                self.squatterCleanupAttempted = false
+                self.isOnFallbackPort = (self.sessionOverridePort != nil)
+                if self.isOnFallbackPort {
+                    self.bindFailureReason = "Daemon moved to fallback port \(daemon.port) because \(AppPreferences.defaultDaemonPort) was held by another process. Clients will rediscover via mDNS."
+                } else {
+                    self.bindFailureReason = nil
+                }
                 DaemonLogger.shared.info("Daemon ready — dashboard can connect to \(wsUrl)")
                 self.onReady?(wsUrl)
             } catch DaemonError.alreadyRunning(let port) {
@@ -90,6 +138,22 @@ final class DaemonService: ObservableObject {
                 DaemonLogger.shared.error(self.errorMessage!)
             }
         }
+    }
+
+    /// Tear down the current daemon (local or external) and start fresh. Used
+    /// after the user changes the daemon port in Settings. Clears any
+    /// session-scoped fallback so the new user choice is honored exactly.
+    func restart() async {
+        await stop()
+        listenerFailureRetries = 0
+        squatterCleanupAttempted = false
+        fallbackAttempted = false
+        sessionOverridePort = nil
+        failedBindPorts.removeAll()
+        isOnFallbackPort = false
+        bindFailureReason = nil
+        errorMessage = nil
+        start()
     }
 
     /// Stop daemon
@@ -159,32 +223,129 @@ final class DaemonService: ObservableObject {
         self.onReady?(wsUrl)
     }
 
-    /// Called when NWListener enters `.failed` state (e.g. EADDRINUSE).
-    /// Tears down the broken daemon and retries with exponential backoff
-    /// so stale sockets have time to release.
+    /// Called when a running daemon's NWListener enters `.failed` state post-bind
+    /// (e.g. network loss after successful bind). Tears down and retries.
     private func handleListenerFailure(error: Error) async {
         guard isRunning else { return }
         DaemonLogger.shared.error("Listener failure detected — tearing down and retrying: \(error)")
+        let attemptedPort = Int(port)
         await server?.shutdown()
         server = nil
         isRunning = false
         isUsingExternalDaemon = false
         port = 0
         readyUrl = nil
+        await retryOrFallback(error: error, attemptedPort: attemptedPort)
+    }
+
+    /// Called when startup-time NWListener bind fails (e.g. EADDRINUSE). Before
+    /// retrying we probe the contested port — if a healthy external daemon owns
+    /// it, we transition to client mode instead of spin-retrying forever.
+    private func handleStartupBindFailure(error: Error, attemptedPort: Int) async {
+        DaemonLogger.shared.error("Daemon listener bind failed: \(error)")
+        await retryOrFallback(error: error, attemptedPort: attemptedPort)
+    }
+
+    /// Shared failure path: probe for external daemon → connect as client, else
+    /// exponential backoff retry (1s/2s/4s, max 3). On retry exhaustion, clear
+    /// daemon.json so stale entries don't leak to plugin/TUI clients.
+    private func retryOrFallback(error: Error, attemptedPort: Int) async {
+        let registry = SessionRegistry.shared
+        let probePort = attemptedPort > 0 ? attemptedPort : AppPreferences.shared.daemonPort
+        if attemptedPort > 0 { failedBindPorts.insert(attemptedPort) }
+        if let health = await registry.probeDaemonHealth(port: probePort),
+           health["mode"] as? String == "daemon" {
+            DaemonLogger.shared.info("Port \(probePort) held by healthy external daemon — switching to client mode")
+            listenerFailureRetries = 0
+            squatterCleanupAttempted = false
+            await connectToExternalDaemon(port: probePort)
+            return
+        }
+
+        // Before spending retry budget on the same failing bind, try the one
+        // App-Store-safe cleanup we're allowed: forceTerminate same-bundle-ID
+        // zombies (crashed/suspended prior instances of this app).
+        var squatterCleanupFoundNothing = false
+        if !squatterCleanupAttempted {
+            squatterCleanupAttempted = true
+            let killed = SquatterCleaner.forceTerminateOwnBundleSiblings()
+            if killed > 0 {
+                DaemonLogger.shared.info("Squatter cleanup terminated \(killed) sibling instance(s); retrying immediately")
+                // Short settle so the kernel releases the sockets before rebinding.
+                // Scheduling via Task lets the current start()'s Task complete
+                // (defer → isStarting=false) before we re-enter.
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    self?.start()
+                }
+                return
+            }
+            squatterCleanupFoundNothing = true
+        }
+
+        let userExplicitPort = AppPreferences.shared.daemonPort
+        let onDefault = (userExplicitPort == AppPreferences.defaultDaemonPort) && (sessionOverridePort == nil)
+        let alt = await registry.findAvailablePort(excluding: failedBindPorts)
+        DaemonLogger.shared.info("retryOrFallback diag: userExplicitPort=\(userExplicitPort) onDefault=\(onDefault) fallbackAttempted=\(fallbackAttempted) squatterNothing=\(squatterCleanupFoundNothing) findAvailable=\(alt.map(String.init) ?? "nil") attemptedPort=\(attemptedPort)")
+
+        // If squatter cleanup found no owned siblings AND we're on the default
+        // port, the squatter is an external process we can't touch. Retries
+        // won't free the port, so jump straight to the fallback port now.
+        if onDefault, !fallbackAttempted, squatterCleanupFoundNothing,
+           let altPort = alt, altPort != userExplicitPort {
+            fallbackAttempted = true
+            sessionOverridePort = altPort
+            listenerFailureRetries = 0
+            squatterCleanupAttempted = false
+            DaemonLogger.shared.info("Port \(userExplicitPort) held by external process — falling back to \(altPort) immediately")
+            Task { @MainActor [weak self] in self?.start() }
+            return
+        }
 
         listenerFailureRetries += 1
         guard listenerFailureRetries <= Self.maxListenerFailureRetries else {
-            errorMessage = "Daemon failed to bind after \(Self.maxListenerFailureRetries) retries: \(error.localizedDescription)"
-            DaemonLogger.shared.error(errorMessage!)
+            // Retry budget exhausted. Try fallback port one more time (handles
+            // the case where user-configured port or retry-loop scenarios
+            // didn't match the fast-path above).
+            if onDefault, !fallbackAttempted,
+               let alt = await registry.findAvailablePort(excluding: failedBindPorts), alt != userExplicitPort {
+                fallbackAttempted = true
+                sessionOverridePort = alt
+                listenerFailureRetries = 0
+                squatterCleanupAttempted = false
+                DaemonLogger.shared.info("Port \(userExplicitPort) stuck after retries — falling back to \(alt)")
+                Task { @MainActor [weak self] in self?.start() }
+                return
+            }
+
+            let stuckPort = probePort
+            let reason: String
+            if fallbackAttempted || !onDefault {
+                reason = "Port \(stuckPort) is held by another process. " +
+                    "Close any stale `agentdeck daemon` CLI processes (try " +
+                    "`sudo lsof -nP -iTCP:\(stuckPort)` in Terminal), or " +
+                    "change the daemon port in Settings."
+            } else {
+                reason = "All ports in range are busy. Close other agentdeck " +
+                    "instances or change the port in Settings."
+            }
+            errorMessage = "Daemon failed to bind: \(error.localizedDescription)"
+            bindFailureReason = reason
+            DaemonLogger.shared.error("\(errorMessage!) — \(reason)")
             listenerFailureRetries = 0
+            squatterCleanupAttempted = false
+            // Don't leave a stale daemon.json pointing at a port we never actually owned.
+            registry.removeDaemonInfo()
             return
         }
 
         // Exponential backoff: 1s, 2s, 4s — lets kernel release stale TCP sockets
         let backoffSec = UInt64(1 << (listenerFailureRetries - 1))
         DaemonLogger.shared.info("Retrying daemon start in \(backoffSec)s (attempt \(listenerFailureRetries)/\(Self.maxListenerFailureRetries))")
-        try? await Task.sleep(for: .seconds(backoffSec))
-        start()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(backoffSec))
+            self?.start()
+        }
     }
 
     private func startHealthMonitor() {

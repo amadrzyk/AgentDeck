@@ -148,7 +148,7 @@ final class DaemonServer {
         await wsServer.setListenerFailedHandler(handler)
     }
 
-    func startServices() async {
+    func startServices() async throws {
         // 1. Setup HTTP routes + Bonjour, then start unified server
         await setupHTTPRoutes()
         await wsServer.setHTTPHandler(httpServer)
@@ -168,14 +168,11 @@ final class DaemonServer {
             txtRecord: txtRecord
         ))
 
-        do {
-            try await wsServer.start(port: port)
-        } catch {
-            DaemonLogger.shared.error("Failed to start server: \(error)")
-            return
-        }
+        // Await listener `.ready` — throws on bind failure (EADDRINUSE etc).
+        // Registry writes must NOT happen before this succeeds.
+        try await wsServer.start(port: port)
 
-        // 2. Register session
+        // 2. Register session (only after listener is actually bound)
         let entry = DaemonSessionEntry(
             id: sessionId, port: Int(port),
             pid: Int(ProcessInfo.processInfo.processIdentifier),
@@ -211,7 +208,9 @@ final class DaemonServer {
         }
 
         // 7. Start device modules
+        DaemonLogger.shared.info("startServices: step7 startDeviceModules begin")
         await startDeviceModules()
+        DaemonLogger.shared.info("startServices: step7 startDeviceModules done")
 
         // 8. Start timeline relay (subscribes to sibling WS)
         await timelineRelay.setEventHandler { [weak self] event in
@@ -221,6 +220,7 @@ final class DaemonServer {
             }
         }
         await timelineRelay.start()
+        DaemonLogger.shared.info("startServices: step8 timelineRelay done")
 
         // 8b. Set up focus relay event callback — merge daemon metadata before broadcasting
         await focusRelay.setBroadcast { [weak self] (box: SendableDict) in
@@ -268,8 +268,11 @@ final class DaemonServer {
             }
         }
 
+        DaemonLogger.shared.info("startServices: step8c focusRelay done")
+
         // 9. Start polling
         startAllPolling()
+        DaemonLogger.shared.info("startServices: step9 startAllPolling done")
 
         // 10. Initial delayed usage fetch
         initialUsageTask = Task { [weak self] in
@@ -277,8 +280,11 @@ final class DaemonServer {
             await self?.fetchUsageRelayed()
         }
 
+        DaemonLogger.shared.info("startServices: step10 initialUsageTask scheduled")
+
         // 11. Auto-install Claude Code hooks
         HookInstaller.installIfNeeded()
+        DaemonLogger.shared.info("startServices: step11 HookInstaller done")
 
         // 12. Voice assistant
         voiceAssistant.sendPrompt = { [weak self] text in
@@ -316,6 +322,7 @@ final class DaemonServer {
             ])
         }
         _ = voiceAssistant.start()
+        DaemonLogger.shared.info("startServices: step12 voiceAssistant done")
 
         // 13. System sleep/wake handling — immediate cleanup on wake
         // Use Darwin notification (IOKit power assertion) — works without AppKit
@@ -442,11 +449,13 @@ final class DaemonServer {
 
         // Start all
         await moduleManager.startAll()
+        DaemonLogger.shared.info("startDeviceModules: moduleManager.startAll done")
 
         // Seed initial state so serial heartbeat has data from the start
         // (without this, lastStateEvent is nil until first WS client or hook event)
         let gwAlive = gatewayAdapter != nil
         lastStateEvent = buildFullStateEvent(agentType: gwAlive ? "openclaw" : "daemon")
+        DaemonLogger.shared.info("startDeviceModules: seed state done")
 
         // Wire serial broadcast hook
         let serialRef = serial
@@ -478,6 +487,7 @@ final class DaemonServer {
             pixooRef.handleEvent(json)
             d200hRef.handleBroadcast(json)
         }
+        DaemonLogger.shared.info("startDeviceModules: wsServer.onBroadcast done")
 
         // Wire ESP32 WiFi auto-provisioning
         if let wifiConfig = WifiConfigManager.load(), wifiConfig.autoProvision {

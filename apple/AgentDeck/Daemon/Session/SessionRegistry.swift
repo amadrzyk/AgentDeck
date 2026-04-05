@@ -132,9 +132,9 @@ final class SessionRegistry: Sendable {
 
     // MARK: - Port Allocation
 
-    func findAvailablePort() async -> Int? {
+    func findAvailablePort(excluding: Set<Int> = []) async -> Int? {
         let sessions = listActive()
-        let usedPorts = Set(sessions.map(\.port))
+        let usedPorts = Set(sessions.map(\.port)).union(excluding)
         for port in Self.basePort...Self.maxPort {
             if !usedPorts.contains(port), await isPortFree(port) {
                 return port
@@ -169,7 +169,18 @@ final class SessionRegistry: Sendable {
     }
 
     private func isProcessAlive(_ pid: Int) -> Bool {
-        kill(Int32(pid), 0) == 0
+        // kill(pid, 0) returns 0 even for zombies still in the kernel table,
+        // so use sysctl to check the process state directly. Treat zombies
+        // (SZOMB) and exiting processes (P_WEXIT flag) as dead — they will
+        // never respond to WebSocket/HTTP probes.
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
+        let result = sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0)
+        guard result == 0, size > 0 else { return false }
+        if info.kp_proc.p_stat == 5 { return false }              // SZOMB
+        if (Int32(info.kp_proc.p_flag) & 0x2000) != 0 { return false }  // P_WEXIT
+        return true
     }
 
     private func isPortFree(_ port: Int) async -> Bool {
@@ -193,12 +204,18 @@ final class SessionRegistry: Sendable {
         addr.sin6_port = in_port_t(port).bigEndian
         addr.sin6_addr = in6addr_any  // :: wildcard
 
-        let result = withUnsafePointer(to: &addr) { ptr in
+        let bindResult = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
             }
         }
-        return result == 0
+        guard bindResult == 0 else { return false }
+
+        // SO_REUSEADDR allows TWO sockets to bind() the same port, but only one
+        // can listen(). Without this check, the probe can report "free" while
+        // another REUSEADDR socket already owns the listen slot, then NWListener
+        // loses the race and fails with EADDRINUSE.
+        return listen(fd, 1) == 0
     }
 
     private func replaceFile(at destination: URL, with source: URL) {
