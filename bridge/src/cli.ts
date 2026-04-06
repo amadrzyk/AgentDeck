@@ -392,7 +392,7 @@ program
       const res = await fetch(`http://127.0.0.1:${port}/devices`, {
         signal: AbortSignal.timeout(2000),
       });
-      const data = await res.json() as { devices: Array<{ type: string; count?: number; ports?: string[]; details?: Array<{ ip: string; name: string; backedOff: boolean; failures: number; nextProbeMs: number; lastPushAgo: number }> }> };
+      const data = await res.json() as { devices: Array<Record<string, any>> };
       const lines: string[] = ['Connected devices:'];
       let total = 0;
 
@@ -400,24 +400,45 @@ program
         if (d.type === 'websocket' && d.count) {
           lines.push(`  WebSocket    ${d.count} client${d.count !== 1 ? 's' : ''}`);
           total += d.count;
-        } else if (d.type === 'esp32' && d.count) {
-          const portInfo = d.ports?.length ? ` (${d.ports.join(', ')})` : '';
-          lines.push(`  ESP32        ${d.count} serial${portInfo}`);
-          total += d.count;
-        } else if (d.type === 'pixoo' && d.details) {
-          for (const px of d.details) {
-            if (px.backedOff) {
-              const mins = Math.ceil(px.nextProbeMs / 60_000);
-              lines.push(`  Pixoo64      ${px.ip} (${px.name}) \u26A0 backed off (next probe ${mins}m)`);
-            } else {
-              const ago = px.lastPushAgo >= 0 ? `${Math.round(px.lastPushAgo / 1000)}s ago` : 'no push yet';
-              lines.push(`  Pixoo64      ${px.ip} (${px.name}) \u2713 ${ago}`);
-            }
-            total++;
+        } else if ((d.type === 'esp32' || d.type === 'esp32_serial') && (d.count || d.connections)) {
+          // Node daemon: { count, ports }, Swift daemon: { connections: [{ port, connected, deviceInfo }] }
+          const count = d.count ?? (d.connections as any[])?.filter((c: any) => c.connected).length ?? 0;
+          const ports = d.ports ?? (d.connections as any[])?.map((c: any) => c.port) ?? [];
+          if (count > 0) {
+            const portInfo = ports.length ? ` (${ports.join(', ')})` : '';
+            lines.push(`  ESP32        ${count} serial${portInfo}`);
+            total += count;
           }
-        } else if (d.type === 'adb' && d.count) {
-          lines.push(`  ADB          ${d.count} USB device${d.count !== 1 ? 's' : ''}`);
-          total += d.count;
+        } else if (d.type === 'pixoo') {
+          // Node daemon: { details: [...] }, Swift daemon: { deviceIps: [...] }
+          if (d.details) {
+            for (const px of d.details as any[]) {
+              if (px.backedOff) {
+                const mins = Math.ceil(px.nextProbeMs / 60_000);
+                lines.push(`  Pixoo64      ${px.ip} (${px.name}) \u26A0 backed off (next probe ${mins}m)`);
+              } else {
+                const ago = px.lastPushAgo >= 0 ? `${Math.round(px.lastPushAgo / 1000)}s ago` : 'no push yet';
+                lines.push(`  Pixoo64      ${px.ip} (${px.name}) \u2713 ${ago}`);
+              }
+              total++;
+            }
+          } else if (d.deviceIps) {
+            for (const ip of d.deviceIps as string[]) {
+              const err = d.lastPushError ? ` \u26A0 ${d.lastPushError}` : ' \u2713';
+              lines.push(`  Pixoo64      ${ip}${err}`);
+              total++;
+            }
+          }
+        } else if (d.type === 'adb') {
+          const count = d.count ?? (d.devices as any[])?.length ?? 0;
+          if (count > 0) {
+            lines.push(`  ADB          ${count} USB device${count !== 1 ? 's' : ''}`);
+            total += count;
+          }
+        } else if (d.type === 'd200h' && d.connected) {
+          const writeInfo = d.writeOK != null ? ` (writes: ${d.writeOK} ok, ${d.writeFail} fail)` : '';
+          lines.push(`  D200H        HID connected${writeInfo}`);
+          total++;
         }
       }
 

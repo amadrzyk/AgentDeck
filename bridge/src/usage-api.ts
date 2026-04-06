@@ -283,7 +283,7 @@ export async function fetchUsageFromApi(): Promise<ApiUsageData | null> {
       fiveHourResetsAt: parseResetsAt(data.five_hour),
       sevenDayPercent: parseUtilization(data.seven_day),
       sevenDayResetsAt: parseResetsAt(data.seven_day),
-      extraUsageEnabled: !!extraUsage?.enabled,
+      extraUsageEnabled: !!(extraUsage?.is_enabled ?? extraUsage?.enabled),
       extraUsageMonthlyLimit: extraUsage?.monthly_limit ?? null,
       extraUsageUsedCredits: extraUsage?.used_credits ?? null,
       extraUsageUtilization: parseUtilization(extraUsage),

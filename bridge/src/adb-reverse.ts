@@ -20,11 +20,19 @@ function hasAdb(): boolean {
 function getConnectedDevices(): string[] {
   try {
     const output = execSync('adb devices', { stdio: 'pipe', timeout: 5000 }).toString();
-    return output
-      .split('\n')
-      .slice(1) // skip "List of devices attached" header
-      .filter((line) => line.includes('\tdevice'))
-      .map((line) => line.split('\t')[0]);
+    const lines = output.split('\n').slice(1).filter((l) => l.trim().length > 0);
+    const connected: string[] = [];
+    for (const line of lines) {
+      const [serial, state] = line.split('\t');
+      if (state === 'device') {
+        connected.push(serial);
+      } else if (state === 'unauthorized') {
+        debug(TAG, `Device ${serial} is unauthorized — accept USB debugging prompt on device`);
+      } else if (state === 'offline') {
+        debug(TAG, `Device ${serial} is offline`);
+      }
+    }
+    return connected;
   } catch {
     return [];
   }
@@ -84,8 +92,8 @@ export function startAdbReversePolling(port: number, intervalMs = 30_000): () =>
           });
           debug(TAG, `adb reverse re-established tcp:${port} → ${serial}`);
         }
-      } catch {
-        // ignore — device may be unauthorized or disconnected
+      } catch (err: any) {
+        debug(TAG, `adb reverse poll failed for ${serial}: ${err?.message ?? err}`);
       }
     }
   }, intervalMs);

@@ -199,13 +199,17 @@ final class DaemonService: ObservableObject {
         }
 
         guard let health, health["mode"] as? String == "daemon" else {
+            // External daemon never responded — stale registry. Clean up and start our own.
+            DaemonLogger.shared.info("External daemon on port \(resolvedPort) is stale — starting local daemon instead")
             self.server = nil
             self.isRunning = false
             self.isUsingExternalDaemon = false
             self.port = 0
             self.readyUrl = nil
-            self.errorMessage = "Stale external daemon registry on port \(resolvedPort)"
-            DaemonLogger.shared.error(self.errorMessage!)
+            self.errorMessage = nil
+            // Wait briefly for TIME_WAIT clearance then try starting local daemon
+            try? await Task.sleep(for: .seconds(1))
+            start()
             return
         }
 

@@ -187,6 +187,7 @@ async function openPort(port: string): Promise<SerialConnection | null> {
     // Open read stream for incoming ESP32 messages
     try {
       const reader = createReadStream(port, { flags: 'r', encoding: 'utf-8' });
+      reader.pause(); // Don't process data until baud rate is configured
       conn.reader = reader;
 
       reader.on('data', (chunk: string | Buffer) => {
@@ -234,6 +235,12 @@ async function openPort(port: string): Promise<SerialConnection | null> {
       } else if (platform === 'linux') {
         await execWithKill(`stty -F ${port} 115200 cs8 -cstopb -parenb -hupcl`);
       }
+    }
+
+    // Resume reader now that baud rate is configured (flush any garbled data from open→stty window)
+    if (conn.reader) {
+      conn.readBuf = '';
+      conn.reader.resume();
     }
 
     const portType = isCDC ? 'CDC' : 'UART';

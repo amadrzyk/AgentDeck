@@ -197,6 +197,8 @@ export class D200hModule implements DeviceModule {
   }
 
   private disconnect(): void {
+    if (this.readTimer) { clearInterval(this.readTimer); this.readTimer = null; }
+    if (this.keepAliveTimer) { clearInterval(this.keepAliveTimer); this.keepAliveTimer = null; }
     try { this.consumerDevice?.close(); } catch { /* ignore */ }
     try { this.keyboardDevice?.close(); } catch { /* ignore */ }
     this.consumerDevice = null;
@@ -220,7 +222,7 @@ export class D200hModule implements DeviceModule {
     try {
       // Use readTimeout for non-blocking behavior (node-hid v3+)
       const data = device.readTimeout ? device.readTimeout(1) : device.read();
-      if (!data || (Array.isArray(data) && data.length === 0)) return;
+      if (!data || (Array.isArray(data) && data.length === 0) || (Buffer.isBuffer(data) && data.length === 0)) return;
 
       const buf = Buffer.from(data as any);
       const event = parseIncoming(buf);
@@ -238,10 +240,12 @@ export class D200hModule implements DeviceModule {
         debug(TAG, `Device: ${event.data.deviceType} fw=${event.data.firmwareVersion} hw=${event.data.hardwareVersion}`);
       }
     } catch (err: any) {
-      if (err?.message?.includes('could not read')) {
-        // Device disconnected
-        debug(TAG, 'Device disconnected');
+      const msg = err?.message ?? '';
+      if (msg.includes('could not read') || msg.includes('disconnected') || msg.includes('transfer')) {
+        debug(TAG, `Device disconnected (${msg})`);
         this.disconnect();
+      } else {
+        debug(TAG, `HID read error: ${msg}`);
       }
     }
   }
