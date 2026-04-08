@@ -30,10 +30,8 @@ targets:
         DEVELOPMENT_TEAM: R22679GY5Z
       configs:
         debug:
-          CODE_SIGN_IDENTITY: "Apple Development"
           CODE_SIGN_STYLE: Automatic
         release:
-          CODE_SIGN_IDENTITY: "Apple Distribution"
           CODE_SIGN_STYLE: Automatic
 
   AgentDeck_macOS:
@@ -50,10 +48,8 @@ targets:
         DEVELOPMENT_TEAM: R22679GY5Z
       configs:
         debug:
-          CODE_SIGN_IDENTITY: "Apple Development"
           CODE_SIGN_STYLE: Automatic
         release:
-          CODE_SIGN_IDENTITY: "Apple Distribution"
           CODE_SIGN_STYLE: Automatic
     entitlements:
       path: AgentDeck/Resources/AgentDeck.entitlements
