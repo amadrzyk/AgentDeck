@@ -75,7 +75,8 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath $RUNNER_TEMP/AgentDeck_iOS.xcarchive \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
-            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM=R22679GY5Z \
             ENABLE_PREVIEWS=NO
 
@@ -167,7 +168,8 @@ jobs:
             -destination 'generic/platform=macOS' \
             -archivePath $RUNNER_TEMP/AgentDeck_macOS.xcarchive \
             MARKETING_VERSION=${{ steps.version.outputs.VERSION }} \
-            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM=R22679GY5Z
 
       - name: Export macOS pkg
