@@ -10,8 +10,6 @@
 	<true/>
 	<key>signingStyle</key>
 	<string>manual</string>
-	<key>signingCertificate</key>
-	<string>iOS Distribution</string>
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>bound.serendipity.agentdeck.dashboard</key>
