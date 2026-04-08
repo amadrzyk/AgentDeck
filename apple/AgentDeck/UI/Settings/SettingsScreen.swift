@@ -97,6 +97,7 @@ struct SettingsScreen: View {
 
     // MARK: - macOS
 
+    #if os(macOS)
     private var macOSSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Settings")
@@ -142,6 +143,7 @@ struct SettingsScreen: View {
         .padding(20)
         .frame(width: 460, height: 620)
     }
+    #endif
 
     // MARK: - Settings Card (Android Card style)
 

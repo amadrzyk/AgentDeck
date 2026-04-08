@@ -130,8 +130,13 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     @discardableResult
     func storeAntigravityBookmark(for url: URL) -> Bool {
         do {
+            #if os(macOS)
+            let options: URL.BookmarkCreationOptions = [.withSecurityScope]
+            #else
+            let options: URL.BookmarkCreationOptions = []
+            #endif
             let bookmark = try url.bookmarkData(
-                options: [.withSecurityScope],
+                options: options,
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
@@ -153,9 +158,14 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         var stale = false
         let url: URL
         do {
+            #if os(macOS)
+            let resolveOptions: URL.BookmarkResolutionOptions = [.withSecurityScope]
+            #else
+            let resolveOptions: URL.BookmarkResolutionOptions = []
+            #endif
             url = try URL(
                 resolvingBookmarkData: bookmark,
-                options: [.withSecurityScope],
+                options: resolveOptions,
                 relativeTo: nil,
                 bookmarkDataIsStale: &stale
             )
