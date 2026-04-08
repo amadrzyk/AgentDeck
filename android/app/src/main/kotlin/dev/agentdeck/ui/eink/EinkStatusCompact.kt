@@ -174,7 +174,7 @@ private fun ModelsColumn(state: DashboardState) {
                 else ""
             "${abbreviateModelName(m.name)}$sizeStr"
         }
-        InlineModelLine("OL", models, labelColor = labelColor, maxLines = 2)
+        InlineModelLine("Ollama", models, labelColor = labelColor, maxLines = 2)
     }
 
     // MLX
@@ -189,8 +189,12 @@ private fun ModelsColumn(state: DashboardState) {
     // Subscriptions
     if (state.subscriptions.isNotEmpty()) {
         InlineModelLine(
-            "Subs",
-            state.subscriptions.joinToString(", ") { abbreviateModelName(it.name) },
+            "Subscription",
+            state.subscriptions.joinToString(", ") { sub ->
+                val name = abbreviateModelName(sub.name)
+                val until = sub.until?.take(10) // "2026-05-01T..." → "2026-05-01"
+                if (until != null) "$name ~$until" else name
+            },
             labelColor = labelColor,
             dataColor = if (einkColorEnabled) Color(0xFF227733) else Color.Black,
         )
@@ -199,7 +203,7 @@ private fun ModelsColumn(state: DashboardState) {
     // Antigravity
     antigravityDisplayLine(state)?.let { line ->
         InlineModelLine(
-            "AG",
+            "Antigravity",
             line,
             labelColor = labelColor,
             dataColor = if (einkColorEnabled) Color(0xFF335588) else Color.Black,

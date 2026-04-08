@@ -78,7 +78,7 @@ fun EinkStatusPanel(
         val ollamaSource = if (runningOllama.isNotEmpty()) runningOllama else ollama
         if (ollamaSource.isNotEmpty()) {
             Text(
-                text = "OL: ${ollamaSource.joinToString(", ") { abbreviateModelName(it.name) }}",
+                text = "Ollama: ${ollamaSource.joinToString(", ") { abbreviateModelName(it.name) }}",
                 style = monoStyle,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -97,13 +97,17 @@ fun EinkStatusPanel(
         }
 
         antigravityDisplayLine(state)?.let { line ->
-            Text(text = "AG: $line", style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            Text(text = "Antigravity: $line", style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
             HorizontalDivider(thickness = 1.dp, color = Color.Black)
         }
 
         if (state.subscriptions.isNotEmpty()) {
             Text(
-                text = "Subs: ${state.subscriptions.joinToString(", ") { abbreviateModelName(it.name) }}",
+                text = "Subscription: ${state.subscriptions.joinToString(", ") { sub ->
+                    val name = abbreviateModelName(sub.name)
+                    val until = sub.until?.take(10)
+                    if (until != null) "$name ~$until" else name
+                }}",
                 style = monoStyle,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
