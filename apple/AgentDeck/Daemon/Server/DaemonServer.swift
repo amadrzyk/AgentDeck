@@ -1394,6 +1394,15 @@ final class DaemonServer {
                         s.agentType = health["agentType"] as? String ?? s.agentType
                         s.state = health["state"] as? String
                         s.modelName = health["modelName"] as? String
+                        s.currentTool = health["currentTool"] as? String
+                        s.navigable = health["navigable"] as? Bool
+                        if let rawOptions = health["options"] as? [[String: Any]] {
+                            s.options = rawOptions.map { option in
+                                option.mapValues(AnyCodable.init)
+                            }
+                        } else {
+                            s.options = nil
+                        }
                     }
                     return s
                 }
@@ -1414,12 +1423,17 @@ final class DaemonServer {
         var sessions = cachedSessions.map { sessionToDict($0) }
         // Inject virtual OpenClaw session when Gateway is reachable
         if cachedGatewayAvailable || gatewayAdapter != nil {
-            if !sessions.contains(where: { ($0["agentType"] as? String) == "openclaw" }) {
-                sessions.append([
+            if !sessions.contains(where: { ($0["id"] as? String) == "openclaw-gateway" || ($0["agentType"] as? String) == "openclaw" }) {
+                var gatewaySession: [String: Any] = [
                     "id": "openclaw-gateway", "port": 18789,
                     "projectName": "OpenClaw", "agentType": "openclaw",
                     "alive": true, "state": gatewayAdapter != nil ? stateMachine.state.rawValue : "idle",
-                ] as [String: Any])
+                ]
+                if let tool = stateMachine.currentTool { gatewaySession["currentTool"] = tool }
+                if let modelName = stateMachine.modelName { gatewaySession["modelName"] = modelName }
+                if !stateMachine.options.isEmpty { gatewaySession["options"] = stateMachine.options }
+                if stateMachine.navigable { gatewaySession["navigable"] = true }
+                sessions.append(gatewaySession)
             }
         }
         return ["type": "sessions_list", "sessions": sessions]
@@ -1897,6 +1911,13 @@ final class DaemonServer {
         if let a = s.agentType { d["agentType"] = a }
         if let st = s.state { d["state"] = st }
         if let mn = s.modelName { d["modelName"] = mn }
+        if let tool = s.currentTool { d["currentTool"] = tool }
+        if let options = s.options {
+            d["options"] = options.map { option in
+                option.mapValues { $0.value }
+            }
+        }
+        if let navigable = s.navigable, navigable { d["navigable"] = true }
         if let sa = s.startedAt { d["startedAt"] = sa }
         return d
     }
