@@ -38,17 +38,52 @@ export function sessionTier(state: string | undefined): SessionTier {
   }
 }
 
+// ===== Agent Type Ranking (stable ordering by agent kind) =====
+
+/**
+ * Rank agent types for stable ordering.
+ * openclaw=0 (always first), claude-code=1, codex-cli=2, opencode=3, others=4.
+ */
+export function agentTypeRank(agentType: string | undefined): number {
+  switch (agentType) {
+    case 'openclaw': return 0;
+    case 'claude-code': return 1;
+    case 'codex-cli': return 2;
+    case 'opencode': return 3;
+    default: return 4;
+  }
+}
+
 // ===== Sorting =====
 
 /**
- * Sort sessions by stateRank (processing first) then projectName alphabetically.
+ * Sort sessions with stable ordering that does NOT jump on state changes.
+ *
+ * Order: agentType (openclaw first → claude-code → codex → opencode)
+ *   → projectName alphabetically
+ *   → startedAt ascending (oldest first) for stability
+ *   → id as final tiebreaker
+ *
  * Returns a new array (never mutates input).
  */
-export function sortSessions<T extends { state?: string; projectName?: string }>(sessions: T[]): T[] {
+export function sortSessions<T extends { state?: string; projectName?: string; agentType?: string; startedAt?: string; id?: string }>(sessions: T[]): T[] {
   return [...sessions].sort((a, b) => {
-    const rank = stateRank(a.state) - stateRank(b.state);
-    if (rank !== 0) return rank;
-    return (a.projectName || '').localeCompare(b.projectName || '');
+    // 1. Agent type group (openclaw first, then by agent kind)
+    const typeRank = agentTypeRank(a.agentType) - agentTypeRank(b.agentType);
+    if (typeRank !== 0) return typeRank;
+
+    // 2. Project name alphabetically
+    const nameCompare = (a.projectName || '').localeCompare(b.projectName || '');
+    if (nameCompare !== 0) return nameCompare;
+
+    // 3. Start time ascending (oldest first = stable position)
+    if (a.startedAt && b.startedAt) {
+      const diff = new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
+      if (diff !== 0) return diff;
+    }
+
+    // 4. Session ID as final tiebreaker
+    return (a.id || '').localeCompare(b.id || '');
   });
 }
 

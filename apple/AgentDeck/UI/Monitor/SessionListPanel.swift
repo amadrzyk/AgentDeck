@@ -127,13 +127,11 @@ struct SessionListPanel: View {
             ))
         }
 
-        // Siblings (skip self and daemon), sorted by state priority + project name
+        // Siblings (skip self and daemon), stable sort: agentType → projectName
         let siblings = stateHolder.state.siblingSessions
             .filter { $0.id != stateHolder.state.sessionId && $0.agentType != "daemon" }
             .sorted {
-                let s0 = AgentConnectionState(rawValue: $0.state ?? "") ?? .disconnected
-                let s1 = AgentConnectionState(rawValue: $1.state ?? "") ?? .disconnected
-                let r0 = Self.stateRank(s0), r1 = Self.stateRank(s1)
+                let r0 = Self.agentTypeRank($0.agentType), r1 = Self.agentTypeRank($1.agentType)
                 if r0 != r1 { return r0 < r1 }
                 return ($0.projectName ?? "") < ($1.projectName ?? "")
             }
@@ -268,6 +266,16 @@ private struct BrandIcon: View {
 }
 
 private extension SessionListPanel {
+    static func agentTypeRank(_ agentType: String?) -> Int {
+        switch agentType {
+        case "openclaw": 0
+        case "claude-code": 1
+        case "codex-cli": 2
+        case "opencode": 3
+        default: 4
+        }
+    }
+
     static func stateRank(_ state: AgentConnectionState) -> Int {
         switch state {
         case .processing: 0

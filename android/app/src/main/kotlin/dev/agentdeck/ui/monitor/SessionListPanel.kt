@@ -25,6 +25,7 @@ import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.ui.component.AgentDeckLogo
 import dev.agentdeck.ui.component.BrandIcon
 import dev.agentdeck.ui.component.stateColor
+import dev.agentdeck.ui.eink.agentTypeRank
 import dev.agentdeck.ui.eink.compactStateMarker
 import dev.agentdeck.ui.eink.mapSessionState
 import dev.agentdeck.ui.eink.stateRank
@@ -74,15 +75,15 @@ fun SessionListPanel(
         )
     }
 
-    // Siblings (skip self and daemon), sorted by state priority + project name
+    // Siblings (skip self and daemon), stable sort: agentType → projectName
     siblingSessions
         .filter { it.id != sessionId && it.agentType != "daemon" }
-        .sortedWith(compareBy<SessionInfo> { stateRank(mapSessionState(it)) }.thenBy { it.projectName ?: "" })
+        .sortedWith(compareBy<SessionInfo> { agentTypeRank(it.agentType) }.thenBy { it.projectName ?: "" })
         .forEach { session ->
             entries += SessionEntry(
                 projectName = session.projectName ?: "Agent",
                 agentType = session.agentType,
-                modelName = null,
+                modelName = session.modelName,
                 effortLevel = null,
                 agentState = mapSessionState(session),
                 isPrimary = false,

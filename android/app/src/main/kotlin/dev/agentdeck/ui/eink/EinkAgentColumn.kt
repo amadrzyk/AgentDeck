@@ -75,15 +75,15 @@ fun EinkAgentPanel(
         )
     }
 
-    // Siblings (skip self and daemon), sorted by state priority + project name
+    // Siblings (skip self and daemon), stable sort: agentType → projectName
     state.siblingSessions
         .filter { it.id != state.sessionId && it.agentType != "daemon" }
-        .sortedWith(compareBy<dev.agentdeck.net.SessionInfo> { stateRank(mapSessionState(it)) }.thenBy { it.projectName ?: "" })
+        .sortedWith(compareBy<dev.agentdeck.net.SessionInfo> { agentTypeRank(it.agentType) }.thenBy { it.projectName ?: "" })
         .forEach { session ->
             entries += AgentEntry(
                 projectName = session.projectName ?: "Agent",
                 agentType = session.agentType,
-                modelName = null,
+                modelName = session.modelName,
                 effortLevel = null,
                 agentState = mapSessionState(session),
             )

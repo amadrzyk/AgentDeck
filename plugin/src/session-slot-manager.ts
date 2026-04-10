@@ -189,16 +189,12 @@ export class SessionSlotManager {
 
   updateSessions(sessions: SessionInfo[], gatewayAvailable: boolean): void {
     this._gatewayAvailable = gatewayAvailable;
-    // Build ordered list: OpenClaw first (if available), then CC sessions by startedAt
-    const ordered: SessionInfo[] = [];
+    // Build ordered list: sorted by agentType (openclaw→claude→codex→opencode) then name→startedAt
+    const alive = sessions.filter(s => (s.agentType as string) !== 'daemon' && s.alive);
 
-    // OpenClaw virtual entry
-    const ocSession = sessions.find(s => s.agentType === 'openclaw');
-    if (ocSession) {
-      ordered.push(ocSession);
-    } else if (gatewayAvailable) {
-      // Create virtual OC session entry
-      ordered.push({
+    // Inject virtual OpenClaw entry if gateway available but no real OC session
+    if (gatewayAvailable && !alive.some(s => s.agentType === 'openclaw')) {
+      alive.push({
         id: 'openclaw-gateway',
         port: 18789,
         projectName: 'OpenClaw',
@@ -208,13 +204,8 @@ export class SessionSlotManager {
       });
     }
 
-    // CC sessions (exclude daemon, openclaw), sorted by state rank then name
-    const ccSessions = sessions
-      .filter(s => s.agentType !== 'openclaw' && (s.agentType as string) !== 'daemon' && s.alive);
-    ordered.push(...sortSessions(ccSessions));
-
-    // Cap at MAX_SESSIONS
-    this._sessions = ordered.slice(0, MAX_SESSIONS);
+    // Canonical stable sort: agentType rank → projectName → startedAt → id
+    this._sessions = sortSessions(alive).slice(0, MAX_SESSIONS);
 
     // Assign #N display names for duplicate (projectName, agentType) pairs — no mutation
     this._displayNames = new Map();

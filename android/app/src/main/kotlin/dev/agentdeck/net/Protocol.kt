@@ -226,6 +226,7 @@ data class SessionInfo(
     val agentType: String? = null,
     val alive: Boolean = true,
     val state: String? = null,
+    val modelName: String? = null,
 )
 
 // --- Bridge timeline entry (rich OpenClaw events) ---

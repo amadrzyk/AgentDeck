@@ -74,6 +74,14 @@ fun stateRank(state: AgentState): Int = when (state) {
     AgentState.DISCONNECTED -> 3
 }
 
+fun agentTypeRank(agentType: String?): Int = when (agentType) {
+    "openclaw" -> 0
+    "claude-code" -> 1
+    "codex-cli" -> 2
+    "opencode" -> 3
+    else -> 4
+}
+
 fun agentIcon(agentType: String?): String = when (agentType) {
     "claude-code" -> "\u273B"         // ✻ (Claude sparkle)
     "openclaw" -> "\uD83E\uDD9E"     // 🦞 (crayfish)
