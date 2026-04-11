@@ -84,8 +84,8 @@ Coverage thresholds (regression guard): lines ≥17%, functions ≥15%, branches
 
 ### Test Report (GitHub Pages)
 
-- **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/reports/` (test report)
-- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) → HTML report → GitHub Pages deploy
+- **URL**: `https://puritysb.github.io/AgentDeck/` (landing) / `/reports/` (test report) / `/demo/` (creature-simulator)
+- **Workflow**: `.github/workflows/test-report.yml` — push to master → Vitest + Android JUnit + Robot Framework (no-hw) + `pnpm run demo:build` → HTML report → GitHub Pages deploy
 - **Report generator**: `scripts/generate-html-report.py` — tab-based SPA dashboard. Robot tab: suite→scenario→BDD steps→board matrix→per-test elapsed time→performance table. `[PERF]` log messages auto-extracted from output.xml
 - **Scenario matrix**: `scripts/scenario-matrix.json` — 10 user scenarios mapped to test files + gap analysis
 - **Landing page**: `scripts/pages-index.html`
