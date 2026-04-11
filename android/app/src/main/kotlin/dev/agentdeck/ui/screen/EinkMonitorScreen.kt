@@ -545,7 +545,33 @@ private fun EinkReconnectingScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        // Error block — above the action button so it's always visible.
+        // Use a bordered Surface to clearly separate diagnostic info from status text.
+        if (lastError != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.8f),
+                shape = RoundedCornerShape(4.dp),
+                border = BorderStroke(1.dp, Color.Black),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(
+                        text = "Connection error",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = lastError,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Stop reconnecting button
         Surface(
@@ -562,17 +588,6 @@ private fun EinkReconnectingScreen(
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(8.dp),
-            )
-        }
-
-        // Error message
-        if (lastError != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = lastError,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
             )
         }
 

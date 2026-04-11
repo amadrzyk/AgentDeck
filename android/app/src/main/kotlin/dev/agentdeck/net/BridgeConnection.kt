@@ -171,9 +171,17 @@ class BridgeConnection private constructor() {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "onFailure — ${t.message}", t)
+                // Prefer HTTP handshake details when the upgrade was rejected — a bare
+                // t.message like "Failed to connect" hides the actual reason (4xx code,
+                // server message). When response is null, fall back to the exception.
+                val msg = if (response != null) {
+                    "HTTP ${response.code} ${response.message} — ${t.message ?: t.javaClass.simpleName}"
+                } else {
+                    "${t.javaClass.simpleName}: ${t.message ?: "unknown"}"
+                }
+                Log.e(TAG, "onFailure — $msg", t)
                 _status.value = ConnectionStatus.DISCONNECTED
-                _lastError.value = t.message
+                _lastError.value = msg
                 onEvent?.invoke(BridgeEvent.Disconnected)
                 scheduleReconnect()
             }
