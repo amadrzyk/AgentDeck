@@ -59,10 +59,13 @@ fun SessionListPanel(
 
     val entries = mutableListOf<SessionEntry>()
 
-    // Daemon-like detection: skip primary if daemon, or if sessions already
-    // contains an entry with the same agentType (daemon relaying OpenClaw
-    // sets agentType='openclaw' but sessions_list already has the virtual entry)
+    // Daemon-like detection: skip primary if daemon, if it's the OpenClaw gateway
+    // proxy (always virtualized into siblings), or if sessions already contain an
+    // entry with the same agentType. Hardening "openclaw" unconditionally protects
+    // against a race between state_update and sessions_list where the primary
+    // briefly carries agentType=openclaw + agentState=DISCONNECTED.
     val isDaemonLike = agentType == "daemon" ||
+        agentType == "openclaw" ||
         siblingSessions.any { it.agentType == agentType }
     if (!isDaemonLike) {
         entries += SessionEntry(
@@ -76,9 +79,13 @@ fun SessionListPanel(
     }
 
     // Siblings (skip self and daemon), stable sort: agentType → projectName
+    // (case-insensitive — must match Apple/shared sortSessions exactly)
     siblingSessions
         .filter { it.id != sessionId && it.agentType != "daemon" }
-        .sortedWith(compareBy<SessionInfo> { agentTypeRank(it.agentType) }.thenBy { it.projectName ?: "" })
+        .sortedWith(
+            compareBy<SessionInfo> { agentTypeRank(it.agentType) }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.projectName ?: "" }
+        )
         .forEach { session ->
             entries += SessionEntry(
                 projectName = session.projectName ?: "Agent",

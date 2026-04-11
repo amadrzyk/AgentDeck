@@ -72,8 +72,11 @@ export function sortSessions<T extends { state?: string; projectName?: string; a
     const typeRank = agentTypeRank(a.agentType) - agentTypeRank(b.agentType);
     if (typeRank !== 0) return typeRank;
 
-    // 2. Project name alphabetically
-    const nameCompare = (a.projectName || '').localeCompare(b.projectName || '');
+    // 2. Project name alphabetically (case-insensitive — must match Swift
+    // DashboardDataRules.sortSessionPayloads' localizedCaseInsensitiveCompare
+    // and Android EinkAgentColumn / SessionListPanel sort, otherwise mixed-case
+    // project names render in different order on Stream Deck vs. Apple/Android.)
+    const nameCompare = (a.projectName || '').localeCompare(b.projectName || '', undefined, { sensitivity: 'base' });
     if (nameCompare !== 0) return nameCompare;
 
     // 3. Start time ascending (oldest first = stable position)

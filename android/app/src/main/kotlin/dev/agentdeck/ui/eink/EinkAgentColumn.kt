@@ -63,7 +63,13 @@ fun EinkAgentPanel(
 
     // Daemon-like: skip primary if daemon, or if sessions already contains
     // an entry with the same agentType (daemon relaying OpenClaw)
+    // OpenClaw is a gateway proxy, never a real "primary" session — when the
+    // daemon flips agentType to "openclaw" (gateway alive) the canonical OC entry
+    // lives in siblingSessions. Always skip the primary in that case so a race
+    // between state_update (agentType="openclaw", agentState=DISCONNECTED) and
+    // sessions_list arrival cannot leave a stale "abnormal" OC card in the column.
     val isDaemonLike = state.agentType == "daemon" ||
+        state.agentType == "openclaw" ||
         state.siblingSessions.any { it.agentType == state.agentType }
     if (!isDaemonLike) {
         entries += AgentEntry(
@@ -78,7 +84,10 @@ fun EinkAgentPanel(
     // Siblings (skip self and daemon), stable sort: agentType → projectName
     state.siblingSessions
         .filter { it.id != state.sessionId && it.agentType != "daemon" }
-        .sortedWith(compareBy<dev.agentdeck.net.SessionInfo> { agentTypeRank(it.agentType) }.thenBy { it.projectName ?: "" })
+        .sortedWith(
+            compareBy<dev.agentdeck.net.SessionInfo> { agentTypeRank(it.agentType) }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.projectName ?: "" }
+        )
         .forEach { session ->
             entries += AgentEntry(
                 projectName = session.projectName ?: "Agent",
