@@ -20,6 +20,8 @@ targets:
     platform: iOS
     sources:
       - AgentDeck
+      - path: ../generated/protocol/AgentCommand.swift
+        group: AgentDeck/Generated
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agentdeck.dashboard
@@ -39,6 +41,8 @@ targets:
     platform: macOS
     sources:
       - AgentDeck
+      - path: ../generated/protocol/AgentCommand.swift
+        group: AgentDeck/Generated
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agentdeck.dashboard
@@ -94,3 +98,40 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: bound.serendipity.agentdeck.dashboard.tests
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AgentDeck.app/Contents/MacOS/AgentDeck"
         BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  AgentDeck_iOS:
+    build:
+      targets:
+        AgentDeck_iOS: all
+        AgentDeckTests_iOS: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - AgentDeckTests_iOS
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgentDeck_macOS:
+    build:
+      targets:
+        AgentDeck_macOS: all
+        AgentDeckTests_macOS: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - AgentDeckTests_macOS
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

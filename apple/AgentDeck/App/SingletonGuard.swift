@@ -14,6 +14,17 @@ enum SingletonGuard {
     /// - Returns: true if this is the only instance (safe to continue), false if terminating.
     @MainActor
     static func enforce() -> Bool {
+        // Under xcodebuild test / xctest, the test runner launches the host app
+        // inside an existing user session where a dev build may already be
+        // running. Skip the singleton check so the test runner can establish
+        // its XPC connection before the app exits.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
+            || ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil {
+            NSLog("[AgentDeck] xctest environment detected — skipping singleton guard")
+            return true
+        }
+
         let myPid = getpid()
         let myBundleId = Bundle.main.bundleIdentifier ?? "bound.serendipity.agentdeck.dashboard"
 
