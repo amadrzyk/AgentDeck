@@ -4,184 +4,267 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AgentDeck Creature Simulator</title>
+  <script>
+    window.__SIM_DATA = null;
+  </script>
+  <script src="./sim-data.js" onerror="console.warn('sim-data.js not found. Run scripts/render-creature-simulator.mjs to generate actual pixels data.')"></script>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;700;800&display=swap');
+
     :root {
-      --bg: #f3eee7;
-      --ink: #211b18;
-      --muted: #6d655f;
-      --panel: #fffaf4;
-      --line: #d3c5b8;
-      --shadow: rgba(30, 20, 10, 0.08);
+      /* Deep mysterious background */
+      --bg-top: #0a0b10;
+      --bg-bottom: #141724;
+      --ink: #e2e8f0;
+      --muted: #8b98a5;
+      
+      /* Glassmorphism panel */
+      --panel: rgba(20, 25, 38, 0.65);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --panel-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+      --glass-blur: blur(24px);
+
+      /* Accent & interactive */
+      --accent: #60a5fa;
+      --accent-glow: rgba(96, 165, 250, 0.2);
+      
       --tablet-water: #15314d;
       --tablet-water-2: #143554;
-      --eink-bg: #ede6da;
+      --eink-bg: #e2e8f0;
       --esp-bg: #16324a;
       --pixoo-bg: #14243c;
       --ask: #f5b942;
     }
 
     * { box-sizing: border-box; }
+    
     body {
       margin: 0;
-      padding: 24px;
-      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: linear-gradient(180deg, #f8f4ef 0%, var(--bg) 100%);
+      padding: 32px 24px;
+      font-family: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(135deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
       color: var(--ink);
+      min-height: 100vh;
+      line-height: 1.5;
     }
 
     .shell {
-      max-width: 1520px;
+      max-width: 1560px;
       margin: 0 auto;
       display: grid;
-      gap: 20px;
+      gap: 28px;
     }
 
-    .toolbar, .panel {
+    /* Core Glassmorphism Component */
+    .glass-panel {
       background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      box-shadow: 0 12px 30px var(--shadow);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--panel-border);
+      border-radius: 20px;
+      box-shadow: var(--panel-shadow);
     }
 
     .toolbar {
-      padding: 16px 18px;
+      padding: 20px 24px;
       display: flex;
-      gap: 18px;
+      gap: 24px;
       align-items: center;
       flex-wrap: wrap;
+      position: sticky;
+      top: 24px;
+      z-index: 100;
     }
 
     .toolbar h1 {
-      margin: 0 20px 0 0;
-      font-size: 20px;
+      margin: 0 24px 0 0;
+      font-family: 'Outfit', sans-serif;
+      font-size: 24px;
+      font-weight: 800;
       letter-spacing: -0.02em;
+      background: linear-gradient(to right, #fff, #9ca3af);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
 
     .toolbar label {
       display: flex;
-      gap: 8px;
+      gap: 10px;
       align-items: center;
       font-size: 13px;
       color: var(--muted);
       font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
 
     .toolbar select {
-      font: inherit;
-      color: var(--ink);
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 8px 10px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 10px 16px;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.2s ease;
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b98a5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 14px;
+      padding-right: 36px;
+    }
+
+    .toolbar select:focus, .toolbar select:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    
+    .toolbar select option {
+      background: var(--bg-bottom);
+      color: #fff;
     }
 
     .grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
+      gap: 24px;
     }
 
     .grid.devices {
       grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 28px;
     }
 
     .panel {
-      padding: 14px;
+      padding: 24px;
     }
 
     .panel h2 {
-      margin: 0 0 4px;
-      font-size: 15px;
-      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.01em;
     }
 
     .panel p {
-      margin: 0 0 10px;
-      font-size: 12px;
+      margin: 0 0 16px;
+      font-size: 13px;
       color: var(--muted);
-      min-height: 32px;
-      line-height: 1.4;
+      min-height: 36px;
+      line-height: 1.5;
     }
 
     svg {
       width: 100%;
       aspect-ratio: 1;
-      border-radius: 14px;
+      border-radius: 16px;
       display: block;
-      background: #fff;
-      border: 1px solid rgba(0,0,0,0.06);
+      background: #000;
+      border: 1px solid rgba(255,255,255,0.06);
     }
 
     .notes {
-      padding: 16px 18px;
-      font-size: 13px;
+      padding: 20px 24px;
+      font-size: 14px;
       color: var(--muted);
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
     .notes strong {
-      color: var(--ink);
+      color: #fff;
     }
 
+    /* Sleek device frames */
     .device-frame {
-      background: #1d1d1f;
-      border-radius: 26px;
-      padding: 12px;
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 20px 40px rgba(14, 16, 20, 0.18);
+      background: linear-gradient(145deg, #1f2430, #131720);
+      border-radius: 28px;
+      padding: 14px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 20px 40px rgba(0, 0, 0, 0.5);
+      position: relative;
+    }
+
+    .device-frame::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      border-radius: 28px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+      pointer-events: none;
     }
 
     .device-screen {
       width: 100%;
-      border-radius: 18px;
+      border-radius: 16px;
       overflow: hidden;
       display: block;
-      border: 1px solid rgba(255,255,255,0.04);
+      background: #000;
+      border: 1px solid rgba(255,255,255,0.02);
+      transform: translateZ(0); /* Trigger GPU */
     }
 
     .device-frame.round {
       border-radius: 999px;
-      padding: 16px;
+      padding: 18px;
     }
 
     .device-frame.round .device-screen {
       border-radius: 999px;
     }
 
+    /* Apple Watch: rectangular with small corner radius */
+    .device-frame.watch-rect {
+      border-radius: 28px;
+      padding: 14px;
+      background: #1a1a1a;
+    }
+
+    .device-frame.watch-rect .device-screen {
+      border-radius: 18px;
+    }
+
     .device-meta {
-      margin-top: 10px;
-      font-size: 11px;
+      margin-top: 14px;
+      font-size: 12px;
       color: var(--muted);
-      line-height: 1.4;
+      line-height: 1.5;
     }
 
     .tc-previews {
       display: grid;
-      gap: 8px;
+      gap: 12px;
     }
 
     .tc-previews svg {
       aspect-ratio: 4 / 1;
-      border-radius: 10px;
+      border-radius: 12px;
       background: #0d1218;
     }
 
-    @media (max-width: 1280px) {
+    /* Responsive Design */
+    @media (max-width: 1400px) {
       .grid.devices { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
 
     @media (max-width: 1100px) {
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid.devices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     @media (max-width: 720px) {
       body { padding: 16px; }
+      .toolbar { top: 16px; }
       .grid, .grid.devices { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
-    <div class="toolbar">
+    <div class="toolbar glass-panel">
       <h1>AgentDeck Creature Simulator</h1>
       <label>Agent
         <select id="agent">
@@ -220,17 +303,17 @@
     </div>
 
     <div class="grid">
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>Asset Reference</h2>
         <p id="ref-copy"></p>
         <svg id="reference" viewBox="0 0 320 320" aria-label="Asset reference"></svg>
       </section>
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>Apple Tablet Proposal</h2>
         <p id="apple-copy"></p>
         <svg id="apple-tablet" viewBox="0 0 320 320" aria-label="Apple tablet proposal"></svg>
       </section>
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>Android Tablet Proposal</h2>
         <p id="android-copy"></p>
         <svg id="android-tablet" viewBox="0 0 320 320" aria-label="Android tablet proposal"></svg>
@@ -238,17 +321,17 @@
     </div>
 
     <div class="grid">
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>E-ink Proposal</h2>
         <p id="eink-copy"></p>
         <svg id="eink" viewBox="0 0 320 320" aria-label="E-ink proposal"></svg>
       </section>
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>ESP32 LCD Proposal</h2>
         <p id="esp-copy"></p>
         <svg id="esp32" viewBox="0 0 320 320" aria-label="ESP32 proposal"></svg>
       </section>
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>Pixoo Proposal</h2>
         <p id="pixoo-copy"></p>
         <svg id="pixoo" viewBox="0 0 320 320" aria-label="Pixoo proposal"></svg>
@@ -256,19 +339,19 @@
     </div>
 
     <div class="grid">
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>Pixoo Focus</h2>
         <p>Enlarged Pixoo64 check. Use this panel to judge whether the selected creature, nearby asking bubble, session dots, and HUD still read at real LED scale.</p>
         <svg id="pixoo-focus" viewBox="0 0 128 128" aria-label="Pixoo focus"></svg>
       </section>
-      <section class="panel">
+      <section class="panel glass-panel">
         <h2>TUI Focus</h2>
         <p>Enlarged terminal terrarium check. This panel now favors actual character/asking placement over full dashboard recreation so sprite readability is easier to judge.</p>
         <svg id="tui-focus" viewBox="0 0 960 560" aria-label="TUI focus"></svg>
       </section>
     </div>
 
-    <div class="panel">
+    <div class="panel glass-panel">
       <h2>Device Simulations</h2>
       <p>Device-family simulation with layout proportions pushed closer to the actual implementations. Pixoo and TUI use renderer output directly, while tablet, e-ink, ESP32, and Stream Deck now mirror the real HUD cards, aquarium placement, and status language more closely.</p>
       <div class="grid devices">
@@ -306,7 +389,13 @@
           <div class="device-frame">
             <svg class="device-screen" id="sim-esp32-ips" viewBox="0 0 480 320" style="aspect-ratio:3/2"></svg>
           </div>
-          <div class="device-meta">ESP32 IPS 3.5. Same aquarium screen, wider left/right HUD cards like the actual IPS layout.</div>
+          <div class="device-meta">ESP32 IPS 3.5&quot; landscape. Same aquarium screen, wider left/right HUD cards like the actual IPS layout.</div>
+        </section>
+        <section>
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-esp32-ips-portrait" viewBox="0 0 320 480" style="aspect-ratio:2/3"></svg>
+          </div>
+          <div class="device-meta">ESP32 IPS 3.5&quot; portrait. Vertical layout: session card top, aquarium center, gauge bar bottom.</div>
         </section>
         <section>
           <div class="device-frame round">
@@ -333,24 +422,30 @@
           <div class="device-frame">
             <svg class="device-screen" id="sim-streamdeck" viewBox="0 0 144 144" style="aspect-ratio:1/1"></svg>
           </div>
-          <div class="device-meta">Stream Deck session button preview. Watermark, state LED, centered title stack, and active spinner closer to the real button SVG.</div>
+          <div class="device-meta">Stream Deck+ session button. Premium Widget layout with gradient bg, edge color strip, and agent watermark — same SVG as the real plugin.</div>
         </section>
         <section>
-          <div class="device-frame round">
+          <div class="device-frame">
+            <svg class="device-screen" id="sim-d200h" viewBox="0 0 144 144" style="aspect-ratio:1/1"></svg>
+          </div>
+          <div class="device-meta">Ulanzi D200H key button. Rendered with the same SVG renderer as Stream Deck (D200H scales 144→196px via resvg-js in production).</div>
+        </section>
+        <section>
+          <div class="device-frame watch-rect">
             <svg class="device-screen" id="sim-apple-watch" viewBox="0 0 416 496" style="aspect-ratio:416/496"></svg>
           </div>
-          <div class="device-meta">Apple Watch Series 11 preview. Uses the real 46mm or 42mm display pixel aspect. This is a planned simulator, not an implemented watchOS target.</div>
+          <div class="device-meta">Apple Watch Series 11 preview. Rectangular display with small corner radius, matching actual watchOS UI proportions.</div>
         </section>
         <section>
           <div class="device-frame">
             <svg class="device-screen" id="sim-tui" viewBox="0 0 720 420" style="aspect-ratio:12/7"></svg>
           </div>
-          <div class="device-meta">Terminal TUI preview. Character spacing, asking placement, and creature recognizability matter more than full dashboard chrome here.</div>
+          <div class="device-meta">Terminal TUI preview (actual renderDashboard output, 120×30 chars).</div>
         </section>
       </div>
     </div>
 
-    <div class="panel notes">
+    <div class="panel notes glass-panel">
       <strong>Purpose:</strong> compare `assets/logos` against per-device rendering before deploying. Pixoo and TUI are inspected from actual renderer output, while tablet, e-ink, ESP32, TC matrix, Stream Deck, and watch previews follow each platform's real HUD structure and safe-area composition as closely as this simulator can without invoking those native renderers directly.
     </div>
   </div>
@@ -473,9 +568,38 @@
       "-": [0b000, 0b000, 0b111, 0b000, 0b000],
       ".": [0b000, 0b000, 0b000, 0b000, 0b010],
     };
+    // TC001 sprites derived from actual OCTOPUS_GRID (13×13→5-bit) and CRAYFISH_GRID (12×8→5-bit)
+    // Each row is a 5-bit bitmask (MSB=leftmost pixel) for a 5×N sprite
     const MATRIX_SPRITES = {
-      octopus: [0b01110, 0b11111, 0b10101, 0b11111, 0b01010, 0b10101],
-      crayfish: [0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010],
+      // Octopus: 5×7 reduction of 13×13 OCTOPUS_GRID
+      // flat head + eyes + arms + waist + tentacles
+      octopus: [
+        0b01110,   // ▄█▄ flat top head
+        0b11111,   // full body row
+        0b10101,   // eyes at col 1,3
+        0b11111,   // arms spread
+        0b01110,   // waist
+        0b10101,   // tentacles outer
+        0b01010,   // tentacle tips
+      ],
+      // Jellyfish (Codex cloud): 5×5 reduction of 10×8 JELLYFISH_GRID
+      jellyfish: [
+        0b01010,   // top lobes
+        0b11111,   // widest
+        0b11111,   // body mid
+        0b11111,   // widest
+        0b01010,   // bottom lobes
+      ],
+      // Crayfish (OpenClaw): 5×6 reduction of 12×8 CRAYFISH_GRID
+      // antennae + head dome + claws+eyes + thorax + abdomen + legs
+      crayfish: [
+        0b01010,   // antennae tips
+        0b01110,   // head dome
+        0b11111,   // claws + body (widest)
+        0b10101,   // eyes at col 1,3
+        0b01110,   // abdomen
+        0b10001,   // tail legs
+      ],
     };
 
     let simTime = 0;
@@ -512,9 +636,11 @@
         "sim-pixoo": [64, 64],
         "sim-tc-usage": [32, 8],
         "sim-tc-agents": [32, 8],
+        "sim-d200h": [144, 144],
         "sim-streamdeck": [144, 144],
         "sim-apple-watch": [416, 496],
         "sim-tui": [720, 420],
+        "sim-esp32-ips-portrait": [320, 480],
         "pixoo-focus": [128, 128],
         "tui-focus": [960, 560],
       }[svg.id] || [320, 320];
@@ -806,7 +932,8 @@
     }
 
     function getTuiActual(agent, state) {
-      return window.__SIM_DATA?.tuiTerrarium?.[getActualKey(agent, state)] || null;
+      // Prefer full dashboard data; fall back to terrarium-only
+      return window.__SIM_DATA?.tui?.[getActualKey(agent, state)] || window.__SIM_DATA?.tuiTerrarium?.[getActualKey(agent, state)] || null;
     }
 
     function decodeBase64Bytes(b64) {
@@ -841,19 +968,107 @@
     function renderTuiActual(svg, frame) {
       clear(svg);
       const [w, h] = svgSize(svg);
-      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, rx: 18, fill: "#0B1118" }));
-      const fontSize = svg.id === "tui-focus" ? 24 : 14;
-      const lineHeight = svg.id === "tui-focus" ? 30 : 20;
-      frame.lines.forEach((line, i) => {
-        svg.appendChild(textNode(line.replace(/\s+$/g, ''), {
-          x: 18,
-          y: 28 + i * lineHeight,
-          fill: "#DDE7F0",
-          "font-size": fontSize,
-          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
-          "xml:space": "preserve",
+
+      // Background — deep terminal black
+      svg.appendChild(el('rect', { x: 0, y: 0, width: w, height: h, rx: 14, fill: '#060A10' }));
+
+      const lines = frame.lines;
+      const charCols = frame.width || 120;
+      const charRows = frame.height || 30;
+
+      // Fixed cell size: distribute full SVG evenly over the character grid
+      const padX = 6, padY = 8;
+      const cellW = (w - padX * 2) / charCols;
+      const cellH = (h - padY * 2) / charRows;
+      // Font size: ~80% of cell height so characters don't overlap
+      const fontSize = Math.max(7, cellH * 0.80);
+      const fontFam = '"SFMono-Regular", "Menlo", "Consolas", "Courier New", ui-monospace, monospace';
+
+      // Color rules — matches the actual TUI renderer's color scheme
+      const BORDER = '#1E4D6B';   // box drawing chars (dimmed cyan)
+      const HEADER = '#7EC8F5';   // section titles (LIMITS, MODELS, TIMELINE)
+      const DIM    = '#3A5C75';   // muted helper text, footer
+      const TEXT   = '#BED4E8';   // normal text
+      const PROC   = '#FCD34D';   // processing / amber
+      const PERM   = '#F87171';   // awaiting_permission / red
+      const IDLE_C = '#4ADE80';   // idle green dot/indicator
+      const LOGO   = '#60AEFF';   // pixel font logo color
+
+      function colorForLine(rawLine, rowIdx) {
+        if (!rawLine || !rawLine.trim()) return DIM;
+        const s = rawLine.trim();
+
+        // Footer (last row)
+        if (rowIdx >= charRows - 1) return DIM;
+
+        // Box border lines: lines that start with or consist of box-drawing chars
+        const firstVisChar = s[0];
+        if ('┌┐└┘├┤┬┴┼─│╔╗╚╝╠╣╦╩╬═║+'.includes(firstVisChar) || s === '--' || /^[+\-]{3,}/.test(s)) {
+          return BORDER;
+        }
+
+        // Left panel: lines inside the left column (contained between │ chars that are close to start)
+        // Detect "│ text │" pattern — return TEXT for content, HEADER/DIM for sub-elements
+        const isBoxContent = /^│/.test(s) || /^\|/.test(s);
+
+        // Section header labels
+        if (/\b(LIMITS|MODELS|TIMELINE|STATUS|SESSIONS)\b/.test(s)) return HEADER;
+
+        // Logo pixel font rows (AGENT / DECK lines rendered at top)
+        // They typically appear in rows 0-7 inside the left panel and consist of block chars
+        if (rowIdx <= 8 && /[▀▄█▌▐░▒▓]/.test(s)) return LOGO;
+
+        // Processing indicator lines
+        if (/PROC|WORKING|RUNNING/.test(s)) return PROC;
+        if (/PERM|AWAIT|PERMIT/.test(s)) return PERM;
+        if (/IDLE|STANDBY/.test(s)) return IDLE_C;
+
+        // Dim: cost/token info
+        if (/Cost:|Tokens:|↻|OAuth|Ollama/.test(s)) return DIM;
+
+        return TEXT;
+      }
+
+      lines.forEach((rawLine, rowIdx) => {
+        const visLine = (rawLine || '');
+        if (!visLine.trim() && rowIdx > 0) return;
+
+        const y = padY + rowIdx * cellH + cellH * 0.84; // text baseline
+        const color = colorForLine(visLine, rowIdx);
+
+        svg.appendChild(textNode(visLine, {
+          x: padX,
+          y,
+          fill: color,
+          'font-size': fontSize,
+          'font-family': fontFam,
+          'xml:space': 'preserve',
+          'letter-spacing': '0',
+          'dominant-baseline': 'auto',
         }));
       });
+
+      // Scanline vignette overlay for terminal feel
+      const NS = 'http://www.w3.org/2000/svg';
+      const defs = document.createElementNS(NS, 'defs');
+      const vg = document.createElementNS(NS, 'linearGradient');
+      vg.setAttribute('id', 'tui-vg-' + svg.id);
+      vg.setAttribute('x1', '0'); vg.setAttribute('y1', '0');
+      vg.setAttribute('x2', '0'); vg.setAttribute('y2', '1');
+      [['0%', 0.3], ['8%', 0], ['92%', 0], ['100%', 0.25]].forEach(([offset, op]) => {
+        const stop = document.createElementNS(NS, 'stop');
+        stop.setAttribute('offset', offset);
+        stop.setAttribute('stop-color', '#000');
+        stop.setAttribute('stop-opacity', op);
+        vg.appendChild(stop);
+      });
+      defs.appendChild(vg);
+      svg.appendChild(defs);
+      svg.appendChild(el('rect', {
+        x: 0, y: 0, width: w, height: h, rx: 14,
+        fill: `url(#tui-vg-${svg.id})`,
+        'pointer-events': 'none',
+      }));
     }
 
     function renderReference(svg, agent) {
@@ -1477,6 +1692,26 @@
           compact: true,
           radius: 12,
         });
+      } else if (variant === "portrait") {
+        // Portrait IPS 320×480: session info top, aquarium middle, gauge bottom
+        const cardH = 88;
+        const gaugeH = 64;
+        drawSessionPanel(svg, 8, 10, w - 16, cardH, {
+          bg: "rgba(0,0,0,0.55)",
+          text: "#E2E8F0",
+          sub: "#94A3B8",
+          accent: "#3B82F6",
+          showWorkers: false,
+          compact: true,
+          radius: 10,
+        });
+        drawTankPanel(svg, 8, h - gaugeH - 8, w - 16, gaugeH, {
+          bg: "rgba(0,0,0,0.55)",
+          text: "#E2E8F0",
+          sub: "#94A3B8",
+          compact: true,
+          radius: 10,
+        });
       } else {
         const topY = 28;
         const leftW = 170;
@@ -1620,113 +1855,107 @@
     function renderMatrixAgentsDevice(svg, agent, state, t) {
       clear(svg);
       drawMatrixLedGrid(svg);
-      const octoAgents = ["claude", "codex", "opencode"];
-      octoAgents.forEach((slotAgent, i) => {
-        const selected = slotAgent === agent;
+      // Col layout: claude@x=0, codex@x=7, opencode@x=14, openclaw@x=24
+      const slots = [
+        { id: "claude",   x: 0,  sprite: MATRIX_SPRITES.octopus,   color: "#C07058" },
+        { id: "codex",    x: 7,  sprite: MATRIX_SPRITES.jellyfish,  color: "#6366F1" },
+        { id: "opencode", x: 14, sprite: MATRIX_SPRITES.octopus,    color: "#C8C1BF" },
+        { id: "openclaw", x: 24, sprite: MATRIX_SPRITES.crayfish,   color: "#FF4D4D" },
+      ];
+      slots.forEach(({ id, x, sprite, color }) => {
+        const selected = id === agent;
         const iconState = selected ? state : "idle";
-        const color = slotAgent === "codex" ? "#6366F1" : slotAgent === "opencode" ? "#C8C1BF" : "#C07058";
-        const opacity = selected ? 1 : 0.72;
-        const bobY = iconState === "working" ? ((Math.sin(t * 4 + i) > 0) ? 0 : 1) : 0;
-        drawMatrixSprite(svg, 1 + i * 7, 1 + bobY, MATRIX_SPRITES.octopus, color, opacity);
+        const opacity = selected ? 1 : 0.55;
+        const bobY = iconState === "working" ? ((Math.sin(t * 4 + x) > 0) ? 0 : 1) : 0;
+        // Dim openclaw slot unless agent=openclaw
+        const slotColor = id === "openclaw" && !selected ? "#7A1F1F" : color;
+        drawMatrixSprite(svg, x + 1, 1 + bobY, sprite, slotColor, opacity);
         const dotColor = iconState === "working" ? "#34D399" : iconState === "asking" ? "#F5B942" : iconState === "sleeping" ? "#4B5563" : "#93C5FD";
-        svg.appendChild(el("circle", { cx: 3.5 + i * 7, cy: 7.1, r: 0.45, fill: dotColor, opacity: 0.95 }));
+        svg.appendChild(el("circle", { cx: x + 3.5, cy: 7.1, r: 0.4, fill: dotColor, opacity: 0.9 }));
       });
-      drawMatrixSprite(svg, 27, 1, MATRIX_SPRITES.crayfish, agent === "openclaw" ? "#FF4D4D" : "#7A1F1F", agent === "openclaw" ? 1 : 0.68);
-      svg.appendChild(el("circle", {
-        cx: 29.5,
-        cy: 7.1,
-        r: 0.45,
-        fill: agent === "openclaw" && state === "working" ? "#34D399" : "#93C5FD",
-        opacity: 0.95,
-      }));
     }
 
     function renderStreamDeckDevice(svg, agent, state, t) {
       clear(svg);
-      const accent = agent === "claude" ? "#4ADE80" : agent === "codex" ? "#8BA4FF" : agent === "openclaw" ? "#C084FC" : "#F1ECEC";
-      const isActive = state === "working" || state === "asking";
-      // Background colors matching actual plugin getStatusInfo()
-      const bg = agent === "openclaw" ? "#1A0A2E"
-        : state === "working" ? "#2a1f00"
-        : state === "asking" ? "#2a0f0f"
-        : state === "sleeping" ? "#1A1A1A"
-        : "#0A2E14";
-      const stateColor = state === "working" ? "#fbbf24"
-        : state === "asking" ? "#f87171"
-        : accent;
-      svg.appendChild(el("rect", { x: 0, y: 0, width: 144, height: 144, rx: 12, fill: bg }));
-      // Agent watermark
+      const isWorking = state === "working";
+      const isAsking = state === "asking";
+      
+      const p1 = agent === "claude" ? "#D97757" : agent === "codex" ? "#8BA4FF" : agent === "openclaw" ? "#FF6B6B" : "#F1ECEC";
+      const p2 = agent === "claude" ? "#BE6D52" : agent === "codex" ? "#5981FF" : agent === "openclaw" ? "#CC3333" : "#AFAFAF";
+
+      // Widget Layout Depth Banding
+      const gradId = `sd-bg-${agent}-${state}`;
+      addLinearGradient(svg, gradId, [
+        { offset: "0%", "stop-color": "#1C1C1E" },
+        { offset: "100%", "stop-color": "#0C0C0E" },
+      ]);
+      svg.appendChild(el("rect", { x: 0, y: 0, width: 144, height: 144, rx: 16, fill: `url(#${gradId})` }));
+      
+      // Floating Panel
+      svg.appendChild(el("rect", { x: 8, y: 8, width: 128, height: 128, rx: 12, fill: "#2C2C2E", opacity: 0.8 }));
+      
+      // Left Edge Color Strip
+      svg.appendChild(el("rect", { x: 8, y: 8, width: 4, height: 128, rx: 2, fill: isWorking ? "#F5B942" : isAsking ? "#F87171" : p1 }));
+
+      // Left-aligned Typography 
+      const labelStr = isWorking ? "RUNNING" : isAsking ? "PERMIT?" : "IDLE";
+      const modelStr = agent === "claude" ? "opus-4" : agent === "codex" ? "gpt-5" : "opencode";
+      const colorText = isWorking ? "#FDE68A" : isAsking ? "#FECACA" : p1;
+
+      svg.appendChild(textNode(labelStr, {
+        x: 20, y: 32, "font-size": 17, "font-weight": 800, "text-anchor": "start",
+        fill: colorText, "font-family": "Inter, sans-serif",
+      }));
+      
+      svg.appendChild(textNode("AgentDeck", {
+        x: 20, y: 52, "font-size": 13, "font-weight": 600, "text-anchor": "start",
+        fill: "#E2E8F0", "font-family": "Inter, sans-serif",
+      }));
+
+      // Agent mark simplified inside
       if (agent === "claude") {
-        drawAgentMark(svg, agent, 72, 72, 86, { state: "idle", t, palette: { fill: stateColor, opacity: isActive ? 0.15 : 0.12 } });
+        drawAgentMark(svg, agent, 114, 114, 40, { state: "idle", t, palette: { fill: p1, opacity: 0.15 } });
       } else if (agent === "codex") {
-        drawAgentMark(svg, agent, 72, 72, 84, {
+        drawAgentMark(svg, agent, 114, 114, 40, {
           state: "idle", t,
-          palette: { top: "#CEC4FF", mid: "#89A7FF", bottom: "#3941FF", opacity: isActive ? 0.18 : 0.15 },
-          promptStyle: { color: "#EDEBFF", fontSize: 20, yOffset: 6, opacity: 0.28 },
-        });
-      } else if (agent === "opencode") {
-        drawAgentMark(svg, agent, 72, 72, 66, {
-          state: "idle", t,
-          palette: { outer: "#F1ECEC", inner: "#4B4646", bg, opacity: isActive ? 0.28 : 0.24 },
+          palette: { top: p1, mid: p1, bottom: p2, opacity: 0.2 },
+          promptStyle: { color: "#FFF", fontSize: 10, yOffset: 3, opacity: 0.4 },
         });
       } else {
-        drawAgentMark(svg, agent, 72, 72, 78, {
+        drawAgentMark(svg, agent, 114, 114, 34, {
           state: "idle", t,
-          palette: { top: "#FF4D4D", bottom: "#991B1B", eye: "#00E5CC", opacity: isActive ? 0.26 : 0.22 },
+          palette: { outer: p1, inner: p2, bg: "#2C2C2E", opacity: 0.25 },
         });
       }
-      // Status LED
-      svg.appendChild(el("circle", { cx: 18, cy: 18, r: 5, fill: state === "asking" ? "#F5B942" : state === "working" ? "#34D399" : "#4ADE80" }));
-      // Session counter badge
-      if (state !== "sleeping") {
-        svg.appendChild(el("rect", { x: 102, y: 6, width: 36, height: 20, rx: 10, fill: stateColor, opacity: 0.25 }));
-        svg.appendChild(textNode("1/3", {
-          x: 120, y: 20, "font-size": 12, "font-weight": 700, "text-anchor": "middle",
-          fill: stateColor, "font-family": "Arial,sans-serif",
-        }));
-      }
-      if (isActive) {
-        // ACTIVE state: project name (small) + spinner + state label + detail
-        // Project name
-        svg.appendChild(textNode("AgentDeck", {
-          x: 72, y: 38, "font-size": 13, "text-anchor": "middle",
-          fill: stateColor, opacity: 0.6, "font-family": "Arial,sans-serif",
-        }));
-        // Spinning Claude sparkle
+
+      // Sparkle on running
+      if (isWorking) {
         const angle = (t * 100) % 360;
-        const opacity = (0.75 + 0.25 * Math.sin(t * Math.PI * 2)).toFixed(2);
-        const spinner = el("g", { transform: `translate(72 58) rotate(${angle}) scale(1.5) translate(-8,-8)` });
-        spinner.appendChild(el("path", {
-          d: "M8,0 L10,5 L16,8 L10,11 L8,16 L6,11 L0,8 L6,5 Z",
-          fill: stateColor,
-          opacity,
-        }));
+        const spinner = el("g", { transform: `translate(114 34) rotate(${angle}) scale(1) translate(-8,-8)` });
+        spinner.appendChild(el("path", { d: "M8,0 L10,5 L16,8 L10,11 L8,16 L6,11 L0,8 L6,5 Z", fill: colorText }));
         svg.appendChild(spinner);
-        // State label
-        const label = state === "working" ? "RUNNING" : "PERMIT?";
-        svg.appendChild(textNode(label, {
-          x: 72, y: 92, "font-size": 24, "font-weight": 700, "text-anchor": "middle",
-          fill: stateColor, "font-family": "Arial,sans-serif",
-        }));
-        // Detail
-        const detail = state === "working" ? "Read file" : "Need input";
-        svg.appendChild(textNode(detail, {
-          x: 72, y: 114, "font-size": 16, "text-anchor": "middle",
-          fill: stateColor, opacity: 0.7, "font-family": "Arial,sans-serif",
+        
+        svg.appendChild(textNode("Read file", {
+          x: 20, y: 120, "font-size": 13, "text-anchor": "start",
+          fill: colorText, opacity: 0.8, "font-family": "Inter, sans-serif",
         }));
       } else {
-        // IDLE state: project name (large) + model line
-        svg.appendChild(textNode("AgentDeck", {
-          x: 72, y: 72, "font-size": 24, "font-weight": 700, "text-anchor": "middle",
-          fill: stateColor, "font-family": "Arial,sans-serif",
-        }));
-        const modelStr = agent === "claude" ? "opus-4 \u00b7 high" : agent === "codex" ? "gpt-5" : agent === "opencode" ? "opencode" : "openclaw";
         svg.appendChild(textNode(modelStr, {
-          x: 72, y: 96, "font-size": 20, "text-anchor": "middle",
-          fill: stateColor, opacity: 0.65, "font-family": "Arial,sans-serif",
+          x: 20, y: 120, "font-size": 14, "text-anchor": "start",
+          fill: colorText, opacity: 0.8, "font-family": "Inter, sans-serif",
         }));
       }
-      if (state === "asking") drawAskIndicator(svg, "streamdeck", 118, 18, 1, t);
+
+      // Badge
+      if (!isAsking) {
+        svg.appendChild(el("rect", { x: 100, y: 16, width: 28, height: 16, rx: 8, fill: "rgba(255,255,255,0.1)" }));
+        svg.appendChild(textNode("1/3", {
+          x: 114, y: 27, "font-size": 10, "font-weight": 700, "text-anchor": "middle",
+          fill: "#A1A1AA", "font-family": "Inter, sans-serif",
+        }));
+      }
+
+      if (isAsking) drawAskIndicator(svg, "streamdeck", 114, 24, 1, t);
     }
 
     function renderAppleWatchDevice(svg, agent, state, t) {
@@ -1738,9 +1967,10 @@
       const [w, h] = [spec.width, spec.height];
       const outerInset = Math.round(w * 0.03);
       const innerInset = Math.round(w * 0.06);
-      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, rx: w * 0.18, fill: "#05080D" }));
-      svg.appendChild(el("rect", { x: outerInset, y: outerInset + 2, width: w - outerInset * 2, height: h - (outerInset + 2) * 2, rx: w * 0.15, fill: "#0A1018" }));
-      svg.appendChild(el("rect", { x: innerInset, y: innerInset + 6, width: w - innerInset * 2, height: h - (innerInset + 6) * 2, rx: w * 0.13, fill: "#0D1724" }));
+      // Apple Watch: rectangular display, small corner radius (not circular)
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, rx: 44, fill: "#111111" }));
+      svg.appendChild(el("rect", { x: outerInset, y: outerInset + 2, width: w - outerInset * 2, height: h - (outerInset + 2) * 2, rx: 34, fill: "#0A1018" }));
+      svg.appendChild(el("rect", { x: innerInset, y: innerInset + 6, width: w - innerInset * 2, height: h - (innerInset + 6) * 2, rx: 28, fill: "#0D1724" }));
       svg.appendChild(el("rect", { x: w * 0.16, y: h * 0.10, width: w * 0.68, height: h * 0.10, rx: w * 0.05, fill: "#121F31" }));
       svg.appendChild(textNode(state.toUpperCase(), {
         x: w / 2,
@@ -1935,11 +2165,14 @@
       renderEinkDevice(document.getElementById("sim-eink-color"), agent, state, true, t);
       renderEsp32Device(document.getElementById("sim-esp32-box"), agent, state, "box", t);
       renderEsp32Device(document.getElementById("sim-esp32-ips"), agent, state, "ips", t);
+      renderEsp32Device(document.getElementById("sim-esp32-ips-portrait"), agent, state, "portrait", t);
       renderEsp32Device(document.getElementById("sim-esp32-round"), agent, state, "round", t);
       renderPixooDevice(document.getElementById("sim-pixoo"), agent, state, t);
       renderMatrixUsageDevice(document.getElementById("sim-tc-usage"), state, t);
       renderMatrixAgentsDevice(document.getElementById("sim-tc-agents"), agent, state, t);
       renderStreamDeckDevice(document.getElementById("sim-streamdeck"), agent, state, t);
+      // D200H uses identical SVG renderer as StreamDeck (same 144×144 base, production scales to 196×196)
+      renderStreamDeckDevice(document.getElementById("sim-d200h"), agent, state, t);
       renderAppleWatchDevice(document.getElementById("sim-apple-watch"), agent, state, t);
       renderTuiDevice(document.getElementById("sim-tui"), agent, state, t);
     }

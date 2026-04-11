@@ -7,7 +7,7 @@ final class TerrariumRenderer {
     // MARK: - Creatures
 
     private var octopuses: [String: OctopusCreature] = [:]
-    private var jellyfish: [String: JellyfishCreature] = [:]
+    private var clouds: [String: CloudCreature] = [:]
     private var opencodeCreatures: [String: OpenCodeCreature] = [:]
     private let crayfish = CrayfishCreature()
     private let tetra = DataParticleSystem()
@@ -64,7 +64,7 @@ final class TerrariumRenderer {
 
         // Sync creature lifecycles
         syncOctopuses(state: state)
-        syncJellyfish(state: state)
+        syncClouds(state: state)
         syncOpenCode(state: state)
 
         // Update all subsystems
@@ -125,7 +125,7 @@ final class TerrariumRenderer {
         var workingPositions = state.creatures
             .filter { $0.state == .working }
             .map { ($0.homeX, $0.homeY) }
-        workingPositions += state.jellyfishCreatures
+        workingPositions += state.cloudCreatures
             .filter { $0.state == .pulsing }
             .map { ($0.homeX, $0.homeY) }
         workingPositions += state.opencodeCreatures
@@ -140,8 +140,8 @@ final class TerrariumRenderer {
         for oct in octopuses.values {
             oct.update(dt: dt, state: state)
         }
-        for jf in jellyfish.values {
-            jf.update(dt: dt, state: state)
+        for cl in clouds.values {
+            cl.update(dt: dt, state: state)
         }
         for oc in opencodeCreatures.values {
             oc.update(dt: dt, state: state)
@@ -189,9 +189,9 @@ final class TerrariumRenderer {
             oct.draw(context: &context, size: size)
         }
 
-        // Layer 9.2: Jellyfish (between octopuses and front fish)
-        for jf in jellyfish.values {
-            jf.draw(context: &context, size: size)
+        // Layer 9.2: Clouds (between octopuses and front fish)
+        for cl in clouds.values {
+            cl.draw(context: &context, size: size)
         }
 
         // Layer 9.3: OpenCode creatures
@@ -246,35 +246,35 @@ final class TerrariumRenderer {
 
     // MARK: - Octopus Lifecycle
 
-    private func syncJellyfish(state: TerrariumState) {
-        let currentIds = Set(state.jellyfishCreatures.map(\.id))
-        let existingIds = Set(jellyfish.keys)
+    private func syncClouds(state: TerrariumState) {
+        let currentIds = Set(state.cloudCreatures.map(\.id))
+        let existingIds = Set(clouds.keys)
 
         // Remove departed
         for id in existingIds.subtracting(currentIds) {
-            jellyfish.removeValue(forKey: id)
+            clouds.removeValue(forKey: id)
         }
 
         // Add new or update existing
-        for creature in state.jellyfishCreatures {
-            if jellyfish[creature.id] == nil {
-                let jf = JellyfishCreature(
+        for creature in state.cloudCreatures {
+            if clouds[creature.id] == nil {
+                let cl = CloudCreature(
                     sessionId: creature.id,
                     homeX: creature.homeX,
                     homeY: creature.homeY,
                     scale: creature.scale
                 )
-                jf.displayName = creature.projectName
-                jf.onWaitingExit = { [weak self] in
+                cl.displayName = creature.projectName
+                cl.onWaitingExit = { [weak self] in
                     self?.bubbles.emitPopBurst(x: creature.homeX, y: creature.homeY)
                 }
-                jellyfish[creature.id] = jf
+                clouds[creature.id] = cl
             } else {
-                let jf = jellyfish[creature.id]!
-                jf.homeX = creature.homeX
-                jf.homeY = creature.homeY
-                jf.scale = creature.scale
-                jf.displayName = creature.projectName
+                let cl = clouds[creature.id]!
+                cl.homeX = creature.homeX
+                cl.homeY = creature.homeY
+                cl.scale = creature.scale
+                cl.displayName = creature.projectName
             }
         }
     }
@@ -330,9 +330,9 @@ final class TerrariumRenderer {
             }
         }
 
-        for (id, jf) in jellyfish {
-            let dx = jf.currentX - nx
-            let dy = jf.currentY - ny
+        for (id, cl) in clouds {
+            let dx = cl.currentX - nx
+            let dy = cl.currentY - ny
             let dist = sqrt(dx * dx + dy * dy)
             if dist < bestDist {
                 bestDist = dist

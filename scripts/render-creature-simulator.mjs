@@ -232,17 +232,12 @@ function renderTuiTerrariumData() {
   });
 }
 
-fs.mkdirSync(outDir, { recursive: true });
-const html = fs.readFileSync(sourcePath, 'utf8');
 const simulatorData = {
   pixoo: renderPixooData(),
   tui: renderTuiData(),
   tuiTerrarium: renderTuiTerrariumData(),
 };
-const injected = html.replace(
-  '</body>',
-  `  <script>window.__SIM_DATA = ${JSON.stringify(simulatorData)};</script>\n</body>`,
-);
-fs.writeFileSync(outPath, injected);
 
-console.log(outPath);
+const dataPath = path.resolve(__dirname, '../tools/creature-simulator/sim-data.js');
+fs.writeFileSync(dataPath, `window.__SIM_DATA = ${JSON.stringify(simulatorData)};`);
+console.log(`Simulator data generated at ${dataPath}`);

@@ -1,19 +1,19 @@
-// JellyfishCreature.swift — Cloud creature for Codex CLI
-// 5-lobe clover shape (5 overlapping circles) matching the Codex CLI icon
+// CloudCreature.swift — Cloud creature for Codex CLI
+// 6-lobe clover shape (6 overlapping circles) matching the Codex CLI icon
 // Vertical gradient (lavender top → blue bottom), edge glow, morphing >_ prompt
 
 import SwiftUI
 
-// MARK: - Jellyfish Visual State
+// MARK: - Cloud Visual State
 
-enum JellyfishVisualState {
+enum CloudVisualState {
     case dormant
     case drifting   // Idle — gentle pulse, slow drift
     case pulsing    // Processing — vivid gradient, glow, faster morph
     case waiting    // Awaiting — "?" bubble
 }
 
-final class JellyfishCreature: Creature {
+final class CloudCreature: Creature {
     // MARK: - 5-Lobe Cloud Geometry
 
     /// Lobe centers relative to cloud center (0,0), radius fraction of bodyWidth
@@ -47,7 +47,7 @@ final class JellyfishCreature: Creature {
 
     let sessionId: String
     var displayName: String?
-    var visualState: JellyfishVisualState = .drifting
+    var visualState: CloudVisualState = .drifting
     var homeX: Float
     var homeY: Float
     var scale: Float
@@ -58,7 +58,7 @@ final class JellyfishCreature: Creature {
     private var phaseOffset: Float
     private var driftPhase: Float
 
-    private var previousState: JellyfishVisualState?
+    private var previousState: CloudVisualState?
     private var transitionProgress: Float = 1.0
 
     var onWaitingExit: (() -> Void)?
@@ -81,7 +81,7 @@ final class JellyfishCreature: Creature {
     func update(dt: Float, state: TerrariumState) {
         time += dt
 
-        if let creature = state.jellyfishCreatures.first(where: { $0.id == sessionId }) {
+        if let creature = state.cloudCreatures.first(where: { $0.id == sessionId }) {
             let newState = creature.state
             if newState != visualState {
                 if visualState == .waiting { onWaitingExit?() }
@@ -195,12 +195,12 @@ final class JellyfishCreature: Creature {
         if visualState == .pulsing {
             let pulse = sin(time * 2.5) * 0.3 + 0.7
             topColor = TerrariumColors.lerpColor(
-                TerrariumColors.jellyfishHighlight, Color.white, Float(pulse) * 0.2)
+                TerrariumColors.cloudHighlight, Color.white, Float(pulse) * 0.2)
             bottomColor = TerrariumColors.lerpColor(
-                TerrariumColors.jellyfishDeep, TerrariumColors.jellyfishBell, Float(pulse) * 0.3)
+                TerrariumColors.cloudDeep, TerrariumColors.cloudBell, Float(pulse) * 0.3)
         } else {
-            topColor = TerrariumColors.jellyfishHighlight
-            bottomColor = TerrariumColors.jellyfishDeep
+            topColor = TerrariumColors.cloudHighlight
+            bottomColor = TerrariumColors.cloudDeep
         }
 
         // Build bounding rect for gradient fill
@@ -214,7 +214,7 @@ final class JellyfishCreature: Creature {
             for rect in lobeRects {
                 let expanded = rect.insetBy(dx: -rect.width * 0.04, dy: -rect.height * 0.04)
                 glowCtx.fill(Path(ellipseIn: expanded),
-                             with: .color(TerrariumColors.jellyfishGlow))
+                             with: .color(TerrariumColors.cloudGlow))
             }
         }
 
@@ -298,40 +298,7 @@ final class JellyfishCreature: Creature {
         }
     }
 
-    // MARK: - Tentacles
 
-    private func drawTentacles(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat, bodyW: CGFloat) {
-        let tentacleAlpha = (visualState == .dormant ? 0.2 : 0.4)
-        let baseY = cy + bodyW * 0.55  // start below cloud
-
-        let positions: [CGFloat] = [-0.25, -0.12, 0.0, 0.12, 0.25]  // X offsets
-
-        for (i, xOff) in positions.enumerated() {
-            let phase = Float(i) * Float.pi / 2.5
-            let wiggle = CGFloat(sin(time * 0.8 + phase) * 3) * bodyW / 120
-
-            let startX = cx + xOff * bodyW + wiggle
-            let endY = baseY + bodyW * CGFloat(0.3 + sin(time * 0.5 + phase) * 0.05)
-
-            let t = Float(i) / Float(positions.count)
-            let color = TerrariumColors.lerpColor(
-                TerrariumColors.jellyfishGlow,
-                TerrariumColors.jellyfishDeep,
-                t
-            )
-
-            var path = SwiftUI.Path()
-            path.move(to: CGPoint(x: startX, y: baseY))
-            path.addQuadCurve(
-                to: CGPoint(x: startX + wiggle * 2, y: endY),
-                control: CGPoint(x: startX + wiggle * 3, y: baseY + (endY - baseY) * 0.6)
-            )
-
-            context.stroke(path,
-                           with: .color(color.opacity(tentacleAlpha)),
-                           style: StrokeStyle(lineWidth: bodyW * 0.018, lineCap: .round))
-        }
-    }
 
     // MARK: - Glow
 
@@ -341,7 +308,7 @@ final class JellyfishCreature: Creature {
 
         let rect = CGRect(x: cx - glowR, y: cy - glowR, width: glowR * 2, height: glowR * 2)
         context.fill(Path(ellipseIn: rect),
-                     with: .color(TerrariumColors.jellyfishGlow.opacity(0.1 * Double(glowPulse))))
+                     with: .color(TerrariumColors.cloudGlow.opacity(0.1 * Double(glowPulse))))
 
         for i in 0..<4 {
             let angle = CGFloat(Float(i) / 4 * Float.pi * 2 + time * 0.5)
@@ -351,7 +318,7 @@ final class JellyfishCreature: Creature {
             let pSize = bodyW * 0.03
             let pRect = CGRect(x: px - pSize, y: py - pSize, width: pSize * 2, height: pSize * 2)
             context.fill(Path(ellipseIn: pRect),
-                         with: .color(TerrariumColors.jellyfishGlow.opacity(0.3 * Double(glowPulse))))
+                         with: .color(TerrariumColors.cloudGlow.opacity(0.3 * Double(glowPulse))))
         }
     }
 
@@ -393,7 +360,7 @@ final class JellyfishCreature: Creature {
             cx: cx,
             bodyTopY: cy - bodyW * 0.6,
             bodyMetric: terrariumNameTagMetric(canvasWidth: canvasWidth, scale: scale),
-            backgroundColor: TerrariumColors.jellyfishNameBg
+            backgroundColor: TerrariumColors.cloudNameBg
         )
     }
 }

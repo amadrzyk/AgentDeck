@@ -32,13 +32,13 @@ enum TetraVisualState {
     case hovering   // Near options
 }
 
-// MARK: - Jellyfish Creature State
+// MARK: - Cloud Creature State
 
-struct JellyfishCreatureState: Identifiable {
+struct CloudCreatureState: Identifiable {
     let id: String
     let projectName: String?
     let modelName: String?
-    let state: JellyfishVisualState
+    let state: CloudVisualState
     let homeX: Float
     let homeY: Float
     let scale: Float
@@ -76,7 +76,7 @@ struct OpenCodeCreatureState: Identifiable {
 
 struct TerrariumState {
     var creatures: [AgentCreatureState] = []
-    var jellyfishCreatures: [JellyfishCreatureState] = []
+    var cloudCreatures: [CloudCreatureState] = []
     var opencodeCreatures: [OpenCodeCreatureState] = []
     var crayfishState: CrayfishVisualState = .dormant
     var crayfishVisible: Bool = false
@@ -179,41 +179,41 @@ extension DashboardState {
 
         result.creatures = creatures
 
-        // Jellyfish (Codex CLI sessions)
-        let primaryIsJellyfish = state != .disconnected && agentType == "codex-cli"
-        let jellyfishSiblings = siblingSessions
+        // Cloud (Codex CLI sessions)
+        let primaryIsCloud = state != .disconnected && agentType == "codex-cli"
+        let cloudSiblings = siblingSessions
             .filter { $0.agentType == "codex-cli" }
-            .filter { !(primaryIsJellyfish && $0.id == sessionId) }
+            .filter { !(primaryIsCloud && $0.id == sessionId) }
             .sorted { $0.id < $1.id }
-        let jellyfishCount = (primaryIsJellyfish ? 1 : 0) + jellyfishSiblings.count
-        let jellySlots = CreatureLayout.layoutCloudCreatures(count: jellyfishCount)
+        let cloudCount = (primaryIsCloud ? 1 : 0) + cloudSiblings.count
+        let cloudSlots = CreatureLayout.layoutCloudCreatures(count: cloudCount)
 
-        var jellyfishCreatures: [JellyfishCreatureState] = []
-        var jellySlotIdx = 0
-        if primaryIsJellyfish {
-            let s = jellySlots.first ?? CreatureSlot(x: 0.50, y: 0.45, scale: 1.0)
-            jellyfishCreatures.append(JellyfishCreatureState(
-                id: sessionId ?? "jf-primary",
+        var cloudCreatures: [CloudCreatureState] = []
+        var cloudSlotIdx = 0
+        if primaryIsCloud {
+            let s = cloudSlots.first ?? CreatureSlot(x: 0.50, y: 0.45, scale: 1.0)
+            cloudCreatures.append(CloudCreatureState(
+                id: sessionId ?? "cl-primary",
                 projectName: projectName,
                 modelName: modelName,
-                state: mapToJellyfishState(state),
+                state: mapToCloudState(state),
                 homeX: s.x, homeY: s.y, scale: s.scale
             ))
-            jellySlotIdx = 1
+            cloudSlotIdx = 1
         }
-        for (i, sibling) in jellyfishSiblings.enumerated() {
-            guard !jellySlots.isEmpty else { break }
-            let idx = min(jellySlotIdx + i, jellySlots.count - 1)
-            let s = jellySlots[idx]
-            jellyfishCreatures.append(JellyfishCreatureState(
+        for (i, sibling) in cloudSiblings.enumerated() {
+            guard !cloudSlots.isEmpty else { break }
+            let idx = min(cloudSlotIdx + i, cloudSlots.count - 1)
+            let s = cloudSlots[idx]
+            cloudCreatures.append(CloudCreatureState(
                 id: sibling.id,
                 projectName: sibling.projectName,
                 modelName: sibling.modelName,
-                state: mapSiblingToJellyfishState(sibling.state),
+                state: mapSiblingToCloudState(sibling.state),
                 homeX: s.x, homeY: s.y, scale: s.scale
             ))
         }
-        result.jellyfishCreatures = jellyfishCreatures
+        result.cloudCreatures = cloudCreatures
 
         // OpenCode creatures
         let primaryIsOpenCode = state != .disconnected && agentType == "opencode"
@@ -313,7 +313,7 @@ extension DashboardState {
         }
     }
 
-    private func mapToJellyfishState(_ connState: AgentConnectionState) -> JellyfishVisualState {
+    private func mapToCloudState(_ connState: AgentConnectionState) -> CloudVisualState {
         switch connState {
         case .disconnected: .dormant
         case .idle: .drifting
@@ -322,7 +322,7 @@ extension DashboardState {
         }
     }
 
-    private func mapSiblingToJellyfishState(_ stateStr: String?) -> JellyfishVisualState {
+    private func mapSiblingToCloudState(_ stateStr: String?) -> CloudVisualState {
         switch stateStr {
         case "processing": .pulsing
         case "awaiting_permission", "awaiting_option", "awaiting_diff": .waiting
