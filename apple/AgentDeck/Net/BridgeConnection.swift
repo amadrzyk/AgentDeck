@@ -124,6 +124,10 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         #else
         // macOS: network is always up — fast failure enables quicker reconnect
         config.waitsForConnectivity = false
+        // Half-open detection: abort reads that idle longer than this. Live sockets
+        // produce traffic via pingIntervalSec so healthy connections never trip it;
+        // after sleep/wake the dead socket fails within the window and reconnect fires.
+        config.timeoutIntervalForResource = 30
         #endif
         let session = URLSession(configuration: config)
         self.urlSession = session

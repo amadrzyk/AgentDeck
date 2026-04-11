@@ -3,6 +3,13 @@
 
 import Foundation
 import Combine
+#if os(macOS)
+import IOKit
+import IOKit.ps
+
+// IOKit power-management constant (the real symbol is private in the Swift import).
+private let kIOMessageSystemHasPoweredOn_AgentStateHolder: UInt32 = 0xe0000300
+#endif
 
 final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     // MARK: - State
@@ -43,6 +50,9 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     #if os(macOS)
     private var staleDataMonitor: Timer?
     private static let staleDataThresholdSec: TimeInterval = 20
+    private var wakeNotificationPort: IONotificationPortRef?
+    private var wakeNotifier: io_object_t = 0
+    private var wakeRootDomain: io_object_t = 0
     #endif
 
     // MARK: - Connection Waterfall State
@@ -136,10 +146,82 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
 
         #if os(macOS)
         startStaleDataMonitor()
+        startSystemWakeListener()
         #endif
     }
 
     #if os(macOS)
+    deinit {
+        stopSystemWakeListener()
+    }
+    #endif
+
+    #if os(macOS)
+    private func startSystemWakeListener() {
+        guard wakeNotificationPort == nil else { return }
+        guard let port = IONotificationPortCreate(kIOMainPortDefault) else {
+            print("[Lifecycle] failed to create IONotificationPort for wake listener")
+            return
+        }
+        IONotificationPortSetDispatchQueue(port, DispatchQueue.main)
+        let rootDomain = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard rootDomain != 0 else {
+            print("[Lifecycle] failed to match IOPMrootDomain")
+            IONotificationPortDestroy(port)
+            return
+        }
+        var notifier: io_object_t = 0
+        let callback: IOServiceInterestCallback = { (refcon, _, messageType, _) in
+            guard messageType == kIOMessageSystemHasPoweredOn_AgentStateHolder else { return }
+            guard let refcon else { return }
+            let holder = Unmanaged<AgentStateHolder>.fromOpaque(refcon).takeUnretainedValue()
+            holder.handleSystemWake()
+        }
+        let result = IOServiceAddInterestNotification(
+            port,
+            rootDomain,
+            kIOGeneralInterest,
+            callback,
+            Unmanaged.passUnretained(self).toOpaque(),
+            &notifier
+        )
+        if result != KERN_SUCCESS {
+            print("[Lifecycle] IOServiceAddInterestNotification failed: \(result)")
+            IOObjectRelease(rootDomain)
+            IONotificationPortDestroy(port)
+            return
+        }
+        self.wakeNotificationPort = port
+        self.wakeNotifier = notifier
+        self.wakeRootDomain = rootDomain
+        print("[Lifecycle] system wake listener installed")
+    }
+
+    private func stopSystemWakeListener() {
+        if wakeNotifier != 0 {
+            IOObjectRelease(wakeNotifier)
+            wakeNotifier = 0
+        }
+        if wakeRootDomain != 0 {
+            IOObjectRelease(wakeRootDomain)
+            wakeRootDomain = 0
+        }
+        if let port = wakeNotificationPort {
+            IONotificationPortDestroy(port)
+            wakeNotificationPort = nil
+        }
+    }
+
+    private func handleSystemWake() {
+        print("[Lifecycle] system wake — force reconnect")
+        connection.forceDisconnectAndRestart()
+        if let preferredLocalBridgeUrl {
+            connectTo(url: preferredLocalBridgeUrl)
+        } else {
+            restartWaterfall()
+        }
+    }
+
     private func startStaleDataMonitor() {
         staleDataMonitor?.invalidate()
         staleDataMonitor = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
