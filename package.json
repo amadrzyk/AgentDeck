@@ -6,6 +6,7 @@
   "scripts": {
     "build": "pnpm --filter @agentdeck/shared build && pnpm --filter '!@agentdeck/shared' -r build",
     "dev": "pnpm -r --parallel dev",
+    "demo": "vite tools/creature-simulator",
     "clean": "pnpm -r clean",
     "typecheck": "pnpm -r typecheck",
     "generate-icons": "node scripts/generate-icons.mjs",
@@ -36,6 +37,7 @@
     "sharp": "^0.34.5",
     "ts-json-schema-generator": "^2.9.0",
     "typescript-eslint": "^8.57.1",
+    "vite": "^7.3.1",
     "vitest": "^4.0.18"
   },
   "pnpm": {
