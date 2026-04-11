@@ -24,9 +24,9 @@
 
 **Stop Chatting. Start Steering.**
 
-AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **12 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, and terminals.
+AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **13 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, HID decks, and terminals.
 
-> One bridge. 12 surfaces. Steer your AI — without leaving your keyboard flow.
+> One bridge. 13 surfaces. Steer your AI — without leaving your keyboard flow.
 
 <p align="center">
   <img src="assets/AgentDeck_SNS_Collage.png" width="720" alt="AgentDeck collage — Stream Deck+, Android, e-ink, Apple devices, ESP32 displays, Pixoo64, and TUI dashboard">
@@ -59,7 +59,8 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 - [Manual Build & Install](#manual-build--install)
 - [Usage](#usage)
   - [CLI Reference](#cli-reference)
-- [Stream Deck+ Layout (v3)](#stream-deck-layout-v3)
+- [Stream Deck+ Layout (v4)](#stream-deck-layout-v4)
+- [Ulanzi D200H Deck Dock](#ulanzi-d200h-deck-dock)
 - [Android Dashboard](#android-dashboard)
 - [Apple Dashboard](#apple-dashboard)
 - [TUI Dashboard](#tui-dashboard)
@@ -73,13 +74,21 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 
 ### Documentation
 
+- [Architecture](docs/architecture.md) — monorepo layout, BridgeCore, PtyAdapter, AgentAdapter, Gateway protocol
+- [Daemon](docs/daemon.md) — daemon hub, singleton guard, mDNS recovery, usage relay, multi-surface monitoring
+- [Plugin Conventions](docs/plugin-conventions.md) — encoder LCD, wide canvas, OC timeline pipeline, D200H HID, sleep/wake
+- [v4 Layout](docs/v4-layout.md) — v4 Session-Per-Button keypad + encoder mapping, v3→v4 changes
+- [Stream Deck+ Layout Reference](docs/streamdeck-layout.md) — per-state layouts, encoder details, button colors
+- [TUI Dashboard](docs/tui-dashboard.md) — terrarium, sprites, adaptive layouts
+- [Android Reference](docs/android.md) — device support, build/signing, creature behavior
+- [Android UI/UX Vision](docs/android-ui.md) — e-ink + tablet layouts, creatures, refresh zones
+- [ESP32 Reference](docs/esp32.md) — firmware boards, flash safety, WiFi provisioning, disconnect recovery
+- [Device Reference](docs/devices.md) — dashboard device types, transport protocols, broadcast architecture
+- [Protocol](docs/protocol.md) — state machine, WebSocket messages, project structure
 - [Voice Setup](docs/voice-setup.md) — sox, whisper.cpp install, model selection
 - [Wake Word Detection](docs/wake-word.md) — Porcupine (Mac) + microWakeWord (ESP32) setup
-- [Stream Deck+ Layout Reference](docs/streamdeck-layout.md) — per-state layouts, encoder details, button colors
-- [Android Reference](docs/android.md) — device support, build/signing, creature behavior
-- [Device Reference](docs/devices.md) — 7 dashboard device types, transport protocols, broadcast architecture
-- [Protocol & Architecture](docs/protocol.md) — state machine, WebSocket messages, project structure
 - [Testing Guide](docs/testing.md) — test structure, coverage, CI pipeline, writing tests
+- [Creature Simulator Demo](https://puritysb.github.io/AgentDeck/demo/) — live creature rendering playground (GitHub Pages)
 
 ---
 
@@ -99,8 +108,8 @@ A **control surface** — like an audio mixing console, but for AI coding agents
 - **Quick actions** — GO ON / REVIEW / COMMIT / CLEAR; encoder cycles custom prompts
 - **System utilities** — volume, mic, media, timer from the Utility encoder
 - **Terminal sessions** — iTerm dial switches sessions, auto-attaches tmux
-- **Multiple coding agents** — Claude Code, Codex CLI, and OpenClaw in one multi-agent daemon view
-- **Works from anywhere** — all 12 surfaces can monitor the agent; interactive surfaces (Stream Deck, Android, Apple) can also control it
+- **Multiple coding agents** — Claude Code, Codex CLI, OpenCode, and OpenClaw in one multi-agent daemon view
+- **Works from anywhere** — all 13 surfaces can monitor the agent; interactive surfaces (Stream Deck, D200H, Android, Apple) can also control it
 
 The bridge is transparent: if it's off, Claude Code works exactly as before.
 
@@ -109,25 +118,27 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 | Agent | Status |
 |-------|--------|
 | **Claude Code** | Supported (primary) |
-| **Codex CLI** | Supported — PTY parser, model detection, and dashboard integration |
+| **Codex CLI** | Supported — PTY parser, model detection, dashboard integration |
+| **OpenCode** | Supported — PTY + SSE hybrid bridge, timeline integration |
 | **OpenClaw** | Experimental — Gateway WebSocket, timeline panel, log stream |
 
-### Supported Surfaces — 12 Types
+### Supported Surfaces — 13 Types
 
 | # | Surface | Description |
 |---|---------|-------------|
-| 1 | **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip |
-| 2 | **Android Tablet** | Color terrarium + HUD overlay (60fps) |
-| 3 | **E-ink Reader** | B&W 16-level grayscale + **Color E-ink** (Kaleido 3, 4096 colors) + partial refresh |
-| 4 | **iPhone** | SwiftUI app — mobile agent monitoring |
-| 5 | **iPad** | SwiftUI app — terrarium second screen |
-| 6 | **macOS** | SwiftUI app — desktop monitoring window |
-| 7 | **ESP32 Round AMOLED** | 1.8" circular 360×360 — compact WiFi display |
-| 8 | **ESP32 IPS LCD** | 3.5" rectangular 480×320 |
-| 9 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 |
-| 10 | **Ulanzi TC001** | 8×32 RGB LED matrix — compact HUD pages and creature sprites |
-| 11 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium |
-| 12 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
+| 1 | **Stream Deck+** | Primary — 8 keys, 4 encoders, LCD touch strip (v4 session-per-button) |
+| 2 | **Ulanzi D200H Deck Dock** | 14-key HID controller + 960×540 LCD — multi-session agent controller, usage monitor, premium CoreGraphics widgets |
+| 3 | **Android Tablet** | Color terrarium + HUD overlay (60fps) |
+| 4 | **E-ink Reader** | B&W 16-level grayscale + **Color E-ink** (Kaleido 3, 4096 colors) + partial refresh |
+| 5 | **iPhone** | SwiftUI app — mobile agent monitoring |
+| 6 | **iPad** | SwiftUI app — terrarium second screen |
+| 7 | **macOS** | SwiftUI app — desktop monitoring window + in-process Swift daemon |
+| 8 | **ESP32 Round AMOLED** | 1.8" circular 466×466 — compact WiFi display |
+| 9 | **ESP32 IPS LCD** | 3.5" rectangular 480×320 |
+| 10 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 |
+| 11 | **Ulanzi TC001** | 8×32 RGB LED matrix — compact HUD pages and creature sprites |
+| 12 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium |
+| 13 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
 
 <p align="center">
   <img src="docs/media/ipad-iphone-closeup.jpg" width="360" alt="iPad and iPhone showing terrarium with pixel art creatures">
@@ -148,9 +159,10 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 ```
                               ┌── Daemon (port 9120, sole hub) ──┐
 Stream Deck Plugin ◄── WS ──►│                                   │
-Android Dashboard  ◄── WS ──►│  WS Server + mDNS + Device Mods  │
+D200H Deck Dock    ◄ USB HID►│                                   │
+Android Dashboard  ◄── WS ──►│  WS Server + mDNS + Device Mods   │
 Apple Dashboard    ◄── WS ──►│  Gateway Proxy + Usage Relay      │
-TUI Dashboard      ◄── WS ──►│  Pixoo + ESP32 Serial + SSE      │
+TUI Dashboard      ◄── WS ──►│  Pixoo + ESP32 Serial + SSE       │
 ESP32 Display      ◄ Serial ►│                                   │
 Pixoo64 LED        ◄ HTTP ──►└───────────────┬───────────────────┘
                                              │ aggregates
@@ -161,7 +173,9 @@ Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    �
                               └──────────────────────────────────┘
 ```
 
-The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 12 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token from `~/.agentdeck/auth-token`. Interactive surfaces (Stream Deck, Android, Apple) can control the agent; monitoring surfaces (Pixoo, TUI, ESP32) display state.
+The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 13 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token from `~/.agentdeck/auth-token`. Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, TUI, ESP32) display state.
+
+On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (30 files, ~5500 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/D200H), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
 
 ---
 
@@ -278,6 +292,7 @@ The CLI command is `agentdeck`.
 |---------|-------------|
 | `agentdeck claude` | Start Claude Code session (PTY + bridge) |
 | `agentdeck codex` | Start Codex CLI session (PTY + bridge) |
+| `agentdeck opencode` | Start OpenCode session (PTY + SSE bridge) |
 | `agentdeck monitor` | Hook-only bridge (no PTY — run `claude` separately) |
 
 **Flags:** `-p <port>`, `-c <command>`, `-d` (debug), `--no-update-check`
@@ -323,29 +338,36 @@ The CLI command is `agentdeck`.
 
 ---
 
-## Stream Deck+ Layout (v3)
+## Stream Deck+ Layout (v4)
 
 <p align="center">
-  <img src="docs/media/layout-overview.jpg" width="720" alt="Stream Deck+ layout — 8 buttons and 4 encoder LCDs showing project list, session info, and quick actions">
+  <img src="docs/media/layout-overview.jpg" width="720" alt="Stream Deck+ layout — 8 session buttons and 4 encoder LCDs showing multi-session view, detail view, and encoders">
 </p>
 
-### Keypad — 8 Actions
+v4 is **session-per-button**: all 8 keypad slots use a single `session-slot` action. List view shows one session per button; pressing a session enters a detail view with options/presets/ESC.
+
+### Keypad — List View (8 sessions)
 
 ```
-┌────────┬─────────┬─────────┬───────────┐
-│  MODE  │ SESSION │  USAGE  │  GO ON    │
-├────────┼─────────┼─────────┼───────────┤
-│ REVIEW │ COMMIT  │  CLEAR  │   STOP    │
-└────────┴─────────┴─────────┘───────────┘
+┌─────────┬─────────┬─────────┬─────────┐
+│ SESS 1  │ SESS 2  │ SESS 3  │ SESS 4  │
+├─────────┼─────────┼─────────┼─────────┤
+│ SESS 5  │ SESS 6  │ SESS 7  │  NEXT   │
+└─────────┴─────────┴─────────┴─────────┘
 ```
 
-| Slot | Action | Description |
-|------|--------|-------------|
-| 0 | **Mode** | Toggle Default / Plan / Accept Edits |
-| 1 | **Session** | Project name + state + session switch |
-| 2 | **Usage** | Usage dashboard (5h / 7d / extra / session / models / oc-usage pages) |
-| 3-6 | **Quick Action x4** | GO ON / REVIEW / COMMIT / CLEAR when idle — up to 4 options on permission/select prompt. 5+ options → 3 + MORE |
-| 7 | **Stop** | Interrupt (Ctrl+C when processing) / Escape (when idle) |
+OpenClaw sits first, then coding agents (Claude / Codex / OpenCode) ordered by port. Slot 7 paginates when there are 8+ sessions. When no daemon is running, slot 0 becomes **▶ START** and launches the macOS AgentDeck Dashboard app.
+
+### Keypad — Detail View (press a session)
+
+| Slot | Content |
+|------|---------|
+| 0 | **BACK** — return to list |
+| 1 | **Session Info** — project + model + state + agent watermark |
+| 2-3 | **Content** — permission options, prompt presets, OpenClaw presets (STATUS / MODEL / GATEWAY) |
+| 4 | **ESC / STOP** — always visible; bright when active, dimmed when idle |
+| 5-6 | **Content** — more options/presets |
+| 7 | **NEXT** — paginate when 5+ options |
 
 ### Encoders — 4 Slots
 
@@ -353,8 +375,8 @@ The CLI command is `agentdeck`.
 |---------|--------|--------|------|-------|
 | E1 | **Utility** | Adjust value (volume, mic, timer) | Toggle / Action | Switch mode |
 | E2 | **Action** | Scroll options / cycle prompts | Send prompt / Confirm | Same as push |
-| E3 | **Terminal** | Switch iTerm session | Activate / Attach tmux | — |
-| E4 | **Voice** | Scroll transcription text | Hold = record, tap (<500ms) = cancel | — |
+| E3 | **Usage** | Cycle pages (overview / 5h / 7d / session / extra) | Refresh usage data | Next page |
+| E4 | **Voice** | Scroll transcription text | Hold = record, tap (<500ms) = cancel, VT push = send/paste | — |
 
 <p align="center">
   <img src="docs/media/voice-korean.jpg" width="360" alt="PLAN mode with Korean voice transcription on encoder LCD">
@@ -365,13 +387,37 @@ The CLI command is `agentdeck`.
 
 ### Dynamic Button States
 
-Slots 3-6 reconfigure based on agent state — permission prompts get semantic colors (green=approve, red=deny, blue=permanent), options get teal/green, and 5+ options collapse into encoder wide-canvas mode.
+Detail-view content slots (2-3, 5-6) reconfigure based on agent state — permission prompts get semantic colors (green=approve, red=deny, blue=permanent), options get teal/green, and 5+ options collapse into encoder wide-canvas mode or paginate via NEXT.
 
 <p align="center">
   <img src="docs/media/encoder-takeover.jpg" width="720" alt="Encoder takeover — plan approval with numbered options on wide-canvas LCD and terminal output">
 </p>
 
-See **[Stream Deck+ Layout Reference](docs/streamdeck-layout.md)** for per-state ASCII diagrams, color tables, encoder details, and button label intelligence.
+See **[v4 Layout](docs/v4-layout.md)** for the full v4 session-per-button model, OpenClaw presets, and v3→v4 migration notes, or **[Stream Deck+ Layout Reference](docs/streamdeck-layout.md)** for per-state ASCII diagrams, color tables, encoder details, and button label intelligence.
+
+---
+
+## Ulanzi D200H Deck Dock
+
+A 14-key USB HID controller with a 960×540 LCD — a second hardware surface that complements the Stream Deck+ with richer session visuals and a dedicated usage monitor.
+
+<p align="center">
+  <em>Multi-session agent controller with premium CoreGraphics-rendered session slots.</em>
+</p>
+
+### Layout
+
+- **13 session buttons** — one per session (same OpenClaw-first ordering as Stream Deck+), with agent-colored watermarks, project name, and state indicator baked into each key image
+- **1 big merged usage button** (col3+col4, row2) — dedicated usage monitor with live 5h/7d gauges
+- **Press feedback** — a bright press-flash on every keydown for tactile confirmation even without force touch
+
+### Transport
+
+- **HID over USB** — VID `0x2207`, PID `0x0019`. The Node.js daemon and the macOS in-process Swift daemon both drive the device; whichever is running claims it. Sandboxed macOS builds require the **USB device** entitlement and Input Monitoring permission.
+- **Heartbeat resilience** — the HID session auto-recovers from hub resets and sleep/wake cycles.
+- **Shared renderers** — session slot imagery is generated from shared SVG renderers in `@agentdeck/shared`, so Stream Deck+, D200H, Android, and Apple surfaces stay visually consistent.
+
+The D200H is not required — it layers on top of a running daemon. Plug it in and it shows up in `agentdeck devices`; nothing else to configure.
 
 ---
 
@@ -436,7 +482,7 @@ Monitor and control your AI agents from iPhone, iPad, or Mac — a native SwiftU
   <img src="docs/media/ipad-iphone-closeup.jpg" width="720" alt="Apple dashboard — iPad and iPhone showing terrarium with pixel art creatures and HUD overlay">
 </p>
 
-The Apple app is a SwiftUI multiplatform app that connects to the same bridge server, providing the full AgentDeck experience on Apple devices.
+The Apple app is a SwiftUI multiplatform app that connects to the bridge on iOS/iPadOS, and **on macOS ships with a full in-process Swift daemon** (30 files, ~5500 LOC) — mDNS, device modules (ADB/Serial/Pixoo/D200H), Gateway proxy, and WebSocket server — so the macOS build works standalone without Node.js. You can still use the `agentdeck` CLI alongside it for Claude Code / Codex / OpenCode PTY sessions; the app's daemon auto-detects and defers to a running CLI daemon on the same port.
 
 ### Three-Tab Navigation
 
@@ -526,17 +572,18 @@ Manage devices with `agentdeck pixoo {scan|add|list|remove|test}` — see [CLI R
 
 ```
 AgentDeck/
-├── shared/        # Shared TypeScript types (states, protocol, voice paths)
-├── bridge/        # Node.js bridge server (PTY, hooks, WS, voice, adapters)
-├── plugin/        # Stream Deck SDK v2 plugin (actions, renderers, utility modes)
+├── shared/        # Shared TypeScript types + SVG renderers (protocol, states, session slots)
+├── bridge/        # Node.js bridge server (PTY, hooks, WS, voice, adapters, D200H HID)
+├── plugin/        # Stream Deck SDK v2 plugin (v4 session-slot action, encoders, renderers)
 ├── hooks/         # Claude Code hook installer
 ├── setup/         # npm setup package (@agentdeck/setup)
 ├── android/       # Jetpack Compose dashboard (e-ink + tablet, terrarium, deck mirror)
-├── apple/         # SwiftUI multiplatform app (iOS/iPad/macOS dashboard + deck mirror)
-├── esp32/         # ESP32 firmware (round AMOLED / IPS LCD, PlatformIO)
+├── apple/         # SwiftUI multiplatform app (iOS/iPad/macOS) + in-process Swift daemon
+├── esp32/         # ESP32 firmware (Round AMOLED / IPS LCD / B86 Box / TC001, PlatformIO)
+├── tools/         # Creature simulator (GitHub Pages /demo/), dev tooling
 ├── config/        # Prompt templates + default settings
-├── scripts/       # Install, uninstall, package, icon generation
-└── docs/          # Documentation (voice, layout, android, protocol)
+├── scripts/       # Install, uninstall, package, icon generation, demo build
+└── docs/          # Documentation (architecture, daemon, v4-layout, android, esp32, …)
 ```
 
 See **[Protocol & Architecture](docs/protocol.md)** for the full file tree, state machine diagram, and WebSocket message reference.
@@ -692,20 +739,24 @@ Stream Deck plugin logs: Stream Deck app → Settings → Logs.
 
 - [x] Android tablet + e-ink dashboard (Jetpack Compose)
 - [x] Apple iOS/iPad/macOS dashboard (SwiftUI multiplatform)
+- [x] macOS in-process Swift daemon (Node.js-free macOS install)
 - [x] Apple TestFlight CI pipeline
 - [x] ESP32 compact displays (Round AMOLED, IPS LCD, B86 Box, Ulanzi TC001)
+- [x] Ulanzi D200H Deck Dock (14-key HID + 960×540 LCD, premium CoreGraphics widgets)
 - [x] TUI terminal dashboard (Unicode Braille + ANSI)
 - [x] Pixoo64 LED matrix pixel art
 - [x] Codex CLI session support
-- [x] Multi-agent visualization (Claude Code + OpenClaw creatures)
+- [x] OpenCode session support (PTY + SSE hybrid)
+- [x] Multi-agent visualization (Claude Code + Codex + OpenCode + OpenClaw creatures)
+- [x] Stream Deck+ v4 session-per-button layout
 - [x] Daemon mode with multi-session aggregation
 - [x] Voice assistant pipeline (wake word → STT → LLM → TTS)
 - [x] Display sleep/wake sync across all surfaces
 - [x] Color E-ink support (Kaleido 3)
+- [x] Creature simulator demo page (GitHub Pages `/demo/`)
 
 ### Planned
 
-- Additional agent integrations (Opencode)
 - Windows/Linux platform support
 - Project-specific layout presets
 - Custom button icon support
