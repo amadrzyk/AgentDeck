@@ -51,3 +51,31 @@ android/*.jks
 *.certSigningRequest
 AuthKey_*.p8
 private_keys/
+
+# Build artifacts
+apple/build/
+*.profraw
+.zig-cache/
+.zig-global-cache/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# ESP32 robot test results
+esp32/robot/results/
+
+# Experimental scratch files
+scratch-*.ts
+scratch-*.js
+
+# zkswe hardware recon — cross-compiled ARM/Mach-O binaries rebuilt via build.sh
+zkswe/agent-archive/*
+!zkswe/agent-archive/build.sh
+!zkswe/agent-archive/*.sh
+!zkswe/agent-archive/lib/
+zkswe/recon/*.dylib
+zkswe/recon/*.so
+
+# Creature simulator generated data (rebuilt by scripts/render-creature-simulator.mjs)
+tools/creature-simulator/sim-data.js
