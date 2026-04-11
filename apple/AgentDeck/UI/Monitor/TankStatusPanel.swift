@@ -51,35 +51,7 @@ struct TankStatusPanel: View {
     }
 
     private var openClawLines: [String] {
-        let available = stateHolder.state.modelCatalog.filter(\.available)
-        guard !available.isEmpty else { return [] }
-
-        let ordered = available.sorted {
-            let lhsDefault = $0.role == "default"
-            let rhsDefault = $1.role == "default"
-            if lhsDefault != rhsDefault { return lhsDefault && !rhsDefault }
-            return normalizeOpenClawName($0.name) < normalizeOpenClawName($1.name)
-        }
-
-        let primary = normalizeOpenClawName(ordered[0].name)
-        let remainder = ordered.dropFirst().map { normalizeOpenClawName($0.name) }
-        guard !remainder.isEmpty else { return [primary] }
-
-        var groups: [String: [String]] = [:]
-        var familyOrder: [String] = []
-
-        for normalized in remainder {
-            let family = openClawFamilyKey(normalized)
-            if groups[family] == nil { familyOrder.append(family) }
-            groups[family, default: []].append(normalized)
-        }
-
-        let compactedRemainder: [String] = familyOrder.compactMap { family -> String? in
-            guard let names = groups[family] else { return nil }
-            return compactOpenClawFamily(names)
-        }
-
-        return [primary] + compactedRemainder
+        DashboardDataRules.openClawDisplayLines(stateHolder.state.modelCatalog)
     }
 
     private var ollamaLines: [String] {
@@ -116,55 +88,6 @@ struct TankStatusPanel: View {
     private var openClawPrimaryLine: String? {
         openClawLines.first
     }
-}
-
-private func normalizeOpenClawName(_ name: String) -> String {
-    name
-        .replacingOccurrences(of: "DeepSeek: DeepSeek ", with: "DeepSeek ")
-        .replacingOccurrences(of: "DeepSeek:", with: "DeepSeek")
-        .replacingOccurrences(of: "GPT: GPT ", with: "GPT ")
-        .replacingOccurrences(of: "GLM: GLM ", with: "GLM ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
-private func openClawFamilyKey(_ name: String) -> String {
-    let lower = name.lowercased()
-    if lower.hasPrefix("glm") { return "glm" }
-    if lower.hasPrefix("gpt") { return "gpt" }
-    if lower.hasPrefix("deepseek") { return "deepseek" }
-    if lower.hasPrefix("claude") { return "claude" }
-    if lower.hasPrefix("gemini") { return "gemini" }
-    if lower.hasPrefix("qwen") { return "qwen" }
-    if lower.hasPrefix("llama") { return "llama" }
-    return name
-}
-
-private func compactOpenClawFamily(_ names: [String]) -> String {
-    let deduped = Array(NSOrderedSet(array: names).array as? [String] ?? names)
-    guard let first = deduped.first else { return "" }
-    guard deduped.count > 1 else { return first }
-
-    let prefix = familyDisplayPrefix(first)
-    guard !prefix.isEmpty else { return deduped.joined(separator: ", ") }
-
-    let compacted = deduped.enumerated().map { index, name in
-        guard index > 0, name.hasPrefix(prefix) else { return name }
-        return String(name.dropFirst(prefix.count))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    return compacted.joined(separator: ", ")
-}
-
-private func familyDisplayPrefix(_ name: String) -> String {
-    let lower = name.lowercased()
-    if lower.hasPrefix("glm-") { return "GLM-" }
-    if lower.hasPrefix("gpt-") { return "GPT-" }
-    if lower.hasPrefix("deepseek ") { return "DeepSeek " }
-    if lower.hasPrefix("claude ") { return "Claude " }
-    if lower.hasPrefix("gemini ") { return "Gemini " }
-    if lower.hasPrefix("qwen ") { return "Qwen " }
-    if lower.hasPrefix("llama ") { return "Llama " }
-    return ""
 }
 
 private struct EngineSection: View {

@@ -22,6 +22,7 @@ struct ApiUsageData: Sendable {
 struct CodexAuthStatus: Sendable {
     var authMode: String?
     var webAuthConnected: Bool = false
+    var accessTokenPresent: Bool = false
     var planType: String?
     var accountId: String?
     var subscriptionActiveUntil: String?
@@ -51,9 +52,17 @@ final class UsageAPIClient: Sendable {
     nonisolated(unsafe) private var consecutiveFailures = 0
     nonisolated(unsafe) private var lastTokenStatus: TokenStatus = .unknown
     nonisolated(unsafe) private var lastBackoffStart: Date = .distantPast
+    nonisolated(unsafe) private var lastStableCodexAuthStatus: CodexAuthStatus?
 
     var tokenStatus: TokenStatus { lastTokenStatus }
-    var codexAuthStatus: CodexAuthStatus? { readCodexAuthStatus() }
+    var codexAuthStatus: CodexAuthStatus? {
+        let merged = Self.stabilizeCodexAuthStatus(
+            previous: lastStableCodexAuthStatus,
+            current: readRawCodexAuthStatus()
+        )
+        lastStableCodexAuthStatus = merged
+        return merged
+    }
     var antigravityStatus: AntigravityStatus? { readAntigravityStatus() }
 
     // MARK: - Fetch
@@ -197,7 +206,7 @@ final class UsageAPIClient: Sendable {
 
     // MARK: - Codex Web Auth
 
-    private func readCodexAuthStatus() -> CodexAuthStatus? {
+    private func readRawCodexAuthStatus() -> CodexAuthStatus? {
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let authFile = URL(fileURLWithPath: realHome).appendingPathComponent(".codex/auth.json")
         guard let data = try? Data(contentsOf: authFile),
@@ -206,6 +215,7 @@ final class UsageAPIClient: Sendable {
         }
 
         let tokens = json["tokens"] as? [String: Any]
+        let accessTokenPresent = string(tokens, key: "access_token") != nil
         let accessPayload = decodeJWT(string(tokens, key: "access_token"))
         let idPayload = decodeJWT(string(tokens, key: "id_token"))
         let accessAuth = authNamespace(accessPayload)
@@ -214,7 +224,8 @@ final class UsageAPIClient: Sendable {
 
         return CodexAuthStatus(
             authMode: authMode,
-            webAuthConnected: authMode == "chatgpt" && string(tokens, key: "access_token") != nil,
+            webAuthConnected: authMode == "chatgpt" && accessTokenPresent,
+            accessTokenPresent: accessTokenPresent,
             planType: firstString([
                 string(json, key: "chatgpt_plan_type"),
                 string(accessAuth, key: "chatgpt_plan_type"),
@@ -246,6 +257,30 @@ final class UsageAPIClient: Sendable {
                 string(idPayload, key: "subscription_active_until"),
             ]),
             lastRefreshAt: string(json, key: "last_refresh")
+        )
+    }
+
+    static func stabilizeCodexAuthStatus(previous: CodexAuthStatus?, current: CodexAuthStatus?) -> CodexAuthStatus? {
+        guard let current else { return previous }
+        guard let previous else { return current }
+
+        let normalizedMode = current.authMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let stillChatGpt = normalizedMode == "chatgpt" || (normalizedMode == nil && current.accessTokenPresent)
+        if normalizedMode != nil, normalizedMode != "chatgpt", !current.accessTokenPresent {
+            return current
+        }
+        if !stillChatGpt {
+            return current
+        }
+
+        return CodexAuthStatus(
+            authMode: current.authMode ?? previous.authMode,
+            webAuthConnected: current.webAuthConnected || previous.webAuthConnected,
+            accessTokenPresent: current.accessTokenPresent || previous.accessTokenPresent,
+            planType: current.planType ?? previous.planType,
+            accountId: current.accountId ?? previous.accountId,
+            subscriptionActiveUntil: current.subscriptionActiveUntil ?? previous.subscriptionActiveUntil,
+            lastRefreshAt: current.lastRefreshAt ?? previous.lastRefreshAt
         )
     }
 

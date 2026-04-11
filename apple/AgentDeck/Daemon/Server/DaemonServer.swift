@@ -1162,7 +1162,6 @@ final class DaemonServer {
         DaemonLogger.shared.info("OpenClaw Gateway lost, cleaning up...")
         Task { await adapter.stop() }
         gatewayAdapter = nil
-        cachedModelCatalog = []
         _ = stateMachine.transition(trigger: "session_end", source: .hook)
         broadcastSessionsList()
         broadcastStateUpdate()
@@ -1205,13 +1204,15 @@ final class DaemonServer {
         case "model_catalog":
             // Gateway sends full model catalog — replace entirely (same as Node.js)
             if let models = event["models"] as? [[String: Any]] {
-                cachedModelCatalog = models
-                DaemonLogger.shared.debug("Daemon", "Model catalog from Gateway: \(models.count) models")
+                let previousModelName = stateMachine.modelName
                 if stateMachine.modelName == nil, let defaultModel = event["defaultModel"] as? String {
                     stateMachine.modelName = defaultModel
                 }
-                broadcastStateUpdate()
-                broadcastUsage()
+                let catalogChanged = updateModelCatalog(from: models, source: "gateway", replaceExisting: true)
+                if !catalogChanged, stateMachine.modelName != previousModelName {
+                    broadcastStateUpdate()
+                    broadcastUsage()
+                }
             }
         default:
             break
@@ -1231,27 +1232,33 @@ final class DaemonServer {
         case "state_update":
             // Extract model catalog from sibling
             if let catalog = event["modelCatalog"] as? [[String: Any]] {
-                mergeModelCatalog(catalog)
+                updateModelCatalog(from: catalog, source: "sibling relay")
             }
         default:
             break
         }
     }
 
-    private func mergeModelCatalog(_ models: [[String: Any]]) {
-        let existingKeys = Set(cachedModelCatalog.compactMap { $0["key"] as? String })
-        var merged = cachedModelCatalog
-        for m in models {
-            if let key = m["key"] as? String, !existingKeys.contains(key) {
-                merged.append(m)
-            }
-        }
-        if merged.count != cachedModelCatalog.count {
-            cachedModelCatalog = merged
-            DaemonLogger.shared.debug("Daemon", "Model catalog merged: \(merged.count) models total")
-            broadcastStateUpdate()
-            broadcastUsage()
-        }
+    static func normalizedModelCatalog(_ models: [[String: Any]]) -> [[String: Any]] {
+        DashboardDataRules.canonicalizeModelCatalog(models)
+    }
+
+    static func mergedModelCatalog(existing: [[String: Any]], incoming: [[String: Any]]) -> [[String: Any]] {
+        DashboardDataRules.mergedModelCatalog(existing: existing, incoming: incoming)
+    }
+
+    @discardableResult
+    private func updateModelCatalog(from models: [[String: Any]], source: String, replaceExisting: Bool = false) -> Bool {
+        let merged = replaceExisting
+            ? Self.normalizedModelCatalog(models)
+            : Self.mergedModelCatalog(existing: cachedModelCatalog, incoming: models)
+        let changed = !(merged as NSArray).isEqual(cachedModelCatalog)
+        guard changed else { return false }
+        cachedModelCatalog = merged
+        DaemonLogger.shared.debug("Daemon", "Model catalog updated from \(source): \(merged.count) models")
+        broadcastStateUpdate()
+        broadcastUsage()
+        return true
     }
 
     // MARK: - Polling
@@ -1381,7 +1388,7 @@ final class DaemonServer {
     @MainActor
     private func refreshSessions() async {
         let sessions = registry.listActive().filter { $0.id != sessionId }
-        cachedSessions = await enrichSessionsWithState(sessions)
+        cachedSessions = DashboardDataRules.sortSessions(await enrichSessionsWithState(sessions))
         broadcastSessionsList()
     }
 
@@ -1424,10 +1431,21 @@ final class DaemonServer {
         // Inject virtual OpenClaw session when Gateway is reachable
         if cachedGatewayAvailable || gatewayAdapter != nil {
             if !sessions.contains(where: { ($0["id"] as? String) == "openclaw-gateway" || ($0["agentType"] as? String) == "openclaw" }) {
+                // Normalize state: when the gateway adapter is alive but the
+                // shared stateMachine has not yet transitioned out of
+                // .disconnected (the connect-time session_start hook only fires
+                // from .disconnected, and may have raced with the broadcast),
+                // emit "idle" rather than "disconnected" so downstream clients
+                // never paint OC as an abnormal/OFF card. The earliest possible
+                // sort tiebreaker (1970-01-01) keeps OC pinned to slot 0 even
+                // if a real openclaw session were ever added later.
+                let smState = stateMachine.state.rawValue
+                let normalizedState = (gatewayAdapter != nil && smState != "disconnected") ? smState : "idle"
                 var gatewaySession: [String: Any] = [
                     "id": "openclaw-gateway", "port": 18789,
                     "projectName": "OpenClaw", "agentType": "openclaw",
-                    "alive": true, "state": gatewayAdapter != nil ? stateMachine.state.rawValue : "idle",
+                    "alive": true, "state": normalizedState,
+                    "startedAt": "1970-01-01T00:00:00.000Z",
                 ]
                 if let tool = stateMachine.currentTool { gatewaySession["currentTool"] = tool }
                 if let modelName = stateMachine.modelName { gatewaySession["modelName"] = modelName }
@@ -1436,6 +1454,7 @@ final class DaemonServer {
                 sessions.append(gatewaySession)
             }
         }
+        sessions = DashboardDataRules.sortSessionPayloads(sessions)
         return ["type": "sessions_list", "sessions": sessions]
     }
 

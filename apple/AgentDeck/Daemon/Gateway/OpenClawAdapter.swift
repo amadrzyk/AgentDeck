@@ -282,14 +282,32 @@ actor OpenClawAdapter {
         let deviceFile = identityDir.appendingPathComponent("device.json")
         let authFile = identityDir.appendingPathComponent("device-auth.json")
 
-        guard let data = try? Data(contentsOf: deviceFile),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let deviceId = json["deviceId"] as? String,
-              let publicKeyPem = json["publicKeyPem"] as? String,
-              let privateKeyPem = json["privateKeyPem"] as? String else {
+        let data: Data
+        do {
+            data = try Data(contentsOf: deviceFile)
+        } catch {
             deviceIdentity = nil
             deviceAuthToken = nil
-            DaemonLogger.shared.debug("OpenClaw", "Device identity not available")
+            DaemonLogger.shared.debug("OpenClaw", "device.json read failed at \(deviceFile.path): \(error)")
+            return
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            deviceIdentity = nil
+            deviceAuthToken = nil
+            DaemonLogger.shared.debug("OpenClaw", "device.json parse failed (invalid JSON)")
+            return
+        }
+        let deviceId = json["deviceId"] as? String
+        let publicKeyPem = json["publicKeyPem"] as? String
+        let privateKeyPem = json["privateKeyPem"] as? String
+        guard let deviceId, let publicKeyPem, let privateKeyPem else {
+            var missing: [String] = []
+            if deviceId == nil { missing.append("deviceId") }
+            if publicKeyPem == nil { missing.append("publicKeyPem") }
+            if privateKeyPem == nil { missing.append("privateKeyPem") }
+            deviceIdentity = nil
+            deviceAuthToken = nil
+            DaemonLogger.shared.debug("OpenClaw", "device.json missing keys: \(missing.joined(separator: ",")) — present: \(Array(json.keys))")
             return
         }
 
@@ -483,8 +501,16 @@ actor OpenClawAdapter {
         return raw.base64URLEncodedString()
     }
 
-    private func emitModelCatalog() async {
-        guard let (entries, defaultModel) = await fetchModelCatalog() else { return }
+    private func emitModelCatalog(retry: Bool = true) async {
+        guard let (entries, defaultModel) = await fetchModelCatalog() else {
+            if retry && !isStopping {
+                DaemonLogger.shared.debug("OpenClaw", "Model catalog empty — retrying in 10s")
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled, !isStopping else { return }
+                await emitModelCatalog(retry: false)
+            }
+            return
+        }
         _onEvent?([
             "type": "model_catalog",
             "models": entries,

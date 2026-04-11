@@ -239,4 +239,102 @@ final class ProtocolTests: XCTestCase {
 
         XCTAssertEqual(json?["type"] as? String, "interrupt")
     }
+
+    func testStabilizeCodexAuthStatusPreservesChatGptPlanAcrossPartialRefresh() {
+        let previous = CodexAuthStatus(
+            authMode: "chatgpt",
+            webAuthConnected: true,
+            accessTokenPresent: true,
+            planType: "plus",
+            accountId: "acct_123",
+            subscriptionActiveUntil: "2026-05-01",
+            lastRefreshAt: "2026-04-09T00:00:00Z"
+        )
+        let current = CodexAuthStatus(
+            authMode: nil,
+            webAuthConnected: false,
+            accessTokenPresent: true,
+            planType: nil,
+            accountId: nil,
+            subscriptionActiveUntil: nil,
+            lastRefreshAt: "2026-04-09T00:01:00Z"
+        )
+
+        let stabilized = UsageAPIClient.stabilizeCodexAuthStatus(previous: previous, current: current)
+
+        XCTAssertEqual(stabilized?.authMode, "chatgpt")
+        XCTAssertEqual(stabilized?.planType, "plus")
+        XCTAssertEqual(stabilized?.accountId, "acct_123")
+        XCTAssertEqual(stabilized?.subscriptionActiveUntil, "2026-05-01")
+        XCTAssertEqual(stabilized?.lastRefreshAt, "2026-04-09T00:01:00Z")
+    }
+
+    func testStabilizeCodexAuthStatusDropsCachedChatGptPlanWhenAuthModeChanges() {
+        let previous = CodexAuthStatus(
+            authMode: "chatgpt",
+            webAuthConnected: true,
+            accessTokenPresent: true,
+            planType: "plus",
+            accountId: "acct_123",
+            subscriptionActiveUntil: "2026-05-01",
+            lastRefreshAt: nil
+        )
+        let current = CodexAuthStatus(
+            authMode: "api",
+            webAuthConnected: false,
+            accessTokenPresent: false,
+            planType: nil,
+            accountId: nil,
+            subscriptionActiveUntil: nil,
+            lastRefreshAt: nil
+        )
+
+        let stabilized = UsageAPIClient.stabilizeCodexAuthStatus(previous: previous, current: current)
+
+        XCTAssertEqual(stabilized?.authMode, "api")
+        XCTAssertNil(stabilized?.planType)
+    }
+
+    func testMergedModelCatalogUpdatesExistingEntryWithoutDroppingOthers() {
+        let existing: [[String: Any]] = [
+            ["key": "gpt-4o", "name": "GPT 4o", "role": "configured", "available": true],
+            ["key": "claude-4", "name": "Claude 4", "role": "configured", "available": true],
+        ]
+        let incoming: [[String: Any]] = [
+            ["key": "gpt-4o", "name": "GPT 4o", "role": "default", "available": true],
+        ]
+
+        let merged = DashboardDataRules.mergedModelCatalog(existing: existing, incoming: incoming)
+
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged.first?["key"] as? String, "gpt-4o")
+        let updated = merged.first { ($0["key"] as? String) == "gpt-4o" }
+        XCTAssertEqual(updated?["role"] as? String, "default")
+    }
+
+    func testSortSessionsUsesStableSharedOrdering() {
+        let sessions = [
+            SessionInfo(id: "2", port: 9122, projectName: "Beta", agentType: "claude-code", alive: true, state: "idle", modelName: nil, startedAt: "2026-04-11T10:02:00Z"),
+            SessionInfo(id: "1", port: 9121, projectName: "Alpha", agentType: "codex-cli", alive: true, state: "processing", modelName: nil, startedAt: "2026-04-11T10:00:00Z"),
+            SessionInfo(id: "3", port: 9123, projectName: "Alpha", agentType: "claude-code", alive: true, state: "idle", modelName: nil, startedAt: "2026-04-11T10:01:00Z"),
+            SessionInfo(id: "4", port: 9124, projectName: "Gateway", agentType: "openclaw", alive: true, state: "idle", modelName: nil, startedAt: nil),
+        ]
+
+        let sorted = DashboardDataRules.sortSessions(sessions)
+
+        XCTAssertEqual(sorted.map(\.id), ["4", "3", "2", "1"])
+    }
+
+    func testOpenClawDisplayLinesKeepDefaultFirstAndCompactFamilies() {
+        let lines = DashboardDataRules.openClawDisplayLines([
+            ModelCatalogEntry(key: "gpt-5.4", name: "GPT 5.4", role: "default", available: true),
+            ModelCatalogEntry(key: "glm-4.5", name: "GLM-4.5", role: "configured", available: true),
+            ModelCatalogEntry(key: "glm-4.5v", name: "GLM-4.5V", role: "configured", available: true),
+            ModelCatalogEntry(key: "deepseek-r1", name: "DeepSeek R1", role: "configured", available: true),
+        ])
+
+        XCTAssertEqual(lines.first, "GPT 5.4")
+        XCTAssertTrue(lines.contains("GLM-4.5, 4.5V"))
+        XCTAssertTrue(lines.contains("DeepSeek R1"))
+    }
 }

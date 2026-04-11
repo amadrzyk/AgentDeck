@@ -30,12 +30,253 @@ struct ModelCatalogEntry: Codable, Sendable {
     let role: String  // "default" | "fallback-{n}" | "configured"
     let available: Bool
 
+    init(key: String, name: String, role: String, available: Bool) {
+        self.key = key
+        self.name = name
+        self.role = role
+        self.available = available
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         key = try container.decodeIfPresent(String.self, forKey: .key) ?? ""
         name = try container.decode(String.self, forKey: .name)
         role = try container.decode(String.self, forKey: .role)
         available = try container.decode(Bool.self, forKey: .available)
+    }
+}
+
+enum DashboardDataRules {
+    static func agentTypeRank(_ agentType: String?) -> Int {
+        switch agentType {
+        case "openclaw": 0
+        case "claude-code": 1
+        case "codex-cli": 2
+        case "opencode": 3
+        default: 4
+        }
+    }
+
+    static func sortSessions(_ sessions: [SessionInfo]) -> [SessionInfo] {
+        sessions.sorted { lhs, rhs in
+            let typeRank = agentTypeRank(lhs.agentType) - agentTypeRank(rhs.agentType)
+            if typeRank != 0 { return typeRank < 0 }
+
+            let projectCompare = (lhs.projectName ?? "").localizedCaseInsensitiveCompare(rhs.projectName ?? "")
+            if projectCompare != .orderedSame { return projectCompare == .orderedAscending }
+
+            let startDiff = startedAtTime(lhs.startedAt) - startedAtTime(rhs.startedAt)
+            if startDiff != 0 { return startDiff < 0 }
+
+            return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+        }
+    }
+
+    #if os(macOS)
+    static func sortSessions(_ sessions: [DaemonSessionEntry]) -> [DaemonSessionEntry] {
+        sessions.sorted { lhs, rhs in
+            let typeRank = agentTypeRank(lhs.agentType) - agentTypeRank(rhs.agentType)
+            if typeRank != 0 { return typeRank < 0 }
+
+            let projectCompare = lhs.projectName.localizedCaseInsensitiveCompare(rhs.projectName)
+            if projectCompare != .orderedSame { return projectCompare == .orderedAscending }
+
+            let startDiff = startedAtTime(lhs.startedAt) - startedAtTime(rhs.startedAt)
+            if startDiff != 0 { return startDiff < 0 }
+
+            return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+        }
+    }
+    #endif
+
+    static func sortSessionPayloads(_ sessions: [[String: Any]]) -> [[String: Any]] {
+        sessions.sorted { lhs, rhs in
+            let lhsType = lhs["agentType"] as? String
+            let rhsType = rhs["agentType"] as? String
+            let typeRank = agentTypeRank(lhsType) - agentTypeRank(rhsType)
+            if typeRank != 0 { return typeRank < 0 }
+
+            let lhsProject = (lhs["projectName"] as? String) ?? ""
+            let rhsProject = (rhs["projectName"] as? String) ?? ""
+            let projectCompare = lhsProject.localizedCaseInsensitiveCompare(rhsProject)
+            if projectCompare != .orderedSame { return projectCompare == .orderedAscending }
+
+            let lhsStartedAt = lhs["startedAt"] as? String
+            let rhsStartedAt = rhs["startedAt"] as? String
+            let startDiff = startedAtTime(lhsStartedAt) - startedAtTime(rhsStartedAt)
+            if startDiff != 0 { return startDiff < 0 }
+
+            let lhsId = (lhs["id"] as? String) ?? ""
+            let rhsId = (rhs["id"] as? String) ?? ""
+            return lhsId.localizedCaseInsensitiveCompare(rhsId) == .orderedAscending
+        }
+    }
+
+    static func sortedModelCatalog(_ entries: [ModelCatalogEntry]) -> [ModelCatalogEntry] {
+        entries.sorted(by: compareModelEntries)
+    }
+
+    static func canonicalizeModelCatalog(_ rows: [[String: Any]]) -> [[String: Any]] {
+        var byKey: [String: [String: Any]] = [:]
+        for row in rows {
+            guard let key = row["key"] as? String, !key.isEmpty else { continue }
+            byKey[key] = row
+        }
+        return byKey.values.sorted(by: compareModelRows)
+    }
+
+    static func mergedModelCatalog(existing: [[String: Any]], incoming: [[String: Any]]) -> [[String: Any]] {
+        var byKey: [String: [String: Any]] = [:]
+        for row in existing {
+            guard let key = row["key"] as? String, !key.isEmpty else { continue }
+            byKey[key] = row
+        }
+        for row in incoming {
+            guard let key = row["key"] as? String, !key.isEmpty else { continue }
+            byKey[key] = row
+        }
+        return byKey.values.sorted(by: compareModelRows)
+    }
+
+    static func openClawDisplayLines(_ modelCatalog: [ModelCatalogEntry]) -> [String] {
+        let available = sortedModelCatalog(modelCatalog).filter(\.available)
+        guard !available.isEmpty else { return [] }
+
+        let primary = normalizedModelName(available[0].name)
+        let remainder = available.dropFirst().map { normalizedModelName($0.name) }
+        guard !remainder.isEmpty else { return [primary] }
+
+        var groups: [String: [String]] = [:]
+        var familyOrder: [String] = []
+        for normalized in remainder {
+            let family = modelFamilyKey(normalized)
+            if groups[family] == nil { familyOrder.append(family) }
+            groups[family, default: []].append(normalized)
+        }
+
+        let compacted = familyOrder.compactMap { family -> String? in
+            guard let names = groups[family] else { return nil }
+            let line = compactModelFamily(names)
+            return line.isEmpty ? nil : line
+        }
+        return [primary] + compacted
+    }
+
+    private static func compareModelEntries(_ lhs: ModelCatalogEntry, _ rhs: ModelCatalogEntry) -> Bool {
+        compareModelFields(
+            lhsRole: lhs.role,
+            lhsName: lhs.name,
+            lhsKey: lhs.key,
+            lhsAvailable: lhs.available,
+            rhsRole: rhs.role,
+            rhsName: rhs.name,
+            rhsKey: rhs.key,
+            rhsAvailable: rhs.available
+        )
+    }
+
+    private static func compareModelRows(_ lhs: [String: Any], _ rhs: [String: Any]) -> Bool {
+        compareModelFields(
+            lhsRole: lhs["role"] as? String ?? "configured",
+            lhsName: lhs["name"] as? String ?? "",
+            lhsKey: lhs["key"] as? String ?? "",
+            lhsAvailable: lhs["available"] as? Bool ?? true,
+            rhsRole: rhs["role"] as? String ?? "configured",
+            rhsName: rhs["name"] as? String ?? "",
+            rhsKey: rhs["key"] as? String ?? "",
+            rhsAvailable: rhs["available"] as? Bool ?? true
+        )
+    }
+
+    private static func compareModelFields(
+        lhsRole: String,
+        lhsName: String,
+        lhsKey: String,
+        lhsAvailable: Bool,
+        rhsRole: String,
+        rhsName: String,
+        rhsKey: String,
+        rhsAvailable: Bool
+    ) -> Bool {
+        let roleRankDiff = modelRoleRank(lhsRole) - modelRoleRank(rhsRole)
+        if roleRankDiff != 0 { return roleRankDiff < 0 }
+
+        if lhsAvailable != rhsAvailable { return lhsAvailable && !rhsAvailable }
+
+        let nameCompare = normalizedModelName(lhsName).localizedCaseInsensitiveCompare(normalizedModelName(rhsName))
+        if nameCompare != .orderedSame { return nameCompare == .orderedAscending }
+
+        return lhsKey.localizedCaseInsensitiveCompare(rhsKey) == .orderedAscending
+    }
+
+    private static func startedAtTime(_ startedAt: String?) -> TimeInterval {
+        guard let startedAt,
+              let date = ISO8601DateFormatter().date(from: startedAt) else {
+            return .greatestFiniteMagnitude
+        }
+        return date.timeIntervalSince1970
+    }
+
+    private static func modelRoleRank(_ role: String) -> Int {
+        if role == "default" { return 0 }
+        if role.hasPrefix("fallback-"),
+           let suffix = role.split(separator: "-").last,
+           let number = Int(suffix) {
+            return 100 + number
+        }
+        return 10_000
+    }
+
+    private static func normalizedModelName(_ name: String) -> String {
+        name
+            .replacingOccurrences(of: "DeepSeek: DeepSeek ", with: "DeepSeek ")
+            .replacingOccurrences(of: "DeepSeek:", with: "DeepSeek")
+            .replacingOccurrences(of: "GPT: GPT ", with: "GPT ")
+            .replacingOccurrences(of: "GLM: GLM ", with: "GLM ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func modelFamilyKey(_ name: String) -> String {
+        let lower = name.lowercased()
+        if lower.hasPrefix("glm") { return "glm" }
+        if lower.hasPrefix("gpt") { return "gpt" }
+        if lower.hasPrefix("deepseek") { return "deepseek" }
+        if lower.hasPrefix("claude") { return "claude" }
+        if lower.hasPrefix("gemini") { return "gemini" }
+        if lower.hasPrefix("qwen") { return "qwen" }
+        if lower.hasPrefix("llama") { return "llama" }
+        return name
+    }
+
+    private static func compactModelFamily(_ names: [String]) -> String {
+        let deduped = names.reduce(into: [String]()) { result, name in
+            if !result.contains(name) {
+                result.append(name)
+            }
+        }
+        guard let first = deduped.first else { return "" }
+        guard deduped.count > 1 else { return first }
+
+        let prefix = familyDisplayPrefix(first)
+        guard !prefix.isEmpty else { return deduped.joined(separator: ", ") }
+
+        return deduped.enumerated().map { index, name in
+            guard index > 0, name.hasPrefix(prefix) else { return name }
+            return String(name.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }.joined(separator: ", ")
+    }
+
+    private static func familyDisplayPrefix(_ name: String) -> String {
+        let lower = name.lowercased()
+        if lower.hasPrefix("glm-") { return "GLM-" }
+        if lower.hasPrefix("gpt-") { return "GPT-" }
+        if lower.hasPrefix("deepseek ") { return "DeepSeek " }
+        if lower.hasPrefix("claude ") { return "Claude " }
+        if lower.hasPrefix("gemini ") { return "Gemini " }
+        if lower.hasPrefix("qwen ") { return "Qwen " }
+        if lower.hasPrefix("llama ") { return "Llama " }
+        return ""
     }
 }
 

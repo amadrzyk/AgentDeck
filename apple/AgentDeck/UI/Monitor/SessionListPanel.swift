@@ -108,10 +108,13 @@ struct SessionListPanel: View {
     private func buildEntries() -> [SessionEntry] {
         var entries: [SessionEntry] = []
 
-        // Daemon-like detection: skip primary if daemon, or if sessions already
-        // contains an entry with the same agentType (daemon relaying OpenClaw
-        // sets agentType='openclaw' but sessions_list already has the virtual entry)
+        // Daemon-like detection: skip primary if daemon, if it's the OpenClaw
+        // gateway proxy (always virtualized into siblings), or if sessions already
+        // contain an entry with the same agentType. Hardening "openclaw" guards
+        // against a race between state_update and sessions_list where the primary
+        // briefly carries agentType=openclaw + state=disconnected.
         let isDaemonLike = stateHolder.state.agentType == "daemon" ||
+            stateHolder.state.agentType == "openclaw" ||
             stateHolder.state.siblingSessions.contains(where: {
                 $0.agentType == stateHolder.state.agentType
             })
@@ -139,9 +142,16 @@ struct SessionListPanel: View {
             entries.append(SessionEntry(
                 projectName: sibling.projectName ?? "Agent",
                 agentType: sibling.agentType,
-                modelName: nil,
+                modelName: sibling.modelName,
                 effortLevel: nil,
-                state: AgentConnectionState(rawValue: sibling.state ?? "") ?? .disconnected,
+                // alive=true (we already filter siblings via isDaemonLike, and the
+                // wire payload always sets alive=true for the OC virtual session)
+                // — fall back to .idle for unknown/empty state to match
+                // ControlTowerPanel.sessionState(_:) and Android mapSessionState.
+                // .disconnected fallback caused OC to render as OFF during the
+                // brief race window before stateMachine transitioned out of
+                // .disconnected on gateway connect.
+                state: AgentConnectionState(rawValue: sibling.state ?? "") ?? .idle,
                 isPrimary: false
             ))
         }
@@ -267,13 +277,7 @@ private struct BrandIcon: View {
 
 private extension SessionListPanel {
     static func agentTypeRank(_ agentType: String?) -> Int {
-        switch agentType {
-        case "openclaw": 0
-        case "claude-code": 1
-        case "codex-cli": 2
-        case "opencode": 3
-        default: 4
-        }
+        DashboardDataRules.agentTypeRank(agentType)
     }
 
     static func stateRank(_ state: AgentConnectionState) -> Int {

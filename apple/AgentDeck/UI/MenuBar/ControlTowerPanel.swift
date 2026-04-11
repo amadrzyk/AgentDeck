@@ -316,7 +316,8 @@ struct ControlTowerPanel: View {
                         .foregroundStyle(.orange)
                 }
             }
-            let available = stateHolder.state.modelCatalog.filter(\.available)
+            let available = DashboardDataRules.sortedModelCatalog(stateHolder.state.modelCatalog)
+                .filter(\.available)
             if !available.isEmpty {
                 Text(available.map(\.name).joined(separator: ", "))
                     .font(.system(size: 10))
