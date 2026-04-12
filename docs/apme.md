@@ -39,6 +39,16 @@
    └──────────────────────────────────────────────────┘
 ```
 
+## Execution model
+
+APME는 **수집**과 **평가**를 분리한다:
+
+- **Session bridge** (`agentdeck claude/codex/opencode/monitor`): 세션 시작~종료 동안 runs, steps, usage, git diff artifact 를 SQLite에 기록. 세션 종료 시 eval 은 실행하지 않음 (프로세스가 2초 내 exit).
+- **Daemon** (`agentdeck daemon start`): 30초마다 미평가 run을 찾아 eval 큐에 넣음. 장수 프로세스이므로 deterministic (lint/build/test) + LLM judge 를 여유롭게 실행.
+- **CLI** (`agentdeck apme judge`): daemon 없이 수동으로 미평가 run 을 평가. 터미널에서 일회성 실행.
+
+daemon 없이 session bridge 단독 사용 시 데이터만 축적되고 eval 은 나중에 `agentdeck apme judge` 로 일괄 처리하거나, daemon 기동 후 자동 처리된다.
+
 ## File map
 
 | File | Role |
