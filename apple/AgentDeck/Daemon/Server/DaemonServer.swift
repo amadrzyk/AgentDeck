@@ -34,6 +34,10 @@ final class DaemonServer {
     private var adbModule: AdbModule?
     private var d200hModule: D200hHidModule?
 
+    // APME
+    private var apmeStore: ApmeStore?
+    private var apmeCollector: ApmeCollector?
+
     // Gateway
     private var gatewayAdapter: OpenClawAdapter?
     private var gatewayConnecting = false
@@ -173,6 +177,14 @@ final class DaemonServer {
     }
 
     func startServices() async throws {
+        // 0. Initialize APME store + collector
+        let store = ApmeStore()
+        if store.open() {
+            apmeStore = store
+            apmeCollector = ApmeCollector(store: store)
+            DaemonLogger.shared.info("APME enabled — data will be logged to \(store.dbPath)")
+        }
+
         // 1. Setup HTTP routes + Bonjour, then start unified server
         await setupHTTPRoutes()
         await wsServer.setHTTPHandler(httpServer)
@@ -631,6 +643,11 @@ final class DaemonServer {
         await httpServer.get("/pixoo") { [weak self] _ in
             guard let self else { return .text("Preview unavailable", status: 503) }
             return await self.pixooPreviewResponse()
+        }
+
+        // APME routes
+        if let store = apmeStore {
+            await ApmeHttpRoutes.register(on: httpServer, store: store)
         }
     }
 
@@ -1100,12 +1117,21 @@ final class DaemonServer {
         case "session_start":
             _ = stateMachine.transition(trigger: "session_start", source: .hook)
             if let p = json["project_name"] as? String { stateMachine.projectName = p }
+            // APME: open a run for this hook-only session
+            apmeCollector?.openRun(
+                sessionId: sessionId,
+                agentType: "claude-code",
+                projectName: json["project_name"] as? String ?? stateMachine.projectName,
+                modelId: stateMachine.modelName
+            )
         case "user_prompt_submit":
             _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
         case "stop":
             _ = stateMachine.transition(trigger: "stop", source: .hook)
         case "session_end":
             _ = stateMachine.transition(trigger: "session_end", source: .hook)
+            // APME: close the run
+            let _ = apmeCollector?.closeRun(sessionId: sessionId)
         case "tool_start":
             stateMachine.currentTool = json["tool_name"] as? String
             stateMachine.toolInput = json["tool_input"] as? String
@@ -1114,6 +1140,10 @@ final class DaemonServer {
             stateMachine.toolCalls += 1
         default: break
         }
+
+        // APME: ingest every hook event as a step
+        apmeCollector?.ingestHook(sessionId: sessionId, event: event, data: json)
+
         broadcastStateUpdate()
     }
 
