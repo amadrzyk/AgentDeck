@@ -180,7 +180,7 @@ export class ApmeRunner {
                 layer: 'llm_judge',
                 metric: axis,
                 score,
-                raw: axis === 'overall' ? JSON.stringify({ reasoning: parsed.reasoning }) : null,
+                raw: axis === 'overall' ? JSON.stringify({ reasoning: parsed.reasoning, done: parsed.done, missed: parsed.missed }) : null,
                 rubricVer: rubric.version,
                 judgeModel,
                 createdAt: now,
@@ -354,6 +354,8 @@ function runCommand(command: string, cwd: string, timeoutMs: number): Promise<Cm
 interface ParsedJudge {
   scores: Record<string, number>;
   reasoning: string;
+  done?: string[];    // items the agent completed
+  missed?: string[];  // items the agent missed
 }
 
 export function buildJudgePrompt(run: ApmeRunRow, rubricPrompt: string, layer1Passed: boolean | null): string {
@@ -464,7 +466,8 @@ export function parseJudgeJson(text: string): ParsedJudge | null {
   try { obj = JSON.parse(match[0]); }
   catch { return null; }
 
-  const want = ['intent', 'correctness', 'style', 'convention', 'overall'] as const;
+  // Support both v1 (intent/correctness/style/convention) and v2 (task_completion/code_quality/efficiency) axes.
+  const want = ['intent', 'correctness', 'style', 'convention', 'task_completion', 'code_quality', 'efficiency', 'overall'] as const;
   const scores: Record<string, number> = {};
   for (const axis of want) {
     const v = obj[axis];
@@ -475,7 +478,9 @@ export function parseJudgeJson(text: string): ParsedJudge | null {
   // Must at least have overall to be useful.
   if (scores.overall === undefined) return null;
   const reasoning = typeof obj.reasoning === 'string' ? obj.reasoning : '';
-  return { scores, reasoning };
+  const done = Array.isArray(obj.done) ? (obj.done as unknown[]).filter((s): s is string => typeof s === 'string') : undefined;
+  const missed = Array.isArray(obj.missed) ? (obj.missed as unknown[]).filter((s): s is string => typeof s === 'string') : undefined;
+  return { scores, reasoning, done, missed };
 }
 
 function clamp01(n: number): number {

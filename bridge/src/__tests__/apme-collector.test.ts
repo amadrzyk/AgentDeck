@@ -120,9 +120,9 @@ describe('ApmeCollector', () => {
     expect(rubric).not.toBeNull();
     expect(rubric?.version).toBe(1);
     expect(rubric?.purpose).toBe('general');
-    expect(rubric?.prompt).toContain('intent');
+    expect(rubric?.prompt).toContain('task_completion');
     const weights = JSON.parse(rubric!.weights) as Record<string, number>;
-    expect(weights.intent).toBeGreaterThan(0);
+    expect(weights.task_completion).toBeGreaterThan(0);
   });
 
   it('insertEval + listEvalsForRun round-trip', async () => {

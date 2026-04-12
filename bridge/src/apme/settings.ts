@@ -63,8 +63,8 @@ export const DEFAULT_APME_CONFIG: ApmeConfig = {
   judge: {
     backend: 'mlx',
     model: 'qwen3-30b',
-    sampleRate: 0.2,
-    onlyWhenDisagreement: true,
+    sampleRate: 1.0,
+    onlyWhenDisagreement: false,
   },
   availableModels: [],
 };

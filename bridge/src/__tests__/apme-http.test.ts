@@ -163,7 +163,7 @@ describe('APME HTTP routes', () => {
     expect(resp.status).toBe(200);
     const body = await resp.json() as { rubric: { version: number; prompt: string } };
     expect(body.rubric.version).toBe(1);
-    expect(body.rubric.prompt).toContain('intent');
+    expect(body.rubric.prompt).toContain('task_completion');
   });
 
   it('POST /apme/vibe records feedback and rejects unknown runs', async () => {

@@ -835,7 +835,7 @@ apme
   .command('run <id>')
   .description('Show details for a specific run')
   .action(async (id: string) => {
-    const { initApme } = await import('./apme/index.js');
+    const { initApme, evaluateOutcome } = await import('./apme/index.js');
     const apme = await initApme();
     if (!apme) { log('APME not available'); process.exit(1); }
 
@@ -848,31 +848,107 @@ apme
     }
     if (!run) { log(`Run ${id} not found.`); process.exit(1); }
 
-    log(`\n  Run: ${run.id}`);
-    log(`  Agent: ${run.agentType}  Model: ${run.modelId ?? '—'}  Project: ${run.projectName ?? '—'}`);
-    log(`  Path: ${run.projectPath ?? '—'}`);
-    log(`  Started: ${new Date(run.startedAt).toISOString()}  Ended: ${run.endedAt ? new Date(run.endedAt).toISOString() : '—'}`);
-    log(`  Exit: ${run.exitCode ?? '—'}  Tokens: ${run.inputTokens ?? 0}in/${run.outputTokens ?? 0}out  Cost: ${run.costUsd != null ? '$' + run.costUsd.toFixed(3) : '—'}`);
-    if (run.gitBefore || run.gitAfter) log(`  Git: ${run.gitBefore?.slice(0, 8) ?? '—'} → ${run.gitAfter?.slice(0, 8) ?? '—'}`);
-    if (run.taskPrompt) log(`  Task: ${run.taskPrompt.slice(0, 200)}`);
+    const durSec = run.endedAt && run.startedAt ? Math.round((run.endedAt - run.startedAt) / 1000) : 0;
+    const durStr = durSec >= 60 ? `${Math.floor(durSec / 60)}m ${durSec % 60}s` : `${durSec}s`;
+    const tokIn = run.inputTokens ?? 0;
+    const tokOut = run.outputTokens ?? 0;
+    const costStr = run.costUsd != null ? `$${run.costUsd.toFixed(3)}` : '—';
+    const catStr = run.taskCategory ?? 'unknown';
 
+    log(`\n  Run: ${run.id.slice(0, 10)} (${run.agentType} / ${run.modelId ?? '—'} / ${run.projectName ?? '—'})`);
+    if (run.taskPrompt) log(`  Task: "${run.taskPrompt.slice(0, 300)}"`);
+    log(`  Duration: ${durStr} │ Tokens: ${tokIn.toLocaleString()} in / ${tokOut.toLocaleString()} out │ Cost: ${costStr}`);
+    log(`  Category: ${catStr}`);
+
+    // ── Outcome ──
+    let outcomeData = run.outcome ? { outcome: run.outcome, confidence: run.outcomeConfidence ?? '—' } : null;
+    if (!outcomeData && run.endedAt) {
+      // Compute now if not yet evaluated
+      const result = evaluateOutcome(apme.store, run.id);
+      if (result) {
+        outcomeData = { outcome: result.outcome.outcome, confidence: result.outcome.confidence };
+        run = apme.store.getRun(run.id) ?? run; // refresh
+      }
+    }
+    if (outcomeData) {
+      log(`\n  ── Outcome ${'─'.repeat(40)} confidence: ${String(outcomeData.confidence).toUpperCase()}`);
+      log(`    ${outcomeData.outcome}`);
+    }
+
+    // ── LLM Judge ──
     const evals = apme.store.listEvalsForRun(run.id);
-    if (evals.length > 0) {
-      log(`\n  Evals (${evals.length}):`);
-      for (const e of evals) {
-        const tag = e.layer === 'deterministic' ? 'DET' : e.layer === 'llm_judge' ? 'LLM' : 'VIB';
-        log(`    [${tag}] ${e.metric.padEnd(14)} ${(e.score * 100).toFixed(0)}%${e.judgeModel ? `  (${e.judgeModel})` : ''}`);
+    const judgeEvals = evals.filter(e => e.layer === 'llm_judge');
+    if (judgeEvals.length > 0) {
+      const overall = judgeEvals.find(e => e.metric === 'overall');
+      log(`\n  ── Task Completion (LLM Judge) ${'─'.repeat(24)} score: ${overall ? (overall.score * 100).toFixed(0) + '%' : '—'}`);
+      for (const e of judgeEvals.filter(e => e.metric !== 'overall')) {
+        log(`    ${e.metric.padEnd(20)} ${(e.score * 100).toFixed(0)}%`);
+      }
+      if (overall?.raw) {
+        try {
+          const raw = JSON.parse(overall.raw) as { reasoning?: string; done?: string[]; missed?: string[] };
+          if (raw.done?.length) {
+            for (const item of raw.done) log(`    ✓ ${item}`);
+          }
+          if (raw.missed?.length) {
+            for (const item of raw.missed) log(`    ✗ ${item}`);
+          }
+          if (raw.reasoning) log(`    Reasoning: "${raw.reasoning.slice(0, 300)}"`);
+        } catch { /* ignore */ }
       }
     }
 
+    // ── Deterministic ──
+    const detEvals = evals.filter(e => e.layer === 'deterministic');
+    if (detEvals.length > 0) {
+      log(`\n  ── Deterministic ${'─'.repeat(36)}`);
+      for (const e of detEvals) {
+        const icon = e.score === 1 ? '✓' : '✗';
+        let cmdInfo = '';
+        if (e.raw) {
+          try {
+            const r = JSON.parse(e.raw) as { command?: string; exitCode?: number; durationMs?: number };
+            cmdInfo = ` (${r.command ?? '—'}, exit=${r.exitCode ?? '—'}, ${r.durationMs ? Math.round(r.durationMs / 1000) + 's' : '—'})`;
+          } catch { /* ignore */ }
+        }
+        log(`    ${icon} ${e.metric}${cmdInfo}`);
+      }
+    }
+
+    // ── Efficiency ──
+    if (run.efficiencyJson) {
+      try {
+        const eff = JSON.parse(run.efficiencyJson) as Record<string, number | null>;
+        log(`\n  ── Efficiency ${'─'.repeat(40)}`);
+        if (eff.diffLines != null) log(`    ${eff.diffLines} lines changed`);
+        if (eff.tokensPerChange != null) log(`    ${eff.tokensPerChange} tokens/changed line`);
+        if (eff.costPerChange != null) log(`    $${eff.costPerChange.toFixed(4)}/changed line`);
+        if (eff.toolEfficiency != null) log(`    ${eff.toolEfficiency} lines/tool call`);
+        if (eff.timeToCompleteSec != null) log(`    ${eff.timeToCompleteSec}s total`);
+      } catch { /* ignore */ }
+    }
+
+    // ── Composite Score ──
+    if (run.compositeScore != null) {
+      log(`\n  ── Composite Score ${'─'.repeat(34)} ${(run.compositeScore * 100).toFixed(0)}%`);
+      // Show weight breakdown
+      const oc = outcomeData ? `outcome(${outcomeData.outcome})` : 'outcome(—)';
+      const jd = judgeEvals.find(e => e.metric === 'overall');
+      const jdStr = jd ? `judge(${(jd.score * 100).toFixed(0)}%)` : 'judge(—)';
+      const vibe = apme.store.latestVibeForRun(run.id);
+      const vibeStr = vibe ? `vibe(${vibe.verdict})` : 'vibe(—)';
+      log(`    ${oc} × 0.4 + ${jdStr} × 0.3 + efficiency × 0.2 + ${vibeStr} × 0.1`);
+    }
+
+    // ── Steps summary ──
     const steps = apme.store.listSteps(run.id);
     if (steps.length > 0) {
-      log(`\n  Steps (${steps.length}):`);
-      for (const s of steps.slice(-20)) {
+      log(`\n  ── Steps (${steps.length}) ${'─'.repeat(38)}`);
+      for (const s of steps.slice(-10)) {
         const tool = s.toolName ? ` [${s.toolName}]` : '';
         log(`    ${new Date(s.ts).toISOString().slice(11, 19)} ${s.kind}${tool}`);
       }
-      if (steps.length > 20) log(`    ... ${steps.length - 20} more`);
+      if (steps.length > 10) log(`    ... ${steps.length - 10} more`);
     }
 
     const vibe = apme.store.latestVibeForRun(run.id);

@@ -836,10 +836,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // eval (session exits within 2s of shutdown). Daemon is long-lived, so it
   // can run the full deterministic + judge pipeline without time pressure.
   if (apme) {
+    const { evaluateOutcome } = await import('./apme/outcome.js');
     const apmeEvalTimer = setInterval(() => {
+      // 1. Enqueue unevaluated runs for deterministic + judge
       const pending = apme!.store.listUnevaluatedRuns(5);
       for (const run of pending) {
         apme!.runner.enqueue({ runId: run.id, projectPath: run.projectPath ?? undefined });
+      }
+      // 2. Run outcome detection + composite scoring on recently closed runs
+      // that don't have an outcome yet.
+      const closedRuns = apme!.store.listRuns({ limit: 20 });
+      for (const run of closedRuns) {
+        if (run.endedAt && !run.outcome) {
+          // Wait at least 60s after close before judging outcome
+          // (gives time for commits, follow-up sessions)
+          const elapsed = Date.now() - run.endedAt;
+          if (elapsed > 60_000) {
+            evaluateOutcome(apme!.store, run.id);
+          }
+        }
       }
     }, 30_000); // every 30s
     core.addInterval(apmeEvalTimer);

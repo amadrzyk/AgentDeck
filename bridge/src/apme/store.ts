@@ -49,7 +49,11 @@ CREATE TABLE IF NOT EXISTS runs (
   hw_profile    TEXT,
   task_signals  TEXT,
   task_category TEXT,
-  task_category_source TEXT DEFAULT 'auto'
+  task_category_source TEXT DEFAULT 'auto',
+  outcome       TEXT,
+  outcome_confidence TEXT,
+  efficiency_json TEXT,
+  composite_score REAL
 );
 
 CREATE TABLE IF NOT EXISTS steps (
@@ -152,21 +156,21 @@ GROUP BY r.task_category, r.model_id;
 const DEFAULT_RUBRIC_V1 = {
   version: 1,
   purpose: 'general',
-  prompt: `You are a strict but fair senior engineer judging the output of an AI coding agent.
+  prompt: `You are a senior engineer evaluating whether an AI coding agent completed the user's task.
 
-Given the task prompt, the git diff produced, the deterministic test results, and
-a sample of the agent's tool calls, score the run on the following axes. Each score
-is a float in [0,1] where 0=failure and 1=excellent. Be concise in reasoning.
+Given the task prompt and the git diff produced, evaluate the agent's contribution.
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
 
 Axes:
-- intent: Did the final output actually address what the user asked for?
-- correctness: Is the code correct given its claimed purpose?
-- style: Does it match the codebase's conventions (naming, structure, imports)?
-- convention: Does it avoid footguns (no dead code, no debug prints, no unrelated churn)?
-- overall: Your holistic judgment weighted by the above.
+- task_completion: Did the agent actually do what the user asked? A perfect score means the task prompt's request was fully addressed in the diff. A zero means nothing relevant was done.
+- code_quality: Is the code correct, safe, and maintainable? Check for bugs, missing error handling, security issues, and dead code.
+- efficiency: Did the agent make minimal, focused changes? Penalize unrelated modifications, unnecessary refactoring, or verbose solutions to simple problems.
+- overall: Your holistic judgment. Weight task_completion most heavily — a session that completes the task with decent quality is better than a perfect-style session that misses the point.
 
-Return strict JSON: {"intent":N,"correctness":N,"style":N,"convention":N,"overall":N,"reasoning":"..."}.`,
-  weights: JSON.stringify({ intent: 0.35, correctness: 0.3, style: 0.15, convention: 0.2 }),
+Important: Explain your reasoning with specific references to what was done and what was missed. List concrete items with checkmarks (done) and crosses (missed). This reasoning will be shown to the user for verification.
+
+Return strict JSON: {"task_completion":N,"code_quality":N,"efficiency":N,"overall":N,"reasoning":"...", "done":["item1","item2"], "missed":["item1"]}.`,
+  weights: JSON.stringify({ task_completion: 0.5, code_quality: 0.3, efficiency: 0.2 }),
   notes: 'seeded default',
 };
 
@@ -234,6 +238,10 @@ export class ApmeStore {
       ['task_signals', 'ALTER TABLE runs ADD COLUMN task_signals TEXT'],
       ['task_category', 'ALTER TABLE runs ADD COLUMN task_category TEXT'],
       ['task_category_source', "ALTER TABLE runs ADD COLUMN task_category_source TEXT DEFAULT 'auto'"],
+      ['outcome', 'ALTER TABLE runs ADD COLUMN outcome TEXT'],
+      ['outcome_confidence', 'ALTER TABLE runs ADD COLUMN outcome_confidence TEXT'],
+      ['efficiency_json', 'ALTER TABLE runs ADD COLUMN efficiency_json TEXT'],
+      ['composite_score', 'ALTER TABLE runs ADD COLUMN composite_score REAL'],
     ];
     for (const [col, sql] of migrations) {
       if (!cols.includes(col)) {
@@ -309,6 +317,10 @@ export class ApmeStore {
       taskSignals: 'task_signals',
       taskCategory: 'task_category',
       taskCategorySource: 'task_category_source',
+      outcome: 'outcome',
+      outcomeConfidence: 'outcome_confidence',
+      efficiencyJson: 'efficiency_json',
+      compositeScore: 'composite_score',
     };
     for (const [k, v] of Object.entries(patch)) {
       const col = map[k];
@@ -515,6 +527,10 @@ function rowToRun(r: Record<string, unknown>): ApmeRunRow {
     taskSignals: (r.task_signals as string | null) ?? null,
     taskCategory: (r.task_category as string | null) ?? null,
     taskCategorySource: (r.task_category_source as string | null) ?? null,
+    outcome: (r.outcome as string | null) ?? null,
+    outcomeConfidence: (r.outcome_confidence as string | null) ?? null,
+    efficiencyJson: (r.efficiency_json as string | null) ?? null,
+    compositeScore: (r.composite_score as number | null) ?? null,
   };
 }
 

@@ -30,6 +30,10 @@ export interface ApmeRunRow {
   taskSignals?: string | null; // JSON TaskSignals
   taskCategory?: string | null;
   taskCategorySource?: string | null; // 'auto' | 'user' | 'llm'
+  outcome?: string | null; // committed|abandoned|iterated|ab_winner|ab_loser|interrupted|exploratory
+  outcomeConfidence?: string | null; // high|medium|low
+  efficiencyJson?: string | null; // JSON EfficiencyMetrics
+  compositeScore?: number | null;
 }
 
 export interface ApmeStepRow {
