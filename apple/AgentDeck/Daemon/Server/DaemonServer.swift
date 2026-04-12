@@ -633,7 +633,20 @@ final class DaemonServer {
                 return .json(["received": true])
             }
             // Extract event name from URL path: "/hooks/PreToolUse" → "PreToolUse"
-            let eventName = String(request.path.dropFirst("/hooks/".count))
+            // Convert to snake_case to match handleHookEvent expectations:
+            // SessionStart → session_start, PreToolUse → tool_start, etc.
+            let rawName = String(request.path.dropFirst("/hooks/".count))
+            let eventName: String
+            switch rawName {
+            case "SessionStart": eventName = "session_start"
+            case "SessionEnd":   eventName = "session_end"
+            case "PreToolUse":   eventName = "tool_start"
+            case "PostToolUse":  eventName = "tool_end"
+            case "Stop":         eventName = "stop"
+            case "UserPromptSubmit": eventName = "user_prompt_submit"
+            case "Notification": eventName = "notification"
+            default: eventName = rawName.lowercased()
+            }
             var json = (try? JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]
             json["event"] = eventName
             Task { @MainActor in await self?.handleHookEvent(json) }

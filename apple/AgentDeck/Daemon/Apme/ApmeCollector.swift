@@ -48,7 +48,7 @@ final class ApmeCollector {
     func handleHook(event: String, data: [String: Any]) {
         guard store.isOpen else { return }
 
-        switch event {
+        switch event.lowercased() {
         case "session_start":
             // Generate a unique session key for this Claude session.
             hookSessionCounter += 1
@@ -107,7 +107,7 @@ final class ApmeCollector {
             recordStep(hookSession: hookSession, runId: runId, event: event, data: data)
 
             // ── Turn management ──
-            if event == "user_prompt_submit" {
+            if event.lowercased() == "user_prompt_submit" || event == "UserPromptSubmit" {
                 let prompt = data["prompt"] as? String
                 // Close previous turn
                 closeTurn(runId: runId)
@@ -125,7 +125,7 @@ final class ApmeCollector {
             }
 
             // Track tool calls on active turn
-            if (event == "tool_start" || event == "PreToolUse"), var turn = activeTurn {
+            if (event.lowercased() == "tool_start" || event == "PreToolUse" || event == "tool_start"), var turn = activeTurn {
                 turn.toolCalls += 1
                 let toolName = data["tool_name"] as? String
                 if toolName == "Edit" { turn.filesModified += 1 }
