@@ -1655,11 +1655,11 @@ private enum D200hRenderer {
                 "Icon": iconPath,
             ]],
         ]
-        if clearAction {
-            entry["Action"] = ""
-        } else if let actionPath {
-            entry["Action"] = "com.ulanzi.ulanzideck.system.open"
-            entry["ActionParam"] = ["Path": actionPath]
+        if !clearAction {
+            if let actionPath {
+                entry["Action"] = "com.ulanzi.ulanzideck.system.open"
+                entry["ActionParam"] = ["Path": actionPath]
+            }
         }
         return entry
     }
