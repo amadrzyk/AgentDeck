@@ -237,7 +237,7 @@ async function selectRun(id){
     h+='<div class="meta-row">';
     h+='<span>🕐 '+tm+(dur?' · '+fd(dur):'')+'</span>';
     if(taskCategory)h+='<span><span class="badge-cat">'+taskCategory+'</span></span>';
-    h+='<span style="font-family:monospace;font-size:11px;color:var(--dim)">'+run.id.slice(0,12)+'</span>';
+    h+='<span style="font-family:monospace;font-size:11px;color:var(--dim);cursor:pointer" onclick="navigator.clipboard.writeText(\\''+run.id+'\\');this.textContent=\\'copied!\\';;setTimeout(()=>this.textContent=\\''+run.id.slice(0,12)+'\\',1000)" title="Click to copy full ID">'+run.id.slice(0,12)+'</span>';
     h+='</div></div>';
 
     // Task prompt
@@ -322,15 +322,28 @@ async function selectRun(id){
       h+='</div>';
     }
 
-    // Vibe
+    // Vibe + copy
     h+='<div class="vibe-bar">';
     h+='<button class="vibe-btn vibe-approve" onclick="submitVibe(\\''+run.id+'\\',\\'approve\\')">👍 Approve</button>';
     h+='<button class="vibe-btn vibe-reject" onclick="submitVibe(\\''+run.id+'\\',\\'reject\\')">👎 Reject</button>';
+    h+='<button class="vibe-btn" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);margin-left:auto" onclick="copyRunReport(\\''+run.id+'\\')">📋 Copy Report</button>';
     if(vibe)h+='<span class="vibe-current">'+vibe.verdict+(vibe.note?' — '+esc(vibe.note):'')+'</span>';
     h+='</div>';
 
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div class="detail-empty">Error: '+e.message+'</div>'}
+}
+
+function copyRunReport(rid){
+  const el=document.getElementById('detail-panel');
+  if(!el)return;
+  // Build text report from the detail panel content
+  const text=el.innerText.replace(/👍 Approve|👎 Reject|📋 Copy Report/g,'').trim();
+  const header='Run: '+rid+'\\nURL: '+location.href;
+  navigator.clipboard.writeText(header+'\\n\\n'+text).then(()=>{
+    const btn=el.querySelector('[onclick*="copyRunReport"]');
+    if(btn){const orig=btn.textContent;btn.textContent='Copied!';setTimeout(()=>btn.textContent=orig,1500)}
+  });
 }
 
 async function submitVibe(rid,v){
