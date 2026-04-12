@@ -235,6 +235,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     if (terrariumTimer) clearInterval(terrariumTimer);
     if (renderTimer) clearInterval(renderTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    clearActivityTimer();
     closeSocket();
     screen.cleanup();
     process.exit(0);
@@ -257,8 +258,35 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     }
   }
 
+  // Activity timeout: if no WS message arrives within this window, the
+  // connection is considered stale (daemon crashed / port in TIME_WAIT).
+  const ACTIVITY_TIMEOUT_MS = 20_000;
+  const PING_INTERVAL_MS = 10_000;
+  let activityTimer: ReturnType<typeof setTimeout> | null = null;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  function resetActivityTimer(socket: WebSocket): void {
+    if (activityTimer) clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+      if (socket !== ws) return;
+      // No message from daemon for 20s — treat as dead connection.
+      state.connectionStatus = 'disconnected';
+      state.isStale = true;
+      receivingBridgeTimeline = false;
+      render();
+      closeSocket();
+      scheduleReconnect();
+    }, ACTIVITY_TIMEOUT_MS);
+  }
+
+  function clearActivityTimer(): void {
+    if (activityTimer) { clearTimeout(activityTimer); activityTimer = null; }
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+  }
+
   function connect(): void {
     closeSocket();
+    clearActivityTimer();
 
     state.connectionStatus = 'reconnecting';
 
@@ -276,11 +304,17 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       state.connectionStatus = 'connected';
       state.isStale = false;
       state.currentPort = targetPort;
+      resetActivityTimer(socket);
+      // Periodic ping so the daemon sends pong — keeps the activity timer fed.
+      pingTimer = setInterval(() => {
+        try { if (socket === ws && socket.readyState === WebSocket.OPEN) socket.ping(); } catch { /* ignore */ }
+      }, PING_INTERVAL_MS);
       render();
     });
 
     socket.on('message', (data) => {
       if (socket !== ws) return;
+      resetActivityTimer(socket);
       try {
         const event = JSON.parse(data.toString()) as BridgeEvent;
         handleEvent(event);
@@ -289,11 +323,17 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
       }
     });
 
+    socket.on('pong', () => {
+      if (socket !== ws) return;
+      resetActivityTimer(socket);
+    });
+
     socket.on('close', () => {
       if (socket !== ws) return;
+      clearActivityTimer();
       state.connectionStatus = 'disconnected';
       state.isStale = true;
-      receivingBridgeTimeline = false; // Resume local generation on reconnect
+      receivingBridgeTimeline = false;
       render();
       scheduleReconnect();
     });
