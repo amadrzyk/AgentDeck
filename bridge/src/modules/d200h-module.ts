@@ -27,15 +27,36 @@ const POLL_INTERVAL = 500;     // Device detection polling (ms)
 const READ_INTERVAL = 20;      // HID read polling (ms)
 const KEEPALIVE_INTERVAL = 30_000; // Keep-alive interval (ms)
 
-// Button index → AgentDeck command mapping
-const BUTTON_COMMANDS: Record<number, any> = {
+// Single-session deep dive layout (matches computeLayout else branch)
+const SINGLE_SESSION_COMMANDS: Record<number, any> = {
   0: { type: 'mode_toggle' },
-  1: { type: 'session_switch' },
-  2: { type: 'usage_toggle' },
+  1: { type: 'focus_session_index', index: 0 },
+  2: null, // DetailInfo (no action)
   3: { type: 'select_option', index: 0 },
   4: { type: 'select_option', index: 1 },
   5: { type: 'select_option', index: 2 },
   6: { type: 'select_option', index: 3 },
+  7: null, // Model Info
+  8: { type: 'usage_toggle' },
+  9: { type: 'usage_toggle' },
+  10: { type: 'interrupt' },
+};
+
+// Multi-session overview layout (matches computeLayout if branch)
+const MULTI_SESSION_COMMANDS: Record<number, any> = {
+  0: { type: 'mode_toggle' },
+  // Row 0 (sessions 0-3)
+  1: { type: 'focus_session_index', index: 0 },
+  2: { type: 'focus_session_index', index: 1 },
+  3: { type: 'focus_session_index', index: 2 },
+  4: { type: 'focus_session_index', index: 3 },
+  // Row 1 (options 0-3)
+  5: { type: 'select_option', index: 0 },
+  6: { type: 'select_option', index: 1 },
+  7: { type: 'select_option', index: 2 },
+  8: { type: 'select_option', index: 3 },
+  9: null, // Model Info
+  // Row 2
   10: { type: 'interrupt' },
 };
 
@@ -65,7 +86,10 @@ export class D200hModule implements DeviceModule {
   private commandHandler: ((cmd: any) => void) | null = null;
   private lastStateHash = '';
   private lastState: any = null;
+  private lastSessions: any[] = [];
   private connected = false;
+  private isUpdating = false;
+  private pendingUpdate: any = null;
 
   async shouldActivate(config: 'auto' | boolean): Promise<boolean> {
     if (config === false) return false;
@@ -96,7 +120,12 @@ export class D200hModule implements DeviceModule {
     ctx.wsServer.onBroadcast((evt: any) => {
       if (evt?.type === 'state_update') {
         this.lastState = evt;
-        this.updateDisplay(evt);
+        this.updateDisplay({ ...this.lastState, allSessions: this.lastSessions }).catch(() => {});
+      } else if (evt?.type === 'sessions_list') {
+        this.lastSessions = evt.sessions ?? [];
+        if (this.lastState) {
+          this.updateDisplay({ ...this.lastState, allSessions: this.lastSessions }).catch(() => {});
+        }
       }
     });
 
@@ -115,6 +144,12 @@ export class D200hModule implements DeviceModule {
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.readTimer) { clearInterval(this.readTimer); this.readTimer = null; }
     if (this.keepAliveTimer) { clearInterval(this.keepAliveTimer); this.keepAliveTimer = null; }
+
+    if (this.connected) {
+      this.isUpdating = false;
+      this.lastStateHash = '';
+      await this.updateDisplay({ ...this.lastState, state: 'DISCONNECTED', allSessions: this.lastSessions }).catch(() => {});
+    }
 
     this.disconnect();
     this.commandHandler = null;
@@ -232,8 +267,20 @@ export class D200hModule implements DeviceModule {
       if (!event) return;
 
       if (event.type === 'button' && event.data.pressed) {
-        const cmd = BUTTON_COMMANDS[event.data.index];
+        const isMultiSession = this.lastSessions.length > 1;
+        const commands = isMultiSession ? MULTI_SESSION_COMMANDS : SINGLE_SESSION_COMMANDS;
+        let cmd = commands[event.data.index];
+
         if (cmd) {
+          // Flatten dynamic session indices
+          if (cmd.type === 'focus_session_index') {
+            const tgt = this.lastSessions[cmd.index];
+            if (tgt) {
+              cmd = { type: 'focus_session', sessionId: tgt.id };
+            } else {
+              return; // Ignore empty sessions
+            }
+          }
           debug(TAG, `Button ${event.data.index} pressed → ${cmd.type}`);
           this.commandHandler?.(cmd);
         } else {
@@ -253,22 +300,39 @@ export class D200hModule implements DeviceModule {
     }
   }
 
-  private updateDisplay(stateEvt: any): void {
+  private async updateDisplay(stateEvt: any): Promise<void> {
     const hash = stateHash(stateEvt);
     if (hash === this.lastStateHash) return;
+    
+    if (this.isUpdating) {
+      this.pendingUpdate = stateEvt;
+      return;
+    }
+
     this.lastStateHash = hash;
+    this.isUpdating = true;
 
     try {
       const zip = renderDashboardZip(stateEvt);
       const packets = buildZipPackets(zip);
 
       for (const pkt of packets) {
+        if (!this.connected) break;
         this.writeToDevice(pkt);
+        await new Promise(r => setTimeout(r, 8)); // Prevent hardware buffer overflow
       }
 
       debug(TAG, `Display updated: ${zip.length} bytes, ${packets.length} packets`);
     } catch (err) {
       debug(TAG, `Display update failed: ${err}`);
+      this.lastStateHash = ''; // Reset hash so it can retry
+    } finally {
+      this.isUpdating = false;
+      if (this.pendingUpdate) {
+        const next = this.pendingUpdate;
+        this.pendingUpdate = null;
+        void this.updateDisplay(next).catch(() => {});
+      }
     }
   }
 
