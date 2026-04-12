@@ -11,8 +11,12 @@
  * methods still exist but are no-ops, and `initApme()` returns null.
  */
 
+import { writeFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import { debug } from '../logger.js';
 import { ApmeStore } from './store.js';
+import { apmeDashboardHtml } from './dashboard-html.js';
 import { ApmeCollector } from './collector.js';
 import { ApmeRunner } from './runner.js';
 import { ApmeTuner } from './tuner.js';
@@ -45,6 +49,12 @@ export async function initApme(dbPath?: string): Promise<ApmeModule | null> {
   const tuner = new ApmeTuner(store);
   const recommender = new ApmeRecommender(store);
   singleton = { store, collector, runner, tuner, hwSampler, recommender };
+
+  // Write dashboard HTML for Swift daemon to pick up.
+  try {
+    const dataDir = process.env.AGENTDECK_DATA_DIR || join(homedir(), '.agentdeck');
+    writeFileSync(join(dataDir, 'apme-dashboard.html'), apmeDashboardHtml(), 'utf-8');
+  } catch { /* best-effort */ }
 
   // Auto-enqueue eval on run close: collectors call `closeRun()` and we
   // forward the returned runId here when wired into the bridge.
