@@ -226,8 +226,16 @@ final class DaemonServer {
         await displayMonitor.start()
         await displayMonitor.setOnStateChanged { [weak self] displayOn in
             Task { @MainActor in
-                self?.cachedDisplayOn = displayOn
-                self?.broadcastRaw(["type": "display_state", "displayOn": displayOn] as [String: Any])
+                guard let self else { return }
+                self.cachedDisplayOn = displayOn
+                self.broadcastRaw(["type": "display_state", "displayOn": displayOn] as [String: Any])
+                if displayOn {
+                    DaemonLogger.shared.info("Display wake — recovering modules and state")
+                    _ = self.registry.listActive()
+                    self.broadcastSessionsList()
+                    Task { await self.moduleManager.wakeAll() }
+                    self.broadcastStateUpdate()
+                }
             }
         }
 
@@ -1507,7 +1515,8 @@ final class DaemonServer {
         if !sessions.isEmpty {
             DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier1-failed", "Usage Tier 1 failed for all \(sessions.count) siblings", minInterval: 30)
             oauthConnected = usageAPI.hasOAuthToken()
-            if cachedApiUsage != nil { apiUsageStale = true }
+            // Don't mark stale here — usageTick's 10-min TTL handles staleness.
+            // A transient relay failure with fresh cached data isn't stale.
             broadcastUsage()
             return
         }
@@ -1528,7 +1537,8 @@ final class DaemonServer {
         } else {
             DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier3-failed:\(usageAPI.tokenStatus.rawValue)", "Usage Tier 3 failed (token: \(usageAPI.tokenStatus.rawValue))", minInterval: 30)
             oauthConnected = usageAPI.hasOAuthToken()
-            if cachedApiUsage != nil { apiUsageStale = true }
+            // Don't mark stale here — usageTick's 10-min TTL handles staleness.
+            // A transient API failure with fresh cached data isn't stale.
             broadcastUsage()
         }
     }

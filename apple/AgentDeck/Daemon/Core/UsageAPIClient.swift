@@ -68,7 +68,8 @@ final class UsageAPIClient: Sendable {
     // MARK: - Fetch
 
     func fetchUsage() async -> ApiUsageData? {
-        // Check file cache first
+        // Check file cache first — keep stale data as fallback for network failures
+        var staleFallback: ApiUsageData?
         if let cached = readFileCache() {
             let age = Date().timeIntervalSince1970 - cached.fetchedAt
             if age < Self.fileCacheTTL {
@@ -76,6 +77,7 @@ final class UsageAPIClient: Sendable {
                 return cached.data
             }
             DaemonLogger.shared.debug("UsageAPI", "File cache stale (age \(Int(age))s)")
+            staleFallback = cached.data
         }
 
         // Check backoff
@@ -83,7 +85,7 @@ final class UsageAPIClient: Sendable {
             let backoff = getBackoffSeconds()
             if backoff > 0 {
                 DaemonLogger.shared.debug("UsageAPI", "Backoff active (\(consecutiveFailures) failures, \(Int(backoff))s remaining)")
-                return nil
+                return staleFallback
             }
         }
 
@@ -91,7 +93,7 @@ final class UsageAPIClient: Sendable {
         guard let token = getOAuthToken() else {
             lastTokenStatus = .missing
             DaemonLogger.shared.debug("UsageAPI", "OAuth token missing (keychain lookup failed)")
-            return nil
+            return staleFallback
         }
 
         // Check token expiry
@@ -99,12 +101,12 @@ final class UsageAPIClient: Sendable {
             if Date().timeIntervalSince1970 > (Double(expiresAt) / 1000.0 - Self.tokenExpiryMargin) {
                 lastTokenStatus = .expired
                 DaemonLogger.shared.debug("UsageAPI", "OAuth token expired")
-                return nil
+                return staleFallback
             }
         }
 
         // Fetch from API
-        guard let apiURL = URL(string: Self.usageAPIURL) else { return nil }
+        guard let apiURL = URL(string: Self.usageAPIURL) else { return staleFallback }
         var request = URLRequest(url: apiURL)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -113,7 +115,7 @@ final class UsageAPIClient: Sendable {
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return nil }
+            guard let http = response as? HTTPURLResponse else { return staleFallback }
 
             if http.statusCode == 200,
                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -151,19 +153,19 @@ final class UsageAPIClient: Sendable {
                     }
                     DaemonLogger.shared.debug("UsageAPI", "Rate limited (429), Retry-After: \(retrySec)s")
                 }
-                return nil
+                return staleFallback
             } else {
                 consecutiveFailures += 1
                 lastBackoffStart = Date()
                 if http.statusCode == 401 || http.statusCode == 403 { lastTokenStatus = .expired }
                 DaemonLogger.shared.debug("UsageAPI", "API fetch failed: HTTP \(http.statusCode)")
-                return nil
+                return staleFallback
             }
         } catch {
             consecutiveFailures += 1
             lastBackoffStart = Date()
             DaemonLogger.shared.debug("UsageAPI", "API fetch error: \(error.localizedDescription)")
-            return nil
+            return staleFallback
         }
     }
 

@@ -4,6 +4,7 @@
 import Foundation
 import Combine
 #if os(macOS)
+import AppKit
 import IOKit
 import IOKit.ps
 
@@ -53,6 +54,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     private var wakeNotificationPort: IONotificationPortRef?
     private var wakeNotifier: io_object_t = 0
     private var wakeRootDomain: io_object_t = 0
+    private var displayWakeObserver: NSObjectProtocol?
     #endif
 
     // MARK: - Connection Waterfall State
@@ -194,10 +196,24 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         self.wakeNotificationPort = port
         self.wakeNotifier = notifier
         self.wakeRootDomain = rootDomain
-        print("[Lifecycle] system wake listener installed")
+
+        // Display wake (monitor on) — separate from system wake
+        displayWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleSystemWake()
+        }
+
+        print("[Lifecycle] system + display wake listener installed")
     }
 
     private func stopSystemWakeListener() {
+        if let obs = displayWakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+            displayWakeObserver = nil
+        }
         if wakeNotifier != 0 {
             IOObjectRelease(wakeNotifier)
             wakeNotifier = 0

@@ -283,6 +283,7 @@ actor ESP32Serial {
         }
 
         guard let conn = openPort(port) else { return }
+        lastReadError = nil
         // IMPORTANT: append to connections array BEFORE starting read thread,
         // otherwise handleReadData won't find the connection by port name
         connections.append(conn)
