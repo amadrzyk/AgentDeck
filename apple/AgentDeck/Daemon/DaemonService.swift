@@ -50,6 +50,9 @@ final class DaemonService: ObservableObject {
     /// Set when bind retries are exhausted; cleared on successful start.
     @Published private(set) var bindFailureReason: String?
 
+    /// Processes that may be blocking the daemon port. Populated on bind failure.
+    @Published private(set) var blockingProcesses: [BlockingProcess] = []
+
     /// True while the daemon is running on a fallback port (user's configured
     /// port was held by something we can't terminate). Surface this in the UI.
     @Published private(set) var isOnFallbackPort = false
@@ -80,7 +83,7 @@ final class DaemonService: ObservableObject {
         guard !isRunning, !isUsingExternalDaemon, !isStarting else { return }
         isStarting = true
         errorMessage = nil
-        bindFailureReason = nil
+        bindFailureReason = nil; blockingProcesses = []
 
         let port = effectivePort
         Task {
@@ -161,7 +164,7 @@ final class DaemonService: ObservableObject {
         sessionOverridePort = nil
         failedBindPorts.removeAll()
         isOnFallbackPort = false
-        bindFailureReason = nil
+        bindFailureReason = nil; blockingProcesses = []
         errorMessage = nil
         start()
     }
@@ -183,7 +186,7 @@ final class DaemonService: ObservableObject {
 
     func startBundledD200HHelper() async {
         errorMessage = nil
-        bindFailureReason = nil
+        bindFailureReason = nil; blockingProcesses = []
 
         let targetPort = Self.promotionTargetPort(currentPort: port, effectivePort: effectivePort)
         let registry = SessionRegistry.shared
@@ -331,7 +334,7 @@ final class DaemonService: ObservableObject {
         if isOnFallbackPort {
             bindFailureReason = "Daemon moved to fallback port \(actualPort) because \(configuredPort) was held by another process. Clients will rediscover via mDNS."
         } else {
-            bindFailureReason = nil
+            bindFailureReason = nil; blockingProcesses = []
         }
     }
 
@@ -495,6 +498,7 @@ final class DaemonService: ObservableObject {
             }
             errorMessage = "Daemon failed to bind: \(error.localizedDescription)"
             bindFailureReason = reason
+            blockingProcesses = PortDiagnostics.collectBlockers(port: stuckPort)
             DaemonLogger.shared.error("\(errorMessage!) — \(reason)")
             listenerFailureRetries = 0
             squatterCleanupAttempted = false

@@ -275,6 +275,60 @@ struct SettingsScreen: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(TerrariumHUD.ledRed)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if !daemonService.blockingProcesses.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Blocking Processes")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                        ForEach(daemonService.blockingProcesses) { proc in
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(proc.isAlive ? (proc.isZombie ? .orange : .red) : .gray)
+                                    .frame(width: 6, height: 6)
+                                Text("PID \(proc.id)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                Text(proc.name)
+                                    .font(.system(size: 10))
+                                if let project = proc.project {
+                                    Text("(\(project))")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(TerrariumHUD.subtext)
+                                }
+                                Text(":\(proc.port)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(TerrariumHUD.subtext)
+                                Spacer()
+                                Text(proc.statusLabel)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(TerrariumHUD.subtext)
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(6)
+
+                    HStack(spacing: 8) {
+                        Button("Clean Up & Retry") {
+                            let result = PortDiagnostics.cleanup()
+                            if result.killed > 0 || result.pruned > 0 {
+                                daemonService.start()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        let cmd = PortDiagnostics.terminalCommand(for: daemonService.blockingProcesses)
+                        if !cmd.isEmpty {
+                            Button("Copy Terminal Command") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(cmd, forType: .string)
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Copies `\(cmd)` to clipboard — paste in Terminal to kill external processes")
+                        }
+                    }
+                }
             } else if let error = daemonService.errorMessage {
                 Text(error)
                     .font(.system(size: 11, design: .monospaced))
