@@ -408,12 +408,29 @@ export async function callJudge(prompt: string, judgeCfg: ApmeJudgeConfig): Prom
 async function callMlx(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
   // MLX server speaks OpenAI chat-completions. Default endpoint matches
   // existing mlx-probe.ts expectations.
-  const url = cfg.endpoint ?? 'http://127.0.0.1:8800/v1/chat/completions';
+  // Try both /v1/chat/completions (mlx-lm) and /chat/completions (mlx-vlm).
+  const url = cfg.endpoint ?? 'http://127.0.0.1:8800/chat/completions';
+  // Auto-detect model if not explicitly configured — query /v1/models or /models
+  let model = cfg.model;
+  if (!model || model === 'qwen3-30b') {
+    try {
+      const base = (cfg.endpoint ?? 'http://127.0.0.1:8800').replace(/\/chat\/completions$/, '').replace(/\/v1\/chat\/completions$/, '');
+      for (const path of ['/v1/models', '/models']) {
+        const mResp = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+        if (mResp?.ok) {
+          const mJson = await mResp.json() as { data?: Array<{ id?: string }> };
+          const first = mJson.data?.find(m => m.id && !m.id.toLowerCase().includes('nanollava'))?.id;
+          if (first) { model = first; break; }
+        }
+      }
+    } catch { /* use configured model */ }
+  }
+
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: cfg.model,
+      model,
       messages: [
         { role: 'system', content: 'You are an exacting code evaluator. Reply with strict JSON only.' },
         { role: 'user', content: prompt },
