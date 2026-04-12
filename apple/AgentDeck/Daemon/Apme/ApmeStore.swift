@@ -215,6 +215,10 @@ final class ApmeStore: @unchecked Sendable {
         sqlite3_step(stmt)
     }
 
+    func listTurns(runId: String) -> [[String: Any]] {
+        return query("SELECT * FROM turns WHERE run_id = '\(runId.replacingOccurrences(of: "'", with: "''"))' ORDER BY turn_index ASC")
+    }
+
     // MARK: - Steps
 
     func insertStep(runId: String, ts: Int, kind: String, toolName: String?, payload: String) {
@@ -417,7 +421,11 @@ final class ApmeStore: @unchecked Sendable {
             hwProfile: d["hw_profile"] as? String,
             taskSignals: d["task_signals"] as? String,
             taskCategory: d["task_category"] as? String,
-            taskCategorySource: d["task_category_source"] as? String
+            taskCategorySource: d["task_category_source"] as? String,
+            outcome: d["outcome"] as? String,
+            outcomeConfidence: d["outcome_confidence"] as? String,
+            efficiencyJson: d["efficiency_json"] as? String,
+            compositeScore: d["composite_score"] as? Double
         )
     }
 
@@ -522,6 +530,10 @@ struct ApmeRun {
     var taskSignals: String?
     var taskCategory: String?
     var taskCategorySource: String?
+    var outcome: String?
+    var outcomeConfidence: String?
+    var efficiencyJson: String?
+    var compositeScore: Double?
 }
 
 struct ApmeStep {

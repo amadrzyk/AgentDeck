@@ -74,7 +74,7 @@ tr.selected td{background:#1e3a5f}
 <!-- Runs panel -->
 <div class="panel visible" id="panel-runs">
   <table id="runs-table">
-    <thead><tr><th>ID</th><th>Agent</th><th>Model</th><th>Project</th><th>Category</th><th>Score</th><th>Outcome</th><th>Task</th><th>Dur</th></tr></thead>
+    <thead><tr><th>ID</th><th>Agent</th><th>Model</th><th>Project</th><th>Category</th><th>Score</th><th>Outcome</th><th>Task</th><th>Time</th></tr></thead>
     <tbody id="runs-body"></tbody>
   </table>
   <div class="detail" id="run-detail"></div>
@@ -130,9 +130,10 @@ async function loadRuns() {
     const runs = d.runs || [];
     const tbody = document.getElementById('runs-body');
     tbody.innerHTML = runs.map(r => {
-      const score = r.overallScore;
+      const score = r.overallScore ?? r.compositeScore;
       const dur = r.endedAt && r.startedAt ? r.endedAt - r.startedAt : null;
       const task = r.taskPrompt ? r.taskPrompt.slice(0, 60) : '—';
+      const time = r.startedAt ? new Date(r.startedAt).toLocaleTimeString() : '—';
       const sel = r.id === selectedRunId ? ' class="selected"' : '';
       return '<tr' + sel + ' onclick="selectRun(\\'' + r.id + '\\')">' +
         '<td>' + r.id.slice(0,8) + '</td>' +
@@ -143,7 +144,7 @@ async function loadRuns() {
         '<td>' + fmtScore(score) + '</td>' +
         '<td>' + fmtOutcome(r.outcome) + '</td>' +
         '<td title="' + esc(r.taskPrompt||'') + '">' + esc(task) + '</td>' +
-        '<td>' + fmtDur(dur) + '</td></tr>';
+        '<td>' + time + ' ' + fmtDur(dur) + '</td></tr>';
     }).join('');
     if (runs.length === 0) tbody.innerHTML = '<tr><td colspan="9" class="empty">No runs yet</td></tr>';
     document.getElementById('status').textContent = runs.length + ' runs — last refresh ' + new Date().toLocaleTimeString();
@@ -160,7 +161,9 @@ async function selectRun(id) {
   el.classList.add('visible');
   el.innerHTML = '<div class="empty">Loading...</div>';
   try {
-    const r = await fetch(BASE + '/apme/run/' + id);
+    // Try Node.js path-param style first, fall back to query-param for Swift daemon.
+    let r = await fetch(BASE + '/apme/run/' + id);
+    if (!r.ok) r = await fetch(BASE + '/apme/run?id=' + id);
     const d = await r.json();
     const run = d.run;
     const evals = d.evals || [];

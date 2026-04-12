@@ -41,7 +41,9 @@ enum ApmeHttpRoutes {
                 if let v = run.costUsd { dict["costUsd"] = v }
                 if let v = run.exitCode { dict["exitCode"] = v }
                 if let v = run.taskCategory { dict["taskCategory"] = v }
-                dict["overallScore"] = overall?.score as Any
+                if let v = run.outcome { dict["outcome"] = v }
+                if let v = run.compositeScore { dict["compositeScore"] = v }
+                dict["overallScore"] = overall?.score ?? run.compositeScore as Any
                 dict["evals"] = evals.map { e -> [String: Any] in
                     var ed: [String: Any] = ["layer": e.layer, "metric": e.metric, "score": e.score, "createdAt": e.createdAt]
                     if let v = e.judgeModel { ed["judgeModel"] = v }
@@ -50,6 +52,41 @@ enum ApmeHttpRoutes {
                 return dict
             }
             return .json(["runs": result])
+        }
+
+        // Run detail — uses query param ?id= because HTTPServer only does exact path match.
+        // Dashboard JS tries /apme/run/<id> first (Node.js), falls back to /apme/run?id=<id> (Swift).
+        await httpServer.get("/apme/run") { request in
+            let url = URLComponents(string: "http://localhost\(request.path)")
+            guard let id = url?.queryItems?.first(where: { $0.name == "id" })?.value else {
+                return .json(["error": "missing ?id= parameter"], status: 400)
+            }
+            guard let run = store.getRun(id: id) else {
+                return .json(["error": "run not found"], status: 404)
+            }
+            let evals = store.listEvalsForRun(run.id)
+            let steps = store.listSteps(runId: run.id)
+            let turns = store.listTurns(runId: run.id)
+            var runDict: [String: Any] = [
+                "id": run.id, "session_id": run.sessionId, "agent_type": run.agentType,
+                "started_at": run.startedAt,
+            ]
+            if let v = run.modelId { runDict["model_id"] = v }
+            if let v = run.projectName { runDict["project_name"] = v }
+            if let v = run.taskPrompt { runDict["task_prompt"] = v }
+            if let v = run.endedAt { runDict["ended_at"] = v }
+            if let v = run.taskCategory { runDict["task_category"] = v }
+            if let v = run.outcome { runDict["outcome"] = v }
+            if let v = run.outcomeConfidence { runDict["outcome_confidence"] = v }
+            if let v = run.efficiencyJson { runDict["efficiency_json"] = v }
+            if let v = run.compositeScore { runDict["composite_score"] = v }
+            let evalsArr = evals.map { e -> [String: Any] in
+                var ed: [String: Any] = ["layer": e.layer, "metric": e.metric, "score": e.score, "createdAt": e.createdAt]
+                if let v = e.raw { ed["raw"] = v }
+                if let v = e.judgeModel { ed["judgeModel"] = v }
+                return ed
+            }
+            return .json(["run": runDict, "evals": evalsArr, "steps": steps.count, "turns": turns, "vibe": NSNull()])
         }
 
         await httpServer.get("/apme/scorecard") { _ in
