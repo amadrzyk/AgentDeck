@@ -82,10 +82,21 @@ function extractZip(zipPath, extractDir) {
   execFileSync('/usr/bin/unzip', ['-q', zipPath, '-d', extractDir], { stdio: 'pipe' });
 }
 
-function iconNameForCell(col, row) {
+function fallbackIconNameForCell(col, row) {
   if (row === 2 && col === 3) return 'btn13L.png';
   if (row === 2 && col === 4) return 'btn13R.png';
   return `btn${row * 5 + col}.png`;
+}
+
+function manifestViewForCell(manifest, col, row) {
+  const button = manifest?.[`${col}_${row}`] ?? {};
+  return Array.isArray(button.ViewParam) ? button.ViewParam[0] : button.ViewParam;
+}
+
+function iconPathForCell(manifest, col, row) {
+  const icon = manifestViewForCell(manifest, col, row)?.Icon;
+  if (icon) return icon;
+  return `icons/${fallbackIconNameForCell(col, row)}`;
 }
 
 function labelForCell(col, row) {
@@ -101,7 +112,7 @@ function labelSvg(label) {
   </svg>`);
 }
 
-async function buildContactSheet(extractDir, outPath) {
+async function buildContactSheet(extractDir, manifest, outPath) {
   const cellWidth = ICON_SIZE + GAP;
   const cellHeight = ICON_SIZE + LABEL_HEIGHT + GAP;
   const width = COLS * ICON_SIZE + (COLS + 1) * GAP;
@@ -110,8 +121,7 @@ async function buildContactSheet(extractDir, outPath) {
 
   for (let row = 0; row < ROWS; row += 1) {
     for (let col = 0; col < COLS; col += 1) {
-      const iconName = iconNameForCell(col, row);
-      const iconPath = join(extractDir, 'icons', iconName);
+      const iconPath = join(extractDir, iconPathForCell(manifest, col, row));
       const left = GAP + col * cellWidth;
       const top = GAP + row * cellHeight;
       if (existsSync(iconPath)) {
@@ -140,7 +150,7 @@ function htmlForPreview(zipPath, manifest, contactSheetName) {
     for (let col = 0; col < COLS; col += 1) {
       const key = `${col}_${row}`;
       const button = manifest?.[key] ?? {};
-      const view = Array.isArray(button.ViewParam) ? button.ViewParam[0] : button.ViewParam;
+      const view = manifestViewForCell(manifest, col, row);
       rows.push(`<tr>
         <td>${key}</td>
         <td>${view?.Icon ?? ''}</td>
@@ -199,7 +209,7 @@ async function main() {
   const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
   const contactSheetName = 'd200h-contact-sheet.png';
   const contactSheetPath = join(args.outDir, contactSheetName);
-  await buildContactSheet(extractDir, contactSheetPath);
+  await buildContactSheet(extractDir, manifest, contactSheetPath);
 
   writeFileSync(join(args.outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   writeFileSync(join(args.outDir, 'preview.html'), htmlForPreview(zipPath, manifest, contactSheetName));

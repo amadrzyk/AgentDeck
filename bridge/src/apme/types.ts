@@ -57,7 +57,7 @@ export interface ApmeArtifactRow {
 export interface ApmeEvalRowDb {
   id?: number;
   runId: string;
-  layer: 'deterministic' | 'llm_judge' | 'vibe';
+  layer: 'deterministic' | 'llm_judge' | 'vibe' | 'turn_judge';
   metric: string;
   score: number;
   raw?: string | null;       // JSON

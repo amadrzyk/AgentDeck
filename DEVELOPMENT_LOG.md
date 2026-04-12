@@ -2,6 +2,66 @@
 
 ---
 
+## 2026-04-13 — Fix missing model names in OpenClaw/OpenCode sessions
+
+### 문제
+macOS Dashboard에서 OpenClaw 모델명이 전혀 표시되지 않음. Android/iOS에서도 세션 목록의 OpenClaw 모델명이 빈칸.
+
+**root causes**:
+1. (RC-1) session-aggregator.ts의 own-session 엔트리가 modelName을 포함하지 않아서 sessions_list 수신 시 항상 undefined → 모든 adapter 영향
+2. (RC-2) OpenCode는 첫 assistant message 전까지 modelID를 얻을 수 없음 (by design — API에서 session 객체에 modelID 미노출)
+3. (RC-3) OpenClaw catalog probe(`openclaw models list --json`) 실패 시 emitModelCatalog()에서 null 반환 → model_info 발행 안 됨
+
+### 해결
+
+**Fix 1** (RC-1): session-aggregator.ts + bridge-core.ts
+- `enrichSessionsWithState()` 와 `buildEnrichedSessionsList()` 에 `ownModelName?: string` 파라미터 추가
+- self-entry 생성 시 modelName 포함: `{ ...base, state: ownState, modelName: ownModelName }`
+- bridge-core.ts의 두 호출부에서 `snapshot.modelName ?? undefined` 전달
+
+**Fix 2** (RC-2): OpenCode — 현재 behavior 유지
+- OpenCode API가 session의 model을 미노출하므로 현 design (first message 이후 modelID 수신) 이 최적
+- Fix 1의 sessions_list 개선으로 자신 세션의 modelName도 state_update에 반영되면 Dashboard에 나타남
+
+**Fix 3** (RC-3): openclaw.ts — fallback modelId 추출
+- `chat.final` event handler 에서 payload의 `model` 또는 `modelId` 필드 검사
+- 있으면 model_info 발행 (catalog probe 실패 시 최소한 첫 response 이후 model명 표시됨)
+
+### 검증
+- session-aggregator tests: ✅ 6 passed
+- bridge-core-sessions tests: ✅ 2 passed
+- adapter tests: ✅ 93 passed
+- output-parser tests: ✅ 221 passed
+- TypeScript build: ✅ all packages compiled
+
+---
+
+## 2026-04-12 — Creature simulator parity + D200H v8 readability
+
+### 문제
+- `tools/creature-simulator`의 e-ink/ESP32/TC001/D200H preview가 실제 렌더러가 아니라 HTML 전용 근사치라 drift 발생.
+- e-ink preview는 1872x1404 기준 높이 비례 폰트가 과대 적용되어 좌측 텍스트와 레이아웃이 실제 Android Compose 화면과 다름.
+- TC001 preview에 실제 AGENTS 페이지에는 없는 agent 하단 상태 점이 표시됨.
+- D200H 세션/usage 텍스트가 실기기에서 작고, usage 색상 룰이 Pixoo/TC001 계열과 다름.
+
+### 해결
+- D200H renderer rev를 `stock-safe-v8`로 갱신하고 세션 키 텍스트/상태 라벨을 확대, idle 상태에서도 agent 브랜드 스트립을 표시.
+- D200H usage merged PNG를 `LIMITS` 중심 레이아웃으로 재구성하고 blue/teal/amber/red 사용량 색상 룰로 통일.
+- TUI simulator data를 160x40 기준 actual `renderDashboard()` 출력으로 재생성하고 ANSI 색 span을 보존해 실제 terminal 색상과 더 가깝게 표시.
+- e-ink simulator preview를 capped font 기반 패널로 교체하여 실제 Compose 화면과 비슷한 밀도 유지.
+- ESP32 simulator preview를 실제 LVGL HUD panel 크기/위치에 맞춰 landscape/portrait/round를 분기.
+- TC001 simulator sprite와 layout을 `matrix_pages.cpp` 기준으로 맞추고 AGENTS 페이지 하단 dot 제거.
+
+### 검증
+- `node --check scripts/render-creature-simulator.mjs` 성공.
+- `swiftc -parse apple/AgentDeck/Daemon/Modules/D200hHidModule.swift` 성공.
+- `pnpm --filter @agentdeck/bridge typecheck` 성공.
+- `playwright screenshot --full-page http://127.0.0.1:8799/index.html /tmp/agentdeck-creature-simulator-after-tui.png` 성공.
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath /tmp/AgentDeckDerivedDataD200HVisualParity build` 성공.
+- D200H 실기 송신 덤프에서 `icons/btn0-stock-safe-v8-*.png`, `icons/btn13-wide-stock-safe-v8-*.png` 생성 확인.
+
+---
+
 ## 2026-04-12 — APME (Agent Performance Monitoring & Evaluation) module
 
 ### 문제

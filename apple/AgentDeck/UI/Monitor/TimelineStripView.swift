@@ -231,6 +231,7 @@ struct TimelineStripView: View {
         case .error: "ERR"
         case .scheduled: "SCHED"
         case .userAction: "USER"
+        case .evalResult: "EVAL"
         }
     }
 }
@@ -246,6 +247,7 @@ func timelineTypeColor(for type: TimelineEntryType) -> Color {
     case .scheduled: TerrariumHUD.subtext
     case .userAction: Color(red: 0.231, green: 0.51, blue: 0.965) // Blue
     case .memoryRecall: TerrariumHUD.claudeBody
+    case .evalResult: TerrariumHUD.ledAmber
     }
 }
 
@@ -270,5 +272,6 @@ func timelineTypeIcon(for type: TimelineEntryType, status: String? = nil) -> Str
     case .error: "✗"
     case .scheduled: "⏰"
     case .userAction: "☞"
+    case .evalResult: "★"
     }
 }

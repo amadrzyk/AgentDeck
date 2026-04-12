@@ -103,7 +103,7 @@ export function renderSessionSlot(
 
   // Simplified Agent watermark at bottom-right
   // agentLogoIcon renders at x,y with given width/height
-  const watermark = `<g transform="translate(90, 86)" opacity="${isIdle ? '0.2' : '0.12'}">
+  const watermark = `<g transform="translate(90, 86)" opacity="${isIdle ? '0.46' : '0.34'}">
     ${agentLogoIcon(agent, 40, 1, 0, 0)}
   </g>`;
   
@@ -214,7 +214,7 @@ export function renderDetailInfo(session: SessionInfo | undefined, state: State,
     </linearGradient>
   `;
 
-  const watermark = `<g transform="translate(90, 86)" opacity="0.15">
+  const watermark = `<g transform="translate(90, 86)" opacity="0.36">
     ${agentLogoIcon(agent, 40, 1, 0, 0)}
   </g>`;
 
@@ -294,15 +294,20 @@ export function renderInfoSlot(label: string, subtitle?: string): string {
 // ---- SVG Frame ----
 
 export function svgFrame(bgColor: string, innerElements: string): string {
-  const depthBands = [
-    `<rect x="0" y="0" width="${SIZE}" height="34" rx="12" fill="#ffffff" opacity="0.08"/>`,
-    `<rect x="0" y="100" width="${SIZE}" height="44" rx="12" fill="#000000" opacity="0.12"/>`
-  ].join('');
+  // Use a random ID to prevent SVG constraint clashes
+  const gradId = 'frame-bg-' + Math.floor(Math.random() * 1000000);
+  const defs = `
+    <linearGradient id="${gradId}" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="${bgColor}"/>
+      <stop offset="100%" stop-color="#0A0A0E"/>
+    </linearGradient>
+  `;
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">`,
-    `<rect width="${SIZE}" height="${SIZE}" rx="12" fill="${bgColor}"/>`,
-    depthBands,
+    `<defs>${defs}</defs>`,
+    `<rect width="${SIZE}" height="${SIZE}" rx="16" fill="url(#${gradId})"/>`,
+    `<rect x="8" y="8" width="128" height="128" rx="12" fill="#2C2C2E" opacity="0.6"/>`,
     innerElements,
     `</svg>`,
   ].join('');

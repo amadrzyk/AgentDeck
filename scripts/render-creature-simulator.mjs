@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderFrame, resetDirector } from '../bridge/dist/pixoo/pixoo-renderer.js';
+import { renderSessionSlot } from '../shared/dist/svg-renderers/session-slot-renderer.js';
 import {
   initTerrarium,
   setOctopi,
@@ -100,6 +101,19 @@ function renderPixooData() {
   return result;
 }
 
+function renderStreamDeckData() {
+  const result = {};
+  for (const agent of Object.keys(AGENTS)) {
+    for (const state of STATES) {
+      const session = buildSessions(agent, state)[0];
+      result[`${agent}:${state}`] = {
+        svg: renderSessionSlot(session, true, 36, session.projectName),
+      };
+    }
+  }
+  return result;
+}
+
 function stripAnsi(str) {
   return str.replace(
     /[\u001B\u009B][[\]()#;?]*(?:(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~])/g,
@@ -107,10 +121,55 @@ function stripAnsi(str) {
   );
 }
 
-function ansiScreenToLines(text, cols, rows) {
-  const screen = Array.from({ length: rows }, () => Array(cols).fill(' '));
+function ansiColorFromCode(code) {
+  const palette = {
+    30: '#111827',
+    31: '#ef4444',
+    32: '#22c55e',
+    33: '#f59e0b',
+    34: '#3b82f6',
+    35: '#a855f7',
+    36: '#06b6d4',
+    37: '#d1d5db',
+    90: '#6b7280',
+    91: '#f87171',
+    92: '#4ade80',
+    93: '#fcd34d',
+    94: '#60a5fa',
+    95: '#c084fc',
+    96: '#67e8f9',
+    97: '#f9fafb',
+  };
+  return palette[code] || null;
+}
+
+function applySgr(params, currentColor) {
+  const parts = params === '' ? [0] : params.split(';').map((part) => Number(part || 0));
+  let color = currentColor;
+  for (let p = 0; p < parts.length; p++) {
+    const code = parts[p];
+    if (code === 0 || code === 39) {
+      color = null;
+    } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+      color = ansiColorFromCode(code);
+    } else if (code === 38 && parts[p + 1] === 2) {
+      const r = parts[p + 2];
+      const g = parts[p + 3];
+      const b = parts[p + 4];
+      if ([r, g, b].every((v) => Number.isFinite(v))) {
+        color = `#${[r, g, b].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('')}`;
+      }
+      p += 4;
+    }
+  }
+  return color;
+}
+
+function ansiScreenToFrame(text, cols, rows) {
+  const screen = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({ ch: ' ', color: null })));
   let row = 0;
   let col = 0;
+  let color = null;
   let i = 0;
 
   while (i < text.length) {
@@ -125,8 +184,10 @@ function ansiScreenToLines(text, cols, rows) {
         row = Math.max(0, Math.min(rows - 1, Number(r) - 1));
         col = Math.max(0, Math.min(cols - 1, Number(c) - 1));
       } else if (final === 'K' && params === '2') {
-        screen[row].fill(' ');
+        screen[row] = Array.from({ length: cols }, () => ({ ch: ' ', color: null }));
         col = 0;
+      } else if (final === 'm') {
+        color = applySgr(params, color);
       }
       i = j + 1;
       continue;
@@ -138,13 +199,43 @@ function ansiScreenToLines(text, cols, rows) {
       continue;
     }
     if (row >= 0 && row < rows && col >= 0 && col < cols) {
-      screen[row][col] = ch;
+      screen[row][col] = { ch, color };
     }
     col++;
     i++;
   }
 
-  return screen.map((line) => line.join('').replace(/\s+$/g, ''));
+  const lines = [];
+  const spans = [];
+  for (const line of screen) {
+    const last = line.findLastIndex((cell) => cell.ch !== ' ');
+    if (last < 0) {
+      lines.push('');
+      spans.push([]);
+      continue;
+    }
+    lines.push(line.slice(0, last + 1).map((cell) => cell.ch).join(''));
+
+    const rowSpans = [];
+    let start = 0;
+    let textRun = '';
+    let runColor = line[0].color;
+    for (let x = 0; x <= last; x++) {
+      const cell = line[x];
+      if (cell.color !== runColor) {
+        if (textRun.trim()) rowSpans.push({ x: start, text: textRun, color: runColor });
+        start = x;
+        textRun = cell.ch;
+        runColor = cell.color;
+      } else {
+        textRun += cell.ch;
+      }
+    }
+    if (textRun.trim()) rowSpans.push({ x: start, text: textRun, color: runColor });
+    spans.push(rowSpans);
+  }
+
+  return { lines, spans };
 }
 
 function renderTuiData() {
@@ -164,8 +255,8 @@ function renderTuiData() {
         setCrayfish(ctx, true, agent === 'openclaw' && state === 'working', 'OpenClaw', false);
         setVoiceAssistantState(ctx, 'disabled');
         for (let frame = 0; frame < 36; frame++) updateTerrarium(ctx, frame);
-        const cols = 120;
-        const rows = 30;
+        const cols = 160;
+        const rows = 40;
         const terrariumLines = renderTerrariumFrame(ctx, cols - Math.max(20, Math.floor(cols * 0.22)) - 3, Math.max(3, Math.floor((rows - 3) * 0.42)), 36);
         const dashboardState = {
           state: simStateToBridge(state),
@@ -197,8 +288,8 @@ function renderTuiData() {
           voiceAssistantResponseText: null,
         };
         const ansi = renderDashboard(dashboardState, cols, rows, terrariumLines, 36, 0);
-        const lines = ansiScreenToLines(ansi, cols, rows);
-        result[`${agent}:${state}`] = { width: cols, height: rows, lines };
+        const frame = ansiScreenToFrame(ansi, cols, rows);
+        result[`${agent}:${state}`] = { width: cols, height: rows, ...frame };
       }
     }
     return result;
@@ -234,6 +325,7 @@ function renderTuiTerrariumData() {
 
 const simulatorData = {
   pixoo: renderPixooData(),
+  streamDeck: renderStreamDeckData(),
   tui: renderTuiData(),
   tuiTerrarium: renderTuiTerrariumData(),
 };

@@ -344,6 +344,7 @@ private fun typeIcon(type: String, status: String? = null): String = when (type)
     "scheduled" -> "⏰"
     "user_action" -> "☞"
     "state_change" -> "△"
+    "eval_result" -> "★"
     else -> "·"
 }
 
@@ -354,7 +355,7 @@ private fun typeColor(type: String) = when (type) {
     "memory_recall" -> TerrariumColors.ClaudeBody
     "chat_start", "chat_end" -> TerrariumColors.HUDText
     "error" -> TerrariumColors.LEDRed
-    "state_change" -> TerrariumColors.LEDAmber
+    "state_change", "eval_result" -> TerrariumColors.LEDAmber
     else -> TerrariumColors.HUDSubtext
 }
 
@@ -379,5 +380,6 @@ private fun formatType(type: String): String = when (type) {
     "scheduled" -> "SCHED"
     "user_action" -> "USER"
     "state_change" -> "STATE"
+    "eval_result" -> "EVAL"
     else -> type.uppercase().take(5)
 }

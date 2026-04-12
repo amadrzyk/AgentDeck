@@ -69,10 +69,25 @@ const OUTCOME_SCORES: Record<Outcome, number> = {
   ab_loser: 0.1,
 };
 
+// Categories where success is measured by response quality, not git commits.
+const NON_CODE_CATEGORIES = new Set(['conversation', 'planning', 'research', 'review']);
+
 export function detectOutcome(store: ApmeStore, run: ApmeRunRow): OutcomeResult {
   if (!run.endedAt) return { outcome: 'pending', confidence: 'low', reason: 'run still in progress' };
 
   const durationSec = (run.endedAt - run.startedAt) / 1000;
+
+  // Non-code categories: response completion = success (no git needed)
+  if (run.taskCategory && NON_CODE_CATEGORIES.has(run.taskCategory)) {
+    const turns = store.listTurns(run.id);
+    if (turns.length > 0) {
+      return { outcome: 'committed', confidence: 'high', reason: `${run.taskCategory} session completed — ${turns.length} turn(s)` };
+    }
+    if (durationSec < 10) {
+      return { outcome: 'interrupted', confidence: 'medium', reason: `very short ${run.taskCategory} session (${Math.round(durationSec)}s)` };
+    }
+    return { outcome: 'exploratory', confidence: 'low', reason: `${run.taskCategory} session with no captured turns` };
+  }
 
   // 1. Check git diff — did the session produce a commit?
   const hasCommit = run.gitBefore && run.gitAfter && run.gitBefore !== run.gitAfter;
@@ -272,6 +287,22 @@ export function evaluateOutcome(store: ApmeStore, runId: string): {
 
   debug('APME', `outcome ${runId.slice(0, 8)}: ${outcome.outcome}(${outcome.confidence}) composite=${composite.composite}`);
   return { outcome, efficiency, composite };
+}
+
+/** Lightweight composite re-computation — called after judge evals are inserted
+ *  so the judge contribution is reflected without re-detecting outcome/efficiency. */
+export function recomputeComposite(store: ApmeStore, runId: string): void {
+  const run = store.getRun(runId);
+  if (!run || !run.outcome || !run.efficiencyJson) return;
+  try {
+    const outcomeResult: OutcomeResult = { outcome: run.outcome as Outcome, confidence: (run.outcomeConfidence ?? 'low') as Confidence, reason: '' };
+    const efficiency: EfficiencyMetrics = JSON.parse(run.efficiencyJson);
+    const composite = computeComposite(store, run, outcomeResult, efficiency);
+    store.updateRun(runId, { compositeScore: composite.composite });
+    debug('APME', `recomputeComposite ${runId.slice(0, 8)}: ${composite.composite}`);
+  } catch (err) {
+    debug('APME', `recomputeComposite failed ${runId.slice(0, 8)}: ${String(err)}`);
+  }
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

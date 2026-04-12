@@ -48,18 +48,23 @@ export async function handleApmeRequest(
       const agentType = url.searchParams.get('agent') ?? undefined;
       const modelId = url.searchParams.get('model') ?? undefined;
       const runs = apme.store.listRuns({ limit, agentType, modelId });
-      const withEvals = runs.map((r) => ({
-        ...r,
-        evals: apme.store.listEvalsForRun(r.id).map((e) => ({
-          layer: e.layer,
-          metric: e.metric,
-          score: e.score,
-          rubricVer: e.rubricVer ?? null,
-          judgeModel: e.judgeModel ?? null,
-          createdAt: e.createdAt,
-        })),
-        overallScore: aggregateOverall(apme.store.listEvalsForRun(r.id)),
-      }));
+      const withEvals = runs.map((r) => {
+        const evals = apme.store.listEvalsForRun(r.id);
+        const vibe = apme.store.latestVibeForRun(r.id);
+        return {
+          ...r,
+          evals: evals.map((e) => ({
+            layer: e.layer,
+            metric: e.metric,
+            score: e.score,
+            rubricVer: e.rubricVer ?? null,
+            judgeModel: e.judgeModel ?? null,
+            createdAt: e.createdAt,
+          })),
+          overallScore: aggregateOverall(evals),
+          vibe: vibe ? { verdict: vibe.verdict } : null,
+        };
+      });
       sendJson(res, 200, { runs: withEvals });
       return true;
     }
@@ -73,8 +78,13 @@ export async function handleApmeRequest(
       }
       const evals = apme.store.listEvalsForRun(id);
       const steps = apme.store.listSteps(id);
-      const turns = apme.store.listTurns(id);
+      const rawTurns = apme.store.listTurns(id);
       const vibe = apme.store.latestVibeForRun(id);
+      // Include per-turn evals for mid-session scoring
+      const turns = rawTurns.map(t => ({
+        ...t,
+        turnEvals: apme.store.listEvalsForTurn(t.id as string),
+      }));
       sendJson(res, 200, {
         run,
         evals,
@@ -205,7 +215,7 @@ function clampInt(s: string | null, min: number, max: number, dflt: number): num
   return Math.max(min, Math.min(max, n));
 }
 
-function aggregateOverall(evals: ReturnType<ApmeModule['store']['listEvalsForRun']>): number | null {
+export function aggregateOverall(evals: ReturnType<ApmeModule['store']['listEvalsForRun']>): number | null {
   const overall = evals.find((e) => e.layer === 'llm_judge' && e.metric === 'overall');
   if (overall) return overall.score;
   const det = evals.filter((e) => e.layer === 'deterministic');

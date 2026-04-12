@@ -49,6 +49,7 @@ interface ActiveTurn {
 export class ApmeCollector {
   private readonly sessionToRun = new Map<string, string>(); // sessionId → runId
   private readonly sessionToTurn = new Map<string, ActiveTurn>(); // sessionId → current turn
+  private readonly sessionToLastTurnId = new Map<string, string>(); // survives closeTurn()
 
   constructor(
     private readonly store: ApmeStore,
@@ -96,11 +97,11 @@ export class ApmeCollector {
           ? ((data as Record<string, unknown>).message as Record<string, unknown>)?.content as string | undefined
           : undefined);
       const prompt = typeof rawPrompt === 'string' ? rawPrompt.slice(0, 8_000) : null;
-      // Close previous turn if open
+      // Close previous turn if open — read index BEFORE delete
+      const prevIndex = this.sessionToTurn.get(sessionId)?.index ?? -1;
       this.closeTurn(sessionId);
       // Open new turn
-      const prevTurn = this.sessionToTurn.get(sessionId);
-      const turnIndex = prevTurn ? prevTurn.index + 1 : 0;
+      const turnIndex = prevIndex + 1;
       const run = this.store.getRun(runId);
       const projectPath = run?.projectPath ?? undefined;
       const turnId = randomUUID();
@@ -148,6 +149,7 @@ export class ApmeCollector {
   private closeTurn(sessionId: string): void {
     const turn = this.sessionToTurn.get(sessionId);
     if (!turn) return;
+    this.sessionToLastTurnId.set(sessionId, turn.id);
     this.sessionToTurn.delete(sessionId);
     const run = this.store.getRun(turn.runId);
     const projectPath = run?.projectPath ?? undefined;
@@ -171,13 +173,35 @@ export class ApmeCollector {
     return this.sessionToTurn.get(sessionId)?.id ?? null;
   }
 
-  /** Store Claude's response text on the current turn. */
+  /** Get the current run ID for a session (if any). */
+  getRunId(sessionId: string): string | null {
+    return this.sessionToRun.get(sessionId) ?? null;
+  }
+
+  /** Store Claude's response text on the current turn.
+   *  Falls back to the last closed turn if closeTurn() already ran (race with session exit). */
   setTurnResponse(sessionId: string, response: string): void {
     if (!this.store.enabled) return;
     const turn = this.sessionToTurn.get(sessionId);
-    if (!turn) return;
+    const turnId = turn?.id ?? this.sessionToLastTurnId.get(sessionId);
+    debug('APME', `setTurnResponse session=${sessionId.slice(0,8)} turnId=${turnId?.slice(0,8) ?? 'null'} respLen=${response.length}`);
+    if (!turnId) return;
     try {
-      this.store.updateTurn(turn.id, { response: response.slice(0, 10_000) });
+      this.store.updateTurn(turnId, { response: response.slice(0, 10_000) });
+    } catch (err) { debug('APME', `setTurnResponse failed: ${String(err)}`); }
+  }
+
+  /** Apply response to the last closed turn if it has no response yet.
+   *  Used as fallback when Stop hook doesn't fire (PTY output capture). */
+  setLastClosedTurnResponse(sessionId: string, response: string): void {
+    if (!this.store.enabled) return;
+    const turnId = this.sessionToLastTurnId.get(sessionId);
+    if (!turnId) return;
+    // Only set if the turn doesn't already have a response
+    const existing = this.store.getTurn(turnId);
+    if (existing?.response) return;
+    try {
+      this.store.updateTurn(turnId, { response: response.slice(0, 10_000) });
     } catch { /* ignore */ }
   }
 
@@ -209,6 +233,27 @@ export class ApmeCollector {
     } catch { /* ignore */ }
   }
 
+  /** Split the current run — closes the active run and opens a fresh one.
+   *  Triggered on `/clear` or other context-reset events so each logical
+   *  conversation gets its own evaluation unit. */
+  splitRun(sessionId: string, projectPath?: string): string | null {
+    if (!this.store.enabled) return null;
+    const runId = this.sessionToRun.get(sessionId);
+    if (!runId) return null;
+    const run = this.store.getRun(runId);
+    if (!run) return null;
+    // Close current run (no exitCode — session is still alive)
+    this.closeRun(sessionId, undefined, projectPath);
+    // Open a new run with the same session parameters
+    return this.openRun({
+      sessionId,
+      agentType: run.agentType,
+      modelId: run.modelId ?? undefined,
+      projectName: run.projectName ?? undefined,
+      projectPath: run.projectPath ?? undefined,
+    });
+  }
+
   /** Update model id when the bridge resolves which model is in use. */
   updateModel(sessionId: string, modelId: string | undefined | null): void {
     if (!this.store.enabled || !modelId) return;
@@ -227,6 +272,7 @@ export class ApmeCollector {
     // Close the last open turn before finalizing the run.
     this.closeTurn(sessionId);
     this.sessionToRun.delete(sessionId);
+    this.sessionToLastTurnId.delete(sessionId);
 
     // Mark empty runs so the dashboard can filter them out.
     // Don't delete — FK constraints and concurrent access make deletion risky.

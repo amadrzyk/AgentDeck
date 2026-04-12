@@ -6,7 +6,8 @@
 export type TimelineEntryType =
   | 'tool_request' | 'tool_resolved' | 'chat_start' | 'chat_end'
   | 'chat_response' | 'error' | 'scheduled' | 'user_action'
-  | 'model_call' | 'model_response' | 'memory_recall' | 'tool_exec';
+  | 'model_call' | 'model_response' | 'memory_recall' | 'tool_exec'
+  | 'eval_result';
 
 export interface TimelineEntry {
   ts: number;

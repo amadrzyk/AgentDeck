@@ -123,10 +123,12 @@ function isPortFree(port: number): Promise<boolean> {
   });
 }
 
-export async function findAvailablePort(): Promise<number> {
+export async function findAvailablePort(opts?: { reserveDaemon?: boolean }): Promise<number> {
   const sessions = listActive();
   const usedPorts = new Set(sessions.map((s) => s.port));
-  for (let port = BASE_PORT; port <= MAX_PORT; port++) {
+  // Session bridges start from BASE_PORT+1 to reserve 9120 for the daemon.
+  const startPort = opts?.reserveDaemon ? BASE_PORT + 1 : BASE_PORT;
+  for (let port = startPort; port <= MAX_PORT; port++) {
     if (!usedPorts.has(port) && await isPortFree(port)) {
       return port;
     }

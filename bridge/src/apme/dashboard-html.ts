@@ -126,7 +126,7 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
           <select id="f-outcome" onchange="applyFilter()" style="background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px"><option value="">All Outcomes</option></select>
         </div>
         <table><thead><tr>
-          <th>Agent</th><th>Model</th><th>Project</th><th>Category</th><th>Score</th><th>Outcome</th><th>Task</th><th>Time</th>
+          <th>Agent</th><th>Model</th><th>Project</th><th>Category</th><th>Score</th><th>Outcome</th><th>Vibe</th><th>Task</th><th>Time</th>
         </tr></thead><tbody id="runs-body"></tbody></table>
       </div>
       <div class="panel" id="panel-scorecard"><div id="scorecard-content" class="empty">Loading...</div></div>
@@ -188,6 +188,7 @@ function renderRuns(runs){
       const task=r.taskPrompt?r.taskPrompt.slice(0,80):'';
       const tm=r.startedAt?new Date(r.startedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
       const sel=r.id===selId?' class="selected"':'';
+      const vb=r.vibe?.verdict==='approve'?'<span style="color:var(--green);font-weight:700">✓</span>':r.vibe?.verdict==='reject'?'<span style="color:var(--red);font-weight:700">✗</span>':'<span style="color:var(--dim)">—</span>';
       return'<tr'+sel+' onclick="selectRun(\\''+r.id+'\\')">'+
         '<td>'+(r.agentType||'—')+'</td>'+
         '<td>'+(r.modelId||'—').slice(0,16)+'</td>'+
@@ -195,14 +196,15 @@ function renderRuns(runs){
         '<td>'+(r.taskCategory?'<span class="badge-cat">'+r.taskCategory+'</span>':'—')+'</td>'+
         '<td>'+fs(sc)+'</td>'+
         '<td>'+fo(r.outcome)+'</td>'+
+        '<td>'+vb+'</td>'+
         '<td class="task-col" title="'+esc(r.taskPrompt||'')+'">'+esc(task)+'</td>'+
         '<td>'+tm+(dur?' · '+fd(dur):'')+'</td></tr>';
     }).join('');
-    if(!filtered.length)tb.innerHTML='<tr><td colspan="8" class="empty">'+(runs.length?'No runs match filters':'No runs yet. Start a coding session to collect data.')+'</td></tr>';
+    if(!filtered.length)tb.innerHTML='<tr><td colspan="9" class="empty">'+(runs.length?'No runs match filters':'No runs yet. Start a coding session to collect data.')+'</td></tr>';
 }
 async function loadRuns(){
   try{
-    const r=await fetch(B+'/apme/runs?limit=50');const d=await r.json();allRuns=(d.runs||[]).filter(r=>r.taskCategory!=='_empty');
+    const r=await fetch(B+'/apme/runs?limit=50');const d=await r.json();allRuns=(d.runs||[]).filter(r=>r.taskCategory!=='_empty'&&r.taskPrompt);
     populateFilters(allRuns);renderRuns(allRuns);
     document.getElementById('status').textContent=allRuns.length+' runs · '+new Date().toLocaleTimeString();
   }catch(e){document.getElementById('status').textContent='Error: '+e.message}
@@ -244,6 +246,11 @@ async function selectRun(id){
     if(taskPrompt){
       h+='<div class="section"><div class="section-head">Task</div>';
       h+='<div style="line-height:1.6;color:var(--text)">'+esc(taskPrompt.slice(0,600))+'</div></div>';
+    }
+
+    // Active session notice
+    if(!endedAt){
+      h+='<div class="section" style="padding:10px 12px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:6px;color:var(--blue);font-size:12px">⏳ Session active — score, category, and outcome appear after the session ends.</div>';
     }
 
     // Composite score bar
@@ -314,10 +321,17 @@ async function selectRun(id){
         const d2=t.ended_at&&t.started_at?fd((t.ended_at-t.started_at)):'open';
         const tc=t.tool_calls||0;const fm=t.files_modified||0;const fc=t.files_created||0;
         const resp=t.response?esc(t.response.slice(0,300)):'';
+        // Turn-level judge score (mid-session eval)
+        const te=t.turnEvals||[];const tov=te.find(e=>e.metric==='overall'&&e.layer==='turn_judge');
+        const tRaw=tov?.raw?JSON.parse(tov.raw):null;
         h+='<div class="turn-card">';
+        h+='<div style="display:flex;align-items:center;justify-content:space-between">';
         h+='<span class="turn-idx">Turn '+t.turn_index+'</span>';
+        if(tov!=null)h+=fs(tov.score);else h+='<span style="font-size:11px;color:var(--dim)">—</span>';
+        h+='</div>';
         h+='<div class="turn-prompt">"'+pr+'"</div>';
         if(resp)h+='<div style="color:var(--muted);font-size:12px;margin:4px 0;padding:6px 8px;background:var(--bg);border-radius:4px;border-left:2px solid var(--accent)">'+resp+(t.response&&t.response.length>300?'...':'')+'</div>';
+        if(tRaw?.reasoning)h+='<div class="reasoning" style="font-size:11px;margin-top:4px">'+esc(tRaw.reasoning.slice(0,300))+'</div>';
         h+='<div class="turn-stats"><span>'+tc+' tools</span><span>'+fm+' edits</span><span>'+fc+' creates</span><span>'+d2+'</span></div>';
         h+='</div>';
       }

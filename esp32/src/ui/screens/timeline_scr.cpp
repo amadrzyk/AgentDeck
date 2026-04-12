@@ -32,6 +32,8 @@ static uint32_t typeColor(const char* type) {
         return Theme::TLChatEnd;
     if (strcmp(type, "model_call") == 0 || strcmp(type, "model_response") == 0)
         return Theme::TLModelCall;
+    if (strcmp(type, "eval_result") == 0)
+        return Theme::TLToolReq;  // amber-ish
     return Theme::HUDDim;
 }
 
@@ -42,6 +44,7 @@ static const char* typeIcon(const char* type) {
     if (strcmp(type, "error") == 0) return "x";
     if (strcmp(type, "chat_end") == 0 || strcmp(type, "chat_response") == 0) return "*";
     if (strcmp(type, "model_call") == 0 || strcmp(type, "model_response") == 0) return "~";
+    if (strcmp(type, "eval_result") == 0) return "@";
     return ".";
 }
 

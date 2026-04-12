@@ -196,6 +196,129 @@ Return strict JSON: {"task_completion":N,"code_quality":N,"efficiency":N,"overal
   notes: 'seeded default',
 };
 
+// ─── Category-specific rubrics ──────────────────────────────────────────────
+// Each category has evaluation axes suited to its domain.
+// The judge selects the rubric matching the run's taskCategory.
+// Falls back to 'general' if no category-specific rubric exists.
+
+const CATEGORY_RUBRICS: Record<string, { purpose: string; prompt: string; weights: string; notes: string }> = {
+  conversation: {
+    purpose: 'conversation',
+    prompt: `You are evaluating an AI assistant's response to a conversational query or question.
+The user asked a question and the agent responded. Evaluate the quality of the response.
+
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- accuracy: Is the answer factually correct? For math/logic questions, is the result right?
+- helpfulness: Does the response address what the user actually wanted? Is it complete?
+- conciseness: Is the response appropriately sized? Not too verbose, not too terse.
+- overall: Holistic judgment. An accurate, helpful response scores high even if brief.
+
+Return strict JSON: {"accuracy":N,"helpfulness":N,"conciseness":N,"overall":N,"reasoning":"...", "done":["item1"], "missed":["item1"]}.`,
+    weights: JSON.stringify({ accuracy: 0.5, helpfulness: 0.3, conciseness: 0.2 }),
+    notes: 'conversation/Q&A evaluation',
+  },
+  planning: {
+    purpose: 'planning',
+    prompt: `You are evaluating an AI agent's planning session. The user asked the agent to plan an approach for a task.
+
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- completeness: Does the plan cover all aspects of the request? Are edge cases considered?
+- feasibility: Is the plan technically sound and implementable? Are the proposed steps realistic?
+- clarity: Is the plan well-structured, easy to follow, with clear priorities?
+- overall: Holistic judgment. A thorough, actionable plan scores high.
+
+Return strict JSON: {"completeness":N,"feasibility":N,"clarity":N,"overall":N,"reasoning":"...", "done":["item1"], "missed":["item1"]}.`,
+    weights: JSON.stringify({ completeness: 0.4, feasibility: 0.35, clarity: 0.25 }),
+    notes: 'planning/architecture evaluation',
+  },
+  research: {
+    purpose: 'research',
+    prompt: `You are evaluating an AI agent's research session. The user asked the agent to investigate, search, or gather information.
+
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- thoroughness: Did the agent search broadly enough? Were relevant files, docs, or sources explored?
+- relevance: Is the information found actually relevant to the user's question?
+- synthesis: Did the agent synthesize findings into a clear answer or summary?
+- overall: Holistic judgment. Research that finds the right answer efficiently scores high.
+
+Return strict JSON: {"thoroughness":N,"relevance":N,"synthesis":N,"overall":N,"reasoning":"...", "done":["item1"], "missed":["item1"]}.`,
+    weights: JSON.stringify({ thoroughness: 0.3, relevance: 0.4, synthesis: 0.3 }),
+    notes: 'research/investigation evaluation',
+  },
+  debugging: {
+    purpose: 'debugging',
+    prompt: `You are evaluating an AI agent's debugging session. The user reported a bug and the agent investigated and attempted to fix it.
+
+Given the task prompt and the git diff produced, evaluate the debugging effort.
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- diagnosis: Did the agent correctly identify the root cause? Not just symptoms but the actual bug?
+- fix_quality: Is the fix correct, minimal, and safe? Does it avoid introducing new bugs?
+- verification: Did the agent verify the fix (run tests, check edge cases)?
+- overall: Holistic judgment. A correct diagnosis + clean fix scores high.
+
+Return strict JSON: {"diagnosis":N,"fix_quality":N,"verification":N,"overall":N,"reasoning":"...", "done":["item1"], "missed":["item1"]}.`,
+    weights: JSON.stringify({ diagnosis: 0.35, fix_quality: 0.4, verification: 0.25 }),
+    notes: 'debugging evaluation',
+  },
+  refactoring: {
+    purpose: 'refactoring',
+    prompt: `You are evaluating an AI agent's refactoring session. The user asked the agent to restructure or improve existing code.
+
+Given the task prompt and the git diff produced, evaluate the refactoring.
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- safety: Does the refactoring preserve existing behavior? No regressions introduced?
+- improvement: Is the resulting code genuinely better? Cleaner, more maintainable, less duplication?
+- scope: Was the refactoring appropriately scoped? Not too aggressive, not too timid?
+- overall: Holistic judgment. Safe refactoring that clearly improves the code scores high.
+
+Return strict JSON: {"safety":N,"improvement":N,"scope":N,"overall":N,"reasoning":"...", "done":["item1"], "missed":["item1"]}.`,
+    weights: JSON.stringify({ safety: 0.4, improvement: 0.35, scope: 0.25 }),
+    notes: 'refactoring evaluation',
+  },
+  review: {
+    purpose: 'review',
+    prompt: `You are evaluating an AI agent's code review session. The user asked the agent to review code for issues.
+
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- coverage: Did the review examine all relevant areas? Were critical paths checked?
+- insight: Did the review catch real issues (not just style nits)? Were suggestions actionable?
+- accuracy: Are the identified issues real problems? Low false positive rate?
+- overall: Holistic judgment. A review that catches important bugs/issues scores high.
+
+Return strict JSON: {"coverage":N,"insight":N,"accuracy":N,"overall":N,"reasoning":"...", "done":["item1"], "missed":["item1"]}.`,
+    weights: JSON.stringify({ coverage: 0.3, insight: 0.4, accuracy: 0.3 }),
+    notes: 'code review evaluation',
+  },
+  ops: {
+    purpose: 'ops',
+    prompt: `You are evaluating an AI agent's ops/DevOps session. The user asked the agent to perform operational tasks (git, CI/CD, deployment, configuration).
+
+Score each axis as a float in [0,1] where 0=failed and 1=excellent.
+
+Axes:
+- correctness: Did the operations complete successfully? Were commands appropriate?
+- safety: Were destructive operations handled carefully? Were backups/confirmations used?
+- completeness: Were all requested steps performed? Nothing left half-done?
+- overall: Holistic judgment. Correct, safe ops that complete the task score high.
+
+Return strict JSON: {"correctness":N,"safety":N,"completeness":N,"overall":N,"reasoning":"...", "done":["item1"], "missed":["item1"]}.`,
+    weights: JSON.stringify({ correctness: 0.4, safety: 0.35, completeness: 0.25 }),
+    notes: 'ops/DevOps evaluation',
+  },
+};
+
 // ─── Store ─────────────────────────────────────────────────────────────────────
 
 type BetterSqliteDb = {
@@ -276,8 +399,20 @@ export class ApmeStore {
 
   private seedDefaultRubric(): void {
     if (!this.db) return;
-    const row = this.db.prepare('SELECT COUNT(*) AS n FROM rubrics').get() as { n: number };
-    if (row.n > 0) return;
+    // Seed general rubric if none exists
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM rubrics WHERE purpose = ?').get('general') as { n: number };
+    if (row.n > 0) {
+      // Seed category rubrics that don't exist yet (idempotent)
+      for (const [, rubric] of Object.entries(CATEGORY_RUBRICS)) {
+        const exists = this.db.prepare('SELECT COUNT(*) AS n FROM rubrics WHERE purpose = ?').get(rubric.purpose) as { n: number };
+        if (exists.n === 0) {
+          this.db.prepare(
+            `INSERT INTO rubrics (version, purpose, prompt, weights, created_at, parent_ver, notes) VALUES (1, ?, ?, ?, ?, NULL, ?)`,
+          ).run(rubric.purpose, rubric.prompt, rubric.weights, Date.now(), rubric.notes);
+        }
+      }
+      return;
+    }
     this.db.prepare(
       `INSERT INTO rubrics (version, purpose, prompt, weights, created_at, parent_ver, notes)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
@@ -289,6 +424,12 @@ export class ApmeStore {
       Date.now(),
       DEFAULT_RUBRIC_V1.notes,
     );
+    // Seed category-specific rubrics
+    for (const [, rubric] of Object.entries(CATEGORY_RUBRICS)) {
+      this.db.prepare(
+        `INSERT INTO rubrics (version, purpose, prompt, weights, created_at, parent_ver, notes) VALUES (1, ?, ?, ?, ?, NULL, ?)`,
+      ).run(rubric.purpose, rubric.prompt, rubric.weights, Date.now(), rubric.notes);
+    }
   }
 
   // ─── Runs ────────────────────────────────────────────────────────────────────
@@ -572,6 +713,35 @@ export class ApmeStore {
        LIMIT ?`,
     ).all(limit) as Array<{ id: string; project_path: string | null }>;
     return rows.map((r) => ({ id: r.id, projectPath: r.project_path }));
+  }
+
+  /** Runs that have ended but have no category — candidates for daemon re-classification. */
+  listUnclassifiedRuns(limit: number = 5): { id: string; projectPath: string | null }[] {
+    if (!this.db) return [];
+    const rows = this.db.prepare(
+      `SELECT r.id, r.project_path FROM runs r
+       WHERE r.ended_at IS NOT NULL
+         AND r.task_category IS NULL
+       ORDER BY r.ended_at DESC
+       LIMIT ?`,
+    ).all(limit) as Array<{ id: string; project_path: string | null }>;
+    return rows.map((r) => ({ id: r.id, projectPath: r.project_path }));
+  }
+
+  /** Orphaned runs: started long ago, never closed, no turns.
+   *  Typically from session bridges that crashed without cleanup. */
+  listOrphanedRuns(staleSec: number = 1800): string[] {
+    if (!this.db) return [];
+    const cutoff = Date.now() - staleSec * 1000;
+    const rows = this.db.prepare(
+      `SELECT r.id FROM runs r
+       WHERE r.ended_at IS NULL
+         AND r.started_at < ?
+         AND r.task_prompt IS NULL
+         AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.run_id = r.id)
+       LIMIT 20`,
+    ).all(cutoff) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
   }
 
   // ─── Scorecard ───────────────────────────────────────────────────────────────

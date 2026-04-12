@@ -291,7 +291,7 @@ export interface TimelineHistoryMsg {
 
 /** A single evaluation score on a completed run. */
 export interface ApmeEvalRow {
-  layer: 'deterministic' | 'llm_judge' | 'vibe';
+  layer: 'deterministic' | 'llm_judge' | 'vibe' | 'turn_judge';
   metric: string;           // e.g. 'build_ok', 'tests_pass', 'intent', 'overall'
   score: number;            // 0.0 - 1.0
   rubricVer?: number;
@@ -307,6 +307,9 @@ export interface ApmeRunSummary {
   modelId?: string;
   projectName?: string;
   taskPrompt?: string;
+  taskCategory?: string;
+  outcome?: 'committed' | 'abandoned' | 'iterated' | 'ab_winner' | 'ab_loser' | 'interrupted' | 'exploratory' | 'pending';
+  compositeScore?: number;
   startedAt: number;
   endedAt?: number;
   inputTokens?: number;

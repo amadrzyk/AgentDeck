@@ -9,6 +9,16 @@
 import type { GroupedEntry } from '../timeline-store.js';
 import { measureTextWidth, sliceByPx, wrapTextByWidth } from './text-utils.js';
 
+/** Score-based color for eval_result entries: green ≥70%, amber ≥40%, red <40% */
+function evalScoreColor(raw?: string): string {
+  const m = raw?.match(/(\d+)%/);
+  if (!m) return '#fbbf24'; // amber fallback
+  const pct = parseInt(m[1], 10);
+  if (pct >= 70) return '#4ade80';
+  if (pct >= 40) return '#fbbf24';
+  return '#f87171';
+}
+
 const PANEL_W = 200;
 const CANVAS_W = 400;
 const H = 100;
@@ -58,6 +68,7 @@ function typeIcon(type: string, status?: string): string {
     case 'model_response': return '\u25C7';  // ◇
     case 'memory_recall': return '\u29BB';   // ⦻
     case 'tool_exec': return '\u25B8';       // ▸
+    case 'eval_result': return '\u2605';    // ★
     default: return '\u2022';
   }
 }
@@ -80,6 +91,7 @@ function typeColor(type: string, status?: string): string {
     case 'model_response': return '#22d3ee';
     case 'memory_recall': return '#a78bfa';
     case 'tool_exec': return '#4ade80';
+    case 'eval_result': return '#fbbf24'; // amber — score color applied via evalScoreColor in render
     default: return '#e2e8f0';
   }
 }

@@ -18,6 +18,7 @@ enum TimelineEntryType: String, Codable, Sendable {
     case modelResponse = "model_response"
     case memoryRecall = "memory_recall"
     case toolExec = "tool_exec"
+    case evalResult = "eval_result"
 }
 
 // MARK: - Timeline Entry

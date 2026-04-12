@@ -87,6 +87,7 @@ private fun TimelineItem(entry: TimelineEntry) {
 }
 
 private fun typeColor(type: String) = when {
+    type.contains("eval") -> AgentDeckColors.Amber
     type.contains("tool") -> AgentDeckColors.Green
     type.contains("chat") || type.contains("model") -> AgentDeckColors.Blue
     type.contains("error") -> AgentDeckColors.Red

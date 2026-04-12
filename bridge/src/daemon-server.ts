@@ -895,6 +895,59 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // can run the full deterministic + judge pipeline without time pressure.
   if (apme) {
     const { evaluateOutcome } = await import('./apme/outcome.js');
+    const { classifyRunSmart } = await import('./apme/classifier.js');
+    const { aggregateOverall } = await import('./apme/http.js');
+
+    // Broadcast eval results to all WS clients + timeline when runner completes
+    apme.runner.onResult(({ runId, turnId }) => {
+      // Turn-level eval: broadcast and add timeline entry with turn score
+      if (turnId) {
+        const run = apme!.store.getRun(runId);
+        if (!run) return;
+        const turnEvals = apme!.store.listEvalsForTurn(turnId);
+        const overall = turnEvals.find(e => e.metric === 'overall');
+        if (!overall) return;
+        const pct = Math.round(overall.score * 100);
+        core.bridgeTimeline.addEntry({
+          ts: Date.now(), type: 'eval_result',
+          raw: `★ turn ${pct}% [${run.taskCategory ?? '?'}]`,
+          detail: `Turn eval · ${run.taskPrompt?.slice(0, 80) ?? ''}`,
+          agentType: run.agentType,
+        });
+        return;
+      }
+      const run = apme!.store.getRun(runId);
+      if (!run) return;
+      const evals = apme!.store.listEvalsForRun(runId);
+      const overallScore = aggregateOverall(evals);
+      // WS broadcast: apme_eval event (type already in protocol.ts)
+      const evalEvent: import('@agentdeck/shared').ApmeEvalEvent = {
+        type: 'apme_eval',
+        run: {
+          runId: run.id, sessionId: run.sessionId, agentType: run.agentType, startedAt: run.startedAt,
+          modelId: run.modelId ?? undefined, projectName: run.projectName ?? undefined,
+          taskPrompt: run.taskPrompt ?? undefined, taskCategory: run.taskCategory ?? undefined,
+          outcome: (run.outcome as import('@agentdeck/shared').ApmeRunSummary['outcome']) ?? undefined,
+          compositeScore: run.compositeScore ?? undefined,
+          overallScore: overallScore ?? undefined,
+          evals: evals.map(e => ({
+            layer: e.layer, metric: e.metric, score: e.score,
+            judgeModel: e.judgeModel ?? undefined, createdAt: e.createdAt,
+          })),
+        },
+      };
+      core.broadcast(evalEvent);
+      // Timeline entry so all devices (Stream Deck, Apple, Android, ESP32) see it
+      const pct = Math.round((overallScore ?? run.compositeScore ?? 0) * 100);
+      core.bridgeTimeline.addEntry({
+        ts: Date.now(),
+        type: 'eval_result',
+        raw: `★ [${run.taskCategory ?? '?'}] ${pct}% · ${run.outcome ?? 'pending'}`,
+        detail: `${run.projectName ?? ''} · ${run.taskPrompt?.slice(0, 100) ?? ''}`,
+        agentType: run.agentType,
+      });
+    });
+
     const apmeEvalTimer = setInterval(() => {
       // 1. Enqueue unevaluated runs for deterministic + judge
       const pending = apme!.store.listUnevaluatedRuns(5);
@@ -906,13 +959,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       const closedRuns = apme!.store.listRuns({ limit: 20 });
       for (const run of closedRuns) {
         if (run.endedAt && !run.outcome) {
-          // Wait at least 60s after close before judging outcome
-          // (gives time for commits, follow-up sessions)
+          // Wait at least 10s after close before judging outcome
           const elapsed = Date.now() - run.endedAt;
-          if (elapsed > 60_000) {
+          if (elapsed > 10_000) {
             evaluateOutcome(apme!.store, run.id);
           }
         }
+      }
+      // 3. Classify unclassified runs (fire-and-forget from session bridge may
+      //    have been killed by process exit — daemon retries here).
+      const unclassified = apme!.store.listUnclassifiedRuns(5);
+      for (const run of unclassified) {
+        void classifyRunSmart(apme!.store, run.id).then(({ signals, category, source }) => {
+          apme!.store.updateRun(run.id, {
+            taskSignals: JSON.stringify(signals),
+            taskCategory: category,
+            taskCategorySource: source,
+          });
+        }).catch(() => {});
+      }
+      // 4. Clean up orphaned runs — session bridges that crashed without graceful
+      //    shutdown leave runs with no ended_at, no turns, no prompt. Tag as _empty
+      //    so the dashboard filters them out.
+      const orphans = apme!.store.listOrphanedRuns(1800); // 30 min stale threshold
+      for (const id of orphans) {
+        apme!.store.updateRun(id, { endedAt: Date.now(), taskCategory: '_empty' });
       }
     }, 30_000); // every 30s
     core.addInterval(apmeEvalTimer);

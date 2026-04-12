@@ -234,13 +234,25 @@
       line-height: 1.5;
     }
 
-    .tc-previews {
+    .tc-previews,
+    .d200h-previews {
       display: grid;
       gap: 12px;
     }
 
     .tc-previews svg {
       aspect-ratio: 4 / 1;
+      border-radius: 12px;
+      background: #0d1218;
+    }
+
+    .d200h-previews svg:first-child {
+      max-width: 56%;
+      justify-self: center;
+    }
+
+    .d200h-previews svg:last-child {
+      aspect-ratio: 2 / 1;
       border-radius: 12px;
       background: #0d1218;
     }
@@ -353,7 +365,7 @@
 
     <div class="panel glass-panel">
       <h2>Device Simulations</h2>
-      <p>Device-family simulation with layout proportions pushed closer to the actual implementations. Pixoo and TUI use renderer output directly, while tablet, e-ink, ESP32, and Stream Deck now mirror the real HUD cards, aquarium placement, and status language more closely.</p>
+      <p>Device-family simulation with layout proportions pushed closer to the actual implementations. Pixoo, TUI, and Stream Deck use renderer output directly; D200H and e-ink mirror each platform's native safe areas and status language.</p>
       <div class="grid devices">
         <section>
           <div class="device-frame">
@@ -416,7 +428,7 @@
               <svg class="device-screen" id="sim-tc-agents" viewBox="0 0 32 8" style="aspect-ratio:4/1"></svg>
             </div>
           </div>
-          <div class="device-meta">Ulanzi TC001 / TC100-class matrix. Two pages: full-screen 5H/7D gauge and octopus row plus fixed crayfish. Non-OpenClaw agents collapse to octopus here.</div>
+          <div class="device-meta">Ulanzi TC001 / TC100-class matrix. Two pages: full-screen 5H/7D gauge and agent row plus fixed crayfish.</div>
         </section>
         <section>
           <div class="device-frame">
@@ -426,9 +438,12 @@
         </section>
         <section>
           <div class="device-frame">
-            <svg class="device-screen" id="sim-d200h" viewBox="0 0 144 144" style="aspect-ratio:1/1"></svg>
+            <div class="d200h-previews">
+              <svg class="device-screen" id="sim-d200h" viewBox="0 0 196 196" style="aspect-ratio:1/1"></svg>
+              <svg class="device-screen" id="sim-d200h-usage" viewBox="0 0 392 196" style="aspect-ratio:2/1"></svg>
+            </div>
           </div>
-          <div class="device-meta">Ulanzi D200H key button. Rendered with the same SVG renderer as Stream Deck (D200H scales 144→196px via resvg-js in production).</div>
+          <div class="device-meta">Ulanzi D200H key button and merged 5H/7D usage window. Text stays inside the physical safe area; usage is one wide composition, not two stretched keys.</div>
         </section>
         <section>
           <div class="device-frame watch-rect">
@@ -440,7 +455,7 @@
           <div class="device-frame">
             <svg class="device-screen" id="sim-tui" viewBox="0 0 720 420" style="aspect-ratio:12/7"></svg>
           </div>
-          <div class="device-meta">Terminal TUI preview (actual renderDashboard output, 120×30 chars).</div>
+          <div class="device-meta">Terminal TUI preview (actual renderDashboard output, 160×40 chars).</div>
         </section>
       </div>
     </div>
@@ -568,37 +583,40 @@
       "-": [0b000, 0b000, 0b111, 0b000, 0b000],
       ".": [0b000, 0b000, 0b000, 0b000, 0b010],
     };
-    // TC001 sprites derived from actual OCTOPUS_GRID (13×13→5-bit) and CRAYFISH_GRID (12×8→5-bit)
-    // Each row is a 5-bit bitmask (MSB=leftmost pixel) for a 5×N sprite
+    // TC001 sprites mirror esp32/src/ui/matrix/matrix_pages.cpp.
+    // Each row is a 5-bit bitmask (MSB=leftmost pixel) for a 5×6 sprite.
     const MATRIX_SPRITES = {
-      // Octopus: 5×7 reduction of 13×13 OCTOPUS_GRID
-      // flat head + eyes + arms + waist + tentacles
       octopus: [
-        0b01110,   // ▄█▄ flat top head
-        0b11111,   // full body row
-        0b10101,   // eyes at col 1,3
-        0b11111,   // arms spread
-        0b01110,   // waist
-        0b10101,   // tentacles outer
-        0b01010,   // tentacle tips
+        0b01110,
+        0b11111,
+        0b10101,
+        0b11111,
+        0b01010,
+        0b10101,
       ],
-      // Jellyfish (Codex cloud): 5×5 reduction of 10×8 JELLYFISH_GRID
       jellyfish: [
-        0b01010,   // top lobes
-        0b11111,   // widest
-        0b11111,   // body mid
-        0b11111,   // widest
-        0b01010,   // bottom lobes
+        0b01110,
+        0b11111,
+        0b11011,
+        0b01110,
+        0b01010,
+        0b10001,
       ],
-      // Crayfish (OpenClaw): 5×6 reduction of 12×8 CRAYFISH_GRID
-      // antennae + head dome + claws+eyes + thorax + abdomen + legs
+      opencode: [
+        0b11111,
+        0b10001,
+        0b10101,
+        0b10001,
+        0b10001,
+        0b11111,
+      ],
       crayfish: [
-        0b01010,   // antennae tips
-        0b01110,   // head dome
-        0b11111,   // claws + body (widest)
-        0b10101,   // eyes at col 1,3
-        0b01110,   // abdomen
-        0b10001,   // tail legs
+        0b10001,
+        0b01110,
+        0b11111,
+        0b01110,
+        0b00100,
+        0b01010,
       ],
     };
 
@@ -636,7 +654,8 @@
         "sim-pixoo": [64, 64],
         "sim-tc-usage": [32, 8],
         "sim-tc-agents": [32, 8],
-        "sim-d200h": [144, 144],
+        "sim-d200h": [196, 196],
+        "sim-d200h-usage": [392, 196],
         "sim-streamdeck": [144, 144],
         "sim-apple-watch": [416, 496],
         "sim-tui": [720, 420],
@@ -936,6 +955,25 @@
       return window.__SIM_DATA?.tui?.[getActualKey(agent, state)] || window.__SIM_DATA?.tuiTerrarium?.[getActualKey(agent, state)] || null;
     }
 
+    function getStreamDeckActual(agent, state) {
+      return window.__SIM_DATA?.streamDeck?.[getActualKey(agent, state)] || null;
+    }
+
+    function renderInlineSvg(svg, rawSvg) {
+      const doc = new DOMParser().parseFromString(rawSvg, "image/svg+xml");
+      const source = doc.documentElement;
+      if (!source || source.nodeName.toLowerCase() === "parsererror" || source.querySelector("parsererror")) {
+        return false;
+      }
+      clear(svg);
+      const viewBox = source.getAttribute("viewBox") || "0 0 144 144";
+      svg.setAttribute("viewBox", viewBox);
+      for (const child of Array.from(source.childNodes)) {
+        svg.appendChild(document.importNode(child, true));
+      }
+      return true;
+    }
+
     function decodeBase64Bytes(b64) {
       const bin = atob(b64);
       const out = new Uint8Array(bin.length);
@@ -972,9 +1010,9 @@
       // Background — deep terminal black
       svg.appendChild(el('rect', { x: 0, y: 0, width: w, height: h, rx: 14, fill: '#060A10' }));
 
-      const lines = frame.lines;
-      const charCols = frame.width || 120;
-      const charRows = frame.height || 30;
+      const lines = frame.lines || [];
+      const charCols = frame.width || 160;
+      const charRows = frame.height || 40;
 
       // Fixed cell size: distribute full SVG evenly over the character grid
       const padX = 6, padY = 8;
@@ -1029,24 +1067,44 @@
         return TEXT;
       }
 
-      lines.forEach((rawLine, rowIdx) => {
-        const visLine = (rawLine || '');
-        if (!visLine.trim() && rowIdx > 0) return;
+      if (Array.isArray(frame.spans) && frame.spans.length) {
+        frame.spans.forEach((rowSpans, rowIdx) => {
+          if (!Array.isArray(rowSpans)) return;
+          const y = padY + rowIdx * cellH + cellH * 0.84;
+          rowSpans.forEach((span) => {
+            if (!span?.text?.trim()) return;
+            svg.appendChild(textNode(span.text, {
+              x: padX + (span.x || 0) * cellW,
+              y,
+              fill: span.color || colorForLine(lines[rowIdx] || '', rowIdx),
+              'font-size': fontSize,
+              'font-family': fontFam,
+              'xml:space': 'preserve',
+              'letter-spacing': '0',
+              'dominant-baseline': 'auto',
+            }));
+          });
+        });
+      } else {
+        lines.forEach((rawLine, rowIdx) => {
+          const visLine = (rawLine || '');
+          if (!visLine.trim() && rowIdx > 0) return;
 
-        const y = padY + rowIdx * cellH + cellH * 0.84; // text baseline
-        const color = colorForLine(visLine, rowIdx);
+          const y = padY + rowIdx * cellH + cellH * 0.84; // text baseline
+          const color = colorForLine(visLine, rowIdx);
 
-        svg.appendChild(textNode(visLine, {
-          x: padX,
-          y,
-          fill: color,
-          'font-size': fontSize,
-          'font-family': fontFam,
-          'xml:space': 'preserve',
-          'letter-spacing': '0',
-          'dominant-baseline': 'auto',
-        }));
-      });
+          svg.appendChild(textNode(visLine, {
+            x: padX,
+            y,
+            fill: color,
+            'font-size': fontSize,
+            'font-family': fontFam,
+            'xml:space': 'preserve',
+            'letter-spacing': '0',
+            'dominant-baseline': 'auto',
+          }));
+        });
+      }
 
       // Scanline vignette overlay for terminal feel
       const NS = 'http://www.w3.org/2000/svg';
@@ -1254,8 +1312,8 @@
       // Vertical Divider
       svg.appendChild(el("line", { x1: x + leftW, y1: y + h * 0.1, x2: x + leftW, y2: y + h * 0.9, stroke: mono ? "#AAAAAA" : "#CCCCCC", "stroke-width": 1 }));
 
-      const fontSize = h * 0.18;
-      const lineH = h * 0.22;
+      const fontSize = Math.min(Math.max(14, h * 0.12), 20);
+      const lineH = Math.min(Math.max(24, h * 0.16), 34);
 
       // Left Column: LIMITS
       let leftY = y + lineH * 0.9;
@@ -1301,6 +1359,108 @@
         x: rightX, y: rightY + lineH * 2.2, fill: text, "font-size": fontSize * 0.95,
         "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
       }));
+    }
+
+    function drawEinkAgentPanel(svg, x, y, w, h, colorMode, selectedAgent, state) {
+      const bg = colorMode ? "#E2DCCF" : "#DCD5C7";
+      const text = colorMode ? "#221F1A" : "#111111";
+      const sub = colorMode ? "#625B52" : "#4F4B46";
+      const accent = colorMode ? "#335588" : "#6E6A66";
+      const titleSize = Math.min(Math.max(24, h * 0.024), 34);
+      const nameSize = Math.min(Math.max(18, h * 0.016), 24);
+      const metaSize = Math.min(Math.max(15, h * 0.014), 20);
+      const iconSize = Math.min(Math.max(18, w * 0.055), 28);
+      const padX = Math.max(14, w * 0.04);
+
+      svg.appendChild(el("rect", { x, y, width: w, height: h, fill: bg }));
+      svg.appendChild(textNode("AgentDeck", {
+        x: x + w / 2, y: y + 18 + titleSize, fill: text, "font-size": titleSize, "font-weight": 800,
+        "text-anchor": "middle", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      svg.appendChild(el("rect", {
+        x: x + w * 0.20, y: y + 30 + titleSize, width: w * 0.60, height: Math.max(2, titleSize * 0.08),
+        rx: 1, fill: accent, opacity: colorMode ? 0.70 : 0.55,
+      }));
+
+      const entries = [
+        { id: "claude", label: "AgentDeck", agentType: "claude", model: "Haiku 4.5", c: colorMode ? "#C07058" : "#555555" },
+        { id: "codex", label: "Codex", agentType: "codex", model: "gpt-5-codex", c: colorMode ? "#6366F1" : "#666666" },
+        { id: "openclaw", label: "OpenClaw", agentType: "openclaw", model: "", c: colorMode ? "#CC3333" : "#4A4A4A" },
+      ];
+      const rowGap = Math.max(54, nameSize + metaSize + 20);
+      let rowY = y + 86 + titleSize;
+      for (const entry of entries) {
+        const active = entry.id === selectedAgent;
+        const mappedState = active ? state : "idle";
+        const marker = mappedState === "working" ? "◉ PROC" : mappedState === "asking" ? "◉ OPT" : mappedState === "sleeping" ? "◌ IDLE" : "◉ IDLE";
+        drawAgentMark(svg, entry.agentType, x + padX + iconSize / 2, rowY - iconSize * 0.25, iconSize, {
+          state: "idle",
+          palette: {
+            fill: entry.c,
+            top: entry.c,
+            mid: entry.c,
+            bottom: entry.c,
+            outer: colorMode ? "#F1ECEC" : "#F4F4F4",
+            inner: colorMode ? "#4B4646" : "#5A5656",
+            bg,
+            opacity: active ? 1 : 0.68,
+          },
+          promptStyle: { color: "#F4F4F4", fontSize: iconSize * 0.28, opacity: 0.75 },
+        });
+        svg.appendChild(textNode(entry.label, {
+          x: x + padX + iconSize + 8, y: rowY, fill: text, "font-size": nameSize,
+          "font-weight": 800, "font-family": "ui-sans-serif, system-ui, sans-serif",
+        }));
+        const meta = entry.model ? `${entry.model} · ${marker}` : marker;
+        svg.appendChild(textNode(`  ${meta}`, {
+          x: x + padX + iconSize + 8, y: rowY + metaSize + 6, fill: sub, "font-size": metaSize,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        rowY += rowGap;
+      }
+
+      svg.appendChild(textNode("⚙ Settings", {
+        x: x + padX, y: y + h - 28, fill: sub, "font-size": metaSize,
+        "font-family": "ui-sans-serif, system-ui, sans-serif",
+      }));
+    }
+
+    function drawEinkTimelinePanel(svg, x, y, w, h, colorMode) {
+      const bg = colorMode ? "#F0ECE4" : "#EEE8DD";
+      const text = colorMode ? "#211B18" : "#1A1815";
+      const sub = colorMode ? "#625B52" : "#4F4B46";
+      const accent = colorMode ? "#335588" : "#555555";
+      const titleSize = Math.min(Math.max(18, h * 0.055), 24);
+      const rowSize = Math.min(Math.max(17, h * 0.048), 22);
+      const detailSize = Math.min(Math.max(14, h * 0.040), 18);
+      svg.appendChild(el("rect", { x, y, width: w, height: h, fill: bg }));
+      svg.appendChild(textNode("TIMELINE 14/35", {
+        x: x + 18, y: y + 28, fill: accent, "font-size": titleSize, "font-weight": 800,
+        "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }));
+      const rows = [
+        ["21:20", "▶", "manual test prompt"],
+        ["21:23", "■", "completed · Haiku 4.5"],
+        ["21:23", "▶", "processing started"],
+        ["21:45", "■", "completed · Haiku 4.5"],
+        ["22:19", "✗", "connection closed"],
+      ];
+      let rowY = y + 60;
+      rows.forEach((row, idx) => {
+        svg.appendChild(textNode(row[0], {
+          x: x + 18, y: rowY, fill: sub, "font-size": rowSize,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        svg.appendChild(textNode(row[1], {
+          x: x + 94, y: rowY, fill: row[1] === "✗" ? (colorMode ? "#CC2222" : text) : accent,
+          "font-size": rowSize, "font-weight": 800, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        svg.appendChild(textNode(row[2], {
+          x: x + 126, y: rowY, fill: idx === 4 ? sub : text, "font-size": idx === 4 ? detailSize : rowSize,
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }));
+        rowY += Math.max(28, rowSize + 12);
+      });
     }
 
     function drawTimelinePanel(svg, x, y, w, h, opts = {}) {
@@ -1608,15 +1768,7 @@
       const leftW = w * 0.22;
       const rightX = leftW + 2;
       const rightW = w - rightX;
-      drawSessionPanel(svg, 0, 0, leftW, h, {
-        bg: panel,
-        text: colorMode ? "#221F1A" : "#111111",
-        sub: colorMode ? "#625B52" : "#4F4B46",
-        accent: colorMode ? "#3366AA" : "#6E6A66",
-        mono: !colorMode,
-        showWorkers: true,
-        radius: 0,
-      });
+      drawEinkAgentPanel(svg, 0, 0, leftW, h, colorMode, agent, state);
       svg.appendChild(el("rect", { x: leftW, y: 0, width: 2, height: h, fill: colorMode ? "#4A4137" : "#2D2A25" }));
       const aqY = 0;
       const aqH = h * 0.50;
@@ -1640,11 +1792,11 @@
       svg.appendChild(el("rect", { x: rightX + rightW * 0.34 + 1, y: rowY, width: rightW * 0.66 - 1, height: rowH, fill: panel }));
       svg.appendChild(textNode("CONTEXT", {
         x: rightX + 14, y: rowY + rowH * 0.18, fill: colorMode ? "#625B52" : "#4F4B46",
-        "font-size": rowH * 0.18, "font-weight": 700, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        "font-size": Math.min(22, Math.max(16, rowH * 0.12)), "font-weight": 700, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
       }));
       svg.appendChild(textNode(state === "working" ? "Read file_path.ts" : state === "asking" ? "Waiting for approval" : "No active tool", {
         x: rightX + 14, y: rowY + rowH * 0.46, fill: colorMode ? "#211B18" : "#1A1815",
-        "font-size": rowH * 0.18, "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+        "font-size": Math.min(22, Math.max(16, rowH * 0.12)), "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
       }));
       drawEinkStatusCompact(svg, rightX + rightW * 0.34 + 1, rowY, rightW * 0.66 - 1, rowH, {
         bg: panel,
@@ -1653,14 +1805,97 @@
         mono: !colorMode,
       });
       svg.appendChild(el("rect", { x: rightX, y: h * 0.63, width: rightW, height: 1, fill: colorMode ? "#4A4137" : "#2D2A25" }));
-      drawTimelinePanel(svg, rightX, h * 0.63, rightW, h * 0.37, {
-        bg: bg,
-        text: colorMode ? "#211B18" : "#1A1815",
-        sub: colorMode ? "#625B52" : "#4F4B46",
-        accent: colorMode ? "#3366AA" : "#555555",
-        mono: !colorMode,
-        radius: 0,
+      drawEinkTimelinePanel(svg, rightX, h * 0.63, rightW, h * 0.37, colorMode);
+    }
+
+    function drawEsp32SessionHud(svg, x, y, w, h, opts = {}) {
+      const round = !!opts.round;
+      const titleSize = round ? 14 : 20;
+      const sessionSize = round ? 10 : 12;
+      const padX = 8;
+      svg.appendChild(el("rect", { x, y, width: w, height: h, rx: round ? 12 : 8, fill: "#000000", opacity: 0.50 }));
+      svg.appendChild(textNode("AgentDeck", {
+        x: x + w / 2, y: y + (round ? 18 : 24), fill: "#E2E8F0", "font-size": titleSize,
+        "font-weight": 800, "text-anchor": "middle", "font-family": "ui-sans-serif, system-ui, sans-serif",
+      }));
+      svg.appendChild(el("rect", {
+        x: x + (round ? (w - 100) / 2 : (w - 130) / 2),
+        y: y + (round ? 24 : 31),
+        width: round ? 100 : 130,
+        height: 2,
+        rx: 1,
+        fill: "#3B82F6",
+      }));
+      const sessions = round ? [
+        ["Claude", "#C07058", "#22C55E"],
+        ["Codex", "#5561E0", "#3B82F6"],
+      ] : [
+        ["AgentDeck", "#C07058", "#22C55E"],
+        ["Codex", "#5561E0", "#3B82F6"],
+        ["OpenClaw", "#FF4D4D", "#22C55E"],
+      ];
+      let rowY = y + (round ? 44 : 52);
+      sessions.forEach(([name, brand, status]) => {
+        svg.appendChild(textNode("●", {
+          x: x + padX, y: rowY, fill: brand, "font-size": sessionSize,
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+        }));
+        svg.appendChild(textNode(name, {
+          x: x + padX + 14, y: rowY, fill: "#94A3B8", "font-size": sessionSize,
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+        }));
+        svg.appendChild(textNode("●", {
+          x: x + w - padX - 12, y: rowY, fill: status, "font-size": sessionSize,
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+        }));
+        rowY += round ? 14 : 17;
       });
+    }
+
+    function drawEsp32WaterGauge(svg, x, y, size, percent, label, reset) {
+      const pct = Math.max(0, Math.min(100, percent));
+      const color = pct >= 90 ? "#EF4444" : pct >= 70 ? "#FBBF24" : "#22C55E";
+      const inner = size - 2;
+      const fillH = inner * pct / 100;
+      svg.appendChild(el("rect", {
+        x, y, width: size, height: size, rx: 6, fill: "#FFFFFF", opacity: 0.125,
+        stroke: "#FFFFFF", "stroke-width": 1, "stroke-opacity": 0.10,
+      }));
+      svg.appendChild(el("rect", {
+        x: x + 1, y: y + 1 + inner - fillH, width: inner, height: fillH,
+        fill: color, opacity: 0.50,
+      }));
+      svg.appendChild(textNode(label, {
+        x: x + size / 2, y: y + 14, fill: "#94A3B8", "font-size": 10,
+        "text-anchor": "middle", "font-family": "ui-sans-serif, system-ui, sans-serif",
+      }));
+      svg.appendChild(textNode(`${Math.round(pct)}%`, {
+        x: x + size / 2, y: y + size / 2 + 7, fill: "#E2E8F0", "font-size": 16,
+        "font-weight": 800, "text-anchor": "middle", "font-family": "ui-sans-serif, system-ui, sans-serif",
+      }));
+      svg.appendChild(textNode(reset, {
+        x: x + size / 2, y: y + size + 12, fill: "#94A3B8", "font-size": 10,
+        "text-anchor": "middle", opacity: 0.70, "font-family": "ui-sans-serif, system-ui, sans-serif",
+      }));
+    }
+
+    function drawEsp32GaugeHud(svg, x, y, w, h, opts = {}) {
+      const round = !!opts.round;
+      const gaugeSize = round ? 44 : 58;
+      const gap = 8;
+      svg.appendChild(el("rect", { x, y, width: w, height: h, rx: round ? 12 : 8, fill: "#000000", opacity: 0.50 }));
+      let gaugeY = y + 9;
+      if (!round) {
+        svg.appendChild(textNode("TANK STATUS", {
+          x: x + 8, y: y + 15, fill: "#94A3B8", "font-size": 10,
+          "font-weight": 800, "font-family": "ui-sans-serif, system-ui, sans-serif",
+        }));
+        gaugeY = y + 23;
+      }
+      const rowW = gaugeSize * 2 + gap;
+      const startX = x + (w - rowW) / 2;
+      drawEsp32WaterGauge(svg, startX, gaugeY, gaugeSize, 46, "5h", "1h24m");
+      drawEsp32WaterGauge(svg, startX + gaugeSize + gap, gaugeY, gaugeSize, 72, "7d", "1d12h");
     }
 
     function renderEsp32Device(svg, agent, state, variant, t) {
@@ -1676,62 +1911,15 @@
         askKind: "esp32",
       });
       if (variant === "round") {
-        drawSessionPanel(svg, (w - 260) / 2, 20, 260, 84, {
-          bg: "rgba(0,0,0,0.50)",
-          text: "#E2E8F0",
-          sub: "#94A3B8",
-          accent: "#3B82F6",
-          showWorkers: false,
-          compact: true,
-          radius: 12,
-        });
-        drawTankPanel(svg, (w - 120) / 2, h - 122, 120, 92, {
-          bg: "rgba(0,0,0,0.50)",
-          text: "#E2E8F0",
-          sub: "#94A3B8",
-          compact: true,
-          radius: 12,
-        });
+        drawEsp32SessionHud(svg, (w - 260) / 2, 20, 260, 82, { round: true });
+        drawEsp32GaugeHud(svg, (w - 112) / 2, h - 30 - 78, 112, 78, { round: true });
       } else if (variant === "portrait") {
-        // Portrait IPS 320×480: session info top, aquarium middle, gauge bottom
-        const cardH = 88;
-        const gaugeH = 64;
-        drawSessionPanel(svg, 8, 10, w - 16, cardH, {
-          bg: "rgba(0,0,0,0.55)",
-          text: "#E2E8F0",
-          sub: "#94A3B8",
-          accent: "#3B82F6",
-          showWorkers: false,
-          compact: true,
-          radius: 10,
-        });
-        drawTankPanel(svg, 8, h - gaugeH - 8, w - 16, gaugeH, {
-          bg: "rgba(0,0,0,0.55)",
-          text: "#E2E8F0",
-          sub: "#94A3B8",
-          compact: true,
-          radius: 10,
-        });
+        drawEsp32SessionHud(svg, 8, 28, w - 16, 112, { round: false });
+        drawEsp32GaugeHud(svg, w - 140 - 8, h - 104, 140, 96, { round: false });
       } else {
         const topY = 28;
-        const leftW = 170;
-        const rightW = variant === "ips" ? 144 : 132;
-        drawSessionPanel(svg, 8, topY, leftW, variant === "ips" ? 104 : 116, {
-          bg: "rgba(0,0,0,0.50)",
-          text: "#E2E8F0",
-          sub: "#94A3B8",
-          accent: "#3B82F6",
-          showWorkers: false,
-          compact: variant === "ips",
-          radius: 8,
-        });
-        drawTankPanel(svg, w - rightW - 8, topY, rightW, variant === "ips" ? 106 : 112, {
-          bg: "rgba(0,0,0,0.50)",
-          text: "#E2E8F0",
-          sub: "#94A3B8",
-          compact: true,
-          radius: 8,
-        });
+        drawEsp32SessionHud(svg, 8, topY, 170, 116, { round: false });
+        drawEsp32GaugeHud(svg, w - 140 - 8, topY, 140, 96, { round: false });
       }
     }
 
@@ -1831,9 +2019,9 @@
       clear(svg);
       drawMatrixLedGrid(svg);
       const pct = state === "working" ? 72 : state === "asking" ? 46 : state === "sleeping" ? 18 : 34;
-      const label = Math.floor((t / 4) % 2) === 0 ? "5H" : "7D";
+      const reset = Math.floor((t / 4) % 2) === 0 ? "1H24" : "1D12";
       const fillW = Math.max(0, Math.min(32, Math.round((pct / 100) * 32)));
-      // Pixoo-matched color palette
+      // Pixoo/TC001-matched color palette
       let fillColor;
       if (pct >= 90) {
         const pulse = 0.7 + 0.3 * Math.sin(t * 6);
@@ -1848,19 +2036,23 @@
       for (let x = fillW; x < 32; x++) {
         for (let y = 0; y < 8; y++) drawMatrixPixel(svg, x, y, "#0F0F14", 0.5);
       }
-      drawMatrixText(svg, label, 1, 1, "#F5FAFF");
-      drawMatrixText(svg, `${pct}%`, 18, 1, "#F5FAFF");
+      drawMatrixText(svg, `${pct}%`, 1, 1, "#F5FAFF");
+      drawMatrixText(svg, reset, 32 - reset.length * 4, 1, "#607080");
+      if (state === "working" || state === "asking") {
+        drawMatrixPixel(svg, 31, 7, state === "working" ? "#C8785A" : "#C88C00", 0.9);
+      }
     }
 
     function renderMatrixAgentsDevice(svg, agent, state, t) {
       clear(svg);
       drawMatrixLedGrid(svg);
-      // Col layout: claude@x=0, codex@x=7, opencode@x=14, openclaw@x=24
+      // Col layout mirrors matrix_pages.cpp: live agents scroll on the left,
+      // OpenClaw crayfish is fixed at x=27 when gateway is available.
       const slots = [
         { id: "claude",   x: 0,  sprite: MATRIX_SPRITES.octopus,   color: "#C07058" },
         { id: "codex",    x: 7,  sprite: MATRIX_SPRITES.jellyfish,  color: "#6366F1" },
-        { id: "opencode", x: 14, sprite: MATRIX_SPRITES.octopus,    color: "#C8C1BF" },
-        { id: "openclaw", x: 24, sprite: MATRIX_SPRITES.crayfish,   color: "#FF4D4D" },
+        { id: "opencode", x: 14, sprite: MATRIX_SPRITES.opencode,   color: "#00C8B4" },
+        { id: "openclaw", x: 26, sprite: MATRIX_SPRITES.crayfish,   color: "#FF4D4D" },
       ];
       slots.forEach(({ id, x, sprite, color }) => {
         const selected = id === agent;
@@ -1870,12 +2062,13 @@
         // Dim openclaw slot unless agent=openclaw
         const slotColor = id === "openclaw" && !selected ? "#7A1F1F" : color;
         drawMatrixSprite(svg, x + 1, 1 + bobY, sprite, slotColor, opacity);
-        const dotColor = iconState === "working" ? "#34D399" : iconState === "asking" ? "#F5B942" : iconState === "sleeping" ? "#4B5563" : "#93C5FD";
-        svg.appendChild(el("circle", { cx: x + 3.5, cy: 7.1, r: 0.4, fill: dotColor, opacity: 0.9 }));
       });
     }
 
     function renderStreamDeckDevice(svg, agent, state, t) {
+      const actual = getStreamDeckActual(agent, state);
+      if (actual?.svg && renderInlineSvg(svg, actual.svg)) return;
+
       clear(svg);
       const isWorking = state === "working";
       const isAsking = state === "asking";
@@ -1914,17 +2107,22 @@
 
       // Agent mark simplified inside
       if (agent === "claude") {
-        drawAgentMark(svg, agent, 114, 114, 40, { state: "idle", t, palette: { fill: p1, opacity: 0.15 } });
+        drawAgentMark(svg, agent, 114, 114, 40, { state: "idle", t, palette: { fill: p1, opacity: 0.46 } });
       } else if (agent === "codex") {
         drawAgentMark(svg, agent, 114, 114, 40, {
           state: "idle", t,
-          palette: { top: p1, mid: p1, bottom: p2, opacity: 0.2 },
-          promptStyle: { color: "#FFF", fontSize: 10, yOffset: 3, opacity: 0.4 },
+          palette: { top: p1, mid: p1, bottom: p2, opacity: 0.46 },
+          promptStyle: { color: "#FFF", fontSize: 10, yOffset: 3, opacity: 0.72 },
+        });
+      } else if (agent === "openclaw") {
+        drawAgentMark(svg, agent, 114, 114, 36, {
+          state: "idle", t,
+          palette: { top: p1, bottom: p2, eye: "#00E5CC", opacity: 0.48 },
         });
       } else {
         drawAgentMark(svg, agent, 114, 114, 34, {
           state: "idle", t,
-          palette: { outer: p1, inner: p2, bg: "#2C2C2E", opacity: 0.25 },
+          palette: { outer: p1, inner: p2, bg: "#2C2C2E", opacity: 0.48 },
         });
       }
 
@@ -1956,6 +2154,139 @@
       }
 
       if (isAsking) drawAskIndicator(svg, "streamdeck", 114, 24, 1, t);
+    }
+
+    function renderD200HDevice(svg, agent, state, t) {
+      clear(svg);
+      svg.setAttribute("viewBox", "0 0 196 196");
+      const isWorking = state === "working";
+      const isAsking = state === "asking";
+      const p1 = agent === "claude" ? "#D97757" : agent === "codex" ? "#8BA4FF" : agent === "openclaw" ? "#FF6B6B" : "#F1ECEC";
+      const p2 = agent === "claude" ? "#BE6D52" : agent === "codex" ? "#5981FF" : agent === "openclaw" ? "#CC3333" : "#AFAFAF";
+      const stateColor = isWorking ? "#3B82F6" : isAsking ? "#F59E0B" : "#22C55E";
+      const stripColor = isWorking || isAsking ? stateColor : p1;
+      const stateLabel = isWorking ? (agent === "openclaw" ? "ROUTING" : "WORKING") : isAsking ? "AWAITING" : agent === "openclaw" ? "STANDBY" : "IDLE";
+      const modelStr = agent === "claude" ? "opus-4" : agent === "codex" ? "gpt-5" : agent === "openclaw" ? "" : "opencode";
+      const nameStr = agent === "claude" ? "Claude" : agent === "codex" ? "Codex" : agent === "openclaw" ? "OpenClaw" : "OpenCode";
+      const hasModel = modelStr.length > 0;
+
+      const gradId = `d200h-bg-${agent}-${state}`;
+      addLinearGradient(svg, gradId, [
+        { offset: "0%", "stop-color": "#141417" },
+        { offset: "100%", "stop-color": "#08090C" },
+      ]);
+      svg.appendChild(el("rect", { x: 0, y: 0, width: 196, height: 196, fill: `url(#${gradId})` }));
+
+      const pad = 18;
+      const inner = 196 - pad * 2;
+      svg.appendChild(el("rect", { x: pad, y: pad, width: inner, height: inner, rx: 13, fill: "#1C1C1E" }));
+      svg.appendChild(el("rect", { x: pad, y: pad, width: inner, height: 34, rx: 13, fill: "#FFFFFF", opacity: 0.08 }));
+      svg.appendChild(el("rect", { x: pad, y: 134, width: inner, height: 44, rx: 13, fill: "#000000", opacity: 0.12 }));
+      svg.appendChild(el("rect", { x: pad, y: pad, width: inner, height: inner, rx: 13, fill: "none", stroke: "#FFFFFF", "stroke-width": 1.5, opacity: 0.24 }));
+      if (isWorking || isAsking) {
+        svg.appendChild(el("rect", { x: pad, y: pad, width: inner, height: inner, rx: 13, fill: "none", stroke: stateColor, "stroke-width": 3, opacity: 0.72 }));
+      }
+      svg.appendChild(el("rect", { x: pad + 3, y: pad + 34, width: 5, height: inner - 68, rx: 2.5, fill: stripColor, opacity: 0.78 }));
+
+      if (agent === "claude") {
+        drawAgentMark(svg, agent, 62, 54, 54, { state: "idle", t, palette: { fill: p1, opacity: 0.82 } });
+      } else if (agent === "codex") {
+        drawAgentMark(svg, agent, 62, 56, 56, {
+          state: "idle", t,
+          palette: { top: p1, mid: p1, bottom: p2, opacity: 0.88 },
+          promptStyle: { color: "#FFF", fontSize: 13, yOffset: 4, opacity: 0.6 },
+        });
+      } else if (agent === "openclaw") {
+        drawAgentMark(svg, agent, 62, 52, 64, {
+          state: "idle", t,
+          palette: { top: p1, bottom: p2, eye: "#00E5CC", opacity: 0.9 },
+        });
+      } else {
+        drawAgentMark(svg, agent, 62, 56, 48, {
+          state: "idle", t,
+          palette: { outer: p1, inner: p2, bg: "#1C1C1E", opacity: 0.9 },
+        });
+      }
+
+      svg.appendChild(el("circle", { cx: 163, cy: 33, r: 8, fill: stateColor, opacity: 0.9 }));
+      svg.appendChild(textNode(nameStr, {
+        x: 34, y: hasModel ? 116 : 122, "font-size": nameStr.length > 8 ? 21 : 23, "font-weight": 800, "text-anchor": "start",
+        fill: "#FFFFFF", "font-family": "Inter, sans-serif",
+      }));
+      if (hasModel) {
+        svg.appendChild(textNode(modelStr, {
+          x: 34, y: 140, "font-size": 16, "font-weight": 700, "text-anchor": "start",
+          fill: "#94A3B8", "font-family": "Inter, sans-serif",
+        }));
+      }
+      svg.appendChild(textNode(stateLabel, {
+        x: 34, y: hasModel ? 163 : 154, "font-size": 15, "font-weight": 800, "text-anchor": "start",
+        fill: stateColor, "font-family": "Inter, sans-serif",
+      }));
+
+      if (isAsking) drawAskIndicator(svg, "streamdeck", 163, 33, 0.85, t);
+    }
+
+    function renderD200HUsageDevice(svg, state, t) {
+      clear(svg);
+      const pct5 = 46;
+      const pct7 = 72;
+      const colorForPct = (pct) => pct >= 90 ? "#EF4444" : pct >= 70 ? "#F59E0B" : pct >= 50 ? "#00C8B4" : "#3B82F6";
+      const color5 = colorForPct(pct5);
+      const color7 = colorForPct(pct7);
+      const w = 392;
+      const h = 196;
+      svg.appendChild(el("rect", { x: 0, y: 0, width: w, height: h, fill: "#0D0D12" }));
+      svg.appendChild(el("rect", { x: 18, y: 18, width: w - 36, height: h - 36, rx: 15, fill: "#151720" }));
+      svg.appendChild(el("rect", { x: 18, y: 18, width: w - 36, height: 42, rx: 15, fill: "#FFFFFF", opacity: 0.08 }));
+      svg.appendChild(el("rect", { x: 18, y: 128, width: w - 36, height: 50, rx: 15, fill: "#000000", opacity: 0.16 }));
+      svg.appendChild(el("rect", { x: 18, y: 18, width: w - 36, height: h - 36, rx: 15, fill: "none", stroke: "#FFFFFF", "stroke-width": 1.5, opacity: 0.24 }));
+      svg.appendChild(el("line", { x1: 196, y1: 50, x2: 196, y2: 144, stroke: "#CCD6E5", "stroke-width": 2, opacity: 0.14 }));
+      svg.appendChild(el("rect", { x: 178, y: 136, width: 36, height: 5, rx: 2.5, fill: "#FFFFFF", opacity: 0.12 }));
+
+      const bar = (x, pct, color) => {
+        const width = 136;
+        const height = 20;
+        const fillW = Math.max(height, width * pct / 100);
+        svg.appendChild(el("rect", { x, y: 128, width, height, rx: height / 2, fill: "#0C0D12", opacity: 0.95 }));
+        svg.appendChild(el("rect", { x, y: 128, width: fillW, height, rx: height / 2, fill: color, opacity: 0.86 }));
+        svg.appendChild(el("rect", { x, y: 128, width, height, rx: height / 2, fill: "none", stroke: color, "stroke-width": 1, opacity: 0.34 }));
+      };
+      bar(34, pct5, color5);
+      bar(222, pct7, color7);
+
+      svg.appendChild(textNode("LIMITS", {
+        x: w / 2, y: 39, "font-size": 16, "font-weight": 800, "text-anchor": "middle",
+        fill: "#E2E8F0", "font-family": "Inter, sans-serif",
+      }));
+      svg.appendChild(textNode("5H", {
+        x: 34, y: 64, "font-size": 18, "font-weight": 800, "text-anchor": "start",
+        fill: "#94A3B8", "font-family": "Inter, sans-serif",
+      }));
+      svg.appendChild(textNode(`${pct5}%`, {
+        x: 34, y: 93, "font-size": 38, "font-weight": 800, "text-anchor": "start",
+        fill: color5, "font-family": "Inter, sans-serif",
+      }));
+      svg.appendChild(textNode("1h24m", {
+        x: 36, y: 118, "font-size": 19, "font-weight": 800, "text-anchor": "start",
+        fill: "#E2E8F0", "font-family": "Inter, sans-serif",
+      }));
+      svg.appendChild(textNode("7D", {
+        x: 222, y: 64, "font-size": 18, "font-weight": 800, "text-anchor": "start",
+        fill: "#94A3B8", "font-family": "Inter, sans-serif",
+      }));
+      svg.appendChild(textNode(`${pct7}%`, {
+        x: 222, y: 93, "font-size": 38, "font-weight": 800, "text-anchor": "start",
+        fill: color7, "font-family": "Inter, sans-serif",
+      }));
+      svg.appendChild(textNode("1d4h", {
+        x: 224, y: 118, "font-size": 19, "font-weight": 800, "text-anchor": "start",
+        fill: "#E2E8F0", "font-family": "Inter, sans-serif",
+      }));
+      svg.appendChild(textNode("ChatGPT Plus Apr 27", {
+        x: w / 2, y: 164, "font-size": 15, "font-weight": 800, "text-anchor": "middle",
+        fill: "#94A3B8", "font-family": "Inter, sans-serif",
+      }));
     }
 
     function renderAppleWatchDevice(svg, agent, state, t) {
@@ -2171,8 +2502,8 @@
       renderMatrixUsageDevice(document.getElementById("sim-tc-usage"), state, t);
       renderMatrixAgentsDevice(document.getElementById("sim-tc-agents"), agent, state, t);
       renderStreamDeckDevice(document.getElementById("sim-streamdeck"), agent, state, t);
-      // D200H uses identical SVG renderer as StreamDeck (same 144×144 base, production scales to 196×196)
-      renderStreamDeckDevice(document.getElementById("sim-d200h"), agent, state, t);
+      renderD200HDevice(document.getElementById("sim-d200h"), agent, state, t);
+      renderD200HUsageDevice(document.getElementById("sim-d200h-usage"), state, t);
       renderAppleWatchDevice(document.getElementById("sim-apple-watch"), agent, state, t);
       renderTuiDevice(document.getElementById("sim-tui"), agent, state, t);
     }

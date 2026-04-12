@@ -29,6 +29,7 @@ export interface EvalJob {
 
 export interface EvalJobResult {
   runId: string;
+  turnId?: string;   // set for turn-level evals
   layer1Ran: boolean;
   layer2Ran: boolean;
   overall?: number;
@@ -93,6 +94,78 @@ export class ApmeRunner {
     this.queue.push(job);
     debug('APME', `enqueue eval runId=${job.runId} (queue=${this.queue.length})`);
     void this.drain();
+  }
+
+  /** Immediately judge a single completed turn (mid-session eval).
+   *  Used for non-code categories where turn prompt+response is the eval unit.
+   *  Fires-and-forgets; result is stored and notified via onResult listeners. */
+  enqueueTurn(job: { runId: string; turnId: string; category?: string }): void {
+    if (!this.store.enabled) return;
+    void this.runTurnEval(job);
+  }
+
+  private async runTurnEval({ runId, turnId, category }: { runId: string; turnId: string; category?: string }): Promise<void> {
+    const cfg = this.configOverride ?? loadApmeConfig();
+    if (!cfg.enabled) return;
+
+    const turn = this.store.getTurn(turnId);
+    if (!turn) return;
+    const prompt = (turn.prompt as string | null) ?? '';
+    const response = (turn.response as string | null) ?? '';
+    if (!prompt && !response) return; // nothing to judge
+
+    // Select rubric by category (conversation/planning/research/review)
+    const rubric = (category ? this.store.getCurrentRubric(category) : null)
+      ?? this.store.getCurrentRubric('conversation'); // sensible fallback
+    if (!rubric) return;
+
+    const judgePrompt = [
+      rubric.prompt,
+      '',
+      '--- TURN CONTEXT ---',
+      `task_category: ${category ?? 'conversation'}`,
+      '',
+      '--- USER PROMPT ---',
+      prompt.slice(0, 2000) || '(not captured)',
+      '',
+      '--- AGENT RESPONSE ---',
+      response.slice(0, 4000) || '(not captured)',
+      '',
+      'Respond with strict JSON only.',
+    ].join('\n');
+
+    try {
+      const judgeText = this.judgeOverride
+        ? await this.judgeOverride(judgePrompt, cfg.judge)
+        : await callJudge(judgePrompt, cfg.judge);
+      const parsed = parseJudgeJson(judgeText);
+      if (!parsed) return;
+
+      const now = Date.now();
+      const judgeModel = `${cfg.judge.backend}:${cfg.judge.model}`;
+      for (const [axis, score] of Object.entries(parsed.scores)) {
+        this.store.insertEvalForTurn({
+          runId, turnId,
+          id: 0, // autoincrement
+          layer: 'turn_judge',
+          metric: axis,
+          score,
+          raw: axis === 'overall'
+            ? JSON.stringify({ reasoning: parsed.reasoning, done: parsed.done, missed: parsed.missed })
+            : null,
+          rubricVer: rubric.version,
+          judgeModel,
+          createdAt: now,
+        });
+      }
+      debug('APME', `turn eval ${turnId.slice(0, 8)}: overall=${parsed.scores.overall}`);
+      // Notify listeners with turnId so daemon can broadcast turn eval
+      for (const fn of this.listeners) {
+        fn({ runId, turnId, layer1Ran: false, layer2Ran: true, overall: parsed.scores.overall });
+      }
+    } catch (err) {
+      debug('APME', `turn eval error turnId=${turnId.slice(0, 8)}: ${String(err)}`);
+    }
   }
 
   /** Runs the queue until empty. Awaitable — callers can join the current drain. */
@@ -163,10 +236,12 @@ export class ApmeRunner {
     let layer2Ran = false;
     let overall: number | undefined;
     if (cfg.enabled && shouldJudge(cfg.judge, layer1Passed)) {
-      const rubric = this.store.getCurrentRubric('general');
+      // Select category-specific rubric, fall back to 'general'
+      const rubric = (run.taskCategory ? this.store.getCurrentRubric(run.taskCategory) : null)
+        ?? this.store.getCurrentRubric('general');
       if (rubric) {
         try {
-          const prompt = buildJudgePrompt(run, rubric.prompt, layer1Passed);
+          const prompt = buildJudgePrompt(run, rubric.prompt, layer1Passed, this.store);
           const judgeText = this.judgeOverride
             ? await this.judgeOverride(prompt, cfg.judge)
             : await callJudge(prompt, cfg.judge);
@@ -188,6 +263,11 @@ export class ApmeRunner {
             }
             overall = parsed.scores.overall;
             layer2Ran = true;
+            // Re-compute composite score with judge contribution
+            try {
+              const { recomputeComposite } = await import('./outcome.js');
+              recomputeComposite(this.store, run.id);
+            } catch { /* ignore — outcome may not have run yet */ }
           } else {
             debug('APME', `judge response unparseable runId=${run.id}`);
           }
@@ -358,28 +438,48 @@ interface ParsedJudge {
   missed?: string[];  // items the agent missed
 }
 
-export function buildJudgePrompt(run: ApmeRunRow, rubricPrompt: string, layer1Passed: boolean | null): string {
-  const diff = collectDiff(run);
+const NON_CODE_CATEGORIES = new Set(['conversation', 'planning', 'research', 'review']);
+
+export function buildJudgePrompt(
+  run: ApmeRunRow, rubricPrompt: string, layer1Passed: boolean | null,
+  store?: import('./store.js').ApmeStore,
+): string {
   const task = (run.taskPrompt ?? '').slice(0, 4_000);
   const det = layer1Passed === null ? 'unknown' : layer1Passed ? 'passed' : 'failed';
-  return [
+  const isNonCode = run.taskCategory && NON_CODE_CATEGORIES.has(run.taskCategory);
+
+  const sections: string[] = [
     rubricPrompt,
     '',
     '--- RUN CONTEXT ---',
     `agent_type: ${run.agentType}`,
     `model: ${run.modelId ?? 'unknown'}`,
     `project: ${run.projectName ?? 'unknown'}`,
+    `task_category: ${run.taskCategory ?? 'unknown'}`,
     `deterministic_checks: ${det}`,
-    `exit_code: ${run.exitCode ?? 'unknown'}`,
     '',
     '--- TASK PROMPT ---',
     task || '(not captured)',
-    '',
-    '--- DIFF (truncated) ---',
-    diff || '(no diff captured)',
-    '',
-    'Respond with strict JSON only.',
-  ].join('\n');
+  ];
+
+  if (isNonCode && store) {
+    // Non-code categories: include turns (prompt + response) instead of diff
+    const turns = store.listTurns(run.id);
+    sections.push('', '--- CONVERSATION ---');
+    for (const t of turns.slice(0, 10)) {
+      const prompt = ((t.prompt as string) ?? '').slice(0, 2000);
+      const response = ((t.response as string) ?? '').slice(0, 3000);
+      sections.push(`[Turn ${t.turn_index}] User: ${prompt}`);
+      if (response) sections.push(`Agent: ${response}`);
+    }
+  } else {
+    // Code categories: include git diff
+    const diff = collectDiff(run);
+    sections.push('', '--- DIFF (truncated) ---', diff || '(no diff captured)');
+  }
+
+  sections.push('', 'Respond with strict JSON only.');
+  return sections.join('\n');
 }
 
 function collectDiff(run: ApmeRunRow): string {

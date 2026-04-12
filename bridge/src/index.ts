@@ -164,12 +164,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     }
   }
 
-  // Multi-session port allocation
+  // Multi-session port allocation — session bridges reserve 9120 for the daemon
   const requestedPort = opts.port ?? BRIDGE_WS_PORT;
-  let port = requestedPort === BRIDGE_WS_PORT ? await findAvailablePort() : requestedPort;
-  if (port !== requestedPort) {
-    log(`Port ${requestedPort} in use, using ${port}`);
-  }
+  let port = requestedPort === BRIDGE_WS_PORT ? await findAvailablePort({ reserveDaemon: true }) : requestedPort;
 
   // Auto-migrate hooks (Claude Code mode only)
   if (agentType === 'claude-code') {
@@ -183,9 +180,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   })();
   const projectName = process.cwd().split('/').pop() || 'unknown';
 
-  // Warn if same project is already running
+  // Warn if same project already has a non-daemon session running
   const existingSessions = listActiveSessions();
-  const sameProject = existingSessions.filter((s) => s.projectName === projectName);
+  const sameProject = existingSessions.filter((s) =>
+    s.projectName === projectName && s.agentType !== 'daemon',
+  );
   if (sameProject.length > 0) {
     const ports = sameProject.map((s) => s.port).join(', ');
     log(`\u26A0 Session "${projectName}" already running on port ${ports}. Starting new session on port ${port}.`);
@@ -436,13 +435,51 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   if (agentType === 'claude-code') {
     wireClaudeCodeTimeline(adapter, core, journal);
   }
+  // APME wiring for non-Claude-Code agents (OpenCode, Codex, OpenClaw)
+  if (apme && agentType !== 'claude-code' && agentType !== 'monitor') {
+    wireAgentApme(adapter, agentType, apme, core, ptyRingBuffer);
+  }
 
   // ===== Wire adapter events → StateMachine + journal =====
+  // APME: PTY response fallback — captures response from terminal output when
+  // the Stop hook doesn't fire (unreliable in Claude Code v2.1+).
+  // Three capture paths handle the hook/PTY race condition:
+  //   Path A: idle fires, turn exists → apply directly
+  //   Path B: idle fires before hook (fast responses) → buffer, apply on hook arrival
+  //   Path C: UserPromptSubmit closes prev turn → apply PTY text to closed turn
+  let pendingPtyResponse: string | null = null;
   adapter.on('event', (evt: AdapterEvent) => {
     switch (evt.source) {
       case 'hook':
         journal.write('hook', 'hook', { event: evt.event, data: evt.data });
+        // APME: detect /clear → split run before ingestHook processes the prompt
+        if (evt.event === 'UserPromptSubmit' && apme) {
+          const msg = evt.data?.message;
+          const promptText = (evt.data?.prompt as string)
+            || (typeof msg === 'object' && msg !== null ? (msg as Record<string, unknown>).content as string : '')
+            || '';
+          if (/^\s*\/clear\s*$/i.test(promptText)) {
+            apme.collector.splitRun(core.sessionId, process.cwd());
+            // Don't ingestHook the /clear prompt — it's not a real task prompt
+            break;
+          }
+        }
         apme?.collector.ingestHook(core.sessionId, evt.event, evt.data);
+        if (evt.event === 'UserPromptSubmit' && apme) {
+          // Path B: apply buffered response to the NEW turn (idle fired before hook)
+          if (pendingPtyResponse) {
+            debug('APME', `hook:UPS Path B: applying pending (${pendingPtyResponse.length} chars)`);
+            apme.collector.setTurnResponse(core.sessionId, pendingPtyResponse);
+            pendingPtyResponse = null;
+          }
+          // Path C: prev turn was just closed by ingestHook — apply pending response
+          if (pendingPtyResponse) {
+            debug('APME', `hook:UPS Path C: applying pending to closed turn (${pendingPtyResponse.length} chars)`);
+            apme.collector.setLastClosedTurnResponse(core.sessionId, pendingPtyResponse);
+            pendingPtyResponse = null;
+          }
+        }
+        if (evt.event === 'Stop') pendingPtyResponse = null; // Stop has cleaner response
         if (evt.event === 'shutdown') {
           shutdown();
           return;
@@ -462,6 +499,50 @@ export async function startSession(opts: SessionOptions): Promise<void> {
           };
           const mapped = parserToHook[evt.event] ?? evt.event;
           apme.collector.ingestHook(core.sessionId, mapped, evt.data ?? {});
+        }
+        // APME: Path A — spinner_stop fires when Claude finishes responding.
+        // Delay 500ms to let response render in PTY, then extract text after ⏺ marker.
+        if (apme && evt.event === 'spinner_stop') {
+          const sid = core.sessionId;
+          setTimeout(() => {
+            if (!apme) return;
+            const tail = ptyRingBuffer.getTail(5000);
+            // Claude's response starts with ⏺ — extract content after last ⏺ marker.
+            // Take only meaningful lines (stop at spinner chars ✢✻⏸, prompt ❯, or separator ──).
+            const marker = tail.lastIndexOf('⏺');
+            let response = '';
+            if (marker >= 0) {
+              const afterMarker = tail.slice(marker + 1).trim();
+              const lines = afterMarker.split('\n');
+              const clean: string[] = [];
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                // Stop at UI artifacts
+                if (/^[✢✻⏸❯─]/.test(trimmed)) break;
+                if (/planmode|shift\+tab/i.test(trimmed)) break;
+                clean.push(trimmed);
+              }
+              response = clean.join('\n').trim();
+            }
+            debug('APME', `spinner_stop+500ms: tailLen=${tail.length} marker=${marker} respLen=${response.length}`);
+            if (response.length > 2) {
+              const turnId = apme.collector.getActiveTurnId(sid);
+              if (turnId) {
+                apme.collector.setTurnResponse(sid, response);
+                pendingPtyResponse = null;
+                // Mid-session turn eval — judge immediately for non-code categories
+                const run = apme.store.getRun(apme.collector.getRunId(sid) ?? '');
+                const category = run?.taskCategory ?? undefined;
+                const NON_CODE = new Set(['conversation', 'planning', 'research', 'review']);
+                if (category && NON_CODE.has(category)) {
+                  apme.runner.enqueueTurn({ runId: run!.id, turnId, category });
+                }
+              } else {
+                pendingPtyResponse = response;
+              }
+            }
+          }, 500);
         }
         break;
 
@@ -1076,6 +1157,73 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     core.shutdown();
   }
 
+}
+
+// ===== Non-Claude agent APME wiring =====
+// For OpenCode, Codex, OpenClaw: intercepts adapter timeline events to create
+// APME turns with prompts and responses. Claude Code uses hooks instead.
+
+function wireAgentApme(
+  adapter: import('./types.js').AgentAdapter,
+  agentType: import('@agentdeck/shared').AgentType,
+  apme: import('./apme/index.js').ApmeModule,
+  core: BridgeCore,
+  ptyRingBuffer: PtyRingBuffer,
+): void {
+  const sid = core.sessionId;
+
+  adapter.on('event', (evt: import('./types.js').AdapterEvent) => {
+    // ── Timeline events (OpenCode / OpenClaw) ──
+    // Both adapters emit { source: 'timeline', entry: TimelineEntry }
+    if (evt.source === 'timeline' && evt.entry) {
+      const entry = evt.entry as import('@agentdeck/shared').TimelineEntry;
+      if (entry.type === 'chat_start') {
+        // Turn start: synthesize UserPromptSubmit from the timeline prompt
+        const prompt = entry.detail || entry.raw || '';
+        apme.collector.ingestHook(sid, 'UserPromptSubmit', {
+          message: { content: prompt },
+        });
+      }
+      if (entry.type === 'chat_response') {
+        // Response captured — save to current turn
+        const response = entry.detail || entry.raw || '';
+        if (response.length > 2) apme.collector.setTurnResponse(sid, response);
+      }
+      if (entry.type === 'chat_end' && !apme.collector.getActiveTurnId(sid)) {
+        // No turn was created (chat_start might have been missed) — skip
+      } else if (entry.type === 'chat_end') {
+        // If no response was captured via chat_response, use chat_end detail
+        const detail = entry.detail;
+        if (detail && detail.length > 2) {
+          apme.collector.setLastClosedTurnResponse(sid, detail);
+        }
+      }
+      if (entry.type === 'tool_request') {
+        apme.collector.ingestHook(sid, 'PreToolUse', { tool_name: entry.raw?.split(' ')[0] ?? 'tool' });
+      }
+      if (entry.type === 'tool_resolved') {
+        apme.collector.ingestHook(sid, 'PostToolUse', {});
+      }
+    }
+
+    // ── Codex: PTY parser fallback ──
+    if (evt.source === 'parser' && (agentType as string) === 'codex-cli') {
+      if (evt.event === 'user_prompt') {
+        const text = (evt.data as Record<string, unknown>)?.text as string | undefined;
+        if (text) {
+          apme.collector.ingestHook(sid, 'UserPromptSubmit', { message: { content: text } });
+        }
+      }
+      if (evt.event === 'spinner_stop') {
+        setTimeout(() => {
+          const tail = ptyRingBuffer.getTail(5000);
+          const lines = tail.split('\n').map(l => l.trim()).filter(Boolean);
+          const response = lines.slice(-5).join('\n');
+          if (response.length > 2) apme.collector.setTurnResponse(sid, response);
+        }, 500);
+      }
+    }
+  });
 }
 
 // ===== Claude Code timeline wiring =====
