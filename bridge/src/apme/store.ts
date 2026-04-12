@@ -65,6 +65,26 @@ CREATE TABLE IF NOT EXISTS steps (
   payload    TEXT
 );
 
+CREATE TABLE IF NOT EXISTS turns (
+  id          TEXT PRIMARY KEY,
+  run_id      TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  turn_index  INTEGER NOT NULL,
+  prompt      TEXT,
+  started_at  INTEGER NOT NULL,
+  ended_at    INTEGER,
+  tool_calls  INTEGER DEFAULT 0,
+  files_modified INTEGER DEFAULT 0,
+  files_created INTEGER DEFAULT 0,
+  git_before  TEXT,
+  git_after   TEXT,
+  task_category TEXT,
+  outcome     TEXT,
+  composite_score REAL,
+  efficiency_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_turns_run ON turns(run_id);
+
 CREATE TABLE IF NOT EXISTS artifacts (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id    TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -77,6 +97,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE TABLE IF NOT EXISTS evals (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id      TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  turn_id     TEXT REFERENCES turns(id) ON DELETE CASCADE,
   layer       TEXT NOT NULL,
   metric      TEXT NOT NULL,
   score       REAL,
@@ -238,6 +259,7 @@ export class ApmeStore {
       ['task_signals', 'ALTER TABLE runs ADD COLUMN task_signals TEXT'],
       ['task_category', 'ALTER TABLE runs ADD COLUMN task_category TEXT'],
       ['task_category_source', "ALTER TABLE runs ADD COLUMN task_category_source TEXT DEFAULT 'auto'"],
+      ['turn_id', 'ALTER TABLE evals ADD COLUMN turn_id TEXT REFERENCES turns(id) ON DELETE CASCADE'],
       ['outcome', 'ALTER TABLE runs ADD COLUMN outcome TEXT'],
       ['outcome_confidence', 'ALTER TABLE runs ADD COLUMN outcome_confidence TEXT'],
       ['efficiency_json', 'ALTER TABLE runs ADD COLUMN efficiency_json TEXT'],
@@ -351,6 +373,70 @@ export class ApmeStore {
       `SELECT * FROM runs ${where} ORDER BY started_at DESC LIMIT ${limit}`,
     ).all(...args) as Record<string, unknown>[];
     return rows.map(rowToRun);
+  }
+
+  // ─── Turns ──────────────────────────────────────────────────────────────────
+
+  insertTurn(turn: { id: string; runId: string; turnIndex: number; prompt?: string; startedAt: number; gitBefore?: string }): void {
+    if (!this.db) return;
+    this.db.prepare(
+      `INSERT INTO turns (id, run_id, turn_index, prompt, started_at, git_before) VALUES (?,?,?,?,?,?)`,
+    ).run(turn.id, turn.runId, turn.turnIndex, turn.prompt ?? null, turn.startedAt, turn.gitBefore ?? null);
+  }
+
+  updateTurn(id: string, fields: Record<string, unknown>): void {
+    if (!this.db) return;
+    const map: Record<string, string> = {
+      endedAt: 'ended_at', toolCalls: 'tool_calls', filesModified: 'files_modified',
+      filesCreated: 'files_created', gitAfter: 'git_after', taskCategory: 'task_category',
+      outcome: 'outcome', compositeScore: 'composite_score', efficiencyJson: 'efficiency_json',
+      prompt: 'prompt',
+    };
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      const col = map[k]; if (!col || v === undefined) continue;
+      sets.push(`${col} = ?`); vals.push(v);
+    }
+    if (sets.length === 0) return;
+    vals.push(id);
+    this.db.prepare(`UPDATE turns SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  getTurn(id: string): Record<string, unknown> | null {
+    if (!this.db) return null;
+    return (this.db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as Record<string, unknown>) ?? null;
+  }
+
+  listTurns(runId: string): Array<Record<string, unknown>> {
+    if (!this.db) return [];
+    return this.db.prepare('SELECT * FROM turns WHERE run_id = ? ORDER BY turn_index ASC').all(runId) as Array<Record<string, unknown>>;
+  }
+
+  listEvalsForTurn(turnId: string): ApmeEvalRowDb[] {
+    if (!this.db) return [];
+    const rows = this.db.prepare(
+      'SELECT * FROM evals WHERE turn_id = ? ORDER BY created_at ASC',
+    ).all(turnId) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      runId: r.run_id as string,
+      layer: r.layer as ApmeEvalRowDb['layer'],
+      metric: r.metric as string,
+      score: r.score as number,
+      raw: (r.raw as string | null) ?? null,
+      rubricVer: (r.rubric_ver as number | null) ?? null,
+      judgeModel: (r.judge_model as string | null) ?? null,
+      createdAt: r.created_at as number,
+    }));
+  }
+
+  insertEvalForTurn(row: ApmeEvalRowDb & { turnId: string }): void {
+    if (!this.db) return;
+    this.db.prepare(
+      `INSERT INTO evals (run_id, turn_id, layer, metric, score, raw, rubric_ver, judge_model, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run(row.runId, row.turnId, row.layer, row.metric, row.score,
+      row.raw ?? null, row.rubricVer ?? null, row.judgeModel ?? null, row.createdAt);
   }
 
   // ─── Steps / Artifacts ───────────────────────────────────────────────────────

@@ -940,6 +940,38 @@ apme
       log(`    ${oc} × 0.4 + ${jdStr} × 0.3 + efficiency × 0.2 + ${vibeStr} × 0.1`);
     }
 
+    // ── Turns ──
+    const turns = apme.store.listTurns(run.id);
+    if (turns.length > 0) {
+      log(`\n  ── Turns (${turns.length}) ${'─'.repeat(38)}`);
+      for (const t of turns) {
+        const idx = t.turn_index as number;
+        const prompt = t.prompt as string | null;
+        const tc = t.tool_calls as number ?? 0;
+        const fm = t.files_modified as number ?? 0;
+        const fc = t.files_created as number ?? 0;
+        const dur = t.ended_at && t.started_at
+          ? `${Math.round(((t.ended_at as number) - (t.started_at as number)) / 1000)}s`
+          : 'open';
+        const gitChanged = t.git_before && t.git_after && t.git_before !== t.git_after ? ' +commit' : '';
+        const turnEvals = apme.store.listEvalsForTurn(t.id as string);
+        const turnOverall = turnEvals.find(e => e.metric === 'overall');
+        const scoreStr = turnOverall ? ` score=${(turnOverall.score * 100).toFixed(0)}%` : '';
+
+        log(`    [${idx}] ${prompt ? '"' + prompt.slice(0, 80) + (prompt.length > 80 ? '...' : '') + '"' : '(no prompt)'}`);
+        log(`        ${tc} tools, ${fm} edits, ${fc} creates, ${dur}${gitChanged}${scoreStr}`);
+
+        // Show judge reasoning if available for this turn
+        if (turnOverall?.raw) {
+          try {
+            const raw = JSON.parse(turnOverall.raw) as { reasoning?: string; done?: string[]; missed?: string[] };
+            if (raw.done?.length) for (const item of raw.done) log(`        ✓ ${item}`);
+            if (raw.missed?.length) for (const item of raw.missed) log(`        ✗ ${item}`);
+          } catch { /* ignore */ }
+        }
+      }
+    }
+
     // ── Steps summary ──
     const steps = apme.store.listSteps(run.id);
     if (steps.length > 0) {

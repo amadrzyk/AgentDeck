@@ -162,6 +162,59 @@ final class ApmeStore: @unchecked Sendable {
         return result
     }
 
+    // MARK: - Turns
+
+    func insertTurn(id: String, runId: String, turnIndex: Int, prompt: String?, startedAt: Int) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "INSERT INTO turns (id, run_id, turn_index, prompt, started_at) VALUES (?,?,?,?,?)",
+            -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, id)
+        bindText(stmt, 2, runId)
+        sqlite3_bind_int(stmt, 3, Int32(turnIndex))
+        bindTextOrNull(stmt, 4, prompt)
+        sqlite3_bind_int64(stmt, 5, Int64(startedAt))
+        sqlite3_step(stmt)
+    }
+
+    func updateTurn(id: String, fields: [String: Any?]) {
+        updateRun(id: id, fields: fields)
+        // Reuse the same generic update logic — column names match
+        // Actually turns table has different column names. Do a direct update.
+        guard let db, !fields.isEmpty else { return }
+        let colMap: [String: String] = [
+            "endedAt": "ended_at", "toolCalls": "tool_calls",
+            "filesModified": "files_modified", "filesCreated": "files_created",
+            "gitAfter": "git_after", "taskCategory": "task_category",
+            "outcome": "outcome", "compositeScore": "composite_score",
+        ]
+        var sets: [String] = []
+        var vals: [Any?] = []
+        for (key, val) in fields {
+            guard let col = colMap[key] else { continue }
+            sets.append("\(col) = ?")
+            vals.append(val)
+        }
+        guard !sets.isEmpty else { return }
+        vals.append(id)
+        let sql = "UPDATE turns SET \(sets.joined(separator: ", ")) WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        for (i, val) in vals.enumerated() {
+            let idx = Int32(i + 1)
+            switch val {
+            case let s as String: sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
+            case let d as Double: sqlite3_bind_double(stmt, idx, d)
+            default: sqlite3_bind_null(stmt, idx)
+            }
+        }
+        sqlite3_step(stmt)
+    }
+
     // MARK: - Steps
 
     func insertStep(runId: String, ts: Int, kind: String, toolName: String?, payload: String) {
@@ -392,6 +445,15 @@ final class ApmeStore: @unchecked Sendable {
       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
       ts INTEGER NOT NULL, kind TEXT NOT NULL, tool_name TEXT, payload TEXT
     );
+    CREATE TABLE IF NOT EXISTS turns (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      turn_index INTEGER NOT NULL, prompt TEXT, started_at INTEGER NOT NULL,
+      ended_at INTEGER, tool_calls INTEGER DEFAULT 0,
+      files_modified INTEGER DEFAULT 0, files_created INTEGER DEFAULT 0,
+      git_before TEXT, git_after TEXT, task_category TEXT,
+      outcome TEXT, composite_score REAL, efficiency_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_turns_run ON turns(run_id);
     CREATE TABLE IF NOT EXISTS artifacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,

@@ -35,8 +35,20 @@ export interface OpenRunInput {
   taskPrompt?: string;
 }
 
+interface ActiveTurn {
+  id: string;
+  runId: string;
+  index: number;
+  startedAt: number;
+  toolCalls: number;
+  filesModified: number;
+  filesCreated: number;
+  gitBefore: string | null;
+}
+
 export class ApmeCollector {
   private readonly sessionToRun = new Map<string, string>(); // sessionId → runId
+  private readonly sessionToTurn = new Map<string, ActiveTurn>(); // sessionId → current turn
 
   constructor(
     private readonly store: ApmeStore,
@@ -69,32 +81,89 @@ export class ApmeCollector {
     return runId;
   }
 
-  /** Record a hook event as a step. */
+  /** Record a hook event as a step + manage turn lifecycle. */
   ingestHook(sessionId: string, event: string, data: Record<string, unknown>): void {
     if (!this.store.enabled) return;
     const runId = this.sessionToRun.get(sessionId);
     if (!runId) return;
     const toolName = typeof data.tool_name === 'string' ? data.tool_name : null;
-    // Capture task_prompt lazily — first UserPromptSubmit wins.
-    if (event === 'UserPromptSubmit' && typeof data.prompt === 'string') {
+
+    // ── Turn management ──
+    if (event === 'UserPromptSubmit') {
+      const prompt = typeof data.prompt === 'string' ? (data.prompt as string).slice(0, 8_000) : null;
+      // Close previous turn if open
+      this.closeTurn(sessionId);
+      // Open new turn
+      const prevTurn = this.sessionToTurn.get(sessionId);
+      const turnIndex = prevTurn ? prevTurn.index + 1 : 0;
+      const run = this.store.getRun(runId);
+      const projectPath = run?.projectPath ?? undefined;
+      const turnId = randomUUID();
+      const turn: ActiveTurn = {
+        id: turnId, runId, index: turnIndex,
+        startedAt: Date.now(), toolCalls: 0,
+        filesModified: 0, filesCreated: 0,
+        gitBefore: readGitHead(projectPath),
+      };
+      this.sessionToTurn.set(sessionId, turn);
       try {
-        const run = this.store.getRun(runId);
-        if (run && !run.taskPrompt) {
-          this.store.updateRun(runId, { taskPrompt: (data.prompt as string).slice(0, 8_000) });
+        this.store.insertTurn({
+          id: turnId, runId, turnIndex, prompt: prompt ?? undefined,
+          startedAt: turn.startedAt, gitBefore: turn.gitBefore ?? undefined,
+        });
+      } catch (err) { debug('APME', `insertTurn failed: ${String(err)}`); }
+      // Also set run's task_prompt from first prompt
+      try {
+        if (run && !run.taskPrompt && prompt) {
+          this.store.updateRun(runId, { taskPrompt: prompt });
         }
       } catch { /* ignore */ }
     }
+
+    // Track tool calls on the active turn
+    const activeTurn = this.sessionToTurn.get(sessionId);
+    if (activeTurn && (event === 'PreToolUse' || event === 'tool_start')) {
+      activeTurn.toolCalls++;
+      if (toolName === 'Edit') activeTurn.filesModified++;
+      if (toolName === 'Write') activeTurn.filesCreated++;
+    }
+
+    // Record step
     try {
       this.store.insertStep({
-        runId,
-        ts: Date.now(),
-        kind: event,
-        toolName,
-        payload: safeStringify(data),
+        runId, ts: Date.now(), kind: event,
+        toolName, payload: safeStringify(data),
       });
     } catch (err) {
       debug('APME', `ingestHook failed: ${String(err)}`);
     }
+  }
+
+  /** Close the current turn for a session (called on new prompt or session end). */
+  private closeTurn(sessionId: string): void {
+    const turn = this.sessionToTurn.get(sessionId);
+    if (!turn) return;
+    this.sessionToTurn.delete(sessionId);
+    const run = this.store.getRun(turn.runId);
+    const projectPath = run?.projectPath ?? undefined;
+    const gitAfter = readGitHead(projectPath);
+    try {
+      this.store.updateTurn(turn.id, {
+        endedAt: Date.now(),
+        toolCalls: turn.toolCalls,
+        filesModified: turn.filesModified,
+        filesCreated: turn.filesCreated,
+        gitAfter,
+      });
+      debug('APME', `closeTurn ${turn.id.slice(0, 8)} index=${turn.index} tools=${turn.toolCalls}`);
+    } catch (err) {
+      debug('APME', `closeTurn failed: ${String(err)}`);
+    }
+  }
+
+  /** Get the current active turn ID for a session (if any). */
+  getActiveTurnId(sessionId: string): string | null {
+    return this.sessionToTurn.get(sessionId)?.id ?? null;
   }
 
   /** Ingest a generic timeline-style event (non-hook). */
@@ -138,6 +207,8 @@ export class ApmeCollector {
     if (!this.store.enabled) return null;
     const runId = this.sessionToRun.get(sessionId);
     if (!runId) return null;
+    // Close the last open turn before finalizing the run.
+    this.closeTurn(sessionId);
     this.sessionToRun.delete(sessionId);
     const gitAfter = readGitHead(projectPath);
     try {

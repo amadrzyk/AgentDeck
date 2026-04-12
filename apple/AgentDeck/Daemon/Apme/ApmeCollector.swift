@@ -25,6 +25,19 @@ final class ApmeCollector {
     /// Counter for generating unique hook session IDs.
     private var hookSessionCounter = 0
 
+    /// Active turn tracking per hook session.
+    private struct ActiveTurn {
+        let id: String
+        let runId: String
+        var index: Int
+        let startedAt: Int
+        var toolCalls: Int = 0
+        var filesModified: Int = 0
+        var filesCreated: Int = 0
+    }
+    private var activeTurn: ActiveTurn?
+    private var turnCounter = 0
+
     init(store: ApmeStore) {
         self.store = store
     }
@@ -65,6 +78,7 @@ final class ApmeCollector {
             guard let hookSession = activeHookSession,
                   let runId = sessionToRun.removeValue(forKey: hookSession) else { return }
             activeHookSession = nil
+            closeTurn(runId: runId) // close last turn
 
             store.updateRun(id: runId, fields: ["endedAt": nowMs()])
 
@@ -92,17 +106,31 @@ final class ApmeCollector {
         if let hookSession = activeHookSession, let runId = sessionToRun[hookSession] {
             recordStep(hookSession: hookSession, runId: runId, event: event, data: data)
 
-            // Lazily capture task_prompt from first user_prompt_submit
-            if event == "user_prompt_submit", let prompt = data["prompt"] as? String {
+            // ── Turn management ──
+            if event == "user_prompt_submit" {
+                let prompt = data["prompt"] as? String
+                // Close previous turn
+                closeTurn(runId: runId)
+                // Open new turn
+                turnCounter += 1
+                let turnId = UUID().uuidString
+                activeTurn = ActiveTurn(id: turnId, runId: runId, index: turnCounter - 1, startedAt: nowMs())
+                store.insertTurn(id: turnId, runId: runId, turnIndex: turnCounter - 1, prompt: prompt, startedAt: nowMs())
+
+                // Set run's task_prompt from first prompt
                 let run = store.getRun(id: runId)
-                if run?.taskPrompt == nil {
-                    store.updateRun(id: runId, fields: ["taskPrompt": String(prompt.prefix(8000))])
+                if run?.taskPrompt == nil, let p = prompt {
+                    store.updateRun(id: runId, fields: ["taskPrompt": String(p.prefix(8000))])
                 }
             }
 
-            // Update model when we see it
-            if event == "tool_start" || event == "tool_end" {
-                // model_name may be piggybacked on hook data
+            // Track tool calls on active turn
+            if (event == "tool_start" || event == "PreToolUse"), var turn = activeTurn {
+                turn.toolCalls += 1
+                let toolName = data["tool_name"] as? String
+                if toolName == "Edit" { turn.filesModified += 1 }
+                if toolName == "Write" { turn.filesCreated += 1 }
+                activeTurn = turn
             }
         }
     }
@@ -165,6 +193,17 @@ final class ApmeCollector {
     }
 
     // MARK: - Private
+
+    private func closeTurn(runId: String) {
+        guard var turn = activeTurn else { return }
+        activeTurn = nil
+        store.updateTurn(id: turn.id, fields: [
+            "endedAt": nowMs(),
+            "toolCalls": turn.toolCalls,
+            "filesModified": turn.filesModified,
+            "filesCreated": turn.filesCreated,
+        ])
+    }
 
     private func recordStep(hookSession: String, runId: String, event: String, data: [String: Any]) {
         let toolName = data["tool_name"] as? String
