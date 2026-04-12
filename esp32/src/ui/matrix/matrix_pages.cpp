@@ -29,7 +29,7 @@ static inline int xyToIdx(int x, int y);
 // render in a cool neutral grey so the display doesn't demand attention.
 static CRGB buildDisconnectMsg(char* out, size_t outSize) {
     bool wifiNow = Net::wifiConnected();
-    bool wsNow = Net::wsConnected();
+    bool serialNow = Net::serialConnected();
 
     lockState();
     uint32_t lastMs = g_state.lastMessageMs;
@@ -38,23 +38,18 @@ static CRGB buildDisconnectMsg(char* out, size_t outSize) {
     bool everGotData = (lastMs != 0);
     const CRGB grey = CRGB(40, 40, 45);  // cool neutral grey
 
-    // Never connected at all
-    if (!everGotData) {
-        if (!wifiNow) {
-            snprintf(out, outSize, "NO WIFI");
-        } else {
-            snprintf(out, outSize, "FINDING");
-        }
+    // Previously connected — daemon went away. Show OFFLINE regardless of
+    // WiFi state (serial-only devices don't need WiFi to work).
+    if (everGotData) {
+        snprintf(out, outSize, "OFFLINE");
         return grey;
     }
 
-    // Had data before — lost connection.
-    if (!wifiNow) {
+    // Never connected: distinguish WiFi issue from bridge discovery.
+    if (!wifiNow && !serialNow) {
         snprintf(out, outSize, "NO WIFI");
     } else {
-        // WiFi up but WS can't reach daemon (most common) or fallback.
-        (void)wsNow;
-        snprintf(out, outSize, "OFFLINE");
+        snprintf(out, outSize, "FINDING");
     }
     return grey;
 }
@@ -162,6 +157,44 @@ static void drawSprite(CRGB* leds, int x0, int y0, const uint8_t* sprite,
             }
         }
     }
+}
+
+// Tiny state dot in bottom-right corner of USAGE page (row 7, col 31)
+// Shows brightest active agent state so user can glance at activity without
+// waiting for the AGENTS page.
+static void drawStateDot(CRGB* leds, float animTime) {
+    lockState();
+    uint8_t sessionCount = g_state.sessionCount;
+    // Find most active state among live non-daemon sessions
+    enum { ST_NONE, ST_IDLE, ST_AWAITING, ST_PROCESSING } best = ST_NONE;
+    for (int i = 0; i < sessionCount; i++) {
+        if (!g_state.sessions[i].alive) continue;
+        if (strcmp(g_state.sessions[i].agentType, "daemon") == 0) continue;
+        if (strcmp(g_state.sessions[i].state, "processing") == 0) { best = ST_PROCESSING; break; }
+        if (strstr(g_state.sessions[i].state, "awaiting")) { if (best < ST_AWAITING) best = ST_AWAITING; }
+        else if (strcmp(g_state.sessions[i].state, "idle") == 0) { if (best < ST_IDLE) best = ST_IDLE; }
+    }
+    unlockState();
+
+    CRGB c = CRGB::Black;
+    switch (best) {
+        case ST_PROCESSING: {
+            float pulse = 0.5f + 0.5f * sinf(animTime * 8.0f);
+            c = CRGB((uint8_t)(200 * pulse), (uint8_t)(120 * pulse), (uint8_t)(90 * pulse));
+            break;
+        }
+        case ST_AWAITING: {
+            float pulse = 0.5f + 0.5f * sinf(animTime * 3.0f);
+            c = CRGB((uint8_t)(200 * pulse), (uint8_t)(140 * pulse), 0);
+            break;
+        }
+        case ST_IDLE:
+            c = CRGB(25, 15, 12);  // dim terracotta
+            break;
+        default:
+            return;  // no sessions — no dot
+    }
+    setPixel(leds, 31, 7, c);
 }
 
 // ===== Sprites (5x6) =====
@@ -294,6 +327,9 @@ void MatrixPages::renderUsage(CRGB* leds, float animTime) {
         drawFullScreenGauge(leds, pct7d, reset7d, animTime, -offset);
         drawFullScreenGauge(leds, pct5h, reset5h, animTime, MATRIX_W - offset);
     }
+
+    // State dot overlay — shows agent activity on gauge page
+    drawStateDot(leds, animTime);
 }
 
 // ================================================================
@@ -376,9 +412,12 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             renderDisconnectStatus(leds, animTime);
             return;
         }
-        if (gatewayAvail) return;
-        int bobY = 1 + (int)(0.3f * sinf(animTime * 1.0f));
-        drawSprite(leds, 8, bobY, SPR_OCTOPUS, 5, 6, CRGB(30, 18, 14));
+        // No active agent sessions — show idle octopus with gentle breathing
+        float breathe = 0.6f + 0.4f * sinf(animTime * 1.2f);
+        int bobY = 1 + (int)(0.5f * sinf(animTime * 0.8f));
+        CRGB idleColor = CRGB(
+            (uint8_t)(80 * breathe), (uint8_t)(48 * breathe), (uint8_t)(36 * breathe));
+        drawSprite(leds, 8, bobY, SPR_OCTOPUS, 5, 6, idleColor);
         return;
     }
 

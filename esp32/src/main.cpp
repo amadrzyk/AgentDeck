@@ -259,10 +259,11 @@ static void uiTask(void* param) {
             if (currentView == VIEW_AQUARIUM || currentView == VIEW_TIMELINE) {
                 if (connected) {
                     Screens::aquariumSetConnectionStatus(ConnOverlayStatus::HIDDEN);
+                } else if (everConnected) {
+                    // Was connected before — daemon went away (regardless of WiFi state)
+                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::RECONNECTING);
                 } else if (!wifiNow && !serialNow) {
                     Screens::aquariumSetConnectionStatus(ConnOverlayStatus::NO_WIFI);
-                } else if (everConnected) {
-                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::RECONNECTING);
                 } else {
                     Screens::aquariumSetConnectionStatus(ConnOverlayStatus::SEARCHING);
                 }
