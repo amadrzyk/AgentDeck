@@ -115,6 +115,8 @@ export interface StateUpdateEvent {
   state: State;
   permissionMode: PermissionMode;
   agentType?: AgentType;
+  /** Session ID of the focused session (injected by daemon focus relay) */
+  sessionId?: string;
   agentCapabilities?: AgentCapabilities;
   currentTool?: string;
   toolInput?: string;

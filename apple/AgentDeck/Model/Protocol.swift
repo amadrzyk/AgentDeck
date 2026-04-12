@@ -368,6 +368,8 @@ struct StateUpdateEvent: Codable, Sendable {
     let state: String
     var permissionMode: String?
     var agentType: String?
+    /// Session ID of the focused session (injected by daemon focus relay)
+    var sessionId: String?
     var agentCapabilities: AgentCapabilities?
     var currentTool: String?
     var toolInput: String?

@@ -33,7 +33,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -97,7 +96,7 @@ fun MonitorScreen(
     displayPrefs: DisplayPreferences,
 ) {
     val dashState by stateHolder.state.collectAsState()
-    val terrariumState by remember { derivedStateOf { dashState.toTerrariumState() } }
+    val terrariumState = remember(dashState) { dashState.toTerrariumState() }
     val timelineEntries by TimelineStore.instance.entries.collectAsState()
     val connectionStatus by connection.status.collectAsState()
     val currentUrl by connection.url.collectAsState()
