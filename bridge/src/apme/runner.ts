@@ -45,14 +45,18 @@ interface DetStepResult {
   command: string;
 }
 
-const DEFAULT_COMMANDS: Record<Lang, { lint?: string; build?: string; test?: string }> = {
+const DEFAULT_COMMANDS: Record<Lang, { lint?: string; build?: string; test?: string | ((cwd: string) => string | null) }> = {
   typescript: {
     lint: 'pnpm -w lint',
     build: 'pnpm -r build',
     test: 'pnpm -w test',
   },
   swift: {
-    test: 'xcodebuild test -scheme AgentDeck -quiet',
+    test: (cwd: string) => {
+      // Auto-detect scheme from the project — don't hardcode "AgentDeck".
+      const scheme = detectSwiftScheme(cwd);
+      return scheme ? `xcodebuild test -scheme ${scheme} -quiet` : null;
+    },
   },
   kotlin: {
     test: './gradlew testDebugUnitTest',
@@ -200,6 +204,26 @@ export class ApmeRunner {
 
 // ─── Language detection ───────────────────────────────────────────────────────
 
+/** Auto-detect the first testable Xcode scheme from a project directory. */
+function detectSwiftScheme(cwd: string): string | null {
+  try {
+    const out = execSync('xcodebuild -list -json', {
+      cwd, encoding: 'utf-8', timeout: 10_000,
+      maxBuffer: 512 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const json = JSON.parse(out) as { project?: { schemes?: string[] } };
+    const schemes = json.project?.schemes;
+    if (!schemes || schemes.length === 0) return null;
+    // Prefer schemes with "Test" or matching directory name.
+    const dirName = cwd.split('/').pop() ?? '';
+    const testScheme = schemes.find((s) => s.toLowerCase().includes('test'));
+    const matchScheme = schemes.find((s) => dirName.toLowerCase().includes(s.toLowerCase().replace(/_/g, '')));
+    return matchScheme ?? testScheme ?? schemes[0];
+  } catch {
+    return null;
+  }
+}
+
 export function detectLanguage(projectPath: string | null | undefined): Lang | null {
   if (!projectPath || !existsSync(projectPath)) return null;
   try {
@@ -235,19 +259,21 @@ export async function runDeterministic(run: ApmeRunRow, cfg: ApmeConfig): Promis
 
   const override = cfg.deterministic.commands[lang] ?? {};
   const defaults = DEFAULT_COMMANDS[lang];
-  const steps: Array<{ metric: DetStepResult['metric']; command?: string }> = [
-    { metric: 'lint_clean', command: override.lint ?? defaults.lint },
-    { metric: 'build_ok',   command: override.build ?? defaults.build },
-    { metric: 'tests_pass', command: override.test  ?? defaults.test },
+  const rawSteps: Array<{ metric: DetStepResult['metric']; cmd: string | ((cwd: string) => string | null) | undefined }> = [
+    { metric: 'lint_clean', cmd: override.lint ?? defaults.lint },
+    { metric: 'build_ok',   cmd: override.build ?? defaults.build },
+    { metric: 'tests_pass', cmd: override.test  ?? defaults.test },
   ];
 
   const results: DetStepResult[] = [];
-  for (const s of steps) {
-    if (!s.command) continue;
-    const r = await runCommand(s.command, cwd, cfg.deterministic.timeoutSec * 1000);
+  for (const s of rawSteps) {
+    // Resolve command: may be a string or a function(cwd) → string|null.
+    const command = typeof s.cmd === 'function' ? s.cmd(cwd) : s.cmd;
+    if (!command) continue;
+    const r = await runCommand(command, cwd, cfg.deterministic.timeoutSec * 1000);
     results.push({
       metric: s.metric,
-      command: s.command,
+      command,
       score: r.exitCode === 0 ? 1 : 0,
       exitCode: r.exitCode,
       durationMs: r.durationMs,
