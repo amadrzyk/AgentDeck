@@ -521,6 +521,17 @@ struct ControlTowerPanel: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
+            Button {
+                openApmeDashboard()
+            } label: {
+                Label("APME", systemImage: "chart.bar.fill")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(daemonService.port == 0)
+            .help("Open the APME evaluation dashboard in your browser")
+
             Spacer()
 
             Button {
@@ -634,6 +645,17 @@ struct ControlTowerPanel: View {
     private func openLaunchSession() {
         openWindow(id: "launch-session")
         // Activate app so window gets focus (menu bar apps default to .accessory)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    /// Open the in-app APME dashboard window (WKWebView pointing at the
+    /// rich SPA served by the local daemon at /apme). One click → full
+    /// APME UI with run history, category scorecard, timeline, and eval
+    /// axes breakdown — no more digging through sqlite, no browser
+    /// roundtrip, no token in address bar history.
+    private func openApmeDashboard() {
+        guard daemonService.port > 0 else { return }
+        openWindow(id: "apme-dashboard")
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 

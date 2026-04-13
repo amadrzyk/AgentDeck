@@ -42,6 +42,16 @@ struct AgentDeckApp: App {
         .defaultPosition(.center)
         .defaultSize(width: 420, height: 340)
         .windowResizability(.contentSize)
+
+        // APME evaluation dashboard — embedded WKWebView pointing at the
+        // in-process daemon's /apme HTTP endpoint. Opens from the menu bar
+        // without launching an external browser.
+        Window("APME Dashboard", id: "apme-dashboard") {
+            ApmeDashboardWindow()
+                .environmentObject(daemonService)
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 1100, height: 760)
         #else
         WindowGroup("AgentDeck Dashboard", id: "dashboard") {
             ContentView()
