@@ -218,6 +218,11 @@ export class OpenCodeAdapter extends PtyAdapter {
         this.chatStartTime = Date.now();
         this.chatToolCount = 0;
         this.chatToolNames = [];
+        // Emit chat_start so timeline shows when processing began
+        this.emitTimelineEntry({
+          ts: this.chatStartTime, type: 'chat_start',
+          raw: this.ocProjectName ? `Processing · ${this.ocProjectName}` : 'Processing started',
+        });
       }
       this.emitAdapterEvent({ source: 'parser', event: 'spinner_start' });
     }
