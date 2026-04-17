@@ -8,6 +8,8 @@ import { createMediaMode } from './media.js';
 import { createTimerMode } from './timer.js';
 import { createDiagMode } from './diag.js';
 import { createPermissionModeMode } from './permission-mode.js';
+import { createApmeMode } from './apme.js';
+import { createTowerMode } from './tower.js';
 export type { UtilityMode, RefreshCallback } from './types.js';
 
 const DEFAULT_ENABLED = ['volume'];
@@ -24,10 +26,12 @@ const FACTORIES: Record<string, (opts: ModeFactoryOptions) => UtilityMode> = {
   timer: (opts) => createTimerMode(opts.refresh),
   diag: (opts) => createDiagMode(opts.refresh),
   mode: (opts) => createPermissionModeMode(opts.refresh),
+  apme: (opts) => createApmeMode(opts.refresh),
+  tower: (opts) => createTowerMode(opts.refresh),
 };
 
 /** Ordered list of all available mode IDs. */
-export const ALL_MODE_IDS = ['volume', 'mic', 'media', 'timer', 'diag', 'mode'];
+export const ALL_MODE_IDS = ['volume', 'mic', 'media', 'timer', 'diag', 'mode', 'apme', 'tower'];
 
 /**
  * Create the enabled modes based on a comma-separated list.

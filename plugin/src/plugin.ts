@@ -25,6 +25,8 @@ import {
 import { ConnectionManager } from './connection-manager.js';
 import { updateUsageModeData, setUsageRefreshCallback } from './utility-modes/usage.js';
 import { updatePermissionModeData, setPermissionModeSwitchCallback } from './utility-modes/permission-mode.js';
+import { pushApmeEval, type ApmeEvalEntry } from './utility-modes/apme.js';
+import { updateTowerSessions } from './utility-modes/tower.js';
 import {
   isEncoderTakeoverActive,
   enterEncoderTakeover,
@@ -359,6 +361,17 @@ connMgr.on('connection', (ev: ConnectionEvent) => {
 connMgr.on('sessions_list', (ev: { type: 'sessions_list'; sessions: SessionInfo[] }) => {
   dlog('Plugin', `sessions_list: ${ev.sessions.length} sessions`);
   updateSessionSlotSessions(ev.sessions, connMgr.isGatewayAvailable());
+  // Forward to Control Tower utility mode
+  updateTowerSessions(
+    ev.sessions.map(s => ({
+      sessionId: s.id ?? '',
+      projectName: s.projectName ?? '',
+      agentType: s.agentType ?? '',
+      state: s.state ?? 'disconnected',
+      modelName: s.modelName,
+    })),
+    connMgr.isConnected(),
+  );
 });
 
 connMgr.on('user_prompt', (ev: UserPromptEvent) => {
@@ -400,6 +413,23 @@ connMgr.on('timeline_event', (ev: { type: 'timeline_event'; entry: import('@agen
     }
   } else {
     timelineStore.addEntry(ev.entry);
+  }
+
+  // Forward eval_result entries to APME utility mode
+  if (ev.entry.type === 'eval_result') {
+    const raw = ev.entry.raw;
+    const scoreMatch = raw.match(/(\d+)%/);
+    const catMatch = raw.match(/\[(\w+)\]/);
+    const modelMatch = raw.match(/model=(\S+)/);
+    if (scoreMatch) {
+      pushApmeEval({
+        runId: '',
+        category: catMatch?.[1] ?? 'general',
+        overall: parseInt(scoreMatch[1], 10),
+        model: modelMatch?.[1] ?? '',
+        ts: ev.entry.ts,
+      });
+    }
   }
 });
 
