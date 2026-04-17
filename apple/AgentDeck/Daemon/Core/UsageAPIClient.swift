@@ -122,6 +122,13 @@ final class UsageAPIClient: Sendable {
                 lastTokenStatus = .valid
                 consecutiveFailures = 0
 
+                // Opt-in raw body dump for diagnosing 0% reports. Enable via
+                // `AGENTDECK_DEBUG_USAGE_RAW=1` in the app's launch environment.
+                if ProcessInfo.processInfo.environment["AGENTDECK_DEBUG_USAGE_RAW"] != nil,
+                   let raw = String(data: data, encoding: .utf8) {
+                    DaemonLogger.shared.debug("UsageAPI", "raw: \(raw)")
+                }
+
                 let usage = parseUsageResponse(json)
                 writeFileCache(usage)
                 DaemonLogger.shared.debug("UsageAPI", "API fetch OK: 5h=\(usage.fiveHourPercent ?? -1)% 7d=\(usage.sevenDayPercent ?? -1)%")
