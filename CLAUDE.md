@@ -159,6 +159,7 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 | [docs/voice-setup.md](docs/voice-setup.md) | sox/whisper install + bridge voice runtime |
 | [docs/devices.md](docs/devices.md) | Device-specific details |
 | [docs/protocol.md](docs/protocol.md) | Bridge ↔ plugin WebSocket protocol |
+| [docs/gateway-protocol.md](docs/gateway-protocol.md) | OpenClaw Gateway WebSocket — frame format, Ed25519 handshake, RPC/event catalog, versioning |
 | [docs/testing.md](docs/testing.md) | Test infrastructure reference |
 | [docs/wake-word.md](docs/wake-word.md) | Porcupine / microWakeWord |
 | [docs/streamdeck-layout.md](docs/streamdeck-layout.md) | Stream Deck layout reference |
