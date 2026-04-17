@@ -78,6 +78,7 @@ export {
   type GatewayResponseFrame,
   type GatewayEventFrame,
   type GatewayError,
+  type GatewayMethodMap,
   type GatewaySession,
   type DeviceIdentity,
   type DeviceAuthToken,

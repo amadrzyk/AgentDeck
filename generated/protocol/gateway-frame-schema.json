@@ -167,19 +167,41 @@
       "additionalProperties": false,
       "properties": {
         "auth": {
-          "$ref": "#/definitions/DeviceAuth"
+          "additionalProperties": false,
+          "description": "Bearer token issued during device pairing.",
+          "properties": {
+            "token": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "token"
+          ],
+          "type": "object"
         },
-        "clientInfo": {
+        "caps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "client": {
           "additionalProperties": false,
           "properties": {
-            "clientId": {
+            "displayName": {
               "type": "string"
             },
-            "clientMode": {
+            "id": {
+              "type": "string"
+            },
+            "mode": {
               "enum": [
                 "backend",
                 "frontend"
               ],
+              "type": "string"
+            },
+            "platform": {
               "type": "string"
             },
             "version": {
@@ -187,12 +209,30 @@
             }
           },
           "required": [
-            "clientId",
-            "clientMode"
+            "id",
+            "displayName",
+            "version",
+            "platform",
+            "mode"
           ],
           "type": "object"
         },
-        "requestScopes": {
+        "device": {
+          "$ref": "#/definitions/DeviceAuth",
+          "description": "Ed25519 device signature over `v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce`."
+        },
+        "maxProtocol": {
+          "description": "Upper bound of protocol versions this client supports.",
+          "type": "number"
+        },
+        "minProtocol": {
+          "description": "Lower bound of protocol versions this client supports.",
+          "type": "number"
+        },
+        "role": {
+          "type": "string"
+        },
+        "scopes": {
           "items": {
             "type": "string"
           },
@@ -200,8 +240,12 @@
         }
       },
       "required": [
-        "auth",
-        "requestScopes"
+        "minProtocol",
+        "maxProtocol",
+        "client",
+        "role",
+        "scopes",
+        "caps"
       ],
       "type": "object"
     },

@@ -17,7 +17,7 @@ private fun <T> Klaxon.convert(k: kotlin.reflect.KClass<*>, fromJson: (JsonValue
 private val klaxon = Klaxon()
     .convert(GatewayEventName::class,            { GatewayEventName.fromValue(it.string!!) },            { "\"${it.value}\"" })
     .convert(GatewayMethodName::class,           { GatewayMethodName.fromValue(it.string!!) },           { "\"${it.value}\"" })
-    .convert(ClientMode::class,                  { ClientMode.fromValue(it.string!!) },                  { "\"${it.value}\"" })
+    .convert(Mode::class,                        { Mode.fromValue(it.string!!) },                        { "\"${it.value}\"" })
     .convert(GatewayMethodParamsDecision::class, { GatewayMethodParamsDecision.fromValue(it.string!!) }, { "\"${it.value}\"" })
     .convert(PayloadDecision::class,             { PayloadDecision.fromValue(it.string!!) },             { "\"${it.value}\"" })
     .convert(State::class,                       { State.fromValue(it.string!!) },                       { "\"${it.value}\"" })
@@ -107,9 +107,32 @@ enum class GatewayMethodName(val value: String) {
 }
 
 data class GatewayMethodParams (
-    val auth: DeviceAuth? = null,
-    val clientInfo: ClientInfo? = null,
-    val requestScopes: List<String>? = null,
+    /**
+     * Bearer token issued during device pairing.
+     */
+    val auth: Auth? = null,
+
+    val caps: List<String>? = null,
+    val client: Client? = null,
+
+    /**
+     * Ed25519 device signature over
+     * `v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce`.
+     */
+    val device: DeviceAuth? = null,
+
+    /**
+     * Upper bound of protocol versions this client supports.
+     */
+    val maxProtocol: Double? = null,
+
+    /**
+     * Lower bound of protocol versions this client supports.
+     */
+    val minProtocol: Double? = null,
+
+    val role: String? = null,
+    val scopes: List<String>? = null,
     val idempotencyKey: String? = null,
     val message: String? = null,
     val sessionKey: String? = null,
@@ -122,28 +145,27 @@ data class GatewayMethodParams (
     val kind: String? = null
 )
 
-data class DeviceAuth (
+/**
+ * Bearer token issued during device pairing.
+ */
+data class Auth (
+    val token: String
+)
+
+data class Client (
+    val displayName: String,
     val id: String,
-    val nonce: String,
-    val publicKey: String,
-    val signature: String,
-    val signedAt: Double
+    val mode: Mode,
+    val platform: String,
+    val version: String
 )
 
-data class ClientInfo (
-    @Json(name = "clientId")
-    val clientID: String,
-
-    val clientMode: ClientMode,
-    val version: String? = null
-)
-
-enum class ClientMode(val value: String) {
+enum class Mode(val value: String) {
     Backend("backend"),
     Frontend("frontend");
 
     companion object {
-        public fun fromValue(value: String): ClientMode = when (value) {
+        public fun fromValue(value: String): Mode = when (value) {
             "backend"  -> Backend
             "frontend" -> Frontend
             else       -> throw IllegalArgumentException()
@@ -163,6 +185,18 @@ enum class GatewayMethodParamsDecision(val value: String) {
         }
     }
 }
+
+/**
+ * Ed25519 device signature over
+ * `v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce`.
+ */
+data class DeviceAuth (
+    val id: String,
+    val nonce: String,
+    val publicKey: String,
+    val signature: String,
+    val signedAt: Double
+)
 
 data class Gateway (
     val accepted: Boolean? = null,

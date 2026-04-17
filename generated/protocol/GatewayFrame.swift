@@ -164,9 +164,19 @@ enum ADGatewayMethodName: String, Codable {
 
 // MARK: - ADGatewayMethodParams
 struct ADGatewayMethodParams: Codable {
-    var auth: ADDeviceAuth?
-    var clientInfo: ADClientInfo?
-    var requestScopes: [String]?
+    /// Bearer token issued during device pairing.
+    var auth: ADAuth?
+    var caps: [String]?
+    var client: ADClient?
+    /// Ed25519 device signature over
+    /// `v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce`.
+    var device: ADDeviceAuth?
+    /// Upper bound of protocol versions this client supports.
+    var maxProtocol: Double?
+    /// Lower bound of protocol versions this client supports.
+    var minProtocol: Double?
+    var role: String?
+    var scopes: [String]?
     var idempotencyKey: String?
     var message: String?
     var sessionKey: String?
@@ -177,8 +187,13 @@ struct ADGatewayMethodParams: Codable {
 
     enum CodingKeys: String, CodingKey {
         case auth = "auth"
-        case clientInfo = "clientInfo"
-        case requestScopes = "requestScopes"
+        case caps = "caps"
+        case client = "client"
+        case device = "device"
+        case maxProtocol = "maxProtocol"
+        case minProtocol = "minProtocol"
+        case role = "role"
+        case scopes = "scopes"
         case idempotencyKey = "idempotencyKey"
         case message = "message"
         case sessionKey = "sessionKey"
@@ -208,9 +223,14 @@ extension ADGatewayMethodParams {
     }
 
     func with(
-        auth: ADDeviceAuth?? = nil,
-        clientInfo: ADClientInfo?? = nil,
-        requestScopes: [String]?? = nil,
+        auth: ADAuth?? = nil,
+        caps: [String]?? = nil,
+        client: ADClient?? = nil,
+        device: ADDeviceAuth?? = nil,
+        maxProtocol: Double?? = nil,
+        minProtocol: Double?? = nil,
+        role: String?? = nil,
+        scopes: [String]?? = nil,
         idempotencyKey: String?? = nil,
         message: String?? = nil,
         sessionKey: String?? = nil,
@@ -221,8 +241,13 @@ extension ADGatewayMethodParams {
     ) -> ADGatewayMethodParams {
         return ADGatewayMethodParams(
             auth: auth ?? self.auth,
-            clientInfo: clientInfo ?? self.clientInfo,
-            requestScopes: requestScopes ?? self.requestScopes,
+            caps: caps ?? self.caps,
+            client: client ?? self.client,
+            device: device ?? self.device,
+            maxProtocol: maxProtocol ?? self.maxProtocol,
+            minProtocol: minProtocol ?? self.minProtocol,
+            role: role ?? self.role,
+            scopes: scopes ?? self.scopes,
             idempotencyKey: idempotencyKey ?? self.idempotencyKey,
             message: message ?? self.message,
             sessionKey: sessionKey ?? self.sessionKey,
@@ -242,6 +267,123 @@ extension ADGatewayMethodParams {
     }
 }
 
+/// Bearer token issued during device pairing.
+// MARK: - ADAuth
+struct ADAuth: Codable {
+    var token: String
+
+    enum CodingKeys: String, CodingKey {
+        case token = "token"
+    }
+}
+
+// MARK: ADAuth convenience initializers and mutators
+
+extension ADAuth {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ADAuth.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        token: String? = nil
+    ) -> ADAuth {
+        return ADAuth(
+            token: token ?? self.token
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ADClient
+struct ADClient: Codable {
+    var displayName: String
+    var id: String
+    var mode: ADMode
+    var platform: String
+    var version: String
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "displayName"
+        case id = "id"
+        case mode = "mode"
+        case platform = "platform"
+        case version = "version"
+    }
+}
+
+// MARK: ADClient convenience initializers and mutators
+
+extension ADClient {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ADClient.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        displayName: String? = nil,
+        id: String? = nil,
+        mode: ADMode? = nil,
+        platform: String? = nil,
+        version: String? = nil
+    ) -> ADClient {
+        return ADClient(
+            displayName: displayName ?? self.displayName,
+            id: id ?? self.id,
+            mode: mode ?? self.mode,
+            platform: platform ?? self.platform,
+            version: version ?? self.version
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum ADMode: String, Codable {
+    case backend = "backend"
+    case frontend = "frontend"
+}
+
+enum ADGatewayMethodParamsDecision: String, Codable {
+    case allow = "allow"
+    case deny = "deny"
+}
+
+/// Ed25519 device signature over
+/// `v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce`.
 // MARK: - ADDeviceAuth
 struct ADDeviceAuth: Codable {
     var id: String
@@ -300,68 +442,6 @@ extension ADDeviceAuth {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
-}
-
-// MARK: - ADClientInfo
-struct ADClientInfo: Codable {
-    var clientId: String
-    var clientMode: ADClientMode
-    var version: String?
-
-    enum CodingKeys: String, CodingKey {
-        case clientId = "clientId"
-        case clientMode = "clientMode"
-        case version = "version"
-    }
-}
-
-// MARK: ADClientInfo convenience initializers and mutators
-
-extension ADClientInfo {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(ADClientInfo.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        clientId: String? = nil,
-        clientMode: ADClientMode? = nil,
-        version: String?? = nil
-    ) -> ADClientInfo {
-        return ADClientInfo(
-            clientId: clientId ?? self.clientId,
-            clientMode: clientMode ?? self.clientMode,
-            version: version ?? self.version
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-enum ADClientMode: String, Codable {
-    case backend = "backend"
-    case frontend = "frontend"
-}
-
-enum ADGatewayMethodParamsDecision: String, Codable {
-    case allow = "allow"
-    case deny = "deny"
 }
 
 // MARK: - ADGateway

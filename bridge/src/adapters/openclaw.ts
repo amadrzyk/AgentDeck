@@ -24,6 +24,7 @@ import type {
   GatewayResponseFrame,
   GatewayEventFrame,
   GatewaySession,
+  GatewayMethodMap,
   DeviceIdentity,
   DeviceAuthToken,
 } from '../types.js';
@@ -532,7 +533,16 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
 
   // ===== Private: Request/Response =====
 
-  private rpcCall(method: string, params: Record<string, unknown>): Promise<unknown> {
+  /**
+   * Typed RPC dispatch. `GatewayMethodMap` correlates the method name with
+   * its param shape and result shape (declared in `shared/gateway-protocol.ts`),
+   * so misuse — wrong params for a method, or calling an unknown method — is
+   * a compile error here rather than a runtime surprise.
+   */
+  private rpcCall<M extends keyof GatewayMethodMap>(
+    method: M,
+    params: GatewayMethodMap[M]['params'],
+  ): Promise<GatewayMethodMap[M]['result']> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error('Gateway not connected'));
@@ -542,7 +552,11 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
       const id = `r${++this.reqId}`;
       const message = { type: 'req' as const, id, method, params };
 
-      this.pendingRpc.set(id, { resolve, reject, method });
+      this.pendingRpc.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        method,
+      });
 
       setTimeout(() => {
         if (this.pendingRpc.has(id)) {
@@ -1076,25 +1090,6 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
   /** Emit a timeline upsert (update existing entry with same ts+type, or add new) */
   private emitTimelineUpsert(entry: TimelineEntry): void {
     this.emitAdapterEvent({ source: 'timeline', entry, upsert: true });
-  }
-
-  /** Fetch event history from Gateway via RPC (for offline recovery) */
-  async fetchHistory(since: number): Promise<TimelineEntry[]> {
-    try {
-      const result = await this.rpcCall('events.history', { since });
-      if (!result || !Array.isArray(result)) return [];
-      // Gateway returns raw event objects — map to TimelineEntry
-      return (result as Record<string, unknown>[]).filter(Boolean).map((e) => ({
-        ts: (e.ts as number) || Date.now(),
-        type: (e.type as TimelineEntry['type']) || 'user_action',
-        raw: (e.raw as string) || (e.summary as string) || '',
-        approvalId: e.approvalId as string | undefined,
-        status: e.status as TimelineEntry['status'],
-      }));
-    } catch (err) {
-      debug('adapter:openclaw', `fetchHistory failed: ${err}`);
-      return [];
-    }
   }
 
   private emitAdapterEvent(evt: AdapterEvent): void {

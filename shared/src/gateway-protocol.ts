@@ -81,15 +81,27 @@ export type GatewayMethodResult =
   | ExecApprovalResolveResult
   | SessionsListResult;
 
-// connect — signed handshake response to connect.challenge
+// connect — signed handshake response to connect.challenge.
+// Wire shape matches `bridge/src/adapters/openclaw.ts#sendConnectRequest`.
 export interface ConnectParams {
-  auth: DeviceAuth;
-  requestScopes: string[];
-  clientInfo?: {
-    clientId: string;
-    clientMode: 'backend' | 'frontend';
-    version?: string;
+  /** Lower bound of protocol versions this client supports. */
+  minProtocol: number;
+  /** Upper bound of protocol versions this client supports. */
+  maxProtocol: number;
+  client: {
+    id: string;
+    displayName: string;
+    version: string;
+    platform: string;
+    mode: 'backend' | 'frontend';
   };
+  role: string;
+  scopes: string[];
+  caps: string[];
+  /** Ed25519 device signature over `v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce`. */
+  device?: DeviceAuth;
+  /** Bearer token issued during device pairing. */
+  auth?: { token: string };
 }
 
 export interface ConnectResult {
@@ -154,6 +166,23 @@ export interface GatewaySession {
   displayName?: string;
   updatedAt?: number;
   sessionId?: string;
+}
+
+/**
+ * Method-name → params/result correlation. `rpcCall` in the Node adapter uses
+ * this to enforce that callers pass the correct params shape for each method
+ * and to infer the result type from the method name.
+ *
+ * When adding a new method: declare its ParamsType and ResultType above,
+ * extend `GatewayMethodName`, and add the entry here. Build-time errors
+ * pinpoint every call site that needs an update.
+ */
+export interface GatewayMethodMap {
+  connect: { params: ConnectParams; result: ConnectResult };
+  'chat.send': { params: ChatSendParams; result: ChatSendResult };
+  'chat.abort': { params: ChatAbortParams; result: ChatAbortResult };
+  'exec.approval.resolve': { params: ExecApprovalResolveParams; result: ExecApprovalResolveResult };
+  'sessions.list': { params: SessionsListParams; result: SessionsListResult };
 }
 
 // ===== Event catalog =====
