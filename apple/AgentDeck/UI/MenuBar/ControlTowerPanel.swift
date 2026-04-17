@@ -3,12 +3,26 @@
 
 #if os(macOS)
 import SwiftUI
+import IOKit
+import IOKit.hid
+import AppKit
 
 struct ControlTowerPanel: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @EnvironmentObject private var daemonService: DaemonService
     @EnvironmentObject private var preferences: AppPreferences
     @Environment(\.openWindow) private var openWindow
+
+    /// Cached Stream Deck detection result. Refreshed on view appear and via
+    /// a lightweight 5s timer while the panel is visible. We never want to
+    /// run IOHIDManager enumeration inside a SwiftUI view body (it is not
+    /// cheap enough to do on every state tick), so a cached @State holds
+    /// the previous verdict until the timer fires.
+    @State private var streamDeckDetection: StreamDeckDetection = StreamDeckDetection(
+        elgatoAppInstalled: false,
+        streamDeckPlusConnected: false
+    )
+    @State private var streamDeckDetectionLastRun: Date? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +54,22 @@ struct ControlTowerPanel: View {
         }
         .frame(width: 340, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { refreshStreamDeckDetectionIfStale() }
+        .onReceive(
+            Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+        ) { _ in refreshStreamDeckDetectionIfStale() }
+    }
+
+    /// Recompute Stream Deck app/hardware detection if the cached verdict is
+    /// older than 5 seconds (or we've never run it). IOHIDManager enumeration
+    /// is cheap but non-free — don't spin it every SwiftUI tick.
+    private func refreshStreamDeckDetectionIfStale() {
+        if let last = streamDeckDetectionLastRun,
+           Date().timeIntervalSince(last) < 5.0 {
+            return
+        }
+        streamDeckDetection = StreamDeckDetection.detect()
+        streamDeckDetectionLastRun = Date()
     }
 
     // MARK: - Session Classification
@@ -345,10 +375,14 @@ struct ControlTowerPanel: View {
                 Text("Error")
                     .font(.system(size: 10))
                     .foregroundStyle(.red)
-            } else {
+            } else if stateHolder.state.gatewayConnected {
                 Text("Connected")
                     .font(.system(size: 10))
                     .foregroundStyle(.green)
+            } else {
+                Text("Reachable")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
             }
         }
     }
@@ -514,11 +548,13 @@ struct ControlTowerPanel: View {
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(Color.accentColor)
+                    streamDeckPromptRow
                 }
             } else {
                 ForEach(entries) { entry in
                     deviceRow(entry)
                 }
+                streamDeckPromptRow
                 if daemonService.connectedClients > 0 {
                     HStack {
                         Spacer()
@@ -529,6 +565,94 @@ struct ControlTowerPanel: View {
                     .padding(.top, 2)
                 }
             }
+        }
+    }
+
+    /// Contextual install-prompt row for Stream Deck+ hardware. Three rendered
+    /// states, driven entirely by `streamDeckDetection`:
+    ///   * hardware present + Elgato app missing → "Download"
+    ///   * hardware present + Elgato app present → "Install Plugin"
+    ///   * hardware absent                        → hidden (EmptyView)
+    /// We deliberately never probe whether our plugin is already loaded inside
+    /// the Elgato app — that state is not queryable from outside — so we show
+    /// the plugin-install nudge optimistically once the app is detected.
+    @ViewBuilder
+    private var streamDeckPromptRow: some View {
+        let detection = streamDeckDetection
+        if detection.streamDeckPlusConnected {
+            if !detection.elgatoAppInstalled {
+                streamDeckRow(
+                    title: "Stream Deck+ detected",
+                    subtitle: "Install Stream Deck software to connect",
+                    buttonLabel: "Download",
+                    action: { openStreamDeckDownloadPage() }
+                )
+            } else {
+                streamDeckRow(
+                    title: "Stream Deck+ ready",
+                    subtitle: "Install the AgentDeck plugin to show sessions on keys",
+                    buttonLabel: "Install Plugin",
+                    action: { openStreamDeckPluginInstaller() }
+                )
+            }
+        }
+    }
+
+    private func streamDeckRow(
+        title: String,
+        subtitle: String,
+        buttonLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Button(action: action) {
+                Text(buttonLabel)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Send the user to Elgato's downloads landing page. We intentionally pick
+    /// the top-level /downloads URL instead of a versioned .dmg link so the
+    /// page keeps working when Elgato ships new versions.
+    private func openStreamDeckDownloadPage() {
+        if let url = URL(string: "https://www.elgato.com/downloads") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Prefer a bundled `.streamDeckPlugin` bundle (when we start shipping it
+    /// inside AgentDeck.app/Contents/Resources/plugin). Fall back to the
+    /// GitHub releases landing page so the button is never a dead end on
+    /// builds that don't bundle the plugin yet.
+    private func openStreamDeckPluginInstaller() {
+        if let bundled = Bundle.main.url(
+            forResource: "bound.serendipity.agentdeck",
+            withExtension: "streamDeckPlugin",
+            subdirectory: "plugin"
+        ) {
+            NSWorkspace.shared.open(bundled)
+            return
+        }
+        if let url = URL(string: "https://github.com/puritysb/AgentDeck/releases/latest") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -622,6 +746,18 @@ struct ControlTowerPanel: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .help("See what AgentDeck looks like on each supported device — no hardware required")
+
+            // MARK: - Pair iPad
+            Button {
+                openWindow(id: "pairing-qr")
+            } label: {
+                Label("Pair iPad", systemImage: "qrcode")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(daemonService.port == 0)
+            .help("Show a QR code to pair your iPad or iPhone with this Mac")
 
             Spacer()
 
@@ -912,6 +1048,46 @@ private struct SectionContainer<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Lightweight detection struct for Stream Deck companion status.
+///
+/// `elgatoAppInstalled` — the Stream Deck desktop app (bundle id
+/// `com.elgato.StreamDeck`) is present in /Applications or ~/Applications.
+/// `streamDeckPlusConnected` — any Elgato HID device (VID `0x0FD9`) is
+/// currently attached. We don't care which model since the companion prompt
+/// is identical regardless.
+///
+/// Neither probe opens the HID device (no `IOHIDManagerOpen`), so USB
+/// entitlement state doesn't affect detection. Returns `false` on any
+/// failure — the Control Tower treats this as a hint, never a hard gate.
+struct StreamDeckDetection {
+    let elgatoAppInstalled: Bool
+    let streamDeckPlusConnected: Bool
+
+    static func detect() -> StreamDeckDetection {
+        let appInstalled = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.elgato.StreamDeck"
+        ) != nil
+        return StreamDeckDetection(
+            elgatoAppInstalled: appInstalled,
+            streamDeckPlusConnected: detectElgatoHardware()
+        )
+    }
+
+    /// Enumerate HID devices matching Elgato VID without opening the manager.
+    /// `IOHIDManagerCopyDevices` fills a set even under App Sandbox when the
+    /// manager isn't opened — matching dictionaries are probed by the kernel,
+    /// not the app.
+    private static func detectElgatoHardware() -> Bool {
+        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let matching: [String: Any] = [kIOHIDVendorIDKey: 0x0FD9]
+        IOHIDManagerSetDeviceMatching(manager, matching as CFDictionary)
+        guard let set = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else {
+            return false
+        }
+        return !set.isEmpty
     }
 }
 #endif

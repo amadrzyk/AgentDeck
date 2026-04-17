@@ -321,23 +321,73 @@ enum SessionLauncher {
 
     // MARK: - Install Prompt
 
+    /// Install guide URLs for each supported agent CLI. Prefer the project's
+    /// official docs over a generic install.sh so users land on a maintained
+    /// page and can follow the current install method (npm, brew, pipx…).
+    private static let installGuideURLs: [LaunchAgentType: URL] = [
+        .claudeCode: URL(string: "https://docs.claude.com/en/docs/claude-code/quickstart")!,
+        .codex: URL(string: "https://github.com/openai/codex-cli")!,
+        .opencode: URL(string: "https://opencode.ai/docs")!,
+        .claudePlain: URL(string: "https://docs.claude.com/en/docs/claude-code/quickstart")!,
+    ]
+
+    /// User-facing install prompt that avoids the "copy this terminal command"
+    /// cliff. Non-developers dismiss clipboard-only dialogs because the next
+    /// step (opening Terminal, pasting, pressing Return) is invisible. Instead
+    /// we surface the official installation guide URL and a "re-check" button
+    /// that re-runs discovery so the user can complete the install in a browser
+    /// and keep the Launch Session flow moving without re-opening AgentDeck.
     private static func showClaudeInstallPrompt() {
+        showAgentInstallPrompt(agent: .claudeCode)
+    }
+
+    /// Generic agent install prompt. Caller passes in the agent type so the
+    /// message + guide URL match what the user was trying to launch.
+    static func showAgentInstallPrompt(agent: LaunchAgentType) {
         let alert = NSAlert()
-        alert.messageText = "Claude Code CLI Not Found"
+        alert.messageText = "\(agent.displayName) CLI Not Found"
         alert.informativeText = """
-        To launch Claude Code sessions from AgentDeck, install the Claude Code CLI:
+        AgentDeck needs the \(agent.displayName) command-line tool to launch this session.
 
-        npm install -g @anthropic-ai/claude-code
+        Open the installation guide to get it set up, then click "Check Again" to continue.
 
-        The AgentDeck bridge is optional. Monitoring and permissions still work through hooks when Claude runs directly.
+        Monitoring and permissions still work through hooks once the CLI is installed.
         """
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Copy Install Command")
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Open Installation Guide")
+        alert.addButton(withTitle: "Check Again")
+        alert.addButton(withTitle: "Cancel")
 
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString("npm install -g @anthropic-ai/claude-code", forType: .string)
+        let response = alert.runModal()
+        switch response {
+        case .alertFirstButtonReturn:
+            if let url = installGuideURLs[agent] {
+                NSWorkspace.shared.open(url)
+            }
+            // Re-open the prompt after the user has a chance to follow the
+            // guide — this keeps the flow alive without requiring them to
+            // re-click "Launch Session" in the menu bar.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                showAgentInstallPrompt(agent: agent)
+            }
+        case .alertSecondButtonReturn:
+            // Re-check installation. If now installed, silently return — the
+            // caller re-runs findClaude()/findInstalledBridge() on next launch
+            // attempt. If still missing, show the prompt again so the user
+            // isn't stuck in a dead end.
+            let stillMissing: Bool
+            switch agent {
+            case .claudeCode, .claudePlain:
+                stillMissing = !isClaudeInstalled() && !isBridgeInstalled()
+            case .codex, .opencode:
+                stillMissing = !isBridgeInstalled()
+            }
+            if stillMissing {
+                showAgentInstallPrompt(agent: agent)
+            }
+        default:
+            return
         }
     }
 

@@ -151,6 +151,16 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         didSet { defaults.set(hasRequestedNotifications, forKey: Keys.hasRequestedNotifications) }
     }
 
+    /// First-run onboarding tracking. Flips to `true` when the user
+    /// completes or skips the 3-pane onboarding sheet (macOS) /
+    /// full-screen flow (iOS). Pure local flag; not mirrored to
+    /// settings.json. Apple's App Store review guidelines expect a
+    /// clear first-run orientation pass for non-developer consumers,
+    /// so this gates the educational flow before the dashboard.
+    @Published var hasSeenOnboarding: Bool {
+        didSet { defaults.set(hasSeenOnboarding, forKey: Keys.hasSeenOnboarding) }
+    }
+
     private let defaults: UserDefaults
 
     private init(defaults: UserDefaults = .standard) {
@@ -180,6 +190,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.hasSeenDevicePreview = defaults.object(forKey: Keys.hasSeenDevicePreview) as? Bool ?? false
         self.hasSeenMonitorEmptyGuide = defaults.object(forKey: Keys.hasSeenMonitorEmptyGuide) as? Bool ?? false
         self.hasRequestedNotifications = defaults.object(forKey: Keys.hasRequestedNotifications) as? Bool ?? false
+        self.hasSeenOnboarding = defaults.object(forKey: Keys.hasSeenOnboarding) as? Bool ?? false
     }
 
     /// Merge the new backend choice into settings.json without clobbering
@@ -387,5 +398,6 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let hasSeenDevicePreview = "prefs.hasSeenDevicePreview"
         static let hasSeenMonitorEmptyGuide = "prefs.hasSeenMonitorEmptyGuide"
         static let hasRequestedNotifications = "prefs.hasRequestedNotifications"
+        static let hasSeenOnboarding = "prefs.hasSeenOnboarding"
     }
 }

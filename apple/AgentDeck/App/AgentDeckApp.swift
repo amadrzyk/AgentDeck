@@ -34,6 +34,23 @@ struct AgentDeckApp: App {
                 .environmentObject(stateHolder)
                 .environmentObject(preferences)
                 .task { configureDaemonConnection() }
+                // First-launch onboarding sheet. Shown once per install; the
+                // xctest guard in AppPreferences ensures tests never block
+                // on a modal. Safe to render unconditionally — the sheet
+                // itself checks `hasSeenOnboarding` and returns a no-op on
+                // subsequent launches.
+                .sheet(isPresented: Binding(
+                    get: {
+                        !preferences.hasSeenOnboarding
+                            && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+                    },
+                    set: { newValue in
+                        if !newValue { preferences.hasSeenOnboarding = true }
+                    }
+                )) {
+                    OnboardingSheet()
+                        .environmentObject(preferences)
+                }
         }
         .defaultPosition(.center)
         .defaultSize(width: 1280, height: 840)
@@ -67,11 +84,33 @@ struct AgentDeckApp: App {
         }
         .defaultPosition(.center)
         .defaultSize(width: 1100, height: 760)
+
+        // QR pairing window — shows the daemon's ws:// URL as a QR code for
+        // iPad/iPhone pairing. Covers the case where mDNS fails (Local
+        // Network permission denied, different subnets, etc.).
+        Window("Pair iPad or iPhone", id: "pairing-qr") {
+            QRPairingWindow()
+                .environmentObject(daemonService)
+                .environmentObject(preferences)
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 400, height: 480)
+        .windowResizability(.contentSize)
         #else
         WindowGroup("AgentDeck Dashboard", id: "dashboard") {
-            ContentView()
-                .environmentObject(stateHolder)
-                .environmentObject(preferences)
+            // iOS: show full-screen onboarding on first launch; dashboard
+            // takes over once `hasSeenOnboarding` flips. Preserves the
+            // environment objects so the onboarding pane 3 can reference
+            // the shared `stateHolder` for live mDNS feedback if needed.
+            Group {
+                if preferences.hasSeenOnboarding {
+                    ContentView()
+                } else {
+                    OnboardingScreen()
+                }
+            }
+            .environmentObject(stateHolder)
+            .environmentObject(preferences)
         }
         #endif
         #if os(macOS)

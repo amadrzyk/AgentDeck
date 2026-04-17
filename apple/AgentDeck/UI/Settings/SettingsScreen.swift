@@ -14,6 +14,13 @@ struct SettingsScreen: View {
     #if os(macOS)
     @State private var portInput: String = ""
     #endif
+    #if os(iOS)
+    /// iOS QR pairing scanner modal presentation flag.
+    @State private var showQRScanner: Bool = false
+    /// User-facing error message shown below the Scan QR button when a
+    /// scanned payload isn't a valid AgentDeck pairing URL.
+    @State private var scanError: String?
+    #endif
 
     var body: some View {
         #if os(macOS)
@@ -134,6 +141,11 @@ struct SettingsScreen: View {
                         .padding(8)
                 }
 
+                GroupBox("Hardware Setup") {
+                    hardwareContent
+                        .padding(8)
+                }
+
                 GroupBox("Claude Code Hooks") {
                     claudeHooksContent
                         .padding(8)
@@ -238,9 +250,66 @@ struct SettingsScreen: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.ledRed)
                 }
+
+                #if os(iOS)
+                // QR scan pairing — secondary path when mDNS can't find the
+                // Mac (different Wi-Fi networks, Local Network permission
+                // denied, etc.). Shows a camera view that decodes the URL
+                // printed by `QRPairingWindow` on the Mac side.
+                Button {
+                    showQRScanner = true
+                } label: {
+                    Label("Scan QR to Pair", systemImage: "qrcode.viewfinder")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.231, green: 0.51, blue: 0.965))
+                .padding(.top, 4)
+
+                if let scanError {
+                    Text(scanError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+                #endif
             }
         }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showQRScanner) {
+            QRScannerView(
+                onScan: { payload in
+                    showQRScanner = false
+                    handleQRScan(payload)
+                },
+                onCancel: {
+                    showQRScanner = false
+                }
+            )
+        }
+        #endif
     }
+
+    #if os(iOS)
+    /// Validate the QR payload and feed it to the connection state holder.
+    /// Expected format: `ws://<host>:<port>?token=<token>` (produced by
+    /// `QRPairingWindow` on the Mac). Reject anything else so a malformed
+    /// or random QR never silently hijacks the connection.
+    private func handleQRScan(_ payload: String) {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss",
+              url.host != nil
+        else {
+            scanError = "That QR doesn't look like an AgentDeck pairing link."
+            return
+        }
+        scanError = nil
+        stateHolder.connectTo(url: trimmed)
+    }
+    #endif
 
     // MARK: - Daemon Content (macOS)
 
@@ -797,6 +866,75 @@ struct SettingsScreen: View {
             }
         }
     }
+
+    #if os(macOS)
+    @State private var showESP32Sheet: Bool = false
+    @State private var showPixooSheet: Bool = false
+    #endif
+
+    /// Hardware integrations that ship with in-app setup UI. D200H is plug
+    /// and play (no setup sheet needed), ESP32 needs Wi-Fi credentials, and
+    /// Pixoo needs an IP. We colocate the entry points so users don't have
+    /// to hunt through the app for "how do I add my device?".
+    #if os(macOS)
+    private var hardwareContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            hardwareRow(
+                icon: "antenna.radiowaves.left.and.right",
+                title: "ESP32 boards",
+                subtitle: "Send Wi-Fi credentials over USB. Works with 86Box, IPS 3.5\" and round AMOLED displays.",
+                buttonLabel: "Set up…",
+                action: { showESP32Sheet = true }
+            )
+            Divider()
+            hardwareRow(
+                icon: "square.grid.3x3.fill",
+                title: "Pixoo matrix displays",
+                subtitle: "Add Divoom Pixoo devices by IP. Restart the daemon after adding for changes to take effect.",
+                buttonLabel: "Manage…",
+                action: { showPixooSheet = true }
+            )
+            Divider()
+            Text("Ulanzi D200H Deck Dock connects over USB automatically — no setup required. Plug it in and it appears in the session list.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .sheet(isPresented: $showESP32Sheet) {
+            ESP32ProvisionSheet()
+        }
+        .sheet(isPresented: $showPixooSheet) {
+            PixooSheet()
+        }
+    }
+
+    private func hardwareRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        buttonLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button(buttonLabel, action: action)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+    }
+    #endif
 
     private var servicesContent: some View {
         VStack(alignment: .leading, spacing: 10) {

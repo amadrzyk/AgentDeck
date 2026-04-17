@@ -109,8 +109,17 @@ jobs:
           rm -f $RUNNER_TEMP/certificate.p12
           rm -rf ~/private_keys
 
+  # macOS App Store upload. Keep disabled until Mac App Store distribution
+  # prerequisites are provisioned on this team:
+  #   1. "Mac Installer Distribution" cert (P12) → APPLE_MAC_INSTALLER_CERT_BASE64 secret
+  #   2. macOS Provisioning Profile for bound.serendipity.agentdeck.dashboard → MACOS_PROVISIONING_PROFILE_BASE64 secret
+  #   3. The app group `group.bound.serendipity.agentdeck.dashboard` registered under the team in App Store Connect
+  #   4. apple/ExportOptions-macOS.plist populated with `<key>method</key><string>app-store-connect</string>`
+  # Once those are in place, flip `if: false` → `if: true` and `release.needs`
+  # below to include `build-macos`. First run should be dry — watch for
+  # cert/profile mismatches before promoting to a real TestFlight build.
   build-macos:
-    if: false  # TODO: needs "Mac Installer Distribution" cert + cloud signing permission
+    if: false
     runs-on: macos-15
     timeout-minutes: 30
 

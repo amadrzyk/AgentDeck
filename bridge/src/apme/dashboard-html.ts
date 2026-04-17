@@ -200,7 +200,30 @@ function renderRuns(runs){
         '<td class="task-col" title="'+esc(r.taskPrompt||'')+'">'+esc(task)+'</td>'+
         '<td>'+tm+(dur?' · '+fd(dur):'')+'</td></tr>';
     }).join('');
-    if(!filtered.length)tb.innerHTML='<tr><td colspan="9" class="empty">'+(runs.length?'No runs match filters':'No runs yet. Start a coding session to collect data.')+'</td></tr>';
+    if(!filtered.length)tb.innerHTML='<tr><td colspan="9" class="empty" style="padding:0">'+(runs.length?'No runs match filters':renderEmptyState())+'</td></tr>';
+}
+/**
+ * Rich first-use empty state. Replaces a bare "No runs yet" message with
+ * an onboarding card so new users understand what APME will do once they
+ * run their first session. Kept inline (no template file) because the
+ * dashboard ships as a single JS string for the daemon HTTP route.
+ */
+function renderEmptyState(){
+  return '<div style="padding:48px 32px;text-align:center;line-height:1.6">'+
+    '<div style="font-size:32px;margin-bottom:16px">📊</div>'+
+    '<div style="font-size:16px;color:var(--muted);font-weight:600;margin-bottom:8px">No APME reports yet</div>'+
+    '<div style="font-size:13px;color:var(--dim);max-width:420px;margin:0 auto 20px">'+
+      'APME evaluates each coding agent session after it finishes — task quality, outcome, and vibe scores. Start a Claude Code, Codex, or OpenCode session and come back here once it completes.'+
+    '</div>'+
+    '<div style="font-size:12px;color:var(--dim);border-top:1px solid var(--border);padding-top:16px;max-width:420px;margin:0 auto">'+
+      '<div style="font-weight:600;margin-bottom:6px;color:var(--muted)">Quick start</div>'+
+      '<div style="text-align:left;padding-left:16px">'+
+        '<div>1. Install AgentDeck hooks in Settings → Claude Code Hooks</div>'+
+        '<div>2. Launch a session from the menubar</div>'+
+        '<div>3. When the agent finishes its turn, a row appears here</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
 }
 async function loadRuns(){
   try{
