@@ -100,6 +100,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     private var connected = false
     private var managerOpened = false
     private var lastStateHash = ""
+    private var displaySuppressed = false
 
     private var pollTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
@@ -293,7 +294,32 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             debugLog("BROADCAST sessions_list: \(sessions.count) sessions")
             cachedSessionsList = sessions
             updateDisplay()
+        case "display_state":
+            let displayOn = event["displayOn"] as? Bool ?? true
+            applyDisplayState(displayOn: displayOn)
         default: break
+        }
+    }
+
+    private func applyDisplayState(displayOn: Bool) {
+        let shouldSuppress = !displayOn
+        guard shouldSuppress != displaySuppressed else { return }
+        displaySuppressed = shouldSuppress
+
+        guard connected, managerOpened else {
+            debugLog("display_state=\(displayOn) deferred (not connected)")
+            return
+        }
+
+        if shouldSuppress {
+            writePacket(buildBrightnessPacket(0))
+            DaemonLogger.shared.debug("D200H", "Display sleep → brightness 0")
+        } else {
+            writePacket(buildBrightnessPacket(100))
+            lastStateHash = ""
+            lastFullSlots = []
+            updateDisplay()
+            DaemonLogger.shared.debug("D200H", "Display wake → brightness 100 + full refresh")
         }
     }
 
@@ -415,10 +441,14 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     }
 
     private func initializeDevice() {
-        writePacket(buildBrightnessPacket(100))
+        // Respect host-display state at (re)connect — if the Mac monitor is off or
+        // locked, bring the device up dim so we don't flash the dashboard.
+        let initialBrightness = displaySuppressed ? 0 : 100
+        writePacket(buildBrightnessPacket(initialBrightness))
         syncLabelStyleIfNeeded(force: true)
 
-        // Force full render (clear hash so updateDisplay always sends)
+        // Force full render (clear hash so updateDisplay always sends).
+        // updateDisplay() is itself a no-op when displaySuppressed is true.
         lastStateHash = ""
         updateDisplay()
 
@@ -748,6 +778,10 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     private func updateDisplay(animationOnly: Bool = false) {
         guard connected, managerOpened else {
             debugLog("updateDisplay SKIP: connected=\(connected) managerOpened=\(managerOpened)")
+            return
+        }
+        if displaySuppressed {
+            debugLog("updateDisplay SKIP: display suppressed (host monitor off/locked)")
             return
         }
 
