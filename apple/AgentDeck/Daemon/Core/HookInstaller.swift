@@ -1,21 +1,55 @@
 #if os(macOS)
-// HookInstaller.swift — Auto-install Claude Code hooks on app launch
-// Ported from hooks/src/install.ts
+// HookInstaller.swift — Install Claude Code hooks with explicit user consent.
+// Ported from hooks/src/install.ts but redesigned for App Store compliance:
+// - No longer writes on launch without consent (guideline 2.5.2).
+// - Reads/writes via a user-granted security-scoped URL bookmark persisted
+//   in AppPreferences (resolveClaudeSettingsURL / storeClaudeSettingsBookmark).
+// - `installIfNeeded()` silently no-ops when consent is `.unknown` or
+//   `.declined`, or when no bookmark exists. `promptAndInstall()` walks the
+//   user through the explicit NSAlert + NSOpenPanel flow.
 
+import AppKit
 import Foundation
 
 enum HookInstaller {
-    private static let settingsFile = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".claude/settings.local.json")
-
     private static let hookEvents = [
         "SessionStart", "SessionEnd", "PreToolUse",
         "PostToolUse", "Stop", "Notification", "UserPromptSubmit",
     ]
 
-    /// Install AgentDeck hooks into Claude Code settings. Safe to call multiple times.
+    /// Install AgentDeck hooks into Claude Code settings only if the user has
+    /// explicitly granted consent + a valid security-scoped bookmark. Safe to
+    /// call on every launch — when preconditions aren't met it's a no-op.
     static func installIfNeeded() {
-        var settings = loadSettings()
+        switch AppPreferences.shared.hookInstallConsent {
+        case .unknown:
+            DaemonLogger.shared.info("Hooks awaiting user consent from Settings")
+            return
+        case .declined:
+            return
+        case .accepted:
+            break
+        }
+
+        guard let resolved = AppPreferences.shared.resolveClaudeSettingsURL() else {
+            DaemonLogger.shared.info("Hooks skipped: no user-authorized settings.local.json bookmark")
+            AppPreferences.shared.hooksInstalled = false
+            return
+        }
+
+        let url = resolved.url
+        if resolved.stale {
+            _ = AppPreferences.shared.storeClaudeSettingsBookmark(for: url)
+        }
+
+        guard url.startAccessingSecurityScopedResource() else {
+            DaemonLogger.shared.info("Hooks skipped: security-scoped resource unavailable at \(url.path)")
+            AppPreferences.shared.hooksInstalled = false
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        var settings = loadSettings(at: url)
         let before = settingsJSON(settings)
 
         settings = applyHooks(settings)
@@ -23,19 +57,121 @@ enum HookInstaller {
         let after = settingsJSON(settings)
         guard before != after else {
             DaemonLogger.shared.debug("Hooks", "Already installed, no changes needed")
+            AppPreferences.shared.hooksInstalled = true
             return
         }
 
-        saveSettings(settings)
-        DaemonLogger.shared.info("Claude Code hooks installed → \(settingsFile.path)")
+        let wrote = saveSettings(settings, to: url)
+        if wrote {
+            AppPreferences.shared.hooksInstalled = true
+            DaemonLogger.shared.info("Claude Code hooks installed → \(url.path)")
+        } else {
+            AppPreferences.shared.hooksInstalled = false
+            DaemonLogger.shared.info("Hooks write failed at \(url.path)")
+        }
     }
 
-    /// Remove AgentDeck hooks from Claude Code settings
+    /// Remove AgentDeck hooks from Claude Code settings. Requires an existing
+    /// bookmark (we need to write back). Leaves consent state untouched;
+    /// `uninstallAndRevoke()` is the full teardown.
     static func uninstall() {
-        var settings = loadSettings()
+        guard let resolved = AppPreferences.shared.resolveClaudeSettingsURL() else {
+            DaemonLogger.shared.info("Hooks uninstall skipped: no authorized settings.local.json bookmark")
+            return
+        }
+
+        let url = resolved.url
+        if resolved.stale {
+            _ = AppPreferences.shared.storeClaudeSettingsBookmark(for: url)
+        }
+
+        guard url.startAccessingSecurityScopedResource() else {
+            DaemonLogger.shared.info("Hooks uninstall skipped: security-scoped resource unavailable at \(url.path)")
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        var settings = loadSettings(at: url)
         settings = removeHooks(settings)
-        saveSettings(settings)
+        _ = saveSettings(settings, to: url)
+        AppPreferences.shared.hooksInstalled = false
         DaemonLogger.shared.info("Claude Code hooks removed")
+    }
+
+    /// Full teardown — remove hooks from the JSON, drop the bookmark, flip
+    /// consent to `.declined` so subsequent launches stay quiet.
+    static func uninstallAndRevoke() {
+        uninstall()
+        AppPreferences.shared.clearClaudeSettingsAccess()
+        AppPreferences.shared.hookInstallConsent = .declined
+        AppPreferences.shared.hooksInstalled = false
+    }
+
+    /// Explicit opt-in flow. Shows an NSAlert explaining the integration,
+    /// then an NSOpenPanel defaulted to `~/.claude/settings.local.json`.
+    /// Returns `true` when the user confirmed and hooks were written (or
+    /// were already installed with a valid bookmark).
+    @discardableResult
+    @MainActor
+    static func promptAndInstall() -> Bool {
+        // If we've already been authorized, just (re)install.
+        if AppPreferences.shared.hookInstallConsent == .accepted,
+           AppPreferences.shared.resolveClaudeSettingsURL() != nil {
+            installIfNeeded()
+            return true
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Enable Claude Code Hooks?"
+        alert.informativeText = """
+            AgentDeck can register hooks in ~/.claude/settings.local.json so Claude Code sessions report state to the dashboard.
+
+            You'll be asked to grant access to that file. AgentDeck only edits its own hook entries — other settings are preserved.
+            """
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Not Now")
+        alert.alertStyle = .informational
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            AppPreferences.shared.hookInstallConsent = .declined
+            DaemonLogger.shared.info("Hooks consent declined by user")
+            return false
+        }
+
+        // Default directoryURL to real $HOME/.claude via getpwuid so the
+        // sandbox doesn't redirect us into the container home.
+        let home = String(cString: getpwuid(getuid()).pointee.pw_dir)
+        let claudeDir = URL(fileURLWithPath: home).appendingPathComponent(".claude", isDirectory: true)
+
+        let panel = NSOpenPanel()
+        panel.title = "Authorize Claude Code Settings"
+        panel.message = "Select (or create) ~/.claude/settings.local.json so AgentDeck can install hooks."
+        panel.prompt = "Authorize"
+        panel.directoryURL = claudeDir
+        panel.nameFieldStringValue = "settings.local.json"
+        panel.allowedFileTypes = ["json"]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.treatsFilePackagesAsDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            AppPreferences.shared.hookInstallConsent = .declined
+            DaemonLogger.shared.info("Hooks consent declined — file picker cancelled")
+            return false
+        }
+
+        guard AppPreferences.shared.storeClaudeSettingsBookmark(for: url) else {
+            DaemonLogger.shared.info("Hooks consent: failed to persist security-scoped bookmark for \(url.path)")
+            return false
+        }
+
+        AppPreferences.shared.hookInstallConsent = .accepted
+        installIfNeeded()
+        return AppPreferences.shared.hooksInstalled
     }
 
     // MARK: - Pure Logic
@@ -119,19 +255,26 @@ enum HookInstaller {
 
     // MARK: - File I/O
 
-    private static func loadSettings() -> [String: Any] {
-        guard let data = try? Data(contentsOf: settingsFile),
+    private static func loadSettings(at url: URL) -> [String: Any] {
+        guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return [:]
         }
         return json
     }
 
-    private static func saveSettings(_ settings: [String: Any]) {
-        let dir = settingsFile.deletingLastPathComponent()
+    @discardableResult
+    private static func saveSettings(_ settings: [String: Any], to url: URL) -> Bool {
+        let dir = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: settingsFile, options: .atomic)
+        guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]) else {
+            return false
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            return false
         }
     }
 

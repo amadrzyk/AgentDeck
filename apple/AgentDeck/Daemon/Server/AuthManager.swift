@@ -8,16 +8,11 @@ import Security
 final class AuthManager: Sendable {
     static let shared = AuthManager()
 
-    static let agentDeckDir: URL = {
-        // getpwuid returns the real home directory even inside the App Sandbox
-        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
-            return URL(fileURLWithPath: String(cString: dir))
-                .appendingPathComponent(".agentdeck")
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".agentdeck")
-    }()
-    static let tokenFile = agentDeckDir.appendingPathComponent("auth-token")
+    /// Base AgentDeck data directory. Delegates to `AgentDeckPaths` which
+    /// resolves to the App Group container when the entitlement is active
+    /// and falls back to the legacy `~/.agentdeck/` layout otherwise.
+    static var agentDeckDir: URL { AgentDeckPaths.baseDirectory }
+    static var tokenFile: URL { AgentDeckPaths.authToken }
     private static let tokenLength = 32 // 32 hex chars = 16 bytes
 
     private let cachedToken: String

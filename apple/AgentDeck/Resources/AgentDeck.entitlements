@@ -14,12 +14,9 @@
 	<true/>
 	<key>com.apple.security.network.server</key>
 	<true/>
-	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>/.agentdeck/</string>
-		<string>/.openclaw/</string>
-		<string>/.codex/</string>
-		<string>/Library/pnpm/</string>
+		<string>group.bound.serendipity.agentdeck.dashboard</string>
 	</array>
 </dict>
 </plist>

@@ -59,11 +59,14 @@ struct ApmeConfig: Codable {
 // MARK: - Loader
 
 enum ApmeSettings {
-    /// Path to the shared settings file.
+    /// Path to the shared settings file. Env override (used by tests) takes
+    /// precedence; otherwise we route through `AgentDeckPaths` so signed
+    /// App Store builds land in the App Group container.
     static var settingsPath: String {
-        let dir = ProcessInfo.processInfo.environment["AGENTDECK_DATA_DIR"]
-            ?? (NSHomeDirectory() as NSString).appendingPathComponent(".agentdeck")
-        return (dir as NSString).appendingPathComponent("settings.json")
+        if let override = ProcessInfo.processInfo.environment["AGENTDECK_DATA_DIR"] {
+            return (override as NSString).appendingPathComponent("settings.json")
+        }
+        return AgentDeckPaths.settingsJson.path
     }
 
     /// Load APME config from ~/.agentdeck/settings.json.

@@ -231,12 +231,12 @@ final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
 
     /// Fetch token and agentType from bridge /health endpoint
     private func fetchHealthInfo(host: String, port: Int, completion: @escaping @Sendable (HealthInfo) -> Void) {
-        // Read auth-token from ~/.agentdeck/auth-token (macOS — use real home, not sandbox container)
+        // macOS: read auth-token from the App Group container (or the legacy
+        // ~/.agentdeck/ fallback when the entitlement isn't active).
         #if os(macOS)
-        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
-        let tokenPath = realHome + "/.agentdeck/auth-token"
-        // Even with local token, still need /health for agentType
-        let localToken = try? String(contentsOfFile: tokenPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokenURL = AgentDeckPaths.authToken
+        let localToken = try? String(contentsOf: tokenURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         #else
         let localToken: String? = nil
         #endif

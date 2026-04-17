@@ -168,9 +168,12 @@ enum SessionLauncher {
             return LaunchPlan(mode: .bundledBridge, command: command)
         }
 
-        // Last-resort fallback for claude-code: plain claude without bridge
+        // Last-resort fallback for claude-code: plain claude without bridge.
+        // Still pass AGENTDECK_PORT so the Claude Code hooks (installed
+        // separately by HookInstaller) can find our daemon even when the
+        // bridge binary isn't available. Claude itself ignores the var.
         if agent == .claudeCode, let claudePath {
-            let command = "\(projectPrefix)\(shellEscape(claudePath))"
+            let command = "\(projectPrefix)\(daemonPrefix)\(shellEscape(claudePath))"
             return LaunchPlan(mode: .plainClaude, command: command)
         }
 
@@ -193,8 +196,7 @@ enum SessionLauncher {
         for path in candidates {
             if FileManager.default.isExecutableFile(atPath: path) { return path }
         }
-        // Try which
-        return shell("which", "agentdeck")
+        return nil
     }
 
     private static func findClaude() -> String? {
@@ -210,7 +212,7 @@ enum SessionLauncher {
         for path in candidates {
             if FileManager.default.isExecutableFile(atPath: path) { return path }
         }
-        return shell("which", "claude")
+        return nil
     }
 
     private static func findBundledBridge() -> String? {
@@ -340,22 +342,6 @@ enum SessionLauncher {
     }
 
     // MARK: - Helpers
-
-    private static func shell(_ args: String...) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch { return nil }
-    }
 
     private static func shellEscape(_ value: String) -> String {
         let escaped = value.replacingOccurrences(of: "'", with: "'\\''")

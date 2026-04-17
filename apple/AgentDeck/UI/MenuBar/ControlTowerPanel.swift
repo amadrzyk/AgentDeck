@@ -490,19 +490,30 @@ struct ControlTowerPanel: View {
         SectionContainer(title: "DEVICES", titleColor: .secondary) {
             let entries = daemonService.deviceSummary.allEntries
             if entries.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "cable.connector.slash")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                    Text("No devices connected")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if daemonService.connectedClients > 0 {
-                        Text("\(daemonService.connectedClients) client\(daemonService.connectedClients == 1 ? "" : "s")")
-                            .font(.system(size: 10))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9))
                             .foregroundStyle(.secondary)
+                        Text("Devices are optional — your agents work standalone.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        if daemonService.connectedClients > 0 {
+                            Text("\(daemonService.connectedClients) client\(daemonService.connectedClients == 1 ? "" : "s")")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    Button {
+                        openDevicePreview()
+                    } label: {
+                        Text("View what devices add →")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.accentColor)
                 }
             } else {
                 ForEach(entries) { entry in
@@ -601,6 +612,16 @@ struct ControlTowerPanel: View {
             .controlSize(.small)
             .disabled(daemonService.port == 0)
             .help("Open the APME evaluation dashboard in your browser")
+
+            Button {
+                openDevicePreview()
+            } label: {
+                Label("Preview Devices", systemImage: "rectangle.on.rectangle")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("See what AgentDeck looks like on each supported device — no hardware required")
 
             Spacer()
 
@@ -739,6 +760,13 @@ struct ControlTowerPanel: View {
     private func openApmeDashboard() {
         guard daemonService.port > 0 else { return }
         openWindow(id: "apme-dashboard")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    /// Open the Device Preview window. Safe to call whether or not any
+    /// hardware is connected — this is the whole point of the window.
+    private func openDevicePreview() {
+        openWindow(id: "device-preview")
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 

@@ -109,9 +109,9 @@ enum SingletonGuard {
     /// Atomic cleanup: remove daemon.json. Safe to call from signal handlers or atexit.
     /// Uses direct POSIX unlink to avoid any Swift runtime/Task complications.
     static func removeDaemonInfoFile() {
-        guard let home = getpwuid(getuid())?.pointee.pw_dir else { return }
-        let path = String(cString: home) + "/.agentdeck/daemon.json"
-        _ = unlink(path)
+        // Resolve via AgentDeckPaths so the App Group container is preferred;
+        // unlink is async-signal-safe (see caller docs) and works on either path.
+        _ = unlink(AgentDeckPaths.daemonJson.path)
     }
 
     /// Remove daemon.json left behind by a crashed / killed previous instance.

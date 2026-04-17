@@ -8,6 +8,17 @@ import AppKit
 final class AppPreferences: ObservableObject, @unchecked Sendable {
     nonisolated(unsafe) static let shared = AppPreferences()
 
+    /// Tri-state consent for Claude Code hook auto-install. App Store review
+    /// guideline 2.5.2 forbids silently modifying user files outside the
+    /// sandbox — we gate `HookInstaller` on `.accepted` and surface the
+    /// choice in Settings. `.unknown` is the default so first-launch does
+    /// nothing until the user explicitly opts in.
+    enum HookInstallConsent: String, Codable, CaseIterable {
+        case unknown
+        case accepted
+        case declined
+    }
+
     enum MenuBarIconStyle: String, CaseIterable, Identifiable {
         case status
         case app
@@ -102,6 +113,27 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     @Published private(set) var antigravityAccessEnabled: Bool
     @Published private(set) var antigravitySelectedPath: String?
 
+    /// User's current consent state for writing to `~/.claude/settings.local.json`.
+    /// `.unknown` on fresh install → HookInstaller no-ops until user opts in.
+    @Published var hookInstallConsent: HookInstallConsent {
+        didSet { defaults.set(hookInstallConsent.rawValue, forKey: Keys.hookInstallConsent) }
+    }
+
+    /// Whether the hook JSON has actually been written to disk. Distinct from
+    /// `hookInstallConsent` so the app can remember install state even if the
+    /// user later revokes the bookmark or switches to `.declined`.
+    @Published var hooksInstalled: Bool {
+        didSet { defaults.set(hooksInstalled, forKey: Keys.hooksInstalled) }
+    }
+
+    /// First-launch tracking for the Device Preview window. Flips to `true`
+    /// the first time the user opens the window so the empty-state banner
+    /// can stop nudging them. Pure local flag — not mirrored to
+    /// settings.json, no bridge coupling.
+    @Published var hasSeenDevicePreview: Bool {
+        didSet { defaults.set(hasSeenDevicePreview, forKey: Keys.hasSeenDevicePreview) }
+    }
+
     private let defaults: UserDefaults
 
     private init(defaults: UserDefaults = .standard) {
@@ -126,16 +158,18 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.antigravitySelectedPath = defaults.string(forKey: Keys.antigravitySelectedPath)
         self.antigravityAccessEnabled = defaults.data(forKey: Keys.antigravityBookmark) != nil
         self.apmeJudgeBackend = defaults.string(forKey: Keys.apmeJudgeBackend) ?? "foundationModels"
+        self.hookInstallConsent = HookInstallConsent(rawValue: defaults.string(forKey: Keys.hookInstallConsent) ?? "") ?? .unknown
+        self.hooksInstalled = defaults.object(forKey: Keys.hooksInstalled) as? Bool ?? false
+        self.hasSeenDevicePreview = defaults.object(forKey: Keys.hasSeenDevicePreview) as? Bool ?? false
     }
 
-    /// Merge the new backend choice into ~/.agentdeck/settings.json without
-    /// clobbering other keys. Writes atomically so a crashed write doesn't
-    /// leave the file half-parsed.
+    /// Merge the new backend choice into settings.json without clobbering
+    /// other keys. Writes atomically so a crashed write doesn't leave the
+    /// file half-parsed. The path resolves via AgentDeckPaths so signed
+    /// builds land in the App Group container.
     private func writeApmeJudgeBackendToSettingsJson(_ backend: String) {
         #if os(macOS)
-        let home = (NSHomeDirectory() as NSString).appendingPathComponent(".agentdeck")
-        let path = (home as NSString).appendingPathComponent("settings.json")
-        let url = URL(fileURLWithPath: path)
+        let url = AgentDeckPaths.settingsJson
 
         // Load existing JSON (or start blank). Silently ignore parse errors —
         // a malformed file will be rewritten fresh with just our key.
@@ -152,8 +186,8 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         root["apme"] = apme
 
         guard let out = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return }
-        // Create parent dir if missing (fresh install).
-        try? FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        // AgentDeckPaths.baseDirectory eagerly creates the parent on first use,
+        // so we only need to write the file here.
         try? out.write(to: url, options: [.atomic])
         #endif
     }
@@ -239,6 +273,68 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         return try body(url)
     }
 
+    // MARK: - Claude settings.local.json security-scoped bookmark
+
+    /// Persist a security-scoped bookmark to `~/.claude/settings.local.json`.
+    /// The user selects the file via NSOpenPanel in HookInstaller; this
+    /// keeps the opaque bookmark + the display path. Mirrors the
+    /// Antigravity pattern so behaviour is consistent across the two
+    /// outside-sandbox file integrations.
+    @discardableResult
+    func storeClaudeSettingsBookmark(for url: URL) -> Bool {
+        do {
+            #if os(macOS)
+            let options: URL.BookmarkCreationOptions = [.withSecurityScope]
+            #else
+            let options: URL.BookmarkCreationOptions = []
+            #endif
+            let bookmark = try url.bookmarkData(
+                options: options,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            defaults.set(bookmark, forKey: Keys.claudeSettingsBookmark)
+            defaults.set(url.path, forKey: Keys.claudeSettingsPath)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Resolve the stored bookmark back into a URL. Returns `nil` when the
+    /// user has not granted access yet. `stale == true` signals the caller
+    /// should re-persist the bookmark — HookInstaller does that after any
+    /// successful read/write.
+    func resolveClaudeSettingsURL() -> (url: URL, stale: Bool)? {
+        guard let bookmark = defaults.data(forKey: Keys.claudeSettingsBookmark) else { return nil }
+        var stale = false
+        do {
+            #if os(macOS)
+            let resolveOptions: URL.BookmarkResolutionOptions = [.withSecurityScope]
+            #else
+            let resolveOptions: URL.BookmarkResolutionOptions = []
+            #endif
+            let url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: resolveOptions,
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            )
+            return (url, stale)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Revoke stored Claude settings bookmark + path. Leaves
+    /// `hookInstallConsent` / `hooksInstalled` to the caller so
+    /// `HookInstaller.uninstallAndRevoke()` can update them in the
+    /// right order.
+    func clearClaudeSettingsAccess() {
+        defaults.removeObject(forKey: Keys.claudeSettingsBookmark)
+        defaults.removeObject(forKey: Keys.claudeSettingsPath)
+    }
+
     /// Clamp user-supplied port to the safe range (avoid privileged <1024 and
      /// out-of-range values that would crash NWEndpoint.Port).
     static func clampPort(_ value: Int) -> Int {
@@ -265,5 +361,10 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let antigravityBookmark = "prefs.antigravityBookmark"
         static let antigravitySelectedPath = "prefs.antigravitySelectedPath"
         static let apmeJudgeBackend = "prefs.apmeJudgeBackend"
+        static let hookInstallConsent = "prefs.hookInstallConsent"
+        static let hooksInstalled = "prefs.hooksInstalled"
+        static let claudeSettingsBookmark = "prefs.claudeSettingsBookmark"
+        static let claudeSettingsPath = "prefs.claudeSettingsPath"
+        static let hasSeenDevicePreview = "prefs.hasSeenDevicePreview"
     }
 }

@@ -19,6 +19,10 @@ struct AgentDeckApp: App {
         // Install cleanup handlers to remove daemon.json on any exit path (crash, signal).
         _ = SingletonGuard.enforce()
         SingletonGuard.installCleanupHandlers()
+        // One-shot migration from legacy ~/.agentdeck/ (pre-sandbox builds) into
+        // the App Group container. Best-effort; per-file errors are logged but
+        // never thrown so startup never blocks on migration.
+        _ = AgentDeckPaths.migrateLegacyDataIfNeeded()
         _daemonService = StateObject(wrappedValue: DaemonService())
     }
     #endif
@@ -49,6 +53,17 @@ struct AgentDeckApp: App {
         Window("APME Dashboard", id: "apme-dashboard") {
             ApmeDashboardWindow()
                 .environmentObject(daemonService)
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 1100, height: 760)
+
+        // Device Preview window — sidebar-driven gallery of every device type
+        // AgentDeck can drive. Users without hardware can see what sessions
+        // look like on each surface; everyone can debug rendering tweaks
+        // without touching a physical device.
+        Window("Device Preview", id: "device-preview") {
+            DevicePreviewScreen()
+                .environmentObject(preferences)
         }
         .defaultPosition(.center)
         .defaultSize(width: 1100, height: 760)

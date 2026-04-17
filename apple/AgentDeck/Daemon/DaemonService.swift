@@ -684,10 +684,9 @@ final class DaemonService: ObservableObject {
     private static func handleTerminationSignal(name: String, service: DaemonService?) {
         DaemonLogger.shared.info("\(name) received — initiating clean shutdown")
         // Remove daemon.json immediately so next launch isn't blocked by stale guard
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let daemonFile = home.appendingPathComponent(".agentdeck/daemon.json")
+        let daemonFile = AgentDeckPaths.daemonJson
         try? FileManager.default.removeItem(at: daemonFile)
-        let crashLog = home.appendingPathComponent(".agentdeck/daemon-crash.log")
+        let crashLog = AgentDeckPaths.daemonCrashLog
         let entry = "[\(ISO8601DateFormatter().string(from: Date()))] \(name) — clean shutdown initiated\n"
         if let data = entry.data(using: .utf8) {
             if FileManager.default.fileExists(atPath: crashLog.path) {

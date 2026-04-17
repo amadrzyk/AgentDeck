@@ -13,18 +13,7 @@ final class DaemonLogger: @unchecked Sendable {
     private var sampledCounters: [String: Int] = [:]
 
     private let osLog = os.Logger(subsystem: "dev.agentdeck.daemon", category: "daemon")
-    private let logFile: URL = {
-        // Use getpwuid to bypass App Sandbox container redirect
-        let homeDir: String
-        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
-            homeDir = String(cString: dir)
-        } else {
-            homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        }
-        let dir = URL(fileURLWithPath: homeDir).appendingPathComponent(".agentdeck")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("swift-daemon.log")
-    }()
+    private let logFile: URL = AgentDeckPaths.swiftDaemonLog
 
     private func writeToFile(_ line: String) {
         let entry = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"

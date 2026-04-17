@@ -369,9 +369,15 @@ final class DaemonServer {
 
         DaemonLogger.shared.info("startServices: step10 initialUsageTask scheduled")
 
-        // 11. Auto-install Claude Code hooks
+        // 11. Claude Code hooks — HookInstaller now requires explicit user
+        // consent (App Store guideline 2.5.2). This call is a no-op unless
+        // the user opted in via Settings → "Enable Claude Code Hooks…".
         HookInstaller.installIfNeeded()
-        DaemonLogger.shared.info("startServices: step11 HookInstaller done")
+        if AppPreferences.shared.hookInstallConsent != .accepted {
+            DaemonLogger.shared.info("startServices: step11 HookInstaller skipped (no consent)")
+        } else {
+            DaemonLogger.shared.info("startServices: step11 HookInstaller done")
+        }
 
         // 12. Voice assistant
         voiceAssistant.sendPrompt = { [weak self] text in

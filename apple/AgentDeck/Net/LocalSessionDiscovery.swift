@@ -1,4 +1,6 @@
-// LocalSessionDiscovery.swift — macOS: read ~/.agentdeck/sessions.json directly
+// LocalSessionDiscovery.swift — macOS: read sessions.json from the AgentDeck
+// data directory (App Group container on signed builds, ~/.agentdeck/ fallback
+// otherwise — see AgentDeckPaths).
 // On macOS the bridge runs on the same machine, so we can discover sessions
 // by reading the file system instead of relying on mDNS.
 
@@ -23,9 +25,7 @@ final class LocalSessionDiscovery: ObservableObject, @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.agentdeck.local-discovery")
 
     private var sessionsFilePath: String {
-        let home = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) }
-            ?? FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/.agentdeck/sessions.json"
+        AgentDeckPaths.sessionsJson.path
     }
 
     func startPolling() {

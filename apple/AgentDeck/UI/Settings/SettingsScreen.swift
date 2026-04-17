@@ -99,53 +99,58 @@ struct SettingsScreen: View {
 
     #if os(macOS)
     private var macOSSettings: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Settings")
-                .font(.title2.bold())
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Settings")
+                    .font(.title2.bold())
 
-            GroupBox("Connection") {
-                connectionContent
-                    .padding(8)
+                GroupBox("Connection") {
+                    connectionContent
+                        .padding(8)
+                }
+
+                GroupBox("Daemon") {
+                    daemonContent
+                        .padding(8)
+                }
+
+                GroupBox("Discovery") {
+                    discoveryContent
+                        .padding(8)
+                }
+
+                GroupBox("Display") {
+                    displayContent
+                        .padding(8)
+                }
+
+                GroupBox("Dashboard") {
+                    dashboardContent
+                        .padding(8)
+                }
+
+                GroupBox("Services") {
+                    servicesContent
+                        .padding(8)
+                }
+
+                GroupBox("Claude Code Hooks") {
+                    claudeHooksContent
+                        .padding(8)
+                }
+
+                GroupBox("APME") {
+                    apmeContent
+                        .padding(8)
+                }
+
+                GroupBox("About") {
+                    aboutContent
+                        .padding(8)
+                }
             }
-
-            GroupBox("Daemon") {
-                daemonContent
-                    .padding(8)
-            }
-
-            GroupBox("Discovery") {
-                discoveryContent
-                    .padding(8)
-            }
-
-            GroupBox("Display") {
-                displayContent
-                    .padding(8)
-            }
-
-            GroupBox("Dashboard") {
-                dashboardContent
-                    .padding(8)
-            }
-
-            GroupBox("Services") {
-                servicesContent
-                    .padding(8)
-            }
-
-            GroupBox("APME") {
-                apmeContent
-                    .padding(8)
-            }
-
-            GroupBox("About") {
-                aboutContent
-                    .padding(8)
-            }
-
-            Spacer()
+            .padding(20)
         }
-        .padding(20)
         .frame(width: 460, height: 720)
     }
     #endif
@@ -608,13 +613,18 @@ struct SettingsScreen: View {
                 Text("MLX (local server, free)").tag("mlx")
                 Text("Anthropic API (paid)").tag("api")
             }
+#if os(macOS)
             .pickerStyle(.radioGroup)
+#else
+            .pickerStyle(.inline)
+#endif
             .labelsHidden()
 
             // Inline availability hint for the current selection.
             Group {
                 switch preferences.apmeJudgeBackend {
                 case "foundationModels":
+#if os(macOS)
                     let ready = ApmeJudgeFoundationModels.isAvailable
                     Label(
                         ready ? "Apple Intelligence ready" : ApmeJudgeFoundationModels.unavailableReason,
@@ -622,6 +632,14 @@ struct SettingsScreen: View {
                     )
                     .font(.system(size: 11))
                     .foregroundStyle(ready ? .green : .orange)
+#else
+                    Label(
+                        "Apple Intelligence judge runs on the macOS daemon.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+#endif
                 case "mlx":
                     Label(
                         "Requires a local MLX server at http://127.0.0.1:8800. Start it before scoring runs.",
@@ -630,6 +648,7 @@ struct SettingsScreen: View {
                     .font(.system(size: 11))
                     .foregroundStyle(TerrariumHUD.subtext)
                 case "api":
+#if os(macOS)
                     let configured = ApmeJudgeApi.isConfigured
                     Label(
                         configured
@@ -639,6 +658,14 @@ struct SettingsScreen: View {
                     )
                     .font(.system(size: 11))
                     .foregroundStyle(configured ? .yellow : .orange)
+#else
+                    Label(
+                        "Anthropic API judge runs on the macOS daemon.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+#endif
                 default:
                     EmptyView()
                 }
@@ -711,6 +738,68 @@ struct SettingsScreen: View {
             #endif
         }
     }
+
+    // MARK: - Claude Code Hooks (macOS)
+
+    #if os(macOS)
+    /// Explicit opt-in surface for `~/.claude/settings.local.json` hook
+    /// registration. Replaces the old auto-install behaviour — App Store
+    /// review 2.5.2 requires user consent before we touch files outside
+    /// the sandbox.
+    private var claudeHooksContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(preferences.hooksInstalled
+                          ? TerrariumHUD.ledGreen
+                          : TerrariumHUD.ledRed.opacity(0.6))
+                    .frame(width: 8, height: 8)
+                Text(hookStatusText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+
+            Text("AgentDeck can register hooks in ~/.claude/settings.local.json so Claude Code sessions report state to the dashboard. You'll be asked to grant access to that file before any write happens.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let path = UserDefaults.standard.string(forKey: "prefs.claudeSettingsPath") {
+                Text(path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            HStack(spacing: 8) {
+                Button("Enable Claude Code Hooks…") {
+                    _ = HookInstaller.promptAndInstall()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(preferences.hookInstallConsent == .accepted && preferences.hooksInstalled)
+
+                Button("Remove") {
+                    HookInstaller.uninstallAndRevoke()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!preferences.hooksInstalled)
+            }
+        }
+    }
+
+    private var hookStatusText: String {
+        if preferences.hooksInstalled {
+            return "Hooks installed"
+        }
+        switch preferences.hookInstallConsent {
+        case .unknown: return "Not configured"
+        case .declined: return "Declined — click Enable to revisit"
+        case .accepted: return "Consent granted, not yet written"
+        }
+    }
+    #endif
 
     private func infoRow(_ label: String, _ value: String) -> some View {
         HStack {
