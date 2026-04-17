@@ -25,7 +25,9 @@ enum BridgeEventParser {
         do {
             switch type {
             case "state_update":
-                return .stateUpdate(try lenient.decode(StateUpdateEvent.self, from: data))
+                var event = try lenient.decode(StateUpdateEvent.self, from: data)
+                event.moduleHealth = parseModuleHealth(json["moduleHealth"] as? [String: Any])
+                return .stateUpdate(event)
             case "usage_update":
                 return .usageUpdate(try lenient.decode(UsageEvent.self, from: data))
             case "connection":
@@ -58,5 +60,67 @@ enum BridgeEventParser {
             print("[BridgeEventParser] Decode error for \(type): \(error)")
             return nil
         }
+    }
+
+    // MARK: - Module Health Parser
+
+    private static func parseModuleHealth(_ raw: [String: Any]?) -> ModuleHealthState? {
+        guard let raw else { return nil }
+        var health = ModuleHealthState()
+
+        if let adb = raw["adb"] as? [String: Any] {
+            health.adb = AdbHealth(
+                available: adb["available"] as? Bool ?? false,
+                devices: adb["devices"] as? [String] ?? [],
+                reverseReadyCount: adb["reverseReadyCount"] as? Int ?? 0,
+                lastError: adb["lastError"] as? String
+            )
+        }
+
+        if let d200h = raw["d200h"] as? [String: Any] {
+            health.d200h = D200hHealth(
+                connected: d200h["connected"] as? Bool ?? false,
+                managerOpened: d200h["managerOpened"] as? Bool ?? false,
+                sandboxEnabled: d200h["sandboxEnabled"] as? Bool ?? false,
+                usbEntitlementPresent: d200h["usbEntitlementPresent"] as? Bool ?? false,
+                buttonPressCount: d200h["buttonPressCount"] as? Int ?? 0,
+                hidReportCount: d200h["hidReportCount"] as? Int ?? 0,
+                writeOK: d200h["writeOK"] as? Int ?? 0,
+                writeFail: d200h["writeFail"] as? Int ?? 0,
+                lastWriteError: d200h["lastWriteError"] as? String,
+                lastOpenError: d200h["lastOpenError"] as? String
+            )
+        }
+
+        if let pixoo = raw["pixoo"] as? [String: Any] {
+            var pixooDevices: [PixooDeviceHealth] = []
+            if let devArr = pixoo["devices"] as? [[String: Any]] {
+                for dev in devArr {
+                    pixooDevices.append(PixooDeviceHealth(
+                        ip: dev["ip"] as? String ?? "",
+                        online: dev["online"] as? Bool ?? false,
+                        failures: dev["failures"] as? Int ?? 0,
+                        backedOff: dev["backedOff"] as? Bool ?? false
+                    ))
+                }
+            }
+            health.pixoo = PixooHealth(
+                configuredDeviceCount: pixoo["configuredDeviceCount"] as? Int ?? 0,
+                deviceIps: pixoo["deviceIps"] as? [String] ?? [],
+                hasFrame: pixoo["hasFrame"] as? Bool ?? false,
+                displayDimmed: pixoo["displayDimmed"] as? Bool ?? false,
+                lastPushError: pixoo["lastPushError"] as? String,
+                devices: pixooDevices
+            )
+        }
+
+        if let serial = raw["serial"] as? [String: Any] {
+            health.serial = SerialHealth(
+                connectedPorts: serial["connectedPorts"] as? [String] ?? [],
+                lastError: serial["lastError"] as? String
+            )
+        }
+
+        return health
     }
 }

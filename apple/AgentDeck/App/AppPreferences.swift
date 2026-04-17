@@ -61,6 +61,9 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     @Published var showTankStatus: Bool {
         didSet { defaults.set(showTankStatus, forKey: Keys.showTankStatus) }
     }
+    @Published var showDeviceDiagnostic: Bool {
+        didSet { defaults.set(showDeviceDiagnostic, forKey: Keys.showDeviceDiagnostic) }
+    }
     @Published var showTimeline: Bool {
         didSet { defaults.set(showTimeline, forKey: Keys.showTimeline) }
     }
@@ -112,6 +115,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.menuBarIconStyle = MenuBarIconStyle(rawValue: defaults.string(forKey: Keys.menuBarIconStyle) ?? "") ?? .status
         self.showSessionList = defaults.object(forKey: Keys.showSessionList) as? Bool ?? true
         self.showTankStatus = defaults.object(forKey: Keys.showTankStatus) as? Bool ?? true
+        self.showDeviceDiagnostic = defaults.object(forKey: Keys.showDeviceDiagnostic) as? Bool ?? true
         self.showTimeline = defaults.object(forKey: Keys.showTimeline) as? Bool ?? true
         self.showSettingsButton = defaults.object(forKey: Keys.showSettingsButton) as? Bool ?? true
         self.showOpenClawSection = defaults.object(forKey: Keys.showOpenClawSection) as? Bool ?? true
@@ -250,6 +254,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let menuBarIconStyle = "prefs.menuBarIconStyle"
         static let showSessionList = "prefs.showSessionList"
         static let showTankStatus = "prefs.showTankStatus"
+        static let showDeviceDiagnostic = "prefs.showDeviceDiagnostic"
         static let showTimeline = "prefs.showTimeline"
         static let showSettingsButton = "prefs.showSettingsButton"
         static let showOpenClawSection = "prefs.showOpenClawSection"

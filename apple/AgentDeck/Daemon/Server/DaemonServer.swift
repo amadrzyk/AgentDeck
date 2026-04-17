@@ -696,6 +696,11 @@ final class DaemonServer {
         }
 
         // Pixoo endpoints
+        await httpServer.get("/pixoo/preview") { [weak self] _ in
+            guard let self else { return .text("No frame available", status: 204) }
+            return await self.pixooPngResponse()
+        }
+
         await httpServer.get("/pixoo/frame") { [weak self] _ in
             guard let self else { return .text("No frame available", status: 204) }
             return await self.pixooFrameResponse()
@@ -733,6 +738,21 @@ final class DaemonServer {
                 "Cache-Control": "no-store",
             ],
             body: bmp
+        )
+    }
+
+    private func pixooPngResponse() -> HTTPServer.HTTPResponse {
+        guard let rgb = pixooModule?.currentFrame(),
+              let png = Self.rgbToPng(rgb, width: 64, height: 64) else {
+            return .text("No frame available", status: 204)
+        }
+        return HTTPServer.HTTPResponse(
+            status: 200,
+            headers: [
+                "Content-Type": "image/png",
+                "Cache-Control": "no-store",
+            ],
+            body: png
         )
     }
 
@@ -841,6 +861,72 @@ final class DaemonServer {
         base[offset + 1] = UInt8((value >> 8) & 0x000000ff)
         base[offset + 2] = UInt8((value >> 16) & 0x000000ff)
         base[offset + 3] = UInt8((value >> 24) & 0x000000ff)
+    }
+
+    /// Encode raw RGB bytes to PNG (no CoreGraphics dependency).
+    /// Uses zlib (Foundation's built-in compression) for IDAT deflate.
+    nonisolated private static func rgbToPng(_ rgb: Data, width: Int, height: Int) -> Data? {
+        let expectedLength = width * height * 3
+        guard rgb.count == expectedLength else { return nil }
+
+        // Build raw IDAT payload: filter byte (0) + RGB row data for each row
+        let rowBytes = width * 3
+        var rawIDAT = Data(capacity: height * (1 + rowBytes))
+        rgb.withUnsafeBytes { src in
+            guard let base = src.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            for y in 0..<height {
+                rawIDAT.append(0) // filter: None
+                rawIDAT.append(UnsafeBufferPointer(start: base + y * rowBytes, count: rowBytes))
+            }
+        }
+
+        // Compress with zlib deflate
+        guard let compressed = try? (rawIDAT as NSData).compressed(using: .zlib) as Data else { return nil }
+
+        // Build PNG file
+        var png = Data()
+
+        // PNG signature
+        png.append(contentsOf: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+
+        // IHDR chunk
+        var ihdr = Data()
+        ihdr.appendBE32(UInt32(width))
+        ihdr.appendBE32(UInt32(height))
+        ihdr.append(8)  // bit depth
+        ihdr.append(2)  // color type: RGB
+        ihdr.append(0)  // compression
+        ihdr.append(0)  // filter
+        ihdr.append(0)  // interlace
+        png.appendPNGChunk(type: [0x49, 0x48, 0x44, 0x52], data: ihdr)
+
+        // IDAT chunk (zlib-wrapped: CMF + FLG header + deflate + Adler32)
+        var idat = Data()
+        idat.append(0x78)  // CMF: deflate, window size 32K
+        idat.append(0x01)  // FLG: no dict, check bits
+        idat.append(compressed)
+        // Adler-32 checksum of uncompressed data
+        let adler = adler32(rawIDAT)
+        idat.appendBE32(adler)
+        png.appendPNGChunk(type: [0x49, 0x44, 0x41, 0x54], data: idat)
+
+        // IEND chunk
+        png.appendPNGChunk(type: [0x49, 0x45, 0x4E, 0x44], data: Data())
+
+        return png
+    }
+
+    nonisolated private static func adler32(_ data: Data) -> UInt32 {
+        var a: UInt32 = 1
+        var b: UInt32 = 0
+        data.withUnsafeBytes { buffer in
+            guard let bytes = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            for i in 0..<data.count {
+                a = (a + UInt32(bytes[i])) % 65521
+                b = (b + a) % 65521
+            }
+        }
+        return (b << 16) | a
     }
 
     nonisolated private static func pixooPreviewHtml() -> String {
@@ -1823,7 +1909,21 @@ final class DaemonServer {
             e["voiceAssistantText"] = cachedVoiceAssistantText as Any
             e["voiceAssistantResponseText"] = cachedVoiceAssistantResponseText as Any
         }
+        // Module health for device diagnostic panel
+        e["moduleHealth"] = buildModuleHealthSync()
         return e
+    }
+
+    private func buildModuleHealthSync() -> [String: Any] {
+        var modules: [String: Any] = [:]
+        if let adb = adbModule { modules["adb"] = adb.statusSnapshot() }
+        if let d200h = d200hModule { modules["d200h"] = d200h.statusSnapshot() }
+        if let pixoo = pixooModule { modules["pixoo"] = pixoo.statusSnapshot() }
+        // SerialModule.statusSnapshot() is async — signal presence only
+        if serialModule != nil {
+            modules["serial"] = ["available": true] as [String: Any]
+        }
+        return modules
     }
 
     private func buildUsageEvent() -> [String: Any]? {
@@ -2402,4 +2502,53 @@ extension [String: Any] {
         try? JSONSerialization.data(withJSONObject: self)
     }
 }
+
+// MARK: - PNG helpers
+
+private extension Data {
+    mutating func appendBE32(_ value: UInt32) {
+        append(UInt8((value >> 24) & 0xFF))
+        append(UInt8((value >> 16) & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
+        append(UInt8(value & 0xFF))
+    }
+
+    mutating func appendPNGChunk(type: [UInt8], data: Data) {
+        appendBE32(UInt32(data.count))
+        append(contentsOf: type)
+        append(data)
+        // CRC32 over type + data
+        var crcData = Data(type)
+        crcData.append(data)
+        appendBE32(crc32(crcData))
+    }
+}
+
+private func crc32(_ data: Data) -> UInt32 {
+    var crc: UInt32 = 0xFFFFFFFF
+    data.withUnsafeBytes { buffer in
+        guard let bytes = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+        for i in 0..<data.count {
+            let idx = Int((crc ^ UInt32(bytes[i])) & 0xFF)
+            crc = crc32Table[idx] ^ (crc >> 8)
+        }
+    }
+    return crc ^ 0xFFFFFFFF
+}
+
+private let crc32Table: [UInt32] = {
+    var table = [UInt32](repeating: 0, count: 256)
+    for i in 0..<256 {
+        var c = UInt32(i)
+        for _ in 0..<8 {
+            if c & 1 != 0 {
+                c = 0xEDB88320 ^ (c >> 1)
+            } else {
+                c = c >> 1
+            }
+        }
+        table[i] = c
+    }
+    return table
+}()
 #endif

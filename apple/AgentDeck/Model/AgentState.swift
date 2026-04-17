@@ -160,4 +160,57 @@ struct DashboardState: Sendable {
     // Multi-session
     var siblingSessions: [SessionInfo] = []
 
+    // Device module health (from daemon statusSnapshot aggregation)
+    var moduleHealth: ModuleHealthState?
+
+}
+
+// MARK: - Module Health
+
+struct ModuleHealthState: Sendable {
+    var adb: AdbHealth?
+    var d200h: D200hHealth?
+    var pixoo: PixooHealth?
+    var serial: SerialHealth?
+}
+
+struct AdbHealth: Sendable {
+    var available: Bool = false
+    var devices: [String] = []
+    var reverseReadyCount: Int = 0
+    var lastError: String?
+}
+
+struct D200hHealth: Sendable {
+    var connected: Bool = false
+    var managerOpened: Bool = false
+    var sandboxEnabled: Bool = false
+    var usbEntitlementPresent: Bool = false
+    var buttonPressCount: Int = 0
+    var hidReportCount: Int = 0
+    var writeOK: Int = 0
+    var writeFail: Int = 0
+    var lastWriteError: String?
+    var lastOpenError: String?
+}
+
+struct PixooHealth: Sendable {
+    var configuredDeviceCount: Int = 0
+    var deviceIps: [String] = []
+    var hasFrame: Bool = false
+    var displayDimmed: Bool = false
+    var lastPushError: String?
+    var devices: [PixooDeviceHealth] = []
+}
+
+struct PixooDeviceHealth: Sendable {
+    var ip: String
+    var online: Bool
+    var failures: Int
+    var backedOff: Bool
+}
+
+struct SerialHealth: Sendable {
+    var connectedPorts: [String] = []
+    var lastError: String?
 }

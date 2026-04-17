@@ -556,6 +556,7 @@ struct SettingsScreen: View {
 
             Toggle("Session list", isOn: $preferences.showSessionList)
             Toggle("Tank status", isOn: $preferences.showTankStatus)
+            Toggle("Device diagnostic", isOn: $preferences.showDeviceDiagnostic)
             Toggle("Timeline strip", isOn: $preferences.showTimeline)
             Toggle("Settings button", isOn: $preferences.showSettingsButton)
 

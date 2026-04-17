@@ -366,6 +366,17 @@ struct SessionInfo: Codable, Sendable, Identifiable {
 struct StateUpdateEvent: Codable, Sendable {
     let type: String  // "state_update"
     let state: String
+
+    // CodingKeys excludes moduleHealth (parsed manually from raw JSON)
+    private enum CodingKeys: String, CodingKey {
+        case type, state, permissionMode, agentType, sessionId, agentCapabilities
+        case currentTool, toolInput, toolProgress, projectName, modelName, effortLevel
+        case billingType, options, promptType, question, navigable, cursorIndex
+        case suggestedPrompt, modelCatalog, sessionStatus, remoteUrl, pairingUrl
+        case workerSessionCount, ollamaStatus, mlxModels, subscriptions
+        case antigravityStatus, gatewayAvailable, gatewayHasError
+        case voiceAssistantState, voiceAssistantText, voiceAssistantResponseText
+    }
     var permissionMode: String?
     var agentType: String?
     /// Session ID of the focused session (injected by daemon focus relay)
@@ -398,6 +409,9 @@ struct StateUpdateEvent: Codable, Sendable {
     var voiceAssistantState: String?  // idle | listening | processing | speaking | disabled
     var voiceAssistantText: String?
     var voiceAssistantResponseText: String?
+
+    // Module health — parsed manually from raw JSON (not Codable)
+    var moduleHealth: ModuleHealthState?
 }
 
 struct UsageEvent: Codable, Sendable {

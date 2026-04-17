@@ -51,10 +51,18 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     #if os(macOS)
     private var staleDataMonitor: Timer?
     private static let staleDataThresholdSec: TimeInterval = 20
+    /// Ignore stale watchdog for this long after a wake so in-process daemon
+    /// recovery (D200H HID restart + 5s sleep, ESP32 4× close/open + 2s sleep,
+    /// mDNS/Bonjour republish) can complete before we judge the socket dead.
+    private static let wakeGracePeriodSec: TimeInterval = 10
+    /// Debounce threshold for handleSystemWake — IOKit SystemHasPoweredOn +
+    /// NSWorkspace.screensDidWake both fire on S3→wake.
+    private static let wakeDebounceSec: TimeInterval = 1
     private var wakeNotificationPort: IONotificationPortRef?
     private var wakeNotifier: io_object_t = 0
     private var wakeRootDomain: io_object_t = 0
     private var displayWakeObserver: NSObjectProtocol?
+    private var lastWakeHandledAt: Date?
     #endif
 
     // MARK: - Connection Waterfall State
@@ -251,6 +259,14 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
     }
 
     private func handleSystemWake() {
+        let now = Date()
+        if let last = lastWakeHandledAt, now.timeIntervalSince(last) < Self.wakeDebounceSec {
+            return
+        }
+        lastWakeHandledAt = now
+        // Give the stale-data watchdog a fresh reference point so it doesn't
+        // fire mid-reconnect using the pre-sleep timestamp.
+        lastDataReceivedAt = now
         print("[Lifecycle] system wake — force reconnect")
         connection.forceDisconnectAndRestart()
         if let preferredLocalBridgeUrl {
@@ -276,6 +292,11 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
               !connection.isReconnecting,
               let preferredLocalBridgeUrl,
               let lastDataReceivedAt else { return }
+
+        if let wakeAt = lastWakeHandledAt,
+           Date().timeIntervalSince(wakeAt) < Self.wakeGracePeriodSec {
+            return
+        }
 
         let age = Date().timeIntervalSince(lastDataReceivedAt)
         guard age > Self.staleDataThresholdSec else { return }
@@ -615,6 +636,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.voiceAssistantState = e.voiceAssistantState ?? state.voiceAssistantState
         state.voiceAssistantText = e.voiceAssistantText  // null when idle, no fallback
         state.voiceAssistantResponseText = e.voiceAssistantResponseText  // null when idle
+        if let mh = e.moduleHealth { state.moduleHealth = mh }
 
         // Local timeline generation (when bridge doesn't provide rich timeline)
         timelineGenerator.onStateUpdate(
