@@ -51,6 +51,42 @@ private func d200hStableStockHidEnabled() -> Bool {
     true
 }
 
+/// Dedicated background thread running an NSRunLoop. Used as the target for
+/// `IOHIDManagerScheduleWithRunLoop` so device match/removal/input-report callbacks
+/// (and the synchronous `IOHIDManagerOpen` / `IOHIDDeviceOpen` work that fires from
+/// them during wake recovery) don't execute on the main thread. Switching to
+/// `IOHIDManagerSetDispatchQueue` was tried first but conflicts with the Open/Close
+/// lifecycle (dispatch-queue-scheduled managers require Activate/Cancel and an async
+/// cancel handler, which would force a larger rewrite); pinning the existing runloop
+/// API to a background thread achieves the same "off-main" goal with zero lifecycle
+/// changes.
+private final class HIDRunLoopThread: @unchecked Sendable {
+    static let shared = HIDRunLoopThread()
+
+    let runLoop: CFRunLoop
+
+    private init() {
+        let ready = DispatchSemaphore(value: 0)
+        var captured: CFRunLoop?
+        let thread = Thread {
+            captured = CFRunLoopGetCurrent()
+            ready.signal()
+            // Keep the runloop alive indefinitely. NSMachPort is a permanent source
+            // that prevents the runloop from returning from `run()`.
+            let port = NSMachPort()
+            RunLoop.current.add(port, forMode: .default)
+            while !Thread.current.isCancelled {
+                RunLoop.current.run(mode: .default, before: .distantFuture)
+            }
+        }
+        thread.name = "bound.serendipity.agentdeck.d200h-hid-runloop"
+        thread.qualityOfService = .utility
+        thread.start()
+        ready.wait()
+        self.runLoop = captured!
+    }
+}
+
 // MARK: - D200hHidModule
 
 final class D200hHidModule: DeviceModule, @unchecked Sendable {
@@ -141,8 +177,12 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             module.handleDeviceRemoved(device)
         }, selfPtr)
 
-        // Schedule on main run loop
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        // Schedule callbacks on a dedicated background runloop thread — NOT the main
+        // runloop. This keeps device match/removal/input-report delivery + the
+        // synchronous IOHIDManagerOpen/IOHIDDeviceOpen work that runs inside them
+        // off the main thread, so the Dashboard WS pipeline isn't blocked during
+        // wake recovery's ~5s manager restart.
+        IOHIDManagerScheduleWithRunLoop(manager, HIDRunLoopThread.shared.runLoop, CFRunLoopMode.defaultMode.rawValue)
 
         // IOHIDManager must be opened for device matching callbacks to fire for
         // already-present devices. Without this, the schedule + matching dict is
@@ -204,7 +244,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         disconnect()
 
         if let manager = hidManager {
-            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+            IOHIDManagerUnscheduleFromRunLoop(manager, HIDRunLoopThread.shared.runLoop, CFRunLoopMode.defaultMode.rawValue)
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         }
         hidManager = nil
