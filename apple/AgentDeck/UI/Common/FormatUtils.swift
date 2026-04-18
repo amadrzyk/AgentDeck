@@ -5,7 +5,14 @@ import Foundation
 
 /// Format ISO 8601 reset time string to human-readable relative duration
 /// e.g., "45m", "2h 15m", "1d 5h"
-func formatResetTime(_ isoString: String?) -> String? {
+///
+/// - `graceSeconds`: window after the reset has already passed during which
+///   "now" is still displayed (the API clock and our clock drift, and the
+///   5h/7d windows get briefly "snapped" at reset). Outside that window the
+///   value is treated as stale and `nil` is returned so callers hide the chip
+///   rather than confusing the user with a permanent "now". Mirrors the
+///   `adjustUsagePercent` stale-window policy (`bug_usage_stale_window_zeroed`).
+func formatResetTime(_ isoString: String?, graceSeconds: Int = 3600) -> String? {
     guard let isoString, !isoString.isEmpty else { return nil }
 
     let formatter = ISO8601DateFormatter()
@@ -14,7 +21,9 @@ func formatResetTime(_ isoString: String?) -> String? {
             ?? ISO8601DateFormatter().date(from: isoString) else { return nil }
 
     let remaining = date.timeIntervalSinceNow
-    guard remaining > 0 else { return "now" }
+    if remaining <= 0 {
+        return remaining >= -Double(graceSeconds) ? "now" : nil
+    }
 
     let totalMinutes = Int(remaining / 60)
     let days = totalMinutes / (60 * 24)
