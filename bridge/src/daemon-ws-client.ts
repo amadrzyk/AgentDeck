@@ -52,9 +52,15 @@ export class DaemonWsClient {
      * Resolves the current daemon port on each (re)connect attempt. Lets the
      * client follow port drift (daemon restart onto a fallback port) and cover
      * the case where the daemon is not up yet when the session bridge starts.
+     *
+     * May be sync (`number | null`) or async (`Promise<number | null>`). The
+     * async shape exists so callers can run a `/health` probe fallback when
+     * the registry is empty — `findDaemonPortAsync` in `session-registry.ts`
+     * does exactly this to cover the App-Store-vs-CLI data-dir split.
+     *
      * Return `null` to defer — the client will keep retrying on backoff.
      */
-    private readonly portProvider?: () => number | null,
+    private readonly portProvider?: () => number | null | Promise<number | null>,
   ) {}
 
   /**
@@ -66,7 +72,7 @@ export class DaemonWsClient {
     if (this.closed) return;
     if (daemonPort != null) {
       this.daemonPort = daemonPort;
-      this.doConnect();
+      void this.doConnect();
     } else {
       this.scheduleReconnect();
     }
@@ -107,10 +113,17 @@ export class DaemonWsClient {
 
   // ---- Internals ----
 
-  private doConnect(): void {
+  private async doConnect(): Promise<void> {
     if (this.closed) return;
     if (this.portProvider) {
-      const resolved = this.portProvider();
+      let resolved: number | null;
+      try {
+        resolved = await this.portProvider();
+      } catch (err) {
+        debug(TAG, `portProvider threw: ${err instanceof Error ? err.message : String(err)}`);
+        resolved = null;
+      }
+      if (this.closed) return;
       if (resolved != null && resolved !== this.daemonPort) {
         debug(TAG, `Daemon port resolved ${this.daemonPort ?? 'null'} → ${resolved}`);
         this.daemonPort = resolved;
@@ -177,7 +190,7 @@ export class DaemonWsClient {
     debug(TAG, `Reconnecting in ${this.reconnectDelay}ms`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.doConnect();
+      void this.doConnect();
     }, this.reconnectDelay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, RECONNECT_MAX);
   }

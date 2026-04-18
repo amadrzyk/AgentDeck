@@ -12,6 +12,46 @@ function getDataDir(): string {
   return process.env.AGENTDECK_DATA_DIR || join(homedir(), '.agentdeck');
 }
 
+/**
+ * Ordered list of data directories this process should READ from.
+ *
+ * The App Store macOS build writes its `daemon.json` / `sessions.json`
+ * into `~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard`
+ * (sandbox forces it), whereas the Node CLI writes to `~/.agentdeck`.
+ * Without cross-reads, `agentdeck claude` launched from Terminal can't
+ * see the Swift daemon that's already listening on 9120, and session
+ * bridges end up orphaned.
+ *
+ * Order:
+ *   1. `AGENTDECK_DATA_DIR` env override (tests, explicit pinning)
+ *   2. `~/.agentdeck`                   (CLI / Homebrew / Node default)
+ *   3. App Store group container        (macOS App Store build)
+ *
+ * Writes stay in the process's own dir via `getDataDir()`. Only reads
+ * iterate this list.
+ */
+export function getCandidateDataDirs(): string[] {
+  if (process.env.AGENTDECK_DATA_DIR) return [process.env.AGENTDECK_DATA_DIR];
+  const dirs = [join(homedir(), '.agentdeck')];
+  if (process.platform === 'darwin') {
+    const groupContainer = join(
+      homedir(),
+      'Library/Group Containers/group.bound.serendipity.agentdeck.dashboard',
+    );
+    if (!dirs.includes(groupContainer)) dirs.push(groupContainer);
+  }
+  return dirs;
+}
+
+/**
+ * Absolute paths of `daemon.json` files this process should read, in the
+ * order defined by `getCandidateDataDirs`. Exposed so hook installers can
+ * generate a shell snippet with the same discovery order.
+ */
+export function getCandidateDaemonJsonPaths(): string[] {
+  return getCandidateDataDirs().map((d) => join(d, 'daemon.json'));
+}
+
 function getSessionsFile(): string { return join(getDataDir(), 'sessions.json'); }
 function getDaemonFile(): string { return join(getDataDir(), 'daemon.json'); }
 export const DAEMON_DEFAULT_PORT = 9120;
@@ -45,12 +85,26 @@ function ensureDir(): void {
 }
 
 function readSessions(): SessionEntry[] {
-  try {
-    const data = readFileSync(getSessionsFile(), 'utf-8');
-    return JSON.parse(data) as SessionEntry[];
-  } catch {
-    return [];
+  // Read sessions.json from each candidate dir and merge — App Store Swift
+  // daemon + CLI Node daemon can coexist, and a session bridge started from
+  // one world needs to see entries written by the other (so it can avoid
+  // port collisions and recognize existing daemons).
+  const merged: SessionEntry[] = [];
+  const seen = new Set<string>();
+  for (const dir of getCandidateDataDirs()) {
+    try {
+      const data = readFileSync(join(dir, 'sessions.json'), 'utf-8');
+      const parsed = JSON.parse(data) as SessionEntry[];
+      for (const entry of parsed) {
+        if (!entry?.id || seen.has(entry.id)) continue;
+        seen.add(entry.id);
+        merged.push(entry);
+      }
+    } catch {
+      // Directory missing or unreadable — normal, skip.
+    }
   }
+  return merged;
 }
 
 /** Atomic write: write to temp file then rename to prevent corruption */
@@ -163,36 +217,58 @@ export function writeDaemonInfo(info: DaemonInfo): void {
   debug('SessionRegistry', `Wrote daemon.json: port=${info.port} pid=${info.pid}`);
 }
 
-/** Remove daemon.json on shutdown */
+/** Remove daemon.json on shutdown — try every candidate dir in case a stale
+ *  file lingers in a sibling world (e.g. Swift died before cleanup). */
 export function removeDaemonInfo(): void {
-  try {
-    unlinkSync(getDaemonFile());
-    debug('SessionRegistry', 'Removed daemon.json');
-  } catch {
-    // Already gone — fine
+  let removed = false;
+  for (const dir of getCandidateDataDirs()) {
+    try {
+      unlinkSync(join(dir, 'daemon.json'));
+      removed = true;
+    } catch {
+      // Not present — normal.
+    }
   }
+  if (removed) debug('SessionRegistry', 'Removed daemon.json');
 }
 
-/** Read daemon.json, validate PID is alive, return info or null */
+/**
+ * Read daemon.json from the first candidate dir that has a valid, live
+ * entry. Iterates `getCandidateDataDirs()` so CLI processes can discover
+ * an App Store Swift daemon's info in the group container, and vice
+ * versa. Stale entries (dead PID) are pruned from the dir that owned
+ * them — never cross-dir — to avoid deleting the other world's live file.
+ */
 export function readDaemonInfo(): DaemonInfo | null {
-  try {
-    const data = readFileSync(getDaemonFile(), 'utf-8');
-    const info = JSON.parse(data) as DaemonInfo;
-    if (info.pid && isProcessAlive(info.pid)) {
-      return info;
+  for (const dir of getCandidateDataDirs()) {
+    const path = join(dir, 'daemon.json');
+    try {
+      const data = readFileSync(path, 'utf-8');
+      const info = JSON.parse(data) as DaemonInfo;
+      if (info.pid && isProcessAlive(info.pid)) {
+        return info;
+      }
+      // Stale entry — only prune if this is our own dir. Cross-dir write
+      // is risky (permission boundaries, group container sandbox).
+      if (dir === getDataDir()) {
+        try { unlinkSync(path); } catch { /* ignore */ }
+      }
+    } catch {
+      // Missing or unparseable — fall through to next candidate.
     }
-    // Stale daemon.json — remove it
-    removeDaemonInfo();
-    return null;
-  } catch {
-    return null;
   }
+  return null;
 }
 
 /**
  * Probe a port's /health endpoint to check if a daemon is already running there.
  * Returns the health JSON if it's a daemon, null otherwise.
  * Timeout: 2s.
+ *
+ * The Swift App Store daemon serves its HTTP endpoints (including `/health`)
+ * on a dedicated port that may differ from the WS port. Callers should pass
+ * `httpPort` from `DaemonInfo` when available; otherwise the same `port` is
+ * used (Node daemon unifies HTTP + WS on one port).
  */
 export function probeDaemonHealth(port: number): Promise<{ mode?: string; pid?: number } | null> {
   return new Promise((resolve) => {
@@ -225,6 +301,46 @@ export function findDaemonPort(): number | null {
   // 2. sessions.json — legacy fallback
   const daemon = findExistingDaemon();
   if (daemon) return daemon.port;
+
+  return null;
+}
+
+/**
+ * Async daemon discovery with /health probe fallback.
+ *
+ * Used by long-lived clients (session bridge `DaemonWsClient`) that can
+ * afford one extra probe round when the registry is empty — typical when
+ * the Swift daemon is running but its `daemon.json` lives in a world this
+ * process's `getCandidateDataDirs()` couldn't read (e.g. the group
+ * container entitlement isn't shared, or the file was written in a
+ * different sandbox). Respects `httpPort` so Swift's split WS/HTTP layout
+ * is probed correctly.
+ *
+ * Returns `{ port, httpPort? }` for callers that need both (WS connects
+ * on `port`, hook HTTP posts target `httpPort ?? port`).
+ */
+export async function findDaemonPortAsync(): Promise<{ port: number; httpPort?: number } | null> {
+  // 1. Registry first — matches the sync path.
+  const info = readDaemonInfo();
+  if (info) {
+    const probePort = info.httpPort ?? info.port;
+    const health = await probeDaemonHealth(probePort);
+    if (health?.mode === 'daemon') {
+      return { port: info.port, httpPort: info.httpPort };
+    }
+    // Registry entry was stale (PID alive but server unresponsive).
+    // Fall through to port scan.
+  }
+
+  // 2. Port scan fallback — covers the "App Store daemon is up but its
+  //    daemon.json sits in a dir this process can't read" case. Narrow
+  //    range (9120-9139) matches the documented daemon port window.
+  for (let p = 9120; p <= 9139; p++) {
+    const health = await probeDaemonHealth(p);
+    if (health?.mode === 'daemon') {
+      return { port: p };
+    }
+  }
 
   return null;
 }

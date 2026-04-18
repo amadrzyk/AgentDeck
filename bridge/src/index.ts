@@ -29,7 +29,7 @@ import {
   listActive as listActiveSessions,
   findAvailablePort,
   detectTmuxSession,
-  findDaemonPort,
+  findDaemonPortAsync,
 } from './session-registry.js';
 import { DaemonWsClient } from './daemon-ws-client.js';
 import { fetchUsageFromApi, hasOAuthToken } from './usage-api.js';
@@ -650,9 +650,17 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   // Port-drift resilient: portProvider is re-invoked on every (re)connect,
   // so the client follows daemon restarts onto fallback ports and the case
   // where the session bridge starts before the daemon is up.
-  const daemonPortProvider = (): number | null => {
-    const p = findDaemonPort();
-    return p != null && p !== core.port ? p : null;
+  //
+  // Async provider: on cold start the registry may still be empty (session
+  // bridge raced the daemon) or the active daemon may be writing its
+  // daemon.json into an unreadable dir (App Store group container vs CLI
+  // `~/.agentdeck` split). `findDaemonPortAsync` probes 9120-9139 /health
+  // as a last resort so the session still attaches instead of staying
+  // orphaned.
+  const daemonPortProvider = async (): Promise<number | null> => {
+    const resolved = await findDaemonPortAsync();
+    if (!resolved) return null;
+    return resolved.port !== core.port ? resolved.port : null;
   };
   const daemonWsClient = new DaemonWsClient(
     core.sessionId,
@@ -661,7 +669,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     core.projectName,
     daemonPortProvider,
   );
-  daemonWsClient.connect(daemonPortProvider());
+  daemonWsClient.connect(null);
   core.onShutdown(() => { daemonWsClient.close(); });
 
   // ===== State changed → broadcast =====

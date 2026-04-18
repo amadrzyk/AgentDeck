@@ -151,13 +151,36 @@ const HOOK_EVENTS = [
   'UserPromptSubmit',
 ] as const;
 
+/**
+ * Kept byte-identical with `@agentdeck/hooks` `buildHookCommand` and the
+ * Swift `HookInstaller.buildHookEntry` snippet. Any change here MUST be
+ * mirrored in those two places, otherwise users installing via different
+ * paths end up with inconsistent daemon discovery. See `hooks/src/install.ts`
+ * for the canonical commentary.
+ */
+function buildHookCommand(eventName: string): string {
+  return [
+    `PORT="\${AGENTDECK_PORT:-}"`,
+    `if [ -z "$PORT" ]; then`,
+    `  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do`,
+    `    [ -f "$F" ] || continue`,
+    `    P=$(python3 -c "import json;d=json.load(open('$F'));print(d.get('httpPort') or d.get('port',''))" 2>/dev/null)`,
+    `    [ -n "$P" ] && curl -sf --max-time 0.3 "http://127.0.0.1:$P/health" >/dev/null 2>&1 && { PORT="$P"; break; }`,
+    `  done`,
+    `fi`,
+    `PORT="\${PORT:-9120}"`,
+    `curl -sf -X POST "http://127.0.0.1:$PORT/hooks/${eventName}" -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+  ].join('; ');
+}
+
 function buildHookEntry(eventName: string) {
+  const needsToolMatcher = ['PreToolUse', 'PostToolUse'].includes(eventName);
   return {
-    matcher: '',
+    matcher: needsToolMatcher ? '*' : '',
     hooks: [
       {
         type: 'command',
-        command: `curl -sf -X POST http://localhost:\${AGENTDECK_PORT:-9120}/hooks/${eventName} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+        command: buildHookCommand(eventName),
       },
     ],
   };

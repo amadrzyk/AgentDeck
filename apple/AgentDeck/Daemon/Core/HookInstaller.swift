@@ -235,12 +235,30 @@ enum HookInstaller {
         return s
     }
 
+    /// Canonical hook shell snippet. Byte-identical with `@agentdeck/hooks`
+    /// `buildHookCommand` and `@agentdeck/setup`'s inlined copy — any change
+    /// must be mirrored in both. Resolves the daemon's HTTP port at hook
+    /// runtime by probing `$AGENTDECK_PORT` → `~/.agentdeck/daemon.json` →
+    /// App Store group container `daemon.json`, verifies each candidate with
+    /// a `/health` probe, and falls back to `9120`. Prefers `httpPort` over
+    /// `port` because the Swift daemon splits WS and HTTP across ports.
+    private static func buildHookCommand(_ event: String) -> String {
+        let lines = [
+            #"PORT="${AGENTDECK_PORT:-}""#,
+            #"if [ -z "$PORT" ]; then"#,
+            #"  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do"#,
+            #"    [ -f "$F" ] || continue"#,
+            #"    P=$(python3 -c "import json;d=json.load(open('$F'));print(d.get('httpPort') or d.get('port',''))" 2>/dev/null)"#,
+            #"    [ -n "$P" ] && curl -sf --max-time 0.3 "http://127.0.0.1:$P/health" >/dev/null 2>&1 && { PORT="$P"; break; }"#,
+            #"  done"#,
+            #"fi"#,
+            #"PORT="${PORT:-9120}""#,
+            "curl -sf -X POST \"http://127.0.0.1:$PORT/hooks/\(event)\" -H 'Content-Type: application/json' -d @- 2>/dev/null || true",
+        ]
+        return lines.joined(separator: "; ")
+    }
+
     private static func buildHookEntry(_ event: String) -> [String: Any] {
-        // Read daemon port from daemon.json at hook runtime, falling back to
-        // AGENTDECK_PORT env var (set by `agentdeck claude` bridge), then 9120.
-        // This ensures hooks reach the Swift daemon even when it's on a fallback port.
-        let daemonJsonPath = AuthManager.agentDeckDir.appendingPathComponent("daemon.json").path
-        let cmd = "PORT=${AGENTDECK_PORT:-$(python3 -c \"import json;print(json.load(open('\(daemonJsonPath)'))['port'])\" 2>/dev/null || echo 9120)}; curl -sf -X POST http://localhost:$PORT/hooks/\(event) -H 'Content-Type: application/json' -d @- 2>/dev/null || true"
         // Tool-specific hooks need glob matcher "*" to fire. Empty "" means
         // "match nothing" for PreToolUse/PostToolUse. Non-tool events ignore matcher.
         let needsToolMatcher = ["PreToolUse", "PostToolUse"].contains(event)
@@ -248,7 +266,7 @@ enum HookInstaller {
             "matcher": needsToolMatcher ? "*" : "",
             "hooks": [[
                 "type": "command",
-                "command": cmd,
+                "command": buildHookCommand(event),
             ] as [String: Any]] as [[String: Any]],
         ]
     }

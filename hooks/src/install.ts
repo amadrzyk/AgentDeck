@@ -12,14 +12,45 @@ export const HOOK_EVENTS = [
   'UserPromptSubmit',
 ] as const;
 
-// Build hook config for each event — reads port from $AGENTDECK_PORT (set by
-// bridge session), then daemon.json, then falls back to 9120. This ensures hooks
-// reach the daemon even when it's on a fallback port and $AGENTDECK_PORT is unset.
+/**
+ * Shell snippet that resolves the AgentDeck daemon's HTTP port at hook
+ * runtime, then POSTs the hook payload to it. Kept in a single helper so
+ * the three hook-writer code paths (`@agentdeck/hooks`, `@agentdeck/setup`
+ * inlined copy, Swift `HookInstaller`) emit byte-identical shell.
+ *
+ * Discovery precedence:
+ *   1. `$AGENTDECK_PORT` env var (set by `agentdeck claude` session bridge
+ *      so the hook targets the *owning* daemon even when several daemons
+ *      are running in parallel)
+ *   2. `~/.agentdeck/daemon.json`                                  (CLI)
+ *   3. App Store group container `daemon.json`                     (Swift)
+ *   4. `9120` fallback (legacy, never reached in practice)
+ *
+ * For (2) and (3) the snippet prefers the daemon's `httpPort` field when
+ * present — Swift runs WS and HTTP on separate ports. Each candidate is
+ * verified with a short `/health` probe so a stale daemon.json from a
+ * crashed daemon doesn't swallow the hook.
+ */
+export function buildHookCommand(eventName: string): string {
+  return [
+    `PORT="\${AGENTDECK_PORT:-}"`,
+    `if [ -z "$PORT" ]; then`,
+    `  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do`,
+    `    [ -f "$F" ] || continue`,
+    `    P=$(python3 -c "import json;d=json.load(open('$F'));print(d.get('httpPort') or d.get('port',''))" 2>/dev/null)`,
+    `    [ -n "$P" ] && curl -sf --max-time 0.3 "http://127.0.0.1:$P/health" >/dev/null 2>&1 && { PORT="$P"; break; }`,
+    `  done`,
+    `fi`,
+    `PORT="\${PORT:-9120}"`,
+    `curl -sf -X POST "http://127.0.0.1:$PORT/hooks/${eventName}" -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+  ].join('; ');
+}
+
 // Claude Code v2.1+ requires 3-level nesting: event → matcher group → hook handler.
 export function buildHookEntry(eventName: string) {
   const handler: any = {
     type: 'command',
-    command: `PORT=\${AGENTDECK_PORT:-\$(python3 -c "import json;print(json.load(open('$HOME/.agentdeck/daemon.json'))['port'])" 2>/dev/null || echo 9120)}; curl -sf -X POST http://localhost:\$PORT/hooks/${eventName} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+    command: buildHookCommand(eventName),
   };
   // Tool-specific hooks (PreToolUse, PostToolUse) need a glob matcher to fire.
   // Empty string "" means "match nothing" for tool events — use "" for non-tool
