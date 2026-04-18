@@ -7,13 +7,18 @@
 //
 // Key lookup order:
 //   1. `ANTHROPIC_API_KEY` environment variable
-//   2. `~/.agentdeck/settings.json` → `apme.judge.apiKey`
+//   2. AgentDeck settings.json — resolved via `AgentDeckPaths.settingsJson`
+//      so App Store builds read from the App Group container
+//      (`~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/settings.json`)
+//      and CLI/dev builds read from `~/.agentdeck/settings.json`. Same file
+//      format either way; the Node bridge writes to its own `~/.agentdeck/`
+//      path so a user running both stacks needs to either stick with one or
+//      keep both keys in sync.
 //
-// No Keychain in Phase 2 — Keychain access in a sandboxed app requires
-// the `keychain-access-groups` entitlement and triggers a permission
-// prompt. settings.json is already readable via the existing
-// temporary-exception entitlement set and matches how the Node bridge
-// stores the key. One source of truth across both stacks.
+// No Keychain — Keychain access for the shared settings.json key would
+// require `keychain-access-groups` coordination with a future helper.
+// settings.json via Group Container is good enough and avoids the
+// permission prompt.
 //
 // Sandbox: api.anthropic.com is reached via `com.apple.security.network.client`
 // which is already granted. No ATS exception needed (HTTPS).

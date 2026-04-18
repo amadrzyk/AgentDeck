@@ -63,7 +63,16 @@ Claude Code hooks run `python3` / `curl` at the user's shell prompt, in their ow
 
 ### Bundled helpers
 
-The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`. Advanced features that rely on external binaries (Android ADB bridging, OpenClaw Gateway integration, APME Layer 1 deterministic git/pnpm scoring, PTY-level agent parsing) are offered exclusively through a separately-installed companion CLI (`npx @agentdeck/setup`) and are documented as such in the app UI.
+The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`. Android ADB bridging, APME Layer 1 deterministic git/pnpm scoring, and PTY-level agent parsing are offered exclusively through a separately-installed companion CLI (`npx @agentdeck/setup`) and are documented as such in the app UI.
+
+### OpenClaw Gateway integration
+
+Unlike the other advanced integrations, OpenClaw **is** first-class in the App Store build — but entirely through the network, not through subprocess or file I/O:
+
+- AgentDeck connects to the user's local OpenClaw Gateway over WebSocket (`ws://127.0.0.1:18789`). No `~/.openclaw/` directory read, no `openclaw` CLI spawn.
+- On first launch AgentDeck generates its own Ed25519 keypair (stored in the macOS Keychain, accessible-after-first-unlock / this-device-only). The public key's SHA-256 hex becomes the `deviceId` sent to the Gateway during the v3 pairing handshake. A short-lived `deviceToken` issued by the Gateway is used for subsequent reconnects.
+- The user must approve the new device in OpenClaw (via `openclaw devices approve <requestId>` or OpenClaw's Web UI) — AgentDeck only displays the pairing state; it never writes to OpenClaw's own config.
+- Reviewers without OpenClaw installed will see the "Gateway not found" state and can skip this integration entirely.
 
 ### Codex / OpenCode launch
 

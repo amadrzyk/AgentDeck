@@ -824,7 +824,7 @@ struct SettingsScreen: View {
                     .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Reads `~/.openclaw/identity/device.json`. Run `openclaw pair` in the CLI to create it.")
+                Text("Connects to `ws://127.0.0.1:18789`. Run `openclaw devices approve <requestId>` after first launch to authorize this Mac app.")
                     .font(.system(size: 11))
                     .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)

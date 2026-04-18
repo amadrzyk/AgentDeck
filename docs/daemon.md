@@ -43,7 +43,12 @@ Daemon이 Gateway adapter의 `connection` 이벤트를 WS 클라이언트에 포
 
 ## Gateway health check
 
-`checkGatewayHealth()` in `gateway-probe.ts` — `openclaw doctor --json` 30초 간격 폴링. warn/error 감지 시 `gatewayHasError: true`를 `state_update`에 포함. Android 가재가 SICK 상태로 전환 (탈색, 기울기, 늘어진 집게). Gateway 미접속 시 폴링 스킵. OpenClaw adapter도 Gateway WS `health` 이벤트를 `gateway_health` metadata로 emit → daemon이 실시간 반영 (폴링 대체).
+두 가지 경로가 빌드별로 나뉜다:
+
+- **Node.js 브릿지 (CLI/Homebrew)** — `checkGatewayHealth()` in `bridge/src/gateway-probe.ts`. `openclaw doctor --json` 을 30초 간격 폴링. warn/error 감지 시 `gatewayHasError: true` 를 `state_update` 에 포함.
+- **Swift 인프로세스 다이몬 (App Store macOS)** — `apple/AgentDeck/Daemon/Gateway/GatewayProbe.swift` 의 `checkHealth()` 는 App Store 빌드에서 subprocess 불가 (Apple 2.5.2) → **`openclaw doctor` 호출 없음**. TCP probe 로 reachability 만 확인하고, 인증 완료된 health 는 `OpenClawAdapter` 의 Gateway `health` RPC/event 로 받는다.
+
+두 경로 모두 `gatewayHasError` 가 true 이면 Android 가재가 SICK 상태로 전환 (탈색, 기울기, 늘어진 집게). Gateway 미접속 시 폴링 스킵.
 
 ## isDaemonLike 패턴
 
@@ -59,8 +64,8 @@ Daemon이 Gateway adapter의 `connection` 이벤트를 WS 클라이언트에 포
 - mDNS (`_agentdeck._tcp`, daemon only), auth token (`~/.agentdeck/auth-token`), SSE (`/sse`), remote WS token validation
 - `0.0.0.0` binding for LAN access
 - `isLocalConnection()` recognizes localhost + machine's own IPs via `os.networkInterfaces()` — same-machine clients (macOS app, localhost) bypass token auth
-- **Client discovery**: Local clients (TUI, CLI, session bridge) read `~/.agentdeck/daemon.json` for port. Remote clients (Android, Apple) use mDNS — only daemon advertises, so no preference logic needed
-- **macOS App Sandbox**: `LocalSessionDiscovery` (sessions.json 직접 읽기) 불가 — sandbox가 `~/.agentdeck/` 접근 차단. macOS는 mDNS로 daemon 발견 (daemon만 광고하므로 단순)
+- **Client discovery**: Local clients (TUI, CLI, session bridge) read `~/.agentdeck/daemon.json` (or `~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json` for App Store build) for port. Swift paths always route through `AgentDeckPaths.swift`. Remote clients (Android, Apple iOS) use mDNS — only daemon advertises, so no preference logic needed
+- **macOS App Sandbox**: App Store 빌드는 Group Container (`~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/`) 로 **정상 read/write 가능** — 여기서 `daemon.json`/`sessions.json` 읽음. 차단되는 건 외부 홈 경로 (`~/.openclaw/`, `~/.codex/`, `/Library/pnpm/`) 뿐. macOS 는 실제로 mDNS 로 daemon 발견 (daemon만 광고하므로 단순)
 - **Client count for polling**: `BridgeCore.hasClients()` = WS clients + external serial connections (`setExternalClientCountProvider`). All polling guards (sessions_list, usage, API) use `hasClients()` so ESP32 serial-only connections keep data flowing
 - **ESP32 daemon state**: `isDaemon = agentType == "daemon" || "openclaw"` — daemon sends "openclaw" when gateway alive, renderer maps per-session octopus states from `sessions_list`. Multi-octopus particles (round-robin spawn from octStates[]), bubbles (exhale from all), session name dedup (`#1`/`#2`)
 

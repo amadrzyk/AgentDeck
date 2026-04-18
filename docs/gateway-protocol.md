@@ -42,22 +42,33 @@ Client                               Gateway
   │ ══ normal traffic (chat.* etc.) ══ │
 ```
 
-서명 페이로드 (pipe-separated):
+서명 페이로드는 2가지 포맷이 공존한다:
 
+**v2** (CLI/non-App-Store 빌드 — file-based identity):
 ```
 v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce
 ```
-
 - `deviceId`: `~/.openclaw/identity/device.json`의 `deviceId`
-- `clientId`: 하드코딩 `gateway-client`
-- `clientMode`: `backend`
-- `role` / `scopes` / `token`: `~/.openclaw/identity/device-auth.json`의 `tokens.operator`
-- `signedAtMs`: `Date.now()`
-- `nonce`: `event connect.challenge`에서 받은 값
+- `token`: `~/.openclaw/identity/device-auth.json`의 `tokens.operator`
+- Ed25519 공개키는 SPKI DER 앞 12바이트(`ED25519_SPKI_PREFIX_LEN`) 제거한 raw 32바이트의 base64url.
 
-Ed25519 공개키는 SPKI DER로 export 후 앞 12바이트(`ED25519_SPKI_PREFIX_LEN`) 제거한 **raw 32바이트**를 base64url로 전송한다.
+**v3** (App Store 빌드 — self-generated identity, OpenClaw 2026.4.14+):
+```
+v3|deviceId|clientId|clientMode|role|scopesCSV|signedAtMs|token|nonce|platform|deviceFamily
+```
+- `deviceId`: **self-generated** Ed25519 공개키(raw 32바이트)의 SHA-256 hex. 앱이 직접 생성하므로 파일 I/O 없음.
+- `token`: 첫 pairing 직후 Gateway 가 `hello-ok.auth.deviceToken` 으로 발급. 이후 재접속은 이 토큰 재사용.
+- `platform`: `darwin` / `deviceFamily`: `mac`.
+- Private key + issued token 은 Keychain (accessibleAfterFirstUnlockThisDeviceOnly) 우선, 실패 시 app container protected file fallback 에 저장.
 
-> **샌드박스 주의**: App Store macOS 앱은 `~/.openclaw/identity/`에 직접 접근할 수 없다. 이 경우 Gateway 연결을 graceful degrade하고 MenuBarExtra/Dashboard에 안내 배너를 표시한다 (`P1-B` 작업). CLI 배포판(`agentdeck` npm)은 정상 접근 가능.
+공통:
+- `clientId`: `gateway-client` (CLI) / `agentdeck-dashboard` (App Store).
+- `clientMode`: `backend`.
+- `role` / `scopes`: App Store 는 기본 `operator` + `[operator.read, operator.write, operator.approvals]`. device-management UI 필요 시 `operator.pairing` opt-in.
+- `signedAtMs`: `Date.now()`.
+- `nonce`: `event connect.challenge` 에서 수신.
+
+> **샌드박스 호환**: App Store macOS 빌드는 `~/.openclaw/identity/` 읽기 불가이므로 v3 self-gen 경로로 동작. CLI 배포판 (`@agentdeck/setup`) 은 v2 file-based 경로 유지. OpenClaw Gateway 는 두 포맷 모두 수용 (Gateway 2026.4.14+).
 
 ## RPC 메소드
 

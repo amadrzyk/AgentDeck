@@ -51,14 +51,16 @@ Core bridge architecture, adapter hierarchy, and module system. See [daemon.md](
 - **Command routing split**: ClaudeCode defers `select_option`/`navigate_option`/`send_prompt` to bridge (PTY); OpenClaw handles all commands via RPC. Bridge updates StateMachine for adapter-handled commands.
 - **OpenClaw capabilities**: `hasTerminal=false`, `hasModeSwitching=false`, `hasDiffReview=false`, `hasOptionLists=true`, `hasNavigablePrompts=false`, `hasSuggestedPrompts=false`, `hasApiUsage=false`
 
-### OpenClaw Gateway protocol (v3, verified against real Gateway)
+### OpenClaw Gateway protocol (v2 + v3, verified against OpenClaw 2026.4.14)
 
 - Custom framing: `{ type: "req"/"res"/"event", ... }` (NOT JSON-RPC)
-- Ed25519 device auth handshake: `connect.challenge` → `connect` (signed with `~/.openclaw/identity/` keys)
-- Methods: `chat.send`, `chat.abort`, `exec.approval.resolve`, `sessions.list`
-- Events: `chat` (delta/final/aborted/error), `exec.approval.requested/resolved`, `presence`, `tick`, `shutdown`
+- Ed25519 device auth handshake: `connect.challenge` → `connect`
+  - **v2 (CLI/non-App-Store builds)**: signed with `~/.openclaw/identity/` keypair (file-based)
+  - **v3 (App Store macOS)**: self-generated Ed25519 keypair (no file I/O; private key in Keychain). `deviceId = sha256(raw pubkey)`, `token` issued by Gateway in `hello-ok.auth.deviceToken` on first pairing and reused on reconnect. Pairing requires manual approval via `openclaw devices approve <requestId>` or OpenClaw Web UI.
+- Methods: `connect`, `health`, `models.list`, `logs.tail`, `sessions.list`, `sessions.subscribe`, `sessions.messages.subscribe`, `chat.send`, `chat.abort`, `exec.approval.resolve`, `system-presence`
+- Events: `connect.challenge`, `health`, `sessions.changed`, `session.message`, `session.tool`, `chat` (delta/final/aborted/error), `exec.approval.requested/resolved`, `presence`, `tick`, `shutdown`
 - Session tracking via `sessionKey` from `sessions.list` / `chat` events
-- Default port 18789, auto-reconnect with exponential backoff
+- Default port 18789, auto-reconnect with exponential backoff; auth failures (`pairing_required`/`token_mismatch`/`device_auth_invalid`) surface to UI instead of looping. See [docs/gateway-protocol.md](gateway-protocol.md) for wire format.
 
 ## Plugin connection (daemon-only single path)
 

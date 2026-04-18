@@ -1,13 +1,21 @@
 #!/bin/bash
-# copy-adb.sh — Copy adb + bundled Node runtime + bridge CLI into app bundle.
-# Searches standard Android SDK paths and copies to Contents/Helpers/.
-# The binary is then ad-hoc re-signed so App Sandbox allows execution.
+# copy-adb.sh — Bundle ADB + OpenClaw Node bridge helper into the CLI /
+# Homebrew macOS app. Everything this script stages is intentionally OUT
+# of the App Store build (Apple Review Guideline 2.5.2 — self-contained
+# binaries only). Layout:
 #
-# Gate: App Store builds set `SWIFT_ACTIVE_COMPILATION_CONDITIONS` to include
-# `AGENTDECK_APP_STORE`. In that build we deliberately ship nothing bundled
-# (no adb, no Node.js, no bridge CLI, no D200H helper) so the archive is
-# self-contained per Apple Review Guideline 2.5.2. The CLI / Homebrew build
-# unsets that flag and gets the full bundled runtime.
+#   Contents/Helpers/adb                     (adb binary from Android SDK)
+#   Contents/Helpers/node                    (user's host Node.js, copied)
+#   Contents/Helpers/agentdeck-d200h-helper  (shell wrapper → node + cli.js)
+#   Contents/Resources/agentdeck-runtime/bridge/dist/cli.js   (bridge CLI)
+#
+# Each file is ad-hoc re-signed after copy so App Sandbox — even on the
+# CLI build — still allows local execution.
+#
+# Gate: App Store builds set `SWIFT_ACTIVE_COMPILATION_CONDITIONS` to
+# include `AGENTDECK_APP_STORE`, and this script early-returns on that
+# signal (see next block). The resulting archive contains none of the
+# paths above; `verify-appstore-archive.sh` asserts their absence in CI.
 
 set -euo pipefail
 
