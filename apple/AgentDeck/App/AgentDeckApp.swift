@@ -152,12 +152,20 @@ struct AgentDeckApp: App {
             }
         }
 
-        // First-launch notification permission prompt. Delayed 1.5s so the
-        // dashboard has drawn before our explanatory NSAlert appears —
-        // otherwise the alert stacks on a black/empty window and looks
-        // like a blocker. The helper is idempotent.
+        // First-launch notification permission prompt. Wait for the
+        // OnboardingSheet to close before firing our explanatory NSAlert
+        // — otherwise the alert stacks behind the modal sheet and the
+        // user is stuck deciding which one to answer first (a bug caught
+        // by design review on 2026-04-18). After onboarding dismisses
+        // we add a 1 s beat so the dashboard has fully drawn before the
+        // system prompt overlays it. The helper itself is idempotent and
+        // bypasses early under xctest, so the poll loop is safe.
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
+            let isXCTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            while !preferences.hasSeenOnboarding && !isXCTest {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            try? await Task.sleep(for: .seconds(1))
             await NotificationPermission.requestIfNeeded()
         }
     }
