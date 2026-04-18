@@ -147,6 +147,8 @@ private struct AgentInfoPaneiOS: View {
 
 private struct FindMacPaneiOS: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
+    @State private var showQRScanner: Bool = false
+    @State private var scanError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -173,13 +175,44 @@ private struct FindMacPaneiOS: View {
             VStack(alignment: .leading, spacing: 8) {
                 bullet("AgentDeck uses Bonjour to find Macs on your Wi-Fi")
                 bullet("iOS will ask for **Local Network** permission — tap Allow")
-                bullet("For different networks, use **Scan QR** in Settings")
+                bullet("For different networks, scan the QR code shown by AgentDeck on your Mac")
             }
             .font(.system(size: 13))
+
+            // Direct QR scan shortcut — shaves a step off the "different
+            // network" pairing flow (previously the copy said "scan QR in
+            // Settings", forcing the user to finish onboarding, open
+            // Settings, and find the scan button). Mirrors the
+            // SettingsScreen iOS scanner presentation (handleQRScan logic).
+            Button {
+                showQRScanner = true
+            } label: {
+                Label("Scan QR from Mac", systemImage: "qrcode.viewfinder")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color(red: 0.231, green: 0.51, blue: 0.965))
+
+            if let scanError {
+                Text(scanError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
 
             Spacer()
         }
         .padding(24)
+        .fullScreenCover(isPresented: $showQRScanner) {
+            QRScannerView(
+                onScan: { payload in
+                    showQRScanner = false
+                    handleQRScan(payload)
+                },
+                onCancel: { showQRScanner = false }
+            )
+        }
     }
 
     private func bullet(_ markdown: String) -> some View {
@@ -189,6 +222,25 @@ private struct FindMacPaneiOS: View {
             Text((try? AttributedString(markdown: markdown)) ?? AttributedString(markdown))
                 .foregroundStyle(.primary)
         }
+    }
+
+    /// Validate the QR payload (AgentDeck pairing URL format
+    /// `ws://host:port?token=…`) before handing it to the state holder.
+    /// Mirrors SettingsScreen iOS's `handleQRScan(_:)` so the scan result
+    /// parsing stays consistent between onboarding and Settings entry
+    /// points — any hardening applied later should be mirrored back.
+    private func handleQRScan(_ payload: String) {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss",
+              url.host != nil
+        else {
+            scanError = "That QR doesn't look like an AgentDeck pairing link."
+            return
+        }
+        scanError = nil
+        stateHolder.connectTo(url: trimmed)
     }
 }
 #endif

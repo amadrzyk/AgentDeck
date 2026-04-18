@@ -1318,6 +1318,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard.tests;
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = AGENTDECK_APP_STORE;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck.app/Contents/MacOS/AgentDeck";
 			};
 			name = Release;
@@ -1482,6 +1483,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = AGENTDECK_APP_STORE;
 			};
 			name = Release;
 		};
@@ -1514,6 +1516,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard.tests;
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = AGENTDECK_APP_STORE;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentDeck.app/Contents/MacOS/AgentDeck";
 			};
 			name = Debug;
@@ -1571,6 +1574,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = AGENTDECK_APP_STORE;
 			};
 			name = Debug;
 		};

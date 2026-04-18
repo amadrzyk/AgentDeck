@@ -105,6 +105,11 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AgentDeck.app/Contents/MacOS/AgentDeck"
         BUNDLE_LOADER: "$(TEST_HOST)"
         GENERATE_INFOPLIST_FILE: YES
+        # Match the host app's compile flag so tests evaluate the same
+        # `#if AGENTDECK_APP_STORE` blocks. Without this the test target
+        # would reference symbols the host compiled out (e.g. the
+        # `.bundledBridge` launch mode fallback) and fail at link or run.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: AGENTDECK_APP_STORE
 
 schemes:
   AgentDeck_iOS:

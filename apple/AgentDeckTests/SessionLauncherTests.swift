@@ -17,6 +17,13 @@ final class SessionLauncherTests: XCTestCase {
         XCTAssertEqual(plan?.command, "AGENTDECK_PORT=9120 '/opt/homebrew/bin/agentdeck' claude")
     }
 
+    #if !AGENTDECK_APP_STORE
+    /// CLI / Homebrew-only test. The bundled `.bundledBridge` launch mode is
+    /// stripped from the App Store build per Apple Review Guideline 2.5.2 —
+    /// see `SessionLauncher.swift:168` where the resolution branch is gated
+    /// under `#if !AGENTDECK_APP_STORE`. Under AGENTDECK_APP_STORE this
+    /// entire test compiles out; the other five tests in the suite cover
+    /// the installed-CLI + plain-claude + nil cases that both builds share.
     func testFallsBackToBundledBridgeWhenInstalledBridgeMissing() {
         let plan = SessionLauncher.resolveLaunchPlan(
             project: nil,
@@ -33,6 +40,7 @@ final class SessionLauncherTests: XCTestCase {
             "AGENTDECK_PORT=9120 '/Applications/AgentDeck.app/Contents/Resources/node' '/Applications/AgentDeck.app/Contents/Resources/bridge/cli.js' claude"
         )
     }
+    #endif
 
     func testFallsBackToPlainClaudeAndPreservesProjectPath() {
         let plan = SessionLauncher.resolveLaunchPlan(

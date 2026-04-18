@@ -4,14 +4,24 @@
 # compile flag. Called from the CI apple-release workflow after `xcodebuild
 # archive` completes, and runnable locally against any built .app.
 #
+# Auto-detects macOS vs iOS bundles: macOS apps have `Contents/`, iOS apps
+# have Info.plist + executable at the bundle root. The macOS-only
+# invariants (no Contents/Helpers, no LSRequiresIPhoneOS leak) only run on
+# macOS bundles; the common ones (no home-relative-path entitlement, no
+# stray executables, no subprocess path strings in the main Mach-O) run
+# on both.
+#
 # Invariants (per Apple Guideline 2.5.2 and our own APP_REVIEW_NOTES.md):
-#   1. No bundled Node.js, bridge CLI, adb binary, or D200H shell helper.
-#   2. No embedded executable other than the main AgentDeck Mach-O.
-#   3. Shipped Info.plist must not contain `LSRequiresIPhoneOS`.
-#   4. Shipped entitlements must not contain the home-relative-path
-#      temporary exception.
-#   5. No embedded subprocess path string (`/usr/bin/env`, `/bin/sh`,
-#      `/usr/bin/security`, `/usr/bin/sqlite3`) in the main binary.
+#   COMMON:
+#     1. No bundled Node.js, bridge CLI, adb binary, or D200H shell helper.
+#     2. No embedded executable other than the main AgentDeck Mach-O.
+#     3. Shipped entitlements must not contain the home-relative-path
+#        temporary exception.
+#     4. No embedded subprocess path string (`/usr/bin/env`, `/bin/sh`,
+#        `/usr/bin/security`, `/usr/bin/sqlite3`) in the main binary.
+#   macOS ONLY:
+#     5. `Contents/Info.plist` must not contain `LSRequiresIPhoneOS`
+#        (iOS-only key must be auto-stripped by Xcode).
 #
 # Usage:
 #   ./verify-appstore-archive.sh /path/to/AgentDeck.app
@@ -30,6 +40,36 @@ if [ ! -d "$APP" ]; then
     exit 2
 fi
 
+# Detect platform layout so we know where to look for Info.plist / main
+# binary and which forbidden-path set to apply.
+if [ -d "$APP/Contents" ]; then
+    PLATFORM="macos"
+    INFO="$APP/Contents/Info.plist"
+    MAIN_EXEC="$APP/Contents/MacOS/AgentDeck"
+    SCAN_ROOT="$APP/Contents"
+    FORBIDDEN_PATHS=(
+        "Contents/Helpers/adb"
+        "Contents/Helpers/node"
+        "Contents/Helpers/agentdeck-d200h-helper"
+        "Contents/Resources/node"
+        "Contents/Resources/agentdeck-runtime"
+        "Contents/Resources/bridge/cli.js"
+        "Contents/Resources/bridge/dist/cli.js"
+    )
+else
+    PLATFORM="ios"
+    INFO="$APP/Info.plist"
+    MAIN_EXEC="$APP/AgentDeck"
+    SCAN_ROOT="$APP"
+    # iOS wouldn't ship these regardless, but assert just in case.
+    FORBIDDEN_PATHS=(
+        "Helpers"
+        "node"
+        "agentdeck-runtime"
+        "bridge/cli.js"
+    )
+fi
+
 FAIL=0
 fail() {
     FAIL=1
@@ -37,23 +77,15 @@ fail() {
 }
 
 # (1) Forbidden bundled asset paths.
-for path in \
-    "Contents/Helpers/adb" \
-    "Contents/Helpers/node" \
-    "Contents/Helpers/agentdeck-d200h-helper" \
-    "Contents/Resources/node" \
-    "Contents/Resources/agentdeck-runtime" \
-    "Contents/Resources/bridge/cli.js" \
-    "Contents/Resources/bridge/dist/cli.js"; do
+for path in "${FORBIDDEN_PATHS[@]}"; do
     if [ -e "$APP/$path" ]; then
         fail "bundled asset present: $path"
     fi
 done
 
-# (2) No executable files outside the main AgentDeck Mach-O in Contents/MacOS.
+# (2) No executable files outside the main AgentDeck Mach-O.
 # `find -perm` flags differ between BSD (macOS) and GNU; use the BSD form.
-EXEC_FILES=$(find "$APP/Contents" -type f -perm +111 2>/dev/null || true)
-MAIN_EXEC="$APP/Contents/MacOS/AgentDeck"
+EXEC_FILES=$(find "$SCAN_ROOT" -type f -perm +111 2>/dev/null || true)
 while IFS= read -r f; do
     [ -z "$f" ] && continue
     [ "$f" = "$MAIN_EXEC" ] && continue
@@ -69,9 +101,9 @@ while IFS= read -r f; do
         && fail "extra executable embedded: ${f#$APP/}"
 done <<< "$EXEC_FILES"
 
-# (3) Info.plist must not declare LSRequiresIPhoneOS.
-INFO="$APP/Contents/Info.plist"
-if [ -f "$INFO" ]; then
+# (3) macOS-only: Info.plist must not declare LSRequiresIPhoneOS.
+# iOS Info.plist legitimately carries this key, so skip on iOS bundles.
+if [ "$PLATFORM" = "macos" ] && [ -f "$INFO" ]; then
     if /usr/libexec/PlistBuddy -c "Print :LSRequiresIPhoneOS" "$INFO" 2>/dev/null; then
         fail "Info.plist contains LSRequiresIPhoneOS (iOS-only key leaked to macOS archive)"
     fi
@@ -104,4 +136,4 @@ if [ "$FAIL" -ne 0 ]; then
     exit 1
 fi
 
-echo "✓ $APP passes App Store archive verification"
+echo "✓ $APP ($PLATFORM) passes App Store archive verification"

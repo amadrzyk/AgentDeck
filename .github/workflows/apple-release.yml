@@ -83,6 +83,16 @@ jobs:
             DEVELOPMENT_TEAM=R22679GY5Z \
             ENABLE_PREVIEWS=NO
 
+      - name: Verify iOS App Store archive invariants
+        # Mirrors the macOS verification: guards against bundled helpers
+        # (Apple 2.5.2), `home-relative-path` entitlement exceptions, and
+        # stray embedded executables slipping into the iOS archive. iOS
+        # builds don't run copy-adb.sh so these should always pass, but
+        # the gate is free insurance against future build-script drift.
+        run: |
+          bash apple/scripts/verify-appstore-archive.sh \
+            $RUNNER_TEMP/AgentDeck_iOS.xcarchive/Products/Applications/AgentDeck.app
+
       - name: Export iOS IPA
         run: |
           xcodebuild -exportArchive \
