@@ -16,6 +16,13 @@ actor BridgeLogStream {
     func start() {
         guard !running else { return }
 
+        #if AGENTDECK_APP_STORE
+        // App Store build: spawning the OpenClaw CLI log tailer violates
+        // Apple 2.5.2. OpenClaw timeline entries are CLI-only; dashboard
+        // still receives everything else via the in-process HTTP hooks.
+        DaemonLogger.shared.debug("LogStream", "openclaw log stream skipped (App Store build)")
+        return
+        #else
         let binPath = Self.resolveOpenClawBin()
         guard let binPath else {
             DaemonLogger.shared.debug("LogStream", "openclaw binary not found")
@@ -58,6 +65,7 @@ actor BridgeLogStream {
         } catch {
             DaemonLogger.shared.debug("LogStream", "Failed to spawn: \(error)")
         }
+        #endif
     }
 
     func stop() {
@@ -149,6 +157,9 @@ actor BridgeLogStream {
     // MARK: - Binary Resolution
 
     private static func resolveOpenClawBin() -> String? {
+        #if AGENTDECK_APP_STORE
+        return nil
+        #else
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let candidates = [
             "\(realHome)/Library/pnpm/openclaw",
@@ -176,6 +187,7 @@ actor BridgeLogStream {
         process.waitUntilExit()
         let result = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return result?.isEmpty == false ? result : nil
+        #endif
     }
 }
 #endif

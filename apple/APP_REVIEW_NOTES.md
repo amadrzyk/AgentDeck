@@ -53,7 +53,21 @@ Used to communicate with the optional Ulanzi D200H Deck Dock (USB HID class, VID
 
 ## Subprocess execution
 
-The app does not spawn arbitrary subprocesses. The earlier design that shelled out to `/usr/bin/env which …` for CLI discovery was removed in version 1.0.0. The only process invocation that remains is `NSWorkspace.shared.open(...)` / `NSAppleScript` to launch the user's chosen terminal emulator (Terminal, iTerm, etc.), which is a standard user-initiated action.
+**The App Store build of AgentDeck does not spawn any subprocess.** The binary is gated behind an `AGENTDECK_APP_STORE` Swift compile condition that compiles-out every `Process()` path — bundled Node runtime, bundled `bridge/cli.js`, bundled `adb`, bundled D200H helper shell script, AppleScript for iTerm launch, AppleScript fallback for Terminal launch, `/usr/bin/security`, `/usr/bin/sqlite3`, `/bin/sh`, `/usr/bin/env`, and every external-CLI probe (`openclaw`, `whisper-cli`, `networksetup`). A CI script (`apple/scripts/verify-appstore-archive.sh`) runs after archive and fails the pipeline if the shipped `.app` contains any of those subprocess path strings in its main Mach-O, or any bundled executable besides the signed AgentDeck binary itself.
+
+The only "launch a program" code path in the shipped app is `NSWorkspace.shared.open(URL)` on a `.command` shell script that the user explicitly initiated (by clicking "Launch Session" in the menu bar). That is a standard user-selected file open and matches the pattern used by Terminal.app's own "Run Script" behavior — AgentDeck does not invoke the command, macOS does.
+
+### What about the Claude Code hook commands?
+
+Claude Code hooks run `python3` / `curl` at the user's shell prompt, in their own terminal session, under Claude Code's process tree — not AgentDeck's. The hook *string* is data AgentDeck writes (with the user's explicit consent via `NSOpenPanel` + security-scoped bookmark) into `~/.claude/settings.local.json`. Claude Code's own runtime is what eventually executes that string when the user runs Claude Code. AgentDeck itself only receives HTTP POSTs from those hooks on `localhost:9120`.
+
+### Bundled helpers
+
+The App Store archive contains no `Contents/Helpers/`, no `Contents/Resources/node`, no `Contents/Resources/agentdeck-runtime`, and no `Contents/Resources/bridge/cli.js`. The sole binary is `Contents/MacOS/AgentDeck`. Advanced features that rely on external binaries (Android ADB bridging, OpenClaw Gateway integration, APME Layer 1 deterministic git/pnpm scoring, PTY-level agent parsing) are offered exclusively through a separately-installed companion CLI (`npx @agentdeck/setup`) and are documented as such in the app UI.
+
+### Codex / OpenCode launch
+
+Codex and OpenCode do not ship Claude-Code-compatible hook systems today, so the App Store build's "Launch Session" shortcut for those two agents requires the companion CLI (`agentdeck` on PATH) to be installed. Without it, the app displays an install-prompt dialog with a link to the agent's official installation guide and a "Check Again" button. Claude Code is monitored entirely through the hook pipeline described above — no companion CLI required.
 
 ## APME evaluation module
 

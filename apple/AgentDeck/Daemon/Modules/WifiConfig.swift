@@ -29,6 +29,14 @@ enum WifiConfigManager {
 
     /// Detect current macOS WiFi SSID
     static func detectCurrentSSID() -> String? {
+        #if AGENTDECK_APP_STORE
+        // App Store build: `networksetup` is a subprocess and not allowed
+        // (Apple 2.5.2). CoreWLAN is the sanctioned API but requires
+        // Location Services permission on macOS 13+ — not worth the prompt
+        // for a nice-to-have auto-fill. The ESP32ProvisionSheet asks the
+        // user to type the SSID directly instead.
+        return nil
+        #else
         guard let output = try? shellSync("networksetup -listallhardwareports") else { return nil }
         let ifaceMatch = output.range(of: #"Hardware Port: Wi-Fi\nDevice: (en\d+)"#, options: .regularExpression)
         let iface: String
@@ -44,16 +52,26 @@ enum WifiConfigManager {
             return String(ssidOutput[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return nil
+        #endif
     }
 
     /// Retrieve WiFi password from macOS Keychain
     static func getKeychainPassword(ssid: String) -> String? {
+        #if AGENTDECK_APP_STORE
+        // App Store build: `/usr/bin/security find-generic-password` is a
+        // subprocess and 2.5.2-sensitive. The ESP32ProvisionSheet asks the
+        // user to type the password directly into a SecureField instead.
+        _ = ssid
+        return nil
+        #else
         let escaped = ssid.replacingOccurrences(of: "\"", with: "\\\"")
         guard let output = try? shellSync("security find-generic-password -ga \"\(escaped)\" -w 2>/dev/null") else { return nil }
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+        #endif
     }
 
+    #if !AGENTDECK_APP_STORE
     private static func shellSync(_ command: String) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -65,5 +83,6 @@ enum WifiConfigManager {
         process.waitUntilExit()
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
+    #endif
 }
 #endif

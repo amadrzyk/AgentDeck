@@ -242,6 +242,13 @@ final class DaemonVoiceAssistant {
     }
 
     private func transcribeViaCLI(_ url: URL) async -> String? {
+        #if AGENTDECK_APP_STORE
+        // App Store build: spawning `whisper-cli` (or any external binary)
+        // violates Apple 2.5.2. The built-in `transcribeViaWhisperServer`
+        // HTTP path handles transcription instead when configured.
+        _ = url
+        return nil
+        #else
         // Find whisper-cli
         let candidates = ["/usr/local/bin/whisper-cli", "/opt/homebrew/bin/whisper-cli"]
         guard let whisperPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
@@ -279,6 +286,7 @@ final class DaemonVoiceAssistant {
         } catch {
             return nil
         }
+        #endif
     }
 
     // MARK: - TTS

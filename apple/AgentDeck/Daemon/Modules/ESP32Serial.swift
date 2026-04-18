@@ -231,16 +231,23 @@ actor ESP32Serial {
     // MARK: - Port Detection
 
     private func detectPorts() -> [String] {
-        do {
-            let output = try shellSync("ls /dev/cu.usb* /dev/cu.wchusbserial* 2>/dev/null || true")
-            return output.split(separator: "\n").map(String.init).filter { port in
+        // Pure-Swift port enumeration. Previously shelled out to `ls` via
+        // /bin/sh; App Store guideline 2.5.2 disallows spawning external
+        // interpreters and `FileManager.contentsOfDirectory` gives us the
+        // same result with no subprocess. Works identically in the CLI
+        // build — there's no reason to keep the shell path.
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: "/dev") else {
+            return []
+        }
+        return entries
+            .filter { $0.hasPrefix("cu.") }
+            .map { "/dev/\($0)" }
+            .filter { port in
                 guard !Self.excludePatterns.contains(where: { port.localizedCaseInsensitiveContains($0) }) else { return false }
                 let range = NSRange(port.startIndex..., in: port)
                 return Self.portPatterns.contains { $0.firstMatch(in: port, range: range) != nil }
             }
-        } catch {
-            return []
-        }
     }
 
     private func pollForDevices() {
@@ -574,6 +581,12 @@ actor ESP32Serial {
         return e
     }
 
+    #if !AGENTDECK_APP_STORE
+    /// Legacy shell helper — retained only for the CLI/Homebrew build where
+    /// it was convenient for one-off `/bin/sh` invocations. The App Store
+    /// build must not spawn an interpreter (Apple 2.5.2), so this helper
+    /// is compile-out and the one remaining caller (`detectPorts`) was
+    /// rewritten to use `FileManager.contentsOfDirectory` directly.
     private func shellSync(_ command: String) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -585,6 +598,7 @@ actor ESP32Serial {
         process.waitUntilExit()
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
+    #endif
 
     // MARK: - Constants
 

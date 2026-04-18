@@ -152,6 +152,12 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
             }
         }
         DaemonLogger.shared.debug("ADB", "adb not found — checked bundled path and \(candidates.count) external paths")
+        #if AGENTDECK_APP_STORE
+        // App Store build: no `/usr/bin/env which adb` fallback (Apple 2.5.2
+        // forbids spawning interpreters). Android integration is already
+        // graceful-disabled by the callers when `adbPath` is nil.
+        return nil
+        #else
         // Fallback: try which via shell (works from terminal, not GUI)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -172,6 +178,7 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
             return out
         }
         return nil
+        #endif
     }
 
     @discardableResult
@@ -183,6 +190,14 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
     }
 
     private func runProcess(timeout: TimeInterval, _ args: [String]) -> (status: Int32?, stdout: Data) {
+        #if AGENTDECK_APP_STORE
+        // App Store build: `adb` is an external binary unavailable in the
+        // sandbox, and spawning it would violate Apple 2.5.2 even if it were
+        // present. All Android integration callers must check `adbPath`
+        // before invoking this and gracefully treat nil as "feature disabled".
+        _ = timeout; _ = args
+        return (status: nil, stdout: Data())
+        #else
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let process = Process()
         // Use resolved adb path for adb commands, /usr/bin/env for others
@@ -228,6 +243,7 @@ final class AdbModule: DeviceModule, @unchecked Sendable {
 
         let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         return (waitResult == .timedOut ? nil : process.terminationStatus, data)
+        #endif
     }
 }
 #endif

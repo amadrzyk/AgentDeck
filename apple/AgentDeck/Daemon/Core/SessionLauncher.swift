@@ -114,6 +114,9 @@ enum SessionLauncher {
             agent: agent,
             daemonPort: daemonPort.flatMap { Int($0) } ?? SessionRegistry.shared.findDaemonPort(),
             installedBridgePath: findInstalledBridge(),
+            // App Store build ships no bundled helpers (Apple 2.5.2 — see
+            // copy-adb.sh gate); pass nil so the resolver can never try to
+            // invoke an embedded Node runtime.
             bundledBridgePath: findBundledBridge(),
             bundledNodePath: findBundledNode(),
             claudePath: findClaude()
@@ -162,11 +165,18 @@ enum SessionLauncher {
             return LaunchPlan(mode: .agentdeckCli, command: command)
         }
 
+        #if !AGENTDECK_APP_STORE
+        // CLI / Homebrew build: fall through to the bundled Node + bridge CLI
+        // that ships under `Contents/Resources/agentdeck-runtime/`. The App
+        // Store build strips those assets (see copy-adb.sh AGENTDECK_APP_STORE
+        // gate) so this branch is compile-out to make it impossible for the
+        // reviewed binary to invoke a bundled interpreter (Apple Guideline 2.5.2).
         if let bundledBridgePath {
             let nodePath = bundledNodePath ?? "node"
             let command = "\(projectPrefix)\(daemonPrefix)\(shellEscape(nodePath)) \(shellEscape(bundledBridgePath)) \(sub)"
             return LaunchPlan(mode: .bundledBridge, command: command)
         }
+        #endif
 
         // Last-resort fallback for claude-code: plain claude without bridge.
         // Still pass AGENTDECK_PORT so the Claude Code hooks (installed
@@ -215,8 +225,11 @@ enum SessionLauncher {
         return nil
     }
 
+    #if !AGENTDECK_APP_STORE
     private static func findBundledBridge() -> String? {
-        // Check app bundle Resources
+        // Check app bundle Resources. App Store builds never ship this —
+        // the build script's AGENTDECK_APP_STORE gate keeps the CLI out of
+        // Resources entirely (Apple 2.5.2).
         guard let resourcePath = Bundle.main.resourcePath else { return nil }
         let bridgePath = (resourcePath as NSString).appendingPathComponent("bridge/cli.js")
         return FileManager.default.fileExists(atPath: bridgePath) ? bridgePath : nil
@@ -227,15 +240,25 @@ enum SessionLauncher {
         let nodePath = (resourcePath as NSString).appendingPathComponent("node")
         return FileManager.default.isExecutableFile(atPath: nodePath) ? nodePath : nil
     }
+    #else
+    // App Store build: never returns a path. These stubs exist so call
+    // sites keep compiling without needing #if guards of their own.
+    private static func findBundledBridge() -> String? { nil }
+    private static func findBundledNode() -> String? { nil }
+    #endif
 
     // MARK: - Terminal Launch
 
     private static func openInTerminal(_ command: String, terminal: TerminalApp = .system) {
-        // iTerm2: use AppleScript (better tab/window control, native UX)
+        #if !AGENTDECK_APP_STORE
+        // iTerm2 branch uses NSAppleScript — that requires Apple Events
+        // entitlement + usage description, which we deliberately don't ship
+        // in the App Store build. CLI/Homebrew builds keep the richer path.
         if terminal == .iterm {
             openInITerm(command)
             return
         }
+        #endif
 
         // Everyone else: write .command script, open with chosen app or system default
         let tmpDir = FileManager.default.temporaryDirectory
@@ -271,10 +294,15 @@ enum SessionLauncher {
             }
         } catch {
             DaemonLogger.shared.error("Failed to create launch script: \(error)")
+            #if !AGENTDECK_APP_STORE
+            // AppleScript fallback requires automation entitlement; omit in
+            // App Store build and surface the failure via the log only.
             openInTerminalViaAppleScript(command)
+            #endif
         }
     }
 
+    #if !AGENTDECK_APP_STORE
     private static func openInITerm(_ command: String) {
         let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -318,6 +346,7 @@ enum SessionLauncher {
             }
         }
     }
+    #endif
 
     // MARK: - Install Prompt
 

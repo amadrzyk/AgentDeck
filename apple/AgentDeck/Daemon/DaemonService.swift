@@ -186,6 +186,15 @@ final class DaemonService: ObservableObject {
     }
 
     func startBundledD200HHelper() async {
+        #if AGENTDECK_APP_STORE
+        // App Store build: bundled Node helper is intentionally absent (see
+        // copy-adb.sh + Apple 2.5.2). Any "promote to bundled helper"
+        // trigger from Settings is a no-op here — the direct IOKit HID path
+        // handles the device without a subprocess. Surface a clear message
+        // rather than silently failing so the toggle UX stays honest.
+        errorMessage = "Bundled D200H helper is only available in the CLI / Homebrew build. The App Store build uses the direct IOKit HID path."
+        return
+        #else
         errorMessage = nil
         bindFailureReason = nil; blockingProcesses = []
 
@@ -261,6 +270,7 @@ final class DaemonService: ObservableObject {
         DaemonLogger.shared.error("\(detail) — reverting to local in-process daemon")
         errorMessage = "\(detail) Reverted to local daemon."
         start()
+        #endif
     }
 
     private func connectToExternalDaemon(port knownPort: Int? = nil) async {

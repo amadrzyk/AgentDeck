@@ -82,6 +82,12 @@ actor GatewayProbe {
     }
 
     private func checkHealth() async -> Bool {
+        #if AGENTDECK_APP_STORE
+        // App Store build: `openclaw doctor` is an external-CLI invocation
+        // that violates Apple 2.5.2. Health status for OpenClaw is sourced
+        // purely from the TCP probe above in this build.
+        return false
+        #else
         // Try `openclaw doctor --json`
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -102,6 +108,7 @@ actor GatewayProbe {
             // openclaw not installed — not an error
         }
         return false
+        #endif
     }
 }
 #endif

@@ -52,6 +52,13 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: true
         DEVELOPMENT_TEAM: R22679GY5Z
+        # App Store compliance gate. When this condition is ON the build
+        # excludes bundled Node/adb/D200H helper assets, AppleScript
+        # subprocess paths, and every remaining `Process()` spawn so the
+        # resulting .app is self-contained per Apple Review Guideline 2.5.2.
+        # For CLI/Homebrew distribution, toggle this off via
+        # `SWIFT_ACTIVE_COMPILATION_CONDITIONS=""` at build time.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: AGENTDECK_APP_STORE
       configs:
         debug:
           CODE_SIGN_STYLE: Automatic

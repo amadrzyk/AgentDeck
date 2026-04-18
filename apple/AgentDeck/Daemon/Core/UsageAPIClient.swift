@@ -188,6 +188,18 @@ final class UsageAPIClient: Sendable {
     }
 
     private func getOAuthCredentials() -> OAuthCredentials? {
+        #if AGENTDECK_APP_STORE
+        // App Store build does not invoke `/usr/bin/security` as a subprocess
+        // (Apple 2.5.2). Claude Code OAuth credentials live in the user's
+        // own keychain — accessible to Claude Code itself via its own
+        // process, and to the Swift daemon via SecItemCopyMatching if the
+        // kSecAttrService item is readable by our signing identity. The
+        // latter requires a Keychain Access Group shared with Claude Code
+        // (which Anthropic does not publish), so in the App Store build
+        // this lookup is simply skipped — usage polling falls back to the
+        // network probe path that doesn't require OAuth state.
+        return nil
+        #else
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = ["find-generic-password", "-s", Self.keychainService, "-w"]
@@ -207,6 +219,7 @@ final class UsageAPIClient: Sendable {
         } catch {
             return nil
         }
+        #endif
     }
 
     private func getOAuthToken() -> String? {
@@ -375,6 +388,14 @@ final class UsageAPIClient: Sendable {
     }
 
     private func sqliteValueViaShell(forKey key: String, dbURL: URL) -> String? {
+        #if AGENTDECK_APP_STORE
+        // Shelling out to `/usr/bin/sqlite3` is 2.5.2-sensitive and the
+        // sqlite3 C API path above already handles 99% of queries. In the
+        // rare case binding fails (text encoding edge cases), return nil
+        // rather than spawning sqlite3 as a subprocess.
+        _ = key; _ = dbURL
+        return nil
+        #else
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         let escapedKey = key.replacingOccurrences(of: "'", with: "''")
@@ -401,6 +422,7 @@ final class UsageAPIClient: Sendable {
         } catch {
             return nil
         }
+        #endif
     }
 
     private func parseAntigravityPlanName(_ authStatusText: String?) -> String? {

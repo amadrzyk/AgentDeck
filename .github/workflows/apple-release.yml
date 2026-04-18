@@ -192,6 +192,14 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM=R22679GY5Z
 
+      - name: Verify App Store archive invariants
+        # Fails the build if bundled Node/adb/bridge helpers, iOS-only plist
+        # keys, home-relative-path entitlement, or subprocess path strings
+        # somehow leaked into the .app. Apple Guideline 2.5.2 enforcement.
+        run: |
+          bash apple/scripts/verify-appstore-archive.sh \
+            $RUNNER_TEMP/AgentDeck_macOS.xcarchive/Products/Applications/AgentDeck.app
+
       - name: Export macOS pkg
         run: |
           xcodebuild -exportArchive \

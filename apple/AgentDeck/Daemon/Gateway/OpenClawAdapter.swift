@@ -529,6 +529,13 @@ actor OpenClawAdapter {
     }
 
     private func fetchModelCatalog() async -> ([[String: Any]], String?)? {
+        #if AGENTDECK_APP_STORE
+        // App Store build: spawning the external `openclaw` CLI violates
+        // Apple 2.5.2. OpenClaw Gateway integration is a CLI-only feature
+        // in the App Store distribution — the user is redirected to
+        // `npx @agentdeck/setup` for that.
+        return nil
+        #else
         guard let binPath = Self.resolveOpenClawBin() else {
             DaemonLogger.shared.debug("OpenClaw", "Model catalog skipped: openclaw binary not found")
             return nil
@@ -580,6 +587,7 @@ actor OpenClawAdapter {
             DaemonLogger.shared.debug("OpenClaw", "Model catalog parse failed: \(error)")
             return nil
         }
+        #endif
     }
 
     private static func parseModelRole(tags: [String]) -> String {
@@ -593,6 +601,11 @@ actor OpenClawAdapter {
     }
 
     private static func resolveOpenClawBin() -> String? {
+        #if AGENTDECK_APP_STORE
+        // App Store build: no external-binary discovery or subprocess spawn
+        // (Apple 2.5.2). Caller handles nil by disabling the OpenClaw path.
+        return nil
+        #else
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let candidates = [
             "\(realHome)/Library/pnpm/openclaw",
@@ -617,6 +630,7 @@ actor OpenClawAdapter {
         let result = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return result?.isEmpty == false ? result : nil
+        #endif
     }
 
     private static func openClawEnvironment() -> [String: String] {

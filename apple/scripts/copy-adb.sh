@@ -1,9 +1,20 @@
 #!/bin/bash
-# copy-adb.sh — Copy adb binary into app bundle during Xcode build.
+# copy-adb.sh — Copy adb + bundled Node runtime + bridge CLI into app bundle.
 # Searches standard Android SDK paths and copies to Contents/Helpers/.
 # The binary is then ad-hoc re-signed so App Sandbox allows execution.
+#
+# Gate: App Store builds set `SWIFT_ACTIVE_COMPILATION_CONDITIONS` to include
+# `AGENTDECK_APP_STORE`. In that build we deliberately ship nothing bundled
+# (no adb, no Node.js, no bridge CLI, no D200H helper) so the archive is
+# self-contained per Apple Review Guideline 2.5.2. The CLI / Homebrew build
+# unsets that flag and gets the full bundled runtime.
 
 set -euo pipefail
+
+if [[ "${SWIFT_ACTIVE_COMPILATION_CONDITIONS:-}" == *AGENTDECK_APP_STORE* ]]; then
+    echo "note: AGENTDECK_APP_STORE build — skipping bundled adb/node/helper (Apple 2.5.2)"
+    exit 0
+fi
 
 if [ -z "${BUILT_PRODUCTS_DIR:-}" ] || [ -z "${CONTENTS_FOLDER_PATH:-}" ]; then
     echo "note: skipping adb bundle outside Xcode build environment"
