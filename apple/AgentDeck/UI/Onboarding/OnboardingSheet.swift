@@ -121,6 +121,13 @@ private struct WelcomePane: View {
 
 // MARK: - Pane 2: Agent picker
 
+/// Two-branch pane. First asks whether the user already has an agent set
+/// up — that's the majority case for developers buying AgentDeck — and
+/// only shows the install guide cards if they say no. A previous version
+/// used a tiny "I already have one" checkbox that had no UI effect; users
+/// reasonably asked "what does this change?". The answer is now visible:
+/// saying yes hides the install step entirely, saying no (or not yet)
+/// reveals it.
 private struct AgentPickerPane: View {
     @Binding var userHasAgent: Bool
 
@@ -142,7 +149,7 @@ private struct AgentPickerPane: View {
             name: "Codex",
             tagline: "OpenAI's coding agent CLI.",
             installCommand: "npm install -g @openai/codex",
-            docsURL: URL(string: "https://github.com/openai/codex-cli")!
+            docsURL: URL(string: "https://github.com/openai/codex")!
         ),
         AgentOption(
             name: "OpenCode",
@@ -155,27 +162,83 @@ private struct AgentPickerPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Pick an AI coding agent")
+                Text("Are you already using an AI coding agent?")
                     .font(.system(size: 22, weight: .semibold))
-                Text("AgentDeck works with any of these. Install at least one — the dashboard starts monitoring the moment you launch a session.")
+                Text(userHasAgent
+                     ? "Great — AgentDeck will start monitoring the moment you launch a session from the menu bar."
+                     : "AgentDeck works with any of these. If you already have one installed, just say so and we'll skip this step.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(spacing: 10) {
-                ForEach(options, id: \.name) { option in
-                    agentCard(option)
-                }
+            // Primary two-button choice — equivalent weight. The user's
+            // answer persists via `userHasAgent`; when yes, we hide the
+            // install cards so the pane stops nagging.
+            HStack(spacing: 10) {
+                choiceButton(
+                    title: "Yes, I have one",
+                    systemImage: "checkmark.circle.fill",
+                    selected: userHasAgent
+                ) { userHasAgent = true }
+
+                choiceButton(
+                    title: "Help me install one",
+                    systemImage: "arrow.down.circle",
+                    selected: !userHasAgent
+                ) { userHasAgent = false }
             }
 
-            Toggle("I already have one of these installed", isOn: $userHasAgent)
-                .font(.system(size: 12))
-                .toggleStyle(.checkbox)
+            if !userHasAgent {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Install one of these on your Mac")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    VStack(spacing: 10) {
+                        ForEach(options, id: \.name) { option in
+                            agentCard(option)
+                        }
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             Spacer()
         }
         .padding(24)
+        .animation(.easeInOut(duration: 0.18), value: userHasAgent)
+    }
+
+    /// Big segmented-style button. Selected state uses accent color fill so
+    /// the current answer is unambiguous — addresses the previous UX gap
+    /// where a checkbox gave no feedback.
+    private func choiceButton(
+        title: String,
+        systemImage: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14))
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(selected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            )
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

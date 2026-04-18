@@ -326,7 +326,7 @@ enum SessionLauncher {
     /// page and can follow the current install method (npm, brew, pipx…).
     private static let installGuideURLs: [LaunchAgentType: URL] = [
         .claudeCode: URL(string: "https://docs.claude.com/en/docs/claude-code/quickstart")!,
-        .codex: URL(string: "https://github.com/openai/codex-cli")!,
+        .codex: URL(string: "https://github.com/openai/codex")!,
         .opencode: URL(string: "https://opencode.ai/docs")!,
         .claudePlain: URL(string: "https://docs.claude.com/en/docs/claude-code/quickstart")!,
     ]
