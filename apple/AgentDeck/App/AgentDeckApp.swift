@@ -186,15 +186,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // deadlocks on the next app launch even if the async shutdown below hangs.
         SingletonGuard.removeDaemonInfoFile()
 
-        let semaphore = DispatchSemaphore(value: 0)
-        Task {
+        // `DaemonService.stop()` is `@MainActor`-isolated, so it needs the
+        // main thread to execute. Using `DispatchSemaphore.wait()` here
+        // would block the main thread forever — the Task below can't run
+        // until main yields, but main is stuck waiting on the semaphore.
+        // That deadlock is what produced the old "Shutdown exceeded 10s —
+        // forcing exit" log and the SX-state zombies Xcode debug sessions
+        // would leave behind.
+        //
+        // Instead, pump the main runloop in short windows so the MainActor
+        // task actually gets a chance to execute. In practice stop()
+        // completes in well under 100ms for client-mode builds, so the
+        // 3-second deadline is a failsafe rather than a regular wait.
+        var done = false
+        Task { @MainActor [weak daemonService] in
             await daemonService?.stop()
-            semaphore.signal()
+            done = true
         }
-        let result = semaphore.wait(timeout: .now() + 10)
-        if result == .timedOut {
-            NSLog("[AgentDeck] Shutdown exceeded 10s — forcing exit")
-            // daemon.json already removed above; just exit
+        let deadline = Date().addingTimeInterval(3)
+        while !done && Date() < deadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if !done {
+            NSLog("[AgentDeck] Shutdown exceeded 3s — forcing exit")
         }
     }
 
