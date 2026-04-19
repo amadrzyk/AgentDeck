@@ -93,6 +93,10 @@ struct TimelineStripView: View {
         let icon = timelineTypeIcon(for: group.entry.type, status: group.entry.status)
         let iconColor = timelineTypeColor(for: group.entry.type)
         let countSuffix = group.count > 1 ? " ×\(group.count)" : ""
+        // Session attribution prefix — bracketed project name differentiates
+        // simultaneous Claude sessions ("ViewTrans" vs "AgentDeck") whose
+        // agentType would otherwise look identical in the timeline.
+        let sessionLabel = rowPrefixLabel(for: group.entry)
 
         return HStack(spacing: 4) {
             // Selected indicator bar
@@ -110,6 +114,13 @@ struct TimelineStripView: View {
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(iconColor.opacity(isChatEnd ? 0.6 : 1))
 
+            if !sessionLabel.isEmpty {
+                Text(sessionLabel)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(isChatEnd ? 0.55 : 0.75))
+                    .lineLimit(1)
+            }
+
             Text(group.entry.raw + countSuffix)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(isChatEnd ? TerrariumHUD.text.opacity(0.6) : TerrariumHUD.text)
@@ -123,6 +134,18 @@ struct TimelineStripView: View {
             isSelected ? Color.white.opacity(0.08) : Color.clear,
             in: RoundedRectangle(cornerRadius: 2)
         )
+    }
+
+    /// Produce the compact-row attribution prefix. Prefers `projectName`
+    /// (e.g. "AgentDeck") over the coarser `agentType` ("Claude"). Falls
+    /// back to the agent tag when no project is recorded so OpenClaw or
+    /// legacy entries still get *something* readable.
+    private func rowPrefixLabel(for entry: TimelineEntry) -> String {
+        if let p = entry.projectName, !p.isEmpty {
+            return "[\(p)]"
+        }
+        let tag = agentTag(entry.agentType)
+        return tag.isEmpty ? "" : "[\(tag)]"
     }
 
     // MARK: - Detail Pane

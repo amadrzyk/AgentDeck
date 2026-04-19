@@ -1217,7 +1217,7 @@ struct SettingsScreen: View {
     // MARK: - Claude Code Hooks (macOS)
 
     #if os(macOS)
-    /// Explicit opt-in surface for `~/.claude/settings.local.json` hook
+    /// Explicit opt-in surface for `~/.claude/settings.json` hook
     /// registration. Replaces the old auto-install behaviour — App Store
     /// review 2.5.2 requires user consent before we touch files outside
     /// the sandbox.
@@ -1234,7 +1234,7 @@ struct SettingsScreen: View {
                     .foregroundStyle(.white)
             }
 
-            Text("AgentDeck can register hooks in ~/.claude/settings.local.json so Claude Code sessions report state to the dashboard. You'll be asked to grant access to that file before any write happens.")
+            Text("AgentDeck can register hooks in ~/.claude/settings.json so Claude Code sessions report state to the dashboard. You'll be asked to grant access to that file before any write happens.")
                 .font(.system(size: 11))
                 .foregroundStyle(TerrariumHUD.subtext)
                 .fixedSize(horizontal: false, vertical: true)

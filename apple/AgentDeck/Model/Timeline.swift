@@ -31,6 +31,14 @@ struct TimelineEntry: Codable, Sendable, Identifiable {
     var approvalId: String?
     var status: String?  // pending | approved | denied
     var agentType: String?
+    /// Project folder name of the session that produced this entry. Used as
+    /// the row prefix so multi-session dashboards can tell "ViewTrans" apart
+    /// from "AgentDeck" even when both are the same `agentType`. Nil for
+    /// entries predating the multi-session attribution work.
+    var projectName: String?
+    /// Session id the entry belongs to. Populated from state_update events
+    /// that carry the hook-attributing sessionId.
+    var sessionId: String?
 
     var id: Double { ts }
 

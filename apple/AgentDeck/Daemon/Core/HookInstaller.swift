@@ -17,6 +17,16 @@ enum HookInstaller {
         "PostToolUse", "Stop", "Notification", "UserPromptSubmit",
     ]
 
+    /// Canonical install target: Claude Code 2.1+ only reads hooks from files
+    /// it actively watches. Empirically (via debug log "Watching for changes in
+    /// setting files …"), those are `~/.claude/settings.json` (user-global),
+    /// `<project>/.claude/settings.json`, and `<project>/.claude/settings.local.json`.
+    /// `~/.claude/settings.local.json` — the file older AgentDeck builds targeted —
+    /// is NOT watched, so hooks written there never fire. We now default to the
+    /// user-global `settings.json` because AgentDeck wants telemetry across every
+    /// Claude Code session, regardless of project.
+    private static let claudeSettingsFilename = "settings.json"
+
     /// Install AgentDeck hooks into Claude Code settings only if the user has
     /// explicitly granted consent + a valid security-scoped bookmark. Safe to
     /// call on every launch — when preconditions aren't met it's a no-op.
@@ -32,7 +42,7 @@ enum HookInstaller {
         }
 
         guard let resolved = AppPreferences.shared.resolveClaudeSettingsURL() else {
-            DaemonLogger.shared.info("Hooks skipped: no user-authorized settings.local.json bookmark")
+            DaemonLogger.shared.info("Hooks skipped: no user-authorized settings.json bookmark")
             AppPreferences.shared.hooksInstalled = false
             return
         }
@@ -40,6 +50,25 @@ enum HookInstaller {
         let url = resolved.url
         if resolved.stale {
             _ = AppPreferences.shared.storeClaudeSettingsBookmark(for: url)
+        }
+
+        // Migrate installs authorized against the legacy unwatched
+        // `~/.claude/settings.local.json`: clean out our hook entries there so
+        // they don't linger as orphans, then invalidate the bookmark and flip
+        // consent back to `.unknown` so the Setup card re-prompts the user to
+        // pick the watched `settings.json` on next interaction.
+        if isLegacyUserLocalPath(url) {
+            DaemonLogger.shared.info("Hooks: legacy bookmark points to unwatched ~/.claude/settings.local.json — migrating")
+            if url.startAccessingSecurityScopedResource() {
+                var settings = loadSettings(at: url)
+                settings = removeHooks(settings)
+                _ = saveSettings(settings, to: url)
+                url.stopAccessingSecurityScopedResource()
+            }
+            AppPreferences.shared.clearClaudeSettingsAccess()
+            AppPreferences.shared.hookInstallConsent = .unknown
+            AppPreferences.shared.hooksInstalled = false
+            return
         }
 
         guard url.startAccessingSecurityScopedResource() else {
@@ -76,7 +105,7 @@ enum HookInstaller {
     /// `uninstallAndRevoke()` is the full teardown.
     static func uninstall() {
         guard let resolved = AppPreferences.shared.resolveClaudeSettingsURL() else {
-            DaemonLogger.shared.info("Hooks uninstall skipped: no authorized settings.local.json bookmark")
+            DaemonLogger.shared.info("Hooks uninstall skipped: no authorized settings.json bookmark")
             return
         }
 
@@ -108,7 +137,8 @@ enum HookInstaller {
     }
 
     /// Explicit opt-in flow. Shows an NSAlert explaining the integration,
-    /// then an NSOpenPanel defaulted to `~/.claude/settings.local.json`.
+    /// then an NSOpenPanel defaulted to `~/.claude/settings.json` — the
+    /// user-global settings file Claude Code 2.1+ actually watches.
     /// Returns `true` when the user confirmed and hooks were written (or
     /// were already installed with a valid bookmark).
     @discardableResult
@@ -124,7 +154,7 @@ enum HookInstaller {
         let alert = NSAlert()
         alert.messageText = "Enable Claude Code Hooks?"
         alert.informativeText = """
-            AgentDeck can register hooks in ~/.claude/settings.local.json so Claude Code sessions report state to the dashboard.
+            AgentDeck can register hooks in ~/.claude/settings.json so Claude Code sessions report state to the dashboard.
 
             You'll be asked to grant access to that file. AgentDeck only edits its own hook entries — other settings are preserved.
             """
@@ -146,10 +176,10 @@ enum HookInstaller {
 
         let panel = NSOpenPanel()
         panel.title = "Authorize Claude Code Settings"
-        panel.message = "Select (or create) ~/.claude/settings.local.json so AgentDeck can install hooks."
+        panel.message = "Select (or create) ~/.claude/settings.json so AgentDeck can install hooks."
         panel.prompt = "Authorize"
         panel.directoryURL = claudeDir
-        panel.nameFieldStringValue = "settings.local.json"
+        panel.nameFieldStringValue = claudeSettingsFilename
         panel.allowedFileTypes = ["json"]
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -172,6 +202,21 @@ enum HookInstaller {
         AppPreferences.shared.hookInstallConsent = .accepted
         installIfNeeded()
         return AppPreferences.shared.hooksInstalled
+    }
+
+    // MARK: - Migration helpers
+
+    /// Detect bookmarks authorized against the pre-migration target
+    /// `~/.claude/settings.local.json` — Claude Code 2.1+ does not watch that
+    /// file for hook registration, so hooks written there never fire.
+    /// Project-local `<project>/.claude/settings.local.json` is a different
+    /// file (watched) and is intentionally NOT matched here.
+    private static func isLegacyUserLocalPath(_ url: URL) -> Bool {
+        let home = String(cString: getpwuid(getuid()).pointee.pw_dir)
+        let legacy = URL(fileURLWithPath: home)
+            .appendingPathComponent(".claude/settings.local.json")
+            .standardizedFileURL
+        return url.standardizedFileURL.path == legacy.path
     }
 
     // MARK: - Pure Logic

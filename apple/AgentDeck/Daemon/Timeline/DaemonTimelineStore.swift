@@ -14,6 +14,13 @@ struct DaemonTimelineEntry: Codable, Sendable {
     var agentType: String?
     var repeatCount: Int?
     var automated: Bool?
+    /// Project name + session id of the originating session. Mirrors the
+    /// equivalent fields on `TimelineEntry` (UI-facing copy) so entries
+    /// round-tripped through the on-disk timeline keep per-session
+    /// attribution. Existing persisted entries without these keys decode
+    /// to nil via Codable's default optional-missing-key behaviour.
+    var projectName: String?
+    var sessionId: String?
 }
 
 actor DaemonTimelineStore {

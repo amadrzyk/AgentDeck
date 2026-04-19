@@ -87,6 +87,27 @@ final class DaemonServer {
     /// which shows up as empty `sessions_list` broadcasts and blank
     /// terrariums on every surface.
     private var pushedSessionsById: [String: DaemonSessionEntry] = [:]
+
+    /// Last hook-event wall-clock timestamp per pushed session, keyed on
+    /// sessionId. Used to evict sessions whose Claude Code process died
+    /// without delivering a `session_end` hook — Claude Code's Stop/End
+    /// hooks are ~18% reliable, so without a TTL sweep the sessions list
+    /// accumulates ghost entries whose creatures keep swimming (or
+    /// "floating") indefinitely. A fresh hook from the same sessionId
+    /// resurrects the entry; see `handleHookEvent` and `evictStaleHookSessions`.
+    private var lastHookAtByPushedSession: [String: Date] = [:]
+
+    /// TTL for hook-driven pushed sessions. 3 minutes balances tolerating
+    /// long "user is thinking" pauses against clearing ghost entries within
+    /// the same coffee break. When a hook arrives after this window, the
+    /// `session_start` synthesis path will recreate the entry.
+    private static let pushedSessionStaleTTL: TimeInterval = 180
+
+    /// Session id of the most recent hook event that carried one. Used to
+    /// stamp state_update broadcasts so dashboard clients can attribute
+    /// timeline entries + primary-creature state to the right session
+    /// when multiple claude sessions are running concurrently.
+    private var currentHookSessionId: String?
     private var cachedModelCatalog: [[String: Any]] = []
     private var cachedOllamaStatus: [String: Any]?
     private var cachedMlxModels: [String] = []
@@ -1446,22 +1467,81 @@ final class DaemonServer {
         guard let event = json["event"] as? String else { return }
         DaemonLogger.shared.debug("Hook", "Received: \(event)")
 
+        // Per-session id extraction. The global state_machine transitions
+        // below remain for backwards compatibility with surfaces that read
+        // the aggregate state (menubar badge, D200H). The authoritative
+        // per-session state lives on `pushedSessionsById` entries so that
+        // multi-session terrariums render each creature independently —
+        // without this a Stop in one session drags the other session's
+        // creature to idle too, because the terrarium falls back to global
+        // state when session.state is nil.
+        let sessionId = (json["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+
         switch event {
         case "session_start":
             _ = stateMachine.transition(trigger: "session_start", source: .hook)
-            if let p = json["project_name"] as? String { stateMachine.projectName = p }
+            let projectName: String = {
+                if let p = json["project_name"] as? String, !p.isEmpty { return p }
+                if let cwd = json["cwd"] as? String, !cwd.isEmpty {
+                    return URL(fileURLWithPath: cwd).lastPathComponent
+                }
+                return ""
+            }()
+            if !projectName.isEmpty { stateMachine.projectName = projectName }
+            // App Store standalone: hook POST is the only Claude Code session
+            // signal (sandbox blocks sessions.json; no WS push arrives without
+            // the external Node bridge). Synthesize an entry keyed on Claude's
+            // session_id so dashboards populate — a later session_push_register
+            // with the same id merges cleanly via upsertIntoCachedSessions.
+            //
+            // agentType MUST be "claude-code" — it's the canonical value every
+            // downstream creature renderer allowlists (Pixoo Swift/Node, plugin,
+            // Android). Using bare "claude" here made hook-only sessions invisible
+            // on every surface except the macOS Terrarium (which uses a denylist).
+            if let sessionId {
+                var entry = DaemonSessionEntry(
+                    id: sessionId,
+                    port: Int(port),
+                    pid: 0,
+                    projectName: projectName,
+                    agentType: "claude-code",
+                    tmuxSession: nil,
+                    tty: nil,
+                    parentTty: nil,
+                    startedAt: ISO8601DateFormatter().string(from: Date())
+                )
+                entry.state = "idle"
+                pushedSessionsById[sessionId] = entry
+                upsertIntoCachedSessions(entry)
+                broadcastSessionsList()
+            }
         case "user_prompt_submit":
             _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
+            updateSessionHookState(sessionId: sessionId, state: "processing")
         case "stop":
             _ = stateMachine.transition(trigger: "stop", source: .hook)
+            updateSessionHookState(sessionId: sessionId, state: "idle", clearTool: true)
         case "session_end":
             _ = stateMachine.transition(trigger: "session_end", source: .hook)
+            if let sessionId {
+                pushedSessionsById.removeValue(forKey: sessionId)
+                cachedSessions.removeAll { $0.id == sessionId }
+                broadcastSessionsList()
+            }
         case "tool_start":
             stateMachine.currentTool = json["tool_name"] as? String
             stateMachine.toolInput = json["tool_input"] as? String
+            updateSessionHookState(
+                sessionId: sessionId,
+                state: "processing",
+                currentTool: json["tool_name"] as? String
+            )
         case "tool_end":
             stateMachine.currentTool = nil; stateMachine.toolInput = nil
             stateMachine.toolCalls += 1
+            // Stay "processing" between tool boundaries — `stop` drops the
+            // session back to idle when the turn finishes.
+            updateSessionHookState(sessionId: sessionId, state: "processing", clearTool: true)
         default: break
         }
 
@@ -1470,7 +1550,71 @@ final class DaemonServer {
         // a run, session_end closes it, everything in between is a step).
         apmeCollector?.handleHook(event: event, data: json)
 
+        // Attribute the next state_update + timeline entries to the session
+        // that fired this hook: remember the sessionId, and mirror the
+        // session's projectName onto the global StateMachine so downstream
+        // timeline generators (client-side StateTimelineGenerator) label
+        // events with the correct project. Without this the global
+        // projectName stays stuck on whichever session most recently fired
+        // `session_start`, so cross-session interleaving mislabels entries.
+        if let sessionId {
+            lastHookAtByPushedSession[sessionId] = Date()
+            currentHookSessionId = sessionId
+            if let proj = pushedSessionsById[sessionId]?.projectName, !proj.isEmpty {
+                stateMachine.projectName = proj
+            }
+        }
+        if event == "session_end", let sessionId {
+            lastHookAtByPushedSession.removeValue(forKey: sessionId)
+            if currentHookSessionId == sessionId { currentHookSessionId = nil }
+        }
+
         broadcastStateUpdate()
+    }
+
+    /// Evict hook-driven sessions whose last hook is older than
+    /// `pushedSessionStaleTTL`. Claude Code's `session_end` hook is
+    /// unreliable, so without this a `claude` process that crashed or was
+    /// Ctrl-C'd leaves a ghost entry whose creature keeps swimming or
+    /// floating forever. A fresh hook for the same sessionId re-creates
+    /// the entry through the `session_start` synthesis path.
+    @MainActor
+    private func evictStaleHookSessions() async {
+        let cutoff = Date().addingTimeInterval(-Self.pushedSessionStaleTTL)
+        let expired = lastHookAtByPushedSession.compactMap { (sid, ts) -> String? in
+            ts < cutoff ? sid : nil
+        }
+        guard !expired.isEmpty else { return }
+        for sid in expired {
+            pushedSessionsById.removeValue(forKey: sid)
+            cachedSessions.removeAll { $0.id == sid }
+            lastHookAtByPushedSession.removeValue(forKey: sid)
+            if currentHookSessionId == sid { currentHookSessionId = nil }
+            DaemonLogger.shared.debug("Hook", "Evicted stale session \(sid) (no hook in \(Int(Self.pushedSessionStaleTTL))s)")
+        }
+        broadcastSessionsList()
+    }
+
+    /// Apply a per-session state/tool update coming from a hook event and
+    /// broadcast the refreshed sessions list. No-op when the sessionId is
+    /// nil or refers to a session we never registered via `session_start`.
+    @MainActor
+    private func updateSessionHookState(
+        sessionId: String?,
+        state newState: String,
+        currentTool: String? = nil,
+        clearTool: Bool = false
+    ) {
+        guard let sessionId, var entry = pushedSessionsById[sessionId] else { return }
+        entry.state = newState
+        if clearTool {
+            entry.currentTool = nil
+        } else if let currentTool {
+            entry.currentTool = currentTool
+        }
+        pushedSessionsById[sessionId] = entry
+        upsertIntoCachedSessions(entry)
+        broadcastSessionsList()
     }
 
     // MARK: - State Changed (cascade)
@@ -1681,6 +1825,16 @@ final class DaemonServer {
     // MARK: - Polling
 
     private func startAllPolling() {
+        // Stale hook-session eviction — 30s. See `lastHookAtByPushedSession`
+        // and `pushedSessionStaleTTL` for rationale.
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self else { break }
+                await self.evictStaleHookSessions()
+            }
+        }
+
         // Sessions — 10s (also self-heals daemon.json if deleted)
         sessionPollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -2011,8 +2165,21 @@ final class DaemonServer {
         } else {
             DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier3-failed:\(usageAPI.tokenStatus.rawValue)", "Usage Tier 3 failed (token: \(usageAPI.tokenStatus.rawValue))", minInterval: 30)
             oauthConnected = usageAPI.hasOAuthToken()
-            // Don't mark stale here — usageTick's 10-min TTL handles staleness.
-            // A transient API failure with fresh cached data isn't stale.
+            // Don't mark stale here for transient failures — usageTick's
+            // 10-min TTL handles temporary outages. BUT: if the token is
+            // definitively missing or expired (App Store sandbox with no
+            // ~/.claude OAuth access, or post-logout), no fresh fetch will
+            // ever land through this daemon — flag stale immediately so
+            // every downstream surface collapses its usage region instead
+            // of showing cached numbers during the 10-min grace.
+            switch usageAPI.tokenStatus {
+            case .missing, .expired:
+                if !apiUsageStale {
+                    DaemonLogger.shared.debug("Daemon", "Token \(usageAPI.tokenStatus.rawValue) — marking cached usage stale so UI hides instead of showing frozen values")
+                    apiUsageStale = true
+                }
+            default: break
+            }
             broadcastUsage()
         }
     }
@@ -2155,6 +2322,10 @@ final class DaemonServer {
         if let t = stateMachine.toolInput { e["toolInput"] = t }
         if let t = stateMachine.toolProgress { e["toolProgress"] = t }
         if let p = stateMachine.projectName { e["projectName"] = p }
+        // Stamp the event with the session id that most recently produced a
+        // hook so timeline / primary-creature attribution picks the right
+        // session when several are running concurrently.
+        if let sid = currentHookSessionId { e["sessionId"] = sid }
         if let m = stateMachine.modelName { e["modelName"] = m }
         if let ef = stateMachine.effortLevel { e["effortLevel"] = ef }
         e["billingType"] = stateMachine.billingType
@@ -2229,17 +2400,24 @@ final class DaemonServer {
         if let v = stateMachine.resetTime { e["resetTime"] = v }
         if let v = stateMachine.resetDate { e["resetDate"] = v }
 
-        // API usage data — skip adjustUsagePercent when values were synced from relay
+        // API usage data — skip adjustUsagePercent when values were synced from relay.
+        // When the data is stale (no live fetch succeeded recently, e.g. App Store
+        // sandbox with no relay path), emit neither percentages nor reset times so
+        // every downstream surface — macOS dashboard, Stream Deck plugin, Android,
+        // Pixoo, D200H — collapses its usage region instead of rendering a stale
+        // number that looks authoritative. `usageStale` flag is still sent so
+        // callers that want to distinguish "never fetched" from "had data, now
+        // stale" can, but no numbers ride along with it.
         if let u = cachedApiUsage {
             let usageIsStale = apiUsageStale || u.stale
-            if apiUsagePreAdjusted {
-                e["fiveHourPercent"] = u.fiveHourPercent as Any
-                e["sevenDayPercent"] = u.sevenDayPercent as Any
-            } else {
-                e["fiveHourPercent"] = adjustUsagePercent(u.fiveHourPercent, resetsAt: u.fiveHourResetsAt) as Any
-                e["sevenDayPercent"] = adjustUsagePercent(u.sevenDayPercent, resetsAt: u.sevenDayResetsAt) as Any
-            }
             if !usageIsStale {
+                if apiUsagePreAdjusted {
+                    e["fiveHourPercent"] = u.fiveHourPercent as Any
+                    e["sevenDayPercent"] = u.sevenDayPercent as Any
+                } else {
+                    e["fiveHourPercent"] = adjustUsagePercent(u.fiveHourPercent, resetsAt: u.fiveHourResetsAt) as Any
+                    e["sevenDayPercent"] = adjustUsagePercent(u.sevenDayPercent, resetsAt: u.sevenDayResetsAt) as Any
+                }
                 if let v = u.fiveHourResetsAt { e["fiveHourResetsAt"] = v }
                 if let v = u.sevenDayResetsAt { e["sevenDayResetsAt"] = v }
             }

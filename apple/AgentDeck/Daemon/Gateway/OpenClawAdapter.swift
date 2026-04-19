@@ -6,7 +6,6 @@ import Foundation
 import CryptoKit
 import Security
 
-#if AGENTDECK_APP_STORE
 enum OpenClawGatewayTokenStore {
     private static let service = "bound.serendipity.agentdeck.dashboard.openclaw.gateway-token"
     private static let account = "default"
@@ -58,23 +57,10 @@ enum OpenClawGatewayTokenStore {
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
-#endif
 
 /// Connects to OpenClaw Gateway via WebSocket, handles Ed25519 auth handshake,
 /// and relays events to the daemon.
 actor OpenClawAdapter {
-    private struct OpenClawModel: Decodable {
-        let key: String
-        let name: String
-        let available: Bool?
-        let missing: Bool?
-        let tags: [String]?
-    }
-
-    private struct ModelListResult: Decodable {
-        let models: [OpenClawModel]
-    }
-
     private struct DeviceIdentity {
         let deviceId: String
         let publicKeyBase64Url: String
@@ -324,12 +310,7 @@ actor OpenClawAdapter {
         guard !isStopping else { return }
 
         guard !pairingRequired else {
-            #if AGENTDECK_APP_STORE
             return
-            #else
-            scheduleIdentityRecheck()
-            return
-            #endif
         }
 
         // Reconnect with exponential backoff
@@ -339,28 +320,6 @@ actor OpenClawAdapter {
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
             await self?.connect()
-        }
-    }
-
-    private func scheduleIdentityRecheck() {
-        reconnectTask?.cancel()
-        reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(60))
-            guard !Task.isCancelled else { return }
-            await self?.recheckIdentityAndReconnect()
-        }
-    }
-
-    private func recheckIdentityAndReconnect() {
-        loadDeviceIdentity()
-        if deviceIdentity != nil {
-            pairingRequired = false
-            reconnectDelay = 1
-            DaemonLogger.shared.debug("OpenClaw", "Device identity found — resuming connection")
-            connect()
-        } else {
-            DaemonLogger.shared.debug("OpenClaw", "Device still not paired — rechecking in 60s")
-            scheduleIdentityRecheck()
         }
     }
 
@@ -380,113 +339,9 @@ actor OpenClawAdapter {
     }
 
     private func loadDeviceIdentity() {
-        #if AGENTDECK_APP_STORE
         loadAppStoreDeviceIdentity()
-        #else
-        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
-        let identityDir = URL(fileURLWithPath: realHome).appendingPathComponent(".openclaw/identity")
-        let deviceFile = identityDir.appendingPathComponent("device.json")
-        let authFile = identityDir.appendingPathComponent("device-auth.json")
-
-        let data: Data
-        do {
-            data = try Data(contentsOf: deviceFile)
-        } catch {
-            deviceIdentity = nil
-            deviceAuthToken = nil
-            let nsError = error as NSError
-            if AgentDeckRuntime.isSandboxed {
-                DaemonLogger.shared.info("[OpenClaw] Gateway disabled — App Sandbox cannot read \(deviceFile.path).")
-            } else if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError {
-                DaemonLogger.shared.info("[OpenClaw] Not paired — run `openclaw pair` to create \(deviceFile.path), then restart the daemon.")
-            } else {
-                DaemonLogger.shared.debug("OpenClaw", "device.json read failed at \(deviceFile.path): \(error)")
-            }
-            return
-        }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            deviceIdentity = nil
-            deviceAuthToken = nil
-            DaemonLogger.shared.debug("OpenClaw", "device.json parse failed (invalid JSON)")
-            return
-        }
-        let deviceId = json["deviceId"] as? String
-        let publicKeyPem = json["publicKeyPem"] as? String
-        let privateKeyPem = json["privateKeyPem"] as? String
-        guard let deviceId, let publicKeyPem, let privateKeyPem else {
-            var missing: [String] = []
-            if deviceId == nil { missing.append("deviceId") }
-            if publicKeyPem == nil { missing.append("publicKeyPem") }
-            if privateKeyPem == nil { missing.append("privateKeyPem") }
-            deviceIdentity = nil
-            deviceAuthToken = nil
-            DaemonLogger.shared.debug("OpenClaw", "device.json missing keys: \(missing.joined(separator: ",")) — present: \(Array(json.keys))")
-            return
-        }
-
-        // Parse PEM to raw key bytes
-        guard let keyData = pemToRawKey(privateKeyPem) else {
-            deviceIdentity = nil
-            deviceAuthToken = nil
-            DaemonLogger.shared.error("OpenClaw: Failed to parse private key PEM")
-            return
-        }
-
-        do {
-            let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: keyData)
-            guard let publicKey = publicKeyBase64Url(from: publicKeyPem) else {
-                deviceIdentity = nil
-                deviceAuthToken = nil
-                DaemonLogger.shared.error("OpenClaw: Failed to parse public key PEM")
-                return
-            }
-            deviceIdentity = DeviceIdentity(
-                deviceId: deviceId,
-                publicKeyBase64Url: publicKey,
-                privateKey: privateKey
-            )
-        } catch {
-            deviceIdentity = nil
-            deviceAuthToken = nil
-            DaemonLogger.shared.error("OpenClaw: Failed to load private key: \(error)")
-            return
-        }
-
-        if let authData = try? Data(contentsOf: authFile),
-           let authJson = try? JSONSerialization.jsonObject(with: authData) as? [String: Any],
-           let tokens = authJson["tokens"] as? [String: Any],
-           let operatorToken = tokens["operator"] as? [String: Any],
-           let token = operatorToken["token"] as? String,
-           let role = operatorToken["role"] as? String,
-           let scopes = operatorToken["scopes"] as? [String] {
-            deviceAuthToken = DeviceAuthToken(token: token, role: role, scopes: scopes)
-        } else {
-            deviceAuthToken = nil
-        }
-        DaemonLogger.shared.debug("OpenClaw", "Device identity loaded: \(String(deviceId.prefix(16)))...")
-        #endif
     }
 
-    private func pemToRawKey(_ pem: String) -> Data? {
-        let lines = pem.components(separatedBy: "\n")
-            .filter { !$0.hasPrefix("-----") && !$0.isEmpty }
-        let base64 = lines.joined()
-        guard let derData = Data(base64Encoded: base64) else { return nil }
-        // SPKI DER has 12-byte prefix for Ed25519
-        if derData.count == 44 {
-            return derData.suffix(32) // Strip SPKI prefix
-        }
-        if derData.count == 32 {
-            return derData
-        }
-        // PKCS8 has 16-byte prefix
-        if derData.count == 48 {
-            return derData.suffix(32)
-        }
-        return nil
-    }
-
-    #if AGENTDECK_APP_STORE
     private struct StoredAppStoreIdentity: Codable {
         var privateKey: String
         var deviceId: String
@@ -590,7 +445,6 @@ actor OpenClawAdapter {
             kSecAttrAccount as String: appStoreIdentityAccount,
         ]
     }
-    #endif
 
     // MARK: - RPC
 
@@ -676,17 +530,10 @@ actor OpenClawAdapter {
     }
 
     private func sendConnectRequest(nonce: String) {
-        #if AGENTDECK_APP_STORE
         var scopes = deviceAuthToken?.scopes ?? defaultScopes
         if scopes.isEmpty {
             scopes = defaultScopes
         }
-        #else
-        var scopes = deviceAuthToken?.scopes ?? ["operator.admin", "operator.approvals", "operator.read"]
-        if scopes.isEmpty {
-            scopes = ["operator.admin", "operator.approvals", "operator.read"]
-        }
-        #endif
 
         var params: [String: Any] = [
             "minProtocol": protocolVersion,
@@ -706,7 +553,6 @@ actor OpenClawAdapter {
 
         if let device = buildDeviceAuth(nonce: nonce, requestScopes: scopes) {
             params["device"] = device
-            #if AGENTDECK_APP_STORE
             var auth: [String: Any] = [:]
             if let gatewayToken = OpenClawGatewayTokenStore.loadToken(), !gatewayToken.isEmpty {
                 auth["token"] = gatewayToken
@@ -717,11 +563,6 @@ actor OpenClawAdapter {
             if !auth.isEmpty {
                 params["auth"] = auth
             }
-            #else
-            if let authToken = deviceAuthToken?.token, !authToken.isEmpty {
-                params["auth"] = ["token": authToken]
-            }
-            #endif
         }
 
         sendRPC(method: "connect", params: params)
@@ -761,7 +602,6 @@ actor OpenClawAdapter {
         let signedAt = Int(Date().timeIntervalSince1970 * 1000)
         let scopes = requestScopes.joined(separator: ",")
 
-        #if AGENTDECK_APP_STORE
         let token = deviceAuthToken?.token ?? ""
         let payload = [
             "v3",
@@ -776,20 +616,6 @@ actor OpenClawAdapter {
             clientPlatform,
             clientDeviceFamily,
         ].joined(separator: "|")
-        #else
-        guard let deviceAuthToken else { return nil }
-        let payload = [
-            "v2",
-            deviceIdentity.deviceId,
-            clientId,
-            clientMode,
-            deviceAuthToken.role,
-            scopes,
-            String(signedAt),
-            deviceAuthToken.token,
-            nonce,
-        ].joined(separator: "|")
-        #endif
 
         guard let signature = try? deviceIdentity.privateKey.signature(for: Data(payload.utf8)) else {
             DaemonLogger.shared.error("OpenClaw: device auth signing failed")
@@ -803,11 +629,6 @@ actor OpenClawAdapter {
             "signedAt": signedAt,
             "nonce": nonce,
         ]
-    }
-
-    private func publicKeyBase64Url(from pem: String) -> String? {
-        guard let raw = pemToRawKey(pem) else { return nil }
-        return raw.base64URLEncodedString()
     }
 
     private func validateHelloOk(_ payload: [String: Any]?) -> Bool {
@@ -832,7 +653,6 @@ actor OpenClawAdapter {
         let scopes = (auth["scopes"] as? [String]) ?? defaultScopes
         deviceAuthToken = DeviceAuthToken(token: token, role: role, scopes: scopes)
 
-        #if AGENTDECK_APP_STORE
         do {
             guard var stored = try loadStoredAppStoreIdentity() else { return }
             stored.deviceToken = token
@@ -842,7 +662,6 @@ actor OpenClawAdapter {
         } catch {
             DaemonLogger.shared.error("OpenClaw device token persist failed: \(error)")
         }
-        #endif
     }
 
     private func classifyAuthFailure(
@@ -901,7 +720,6 @@ actor OpenClawAdapter {
     }
 
     private func fetchModelCatalog() async -> ([[String: Any]], String?)? {
-        #if AGENTDECK_APP_STORE
         let response = await rpcRequest(method: "models.list", params: [:])
         guard response.ok, let payload = response.payload,
               let models = payload["models"] as? [[String: Any]] else {
@@ -930,59 +748,6 @@ actor OpenClawAdapter {
         let defaultModel = entries.first(where: { ($0["role"] as? String) == "default" })?["name"] as? String
             ?? entries.first(where: { ($0["available"] as? Bool) != false })?["name"] as? String
         return (entries, defaultModel)
-        #else
-        guard let binPath = Self.resolveOpenClawBin() else {
-            DaemonLogger.shared.debug("OpenClaw", "Model catalog skipped: openclaw binary not found")
-            return nil
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binPath)
-        process.arguments = ["models", "list", "--json"]
-        process.environment = Self.openClawEnvironment()
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        do {
-            try process.run()
-        } catch {
-            DaemonLogger.shared.debug("OpenClaw", "Model catalog spawn failed: \(error)")
-            return nil
-        }
-
-        let output = await Task.detached(priority: .utility) {
-            process.waitUntilExit()
-            let out = stdout.fileHandleForReading.readDataToEndOfFile()
-            let err = stderr.fileHandleForReading.readDataToEndOfFile()
-            return (process.terminationStatus, out, err)
-        }.value
-
-        guard output.0 == 0 else {
-            let err = String(data: output.2, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown"
-            DaemonLogger.shared.debug("OpenClaw", "Model catalog command failed: \(err)")
-            return nil
-        }
-
-        do {
-            let decoded = try JSONDecoder().decode(ModelListResult.self, from: output.1)
-            let entries = decoded.models.map { model in
-                [
-                    "key": model.key,
-                    "name": model.name,
-                    "role": Self.parseModelRole(tags: model.tags ?? []),
-                    "available": (model.available ?? true) && !(model.missing ?? false),
-                ] as [String: Any]
-            }
-            let defaultModel = entries.first(where: { ($0["role"] as? String) == "default" })?["name"] as? String
-                ?? entries.first(where: { ($0["available"] as? Bool) != false })?["name"] as? String
-            return (entries, defaultModel)
-        } catch {
-            DaemonLogger.shared.debug("OpenClaw", "Model catalog parse failed: \(error)")
-            return nil
-        }
-        #endif
     }
 
     func fetchHealthHasError() async -> Bool? {
@@ -1007,7 +772,6 @@ actor OpenClawAdapter {
     }
 
     private func requestInitialLogTail() async {
-        #if AGENTDECK_APP_STORE
         let response = await rpcRequest(method: "logs.tail", params: ["limit": 80, "maxBytes": 64_000])
         guard response.ok,
               let payload = response.payload,
@@ -1018,7 +782,6 @@ actor OpenClawAdapter {
                   let entry = BridgeLogStream.parseLogLine(json) else { continue }
             emitTimelineEntry(entry)
         }
-        #endif
     }
 
     private func emitTimelineEntry(fromSessionMessage payload: [String: Any]) {
@@ -1093,55 +856,6 @@ actor OpenClawAdapter {
             }
         }
         return "configured"
-    }
-
-    private static func resolveOpenClawBin() -> String? {
-        #if AGENTDECK_APP_STORE
-        // App Store build: no external-binary discovery or subprocess spawn
-        // (Apple 2.5.2). Caller handles nil by disabling the OpenClaw path.
-        return nil
-        #else
-        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
-        let candidates = [
-            "\(realHome)/Library/pnpm/openclaw",
-            "\(realHome)/.local/bin/openclaw",
-            "\(realHome)/bin/openclaw",
-            "/opt/homebrew/bin/openclaw",
-            "/usr/local/bin/openclaw",
-        ]
-        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
-            return path
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["which", "openclaw"]
-        process.environment = openClawEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
-        let result = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return result?.isEmpty == false ? result : nil
-        #endif
-    }
-
-    private static func openClawEnvironment() -> [String: String] {
-        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
-        var env = ProcessInfo.processInfo.environment
-        env["HOME"] = realHome
-        env["PATH"] = [
-            "\(realHome)/Library/pnpm",
-            "\(realHome)/.local/bin",
-            "\(realHome)/bin",
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-        ].joined(separator: ":")
-        return env
     }
 }
 

@@ -29,13 +29,20 @@ final class StateTimelineGenerator {
         agentType: String?,
         currentTool: String?,
         toolInput: String?,
-        question: String?
+        question: String?,
+        projectName: String? = nil,
+        sessionId: String? = nil
     ) {
         if receivingBridgeTimeline { return }
 
         let now = Date().timeIntervalSince1970 * 1000 // ms
         if let at = agentType { lastAgentType = at }
         let agent = lastAgentType
+        // projectName / sessionId are attribution fields — always forwarded
+        // from the state_update event. Nil is legitimate (single-session
+        // CLI mode, gateway-only mode, etc.) and rendered without a prefix.
+        let proj = projectName
+        let sid = sessionId
 
         // State transitions
         switch (previousState, newState) {
@@ -54,16 +61,16 @@ final class StateTimelineGenerator {
                 raw = "Prompt sent"
                 detail = nil
             }
-            store.addEntry(TimelineEntry(ts: now, type: .chatStart, raw: raw, detail: detail, agentType: agent))
+            store.addEntry(TimelineEntry(ts: now, type: .chatStart, raw: raw, detail: detail, agentType: agent, projectName: proj, sessionId: sid))
 
         case (_, .awaitingPermission) where previousState != .awaitingPermission:
             let q = question ?? "Permission requested"
-            store.addEntry(TimelineEntry(ts: now, type: .toolRequest, raw: q, agentType: agent))
+            store.addEntry(TimelineEntry(ts: now, type: .toolRequest, raw: q, agentType: agent, projectName: proj, sessionId: sid))
 
         case (.awaitingPermission, .processing),
              (.awaitingOption, .processing),
              (.awaitingDiff, .processing):
-            store.addEntry(TimelineEntry(ts: now, type: .chatStart, raw: "Resumed", agentType: agent))
+            store.addEntry(TimelineEntry(ts: now, type: .chatStart, raw: "Resumed", agentType: agent, projectName: proj, sessionId: sid))
 
         case (.processing, .idle):
             // Chat completed
@@ -81,10 +88,10 @@ final class StateTimelineGenerator {
                 "Prompt: \(p.count > 200 ? String(p.prefix(200)) + "..." : p)"
             }
             chatStartTime = nil
-            store.addEntry(TimelineEntry(ts: now, type: .chatEnd, raw: summary, detail: detail, agentType: agent))
+            store.addEntry(TimelineEntry(ts: now, type: .chatEnd, raw: summary, detail: detail, agentType: agent, projectName: proj, sessionId: sid))
 
         case (.disconnected, _) where newState != .disconnected:
-            store.addEntry(TimelineEntry(ts: now, type: .chatStart, raw: "Connected", agentType: agent))
+            store.addEntry(TimelineEntry(ts: now, type: .chatStart, raw: "Connected", agentType: agent, projectName: proj, sessionId: sid))
 
         default:
             break
@@ -95,7 +102,7 @@ final class StateTimelineGenerator {
             let timeSinceLast = now - lastToolTime
             if tool != lastToolName || timeSinceLast > Self.toolDedupMs * 1000 {
                 let summary = formatToolSummary(tool, toolInput)
-                store.addEntry(TimelineEntry(ts: now, type: .toolRequest, raw: summary, agentType: agent))
+                store.addEntry(TimelineEntry(ts: now, type: .toolRequest, raw: summary, agentType: agent, projectName: proj, sessionId: sid))
                 lastToolName = tool
                 lastToolTime = now
             }

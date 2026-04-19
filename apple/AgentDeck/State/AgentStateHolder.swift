@@ -655,7 +655,9 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             agentType: e.agentType,
             currentTool: e.currentTool,
             toolInput: e.toolInput,
-            question: e.question
+            question: e.question,
+            projectName: e.projectName,
+            sessionId: e.sessionId
         )
         timelineVersion += 1
 
@@ -690,16 +692,20 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         // Save previous values for trend indicators before overwriting
         if e.fiveHourPercent != nil { state.previousFiveHourPercent = state.fiveHourPercent }
         if e.sevenDayPercent != nil { state.previousSevenDayPercent = state.sevenDayPercent }
-        state.fiveHourPercent = e.fiveHourPercent ?? state.fiveHourPercent
+        // When upstream signals stale (no live source could produce a fresh
+        // number) clear the displayed values entirely instead of retaining
+        // the last-seen ones — a stale number in the UI is the worst of both
+        // worlds (looks authoritative, but isn't). Downstream surfaces then
+        // naturally collapse their usage regions on nil.
         if e.usageStale == true {
-            state.fiveHourResetsAt = e.fiveHourResetsAt
+            state.fiveHourPercent = nil
+            state.sevenDayPercent = nil
+            state.fiveHourResetsAt = nil
+            state.sevenDayResetsAt = nil
         } else {
+            state.fiveHourPercent = e.fiveHourPercent ?? state.fiveHourPercent
+            state.sevenDayPercent = e.sevenDayPercent ?? state.sevenDayPercent
             state.fiveHourResetsAt = e.fiveHourResetsAt ?? state.fiveHourResetsAt
-        }
-        state.sevenDayPercent = e.sevenDayPercent ?? state.sevenDayPercent
-        if e.usageStale == true {
-            state.sevenDayResetsAt = e.sevenDayResetsAt
-        } else {
             state.sevenDayResetsAt = e.sevenDayResetsAt ?? state.sevenDayResetsAt
         }
         state.extraUsageEnabled = e.extraUsageEnabled ?? state.extraUsageEnabled
