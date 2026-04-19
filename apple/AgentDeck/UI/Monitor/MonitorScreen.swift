@@ -6,6 +6,7 @@ struct MonitorScreen: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @EnvironmentObject private var preferences: AppPreferences
     #if os(macOS)
+    @EnvironmentObject private var daemonService: DaemonService
     @Environment(\.openWindow) private var openWindow
     #endif
 
@@ -159,7 +160,14 @@ struct MonitorScreen: View {
     @ViewBuilder
     private func setupNeededLayer(geo: GeometryProxy) -> some View {
         if stateHolder.state.bridgeConnected {
+            #if os(macOS)
+            let items = stateHolder.setupNeededItems(
+                preferences: preferences,
+                daemonService: daemonService
+            )
+            #else
             let items = stateHolder.setupNeededItems(preferences: preferences)
+            #endif
             if !items.isEmpty {
                 VStack {
                     Spacer()

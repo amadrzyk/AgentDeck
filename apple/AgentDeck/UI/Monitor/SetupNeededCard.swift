@@ -144,20 +144,54 @@ extension AgentStateHolder {
     /// Kept as a plain function so both Monitor and Menubar can call into
     /// the same decision tree if we ever want the menubar to mirror the
     /// card — right now only MonitorScreen consumes it.
-    func setupNeededItems(preferences: AppPreferences) -> [SetupItem] {
+    ///
+    /// Platform split:
+    /// - macOS accepts `DaemonService` so the Claude-quota branch can
+    ///   distinguish "CLI not installed" / "CLI installed but this Mac
+    ///   app is still the daemon" / "external CLI daemon but quota still
+    ///   missing" — each needs different instructions.
+    /// - iOS has no `DaemonService` (daemon concept is macOS-only). The
+    ///   iOS variant falls back to a simpler message pointing users at
+    ///   their Mac, since iPad/iPhone can't install or manage the CLI.
+    #if os(macOS)
+    /// `@MainActor` because `DaemonService` is itself `@MainActor` —
+    /// reaching its `isSelfDaemon` / `cliInstalled` properties from a
+    /// nonisolated context fails the Swift 6 actor-isolation check. The
+    /// caller (MonitorScreen body) is already on MainActor, so this
+    /// annotation is a no-op at call sites.
+    @MainActor
+    func setupNeededItems(
+        preferences: AppPreferences,
+        daemonService: DaemonService
+    ) -> [SetupItem] {
         var items: [SetupItem] = []
 
-        // 1) Claude quota — App Store sandbox can never reach Claude Code's
-        //    OAuth token directly. The CLI daemon (non-sandboxed Node) can,
-        //    but only if it's bound to port 9120 before the Mac app — which
-        //    requires `agentdeck daemon install` (LaunchAgent), not just
-        //    installing the CLI package. We surface both steps so users
-        //    don't stop after `npx @agentdeck/setup` and wonder why
-        //    nothing populates.
+        // 1) Claude quota — four distinct states, each with its own copy.
+        //    (a) Non-sandbox build: user just needs to sign in via `claude`.
+        //    (b) Sandbox + no CLI: install the CLI + LaunchAgent together.
+        //    (c) Sandbox + CLI installed + Mac app is the daemon: user did
+        //        `npx @agentdeck/setup` but skipped `agentdeck daemon install`,
+        //        so the sandboxed Swift daemon still owns 9120 and can't
+        //        reach the Claude keychain. Tell them precisely what's
+        //        missing — otherwise they re-read "install CLI" and think
+        //        they already did that.
+        //    (d) Sandbox + external CLI daemon, quota still missing: the
+        //        CLI daemon couldn't read the keychain itself (Claude Code
+        //        never signed in on this machine, or token expired). Point
+        //        at `claude` login instead of the daemon setup.
         if (state.oauthConnected ?? false) == false {
-            let hint = AgentDeckRuntime.isSandboxed
-                ? "App Store sandbox can't read Claude's OAuth token. Install AgentDeck CLI and run `agentdeck daemon install` so the CLI daemon handles quota lookups."
-                : "Sign in with `claude` in Terminal to populate 5h / 7d quota gauges."
+            let hint: String
+            if !AgentDeckRuntime.isSandboxed {
+                hint = "Sign in with `claude` in Terminal to populate 5h / 7d quota gauges."
+            } else if daemonService.isSelfDaemon {
+                if daemonService.cliInstalled {
+                    hint = "CLI is installed but this Mac app is still the daemon. Quit AgentDeck, run `agentdeck daemon install` once, then relaunch — the CLI daemon will take over quota lookups."
+                } else {
+                    hint = "App Store sandbox can't read Claude's OAuth token. Install AgentDeck CLI and run `agentdeck daemon install` so the CLI daemon handles quota lookups."
+                }
+            } else {
+                hint = "CLI daemon is running but Claude quota is still unavailable. Run `claude` once in Terminal (or `claude setup-token`) so Claude Code has a valid session."
+            }
             items.append(SetupItem(
                 id: "claude",
                 icon: "bolt.badge.clock",
@@ -215,6 +249,37 @@ extension AgentStateHolder {
 
         return items
     }
+    #else
+    /// iOS variant — no daemon/CLI concept, and hooks/OpenClaw tokens
+    /// are Mac-side affairs. We still surface the fact that quota
+    /// isn't populating, but the instruction sends the user back to
+    /// their Mac rather than asking them to install a CLI on iPad.
+    func setupNeededItems(preferences: AppPreferences) -> [SetupItem] {
+        var items: [SetupItem] = []
+
+        if (state.oauthConnected ?? false) == false {
+            items.append(SetupItem(
+                id: "claude",
+                icon: "bolt.badge.clock",
+                tint: .orange,
+                title: "Claude quota unavailable",
+                hint: "Configure this on your Mac — AgentDeck Settings → Integrations guides you through enabling quota lookups on the daemon."
+            ))
+        }
+
+        if state.gatewayAvailable && !state.gatewayConnected {
+            items.append(SetupItem(
+                id: "openclaw",
+                icon: "lock.shield",
+                tint: .red,
+                title: "OpenClaw not authenticated",
+                hint: "Paste the OPENCLAW_GATEWAY_TOKEN on your Mac. Changes flow here automatically."
+            ))
+        }
+
+        return items
+    }
+    #endif
 }
 
 // MARK: - Preview helpers

@@ -37,6 +37,45 @@ import IOKit
 final class DaemonService: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isUsingExternalDaemon = false
+
+    /// `true` when the in-process Swift daemon is the one bound to port
+    /// 9120 (not the CLI's Node daemon). Matters for Setup Card
+    /// messaging — "install CLI" advice is only useful when this Mac
+    /// app is the active daemon; if an external (CLI) daemon is
+    /// already running the quota still missing means the CLI-side
+    /// keychain read failed, which is a different problem.
+    var isSelfDaemon: Bool { isRunning && !isUsingExternalDaemon }
+
+    /// Existence check for the `agentdeck` CLI binary across common
+    /// install locations. Sandbox allows path-existence queries on
+    /// `/usr/local/bin` and `/opt/homebrew/bin` (metadata access, not
+    /// file reads). Home-relative `.npm-global/bin` uses the real
+    /// home directory via `getpwuid_r` so the sandbox container
+    /// redirect doesn't make us miss it. Computed lazily per call —
+    /// cheap enough at the Setup-card refresh cadence.
+    var cliInstalled: Bool {
+        for path in Self.cliBinaryPaths where FileManager.default.fileExists(atPath: path) {
+            return true
+        }
+        return false
+    }
+
+    /// Ordered search paths for the `agentdeck` binary. Same list as
+    /// the hook-snippet shell discovery keeps in `@agentdeck/hooks`,
+    /// minus the env-var override (that only applies at hook runtime).
+    private static let cliBinaryPaths: [String] = {
+        var paths = ["/usr/local/bin/agentdeck", "/opt/homebrew/bin/agentdeck"]
+        // Real home (not sandbox container) for `~/.npm-global/bin/agentdeck`.
+        var pwd = passwd()
+        var result: UnsafeMutablePointer<passwd>?
+        var buffer = [CChar](repeating: 0, count: 16 * 1024)
+        let rc = getpwuid_r(getuid(), &pwd, &buffer, buffer.count, &result)
+        if rc == 0, result != nil {
+            let home = String(cString: pwd.pw_dir)
+            paths.append("\(home)/.npm-global/bin/agentdeck")
+        }
+        return paths
+    }()
     @Published private(set) var ownsExternalDaemon = false
     @Published private(set) var port: UInt16 = 0
     @Published private(set) var connectedClients = 0
