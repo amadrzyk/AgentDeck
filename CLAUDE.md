@@ -7,7 +7,7 @@ Stream Deck+ controller for Claude Code CLI — a bidirectional local control sy
 - **bridge/** — Node.js server: Daemon hub + Session Bridge (PTY, hook HTTP, state machine). `src/apme/` — APME eval module (SQLite store, collector, deterministic+LLM judge runner, category-aware rubrics, turn-level mid-session eval, rubric auto-tuner, recommender, daemon HTTP API). See [docs/apme.md](docs/apme.md)
 - **plugin/** — Stream Deck SDK v2 plugin
 - **shared/** — TypeScript types/utils shared between bridge & plugin (protocol, states, timeline, adapter interfaces, session-utils)
-- **hooks/** — Claude Code hook installer for `~/.claude/settings.local.json`
+- **hooks/** — Claude Code hook installer for `~/.claude/settings.json` (user-global, watched by CC 2.1+)
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package (`npx @agentdeck/setup`)
 - **android/** — Jetpack Compose launcher app (CremaS, Onyx, Kobo, tablets)
