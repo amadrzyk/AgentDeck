@@ -26,7 +26,7 @@ private let ICON_SIZE = 196
 
 private let POLL_INTERVAL: UInt64 = 500_000_000   // 500ms device detection
 private let KEEPALIVE_INTERVAL: TimeInterval = 15  // 15s keep-alive (D200H reverts to default after ~30s)
-private let D200H_RENDERER_REV = "stock-safe-v19"
+private let D200H_RENDERER_REV = "stock-safe-v20"
 
 // HID Commands
 private let CMD_SET_BUTTONS: UInt16    = 0x0001
@@ -478,19 +478,15 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         lastStateHash = ""
         updateDisplay()
 
-        // Override the Ulanzi stock firmware's built-in clock widget that otherwise
-        // permanently sits in the bottom-right corner of the merged usage slot
-        // (col3+col4 row2). SET_BUTTONS does not reach that layer — only
-        // SET_SMALL_WINDOW does — so without this call the user sees our usage
-        // button *and* the stock clock simultaneously bleeding through. An older
-        // design treated the overlay as harmful and suppressed this call, but in
-        // the current slot-13-as-usage layout the stock clock is strictly worse
-        // than our own text.
-        sendKeepAlive()
-
-        // Start heartbeat — periodic full re-render + small-window refresh to
-        // prevent the D200H firmware from reverting (~30s timeout) back to its
-        // stock UI, which includes the bottom-right clock.
+        // Note: an earlier iteration called sendKeepAlive() here to try to
+        // overwrite the stock firmware's small-window layer with our own
+        // usage text. In practice D200H renders the manifest `3_2` icon AND
+        // the small-window layer on the same coordinates, so pushing a
+        // second SET_SMALL_WINDOW on top produced the "two overlapping
+        // readouts" symptom. Suppressing the small-window layer is handled
+        // purely through the manifest (`clearAction: true` on the `3_2`
+        // entry) — see DEVELOPMENT_LOG 2026-04-12 "usage manifest empty
+        // action clears clock widget overlay".
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -498,7 +494,6 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
                 guard let self, self.connected, self.managerOpened else { continue }
                 self.lastStateHash = ""  // force re-render
                 self.updateDisplay()
-                self.sendKeepAlive()
             }
         }
     }
@@ -934,22 +929,19 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         }
     }
 
-    // MARK: - Keep-alive
-
-    private func sendKeepAlive() {
-        guard connected, managerOpened else { return }
-        // Keep-alive via small window update
-        let pct5h = cachedUsageEvent?["fiveHourPercent"] as? Double ?? cachedStateEvent?["fiveHourPercent"] as? Double ?? 0
-        let pct7d = cachedUsageEvent?["sevenDayPercent"] as? Double ?? cachedStateEvent?["sevenDayPercent"] as? Double ?? 0
-        let sessions = cachedSessionsList.count
-        let text: String
-        if pct5h >= 90 { text = "⚡ 5h:\(Int(pct5h))%" }
-        else if pct5h > 0 { text = "5h:\(Int(pct5h))% 7d:\(Int(pct7d))%" }
-        else { text = "\(sessions) agents" }
-        writePacket(buildSmallWindowPacket(mode: 1, cpu: 0, mem: 0, time: text, gpu: 0))
-    }
-
     // MARK: - HID Write
+
+    // NOTE: sendKeepAlive() used to live here and push CMD_SET_SMALL_WINDOW
+    // every 15 seconds. It was deleted on 2026-04-19 because the D200H firmware
+    // does NOT use SMALL_WINDOW as a "redraw the bottom-right area" primitive
+    // — it composites a separate clock-widget layer on top of the manifest
+    // icon at the same coordinates. Writing anything via SET_SMALL_WINDOW adds
+    // an extra overlapping readout rather than replacing the clock.
+    // See DEVELOPMENT_LOG 2026-04-19 "D200H clock overlay — reproduced and
+    // permanently suppressed". Do not reintroduce this function; stock-clock
+    // suppression is handled entirely by the manifest `3_2` Action="" escape
+    // hatch in `manifestEntry` / `renderFullZip`.
+
 
     private func writePacket(_ data: Data) {
         guard let device = consumerDevice else { return }
@@ -1170,6 +1162,18 @@ private func buildLabelStylePacket(showTitle: Bool) -> Data {
     return buildPacket(command: CMD_SET_LABEL_STYLE, payload: json)
 }
 
+/// TRAP: do NOT call from the steady-state rendering path.
+///
+/// D200H firmware composites the SMALL_WINDOW layer **on top of** the
+/// manifest icon at the same slot-13 coordinates, so sending a packet here
+/// produces "two overlapping readouts" rather than replacing the stock
+/// clock. Stock-clock suppression is achieved by setting the manifest
+/// `3_2` entry's `Action` to `""` (see `manifestEntry(clearAction:)`), not
+/// by writing content through this layer.
+///
+/// This function is retained only for protocol documentation and ad-hoc
+/// reverse-engineering experiments. If you reach for it in production code,
+/// read DEVELOPMENT_LOG 2026-04-19 first.
 private func buildSmallWindowPacket(mode: Int, cpu: Int, mem: Int, time: String, gpu: Int) -> Data {
     let str = "\(mode)|\(cpu)|\(mem)|\(time)|\(gpu)"
     return buildPacket(command: CMD_SET_SMALL_WINDOW, payload: Data(str.utf8))
@@ -1690,13 +1694,24 @@ private enum D200hRenderer {
             )
             files.append((iconPath, png))
         } else {
+            // Option-select mode: slot 13 is the BACK affordance, rendered as a
+            // wide 392x196 tile. The back navigation is handled locally in
+            // `resolveButtonCommand` via the Keyboard HID input report, so the
+            // manifest `Action` field is only used by the stock firmware to
+            // route taps — and any non-stock value there makes the firmware
+            // fall back to rendering its stock smallwindow clock layer on the
+            // same coordinates, producing the overlapping-clock symptom. Use
+            // `clearAction: true` (Action="") which is the documented escape
+            // hatch (DEVELOPMENT_LOG 2026-04-12 "usage manifest empty action
+            // clears clock widget overlay") and matches what the session-list
+            // branch above already does.
             let mergedSlot = slots[13]
             let png = renderWideButton(left: mergedSlot, right: mergedSlot)
             let iconPath = iconFilePath(slotId: 13, suffix: "wide", data: png)
             manifest["3_2"] = manifestEntry(
                 text: manifestText(for: mergedSlot, optionMode: optionMode, slotId: 13),
                 iconPath: iconPath,
-                actionPath: "agentdeck://back"
+                clearAction: true
             )
             files.append((iconPath, png))
         }
@@ -1724,7 +1739,7 @@ private enum D200hRenderer {
                 manifest["3_2"] = manifestEntry(
                     text: manifestText(for: mergedSlot, optionMode: optionMode, slotId: 13),
                     iconPath: iconPath,
-                    actionPath: "agentdeck://back"
+                    clearAction: true
                 )
                 files.append((iconPath, png))
                 continue
@@ -1960,6 +1975,17 @@ private enum D200hRenderer {
         return ""
     }
 
+    /// Builds a stock-firmware manifest entry.
+    ///
+    /// CRITICAL INVARIANT for the merged usage slot `3_2`: always pass
+    /// `clearAction: true`. Any other value (including `actionPath: nil`
+    /// which produces an entry with no Action field at all, and any custom
+    /// `agentdeck://...` URI) causes the D200H firmware to fall back to
+    /// rendering its stock smallwindow clock widget on the same
+    /// coordinates as our usage icon, producing the "overlapping clock"
+    /// regression that keeps resurfacing whenever this code is touched.
+    /// The empty-string `Action=""` is the only reliably tested escape
+    /// hatch (DEVELOPMENT_LOG 2026-04-12 and 2026-04-19).
     private static func manifestEntry(
         text: String, iconPath: String, actionPath: String? = nil, clearAction: Bool = false
     ) -> [String: Any] {
