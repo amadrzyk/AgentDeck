@@ -120,12 +120,15 @@ extension AgentStateHolder {
         var items: [SetupItem] = []
 
         // 1) Claude quota — App Store sandbox can never reach Claude Code's
-        //    OAuth token, so the card frames this as "install the CLI" rather
-        //    than giving a false impression that signing in inside the app
-        //    will fix it.
+        //    OAuth token directly. The CLI daemon (non-sandboxed Node) can,
+        //    but only if it's bound to port 9120 before the Mac app — which
+        //    requires `agentdeck daemon install` (LaunchAgent), not just
+        //    installing the CLI package. We surface both steps so users
+        //    don't stop after `npx @agentdeck/setup` and wonder why
+        //    nothing populates.
         if (state.oauthConnected ?? false) == false {
             let hint = AgentDeckRuntime.isSandboxed
-                ? "App Store build can't read Claude's OAuth token. Install the AgentDeck CLI to track quota here."
+                ? "App Store sandbox can't read Claude's OAuth token. Install AgentDeck CLI and run `agentdeck daemon install` so the CLI daemon handles quota lookups."
                 : "Sign in with `claude` in Terminal to populate 5h / 7d quota gauges."
             items.append(SetupItem(
                 id: "claude",

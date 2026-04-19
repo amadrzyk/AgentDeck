@@ -389,7 +389,7 @@ struct ControlTowerPanel: View {
     /// line so the menubar popover doesn't grow.
     private var rateLimitsEmptyMessage: String {
         if AgentDeckRuntime.isSandboxed && (stateHolder.state.oauthConnected ?? false) == false {
-            return "Claude quota unavailable — App Store sandbox can't read Claude's OAuth token. Install the AgentDeck CLI (`npx @agentdeck/setup`) to track usage here."
+            return "Claude quota unavailable — App Store sandbox can't read Claude's OAuth token. Install the AgentDeck CLI (`npx @agentdeck/setup`) and run `agentdeck daemon install` so the CLI daemon owns quota lookups."
         }
         if (stateHolder.state.oauthConnected ?? false) == false {
             return "Claude Code isn't signed in. Run `claude` once in Terminal, then the quota gauges will populate here."
