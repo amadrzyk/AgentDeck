@@ -113,6 +113,9 @@ struct DashboardState: Sendable {
     var gatewayAuthStatus: String?
     var gatewayAuthRequestId: String?
     var gatewayAuthMessage: String?
+    /// Locally-generated Gateway identity (Ed25519 public-key SHA-256 hex).
+    /// Surfaced in pairing hints when auth is blocked on signature failure.
+    var gatewayDeviceId: String?
     var daemonPort: Int?
 
     // Usage

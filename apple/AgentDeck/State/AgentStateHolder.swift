@@ -642,6 +642,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
             state.gatewayAuthRequestId = e.gatewayAuthRequestId
             state.gatewayAuthMessage = e.gatewayAuthMessage
         }
+        state.gatewayDeviceId = e.gatewayDeviceId ?? state.gatewayDeviceId
         state.daemonPort = e.daemonPort ?? state.daemonPort
         state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog
         state.voiceAssistantState = e.voiceAssistantState ?? state.voiceAssistantState

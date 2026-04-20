@@ -375,7 +375,7 @@ struct StateUpdateEvent: Codable, Sendable {
         case suggestedPrompt, modelCatalog, sessionStatus, remoteUrl, pairingUrl
         case workerSessionCount, ollamaStatus, mlxModels, subscriptions
         case antigravityStatus, gatewayAvailable, gatewayConnected, gatewayHasError
-        case gatewayAuthStatus, gatewayAuthRequestId, gatewayAuthMessage
+        case gatewayAuthStatus, gatewayAuthRequestId, gatewayAuthMessage, gatewayDeviceId
         case daemonPort, mlxModelCatalog
         case voiceAssistantState, voiceAssistantText, voiceAssistantResponseText
     }
@@ -412,6 +412,7 @@ struct StateUpdateEvent: Codable, Sendable {
     var gatewayAuthStatus: String?
     var gatewayAuthRequestId: String?
     var gatewayAuthMessage: String?
+    var gatewayDeviceId: String?
     var daemonPort: Int?
     var mlxModelCatalog: [String]?
     var voiceAssistantState: String?  // idle | listening | processing | speaking | disabled

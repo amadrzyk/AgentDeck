@@ -29,6 +29,10 @@ import SwiftUI
 
 struct TopologyRail: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
+    #if os(macOS)
+    @EnvironmentObject private var daemonService: DaemonService
+    @EnvironmentObject private var preferences: AppPreferences
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -153,9 +157,22 @@ struct TopologyRail: View {
     }
 
     private var claudeRow: some View {
+        // Claude is reachable when EITHER the hook relay is wired up OR the
+        // OAuth token is readable. In App Store mode the sandbox blocks
+        // `~/.claude/` OAuth reads, so hooks are the primary signal — gating
+        // the LED on oauthConnected alone made hook-only users see a warn
+        // LED + "Not connected" subtitle even while Claude sessions were
+        // flowing through the dashboard.
+        #if os(macOS)
+        let hooksOn = preferences.hooksInstalled
+        #else
+        let hooksOn = false
+        #endif
+        let oauthOn = stateHolder.state.oauthConnected == true
+        let oauthKnownDown = stateHolder.state.oauthConnected == false
         let status: LEDStatus = {
-            if stateHolder.state.oauthConnected == true { return .ok }
-            if stateHolder.state.oauthConnected == false { return .warn }
+            if hooksOn || oauthOn { return .ok }
+            if oauthKnownDown { return .warn }
             return .dim
         }()
         // Only read `modelCatalog` here when the primary session is a
@@ -171,7 +188,8 @@ struct TopologyRail: View {
             if !claudeModels.isEmpty {
                 return claudeModels.joined(separator: ", ")
             }
-            if stateHolder.state.oauthConnected == false { return "Not connected" }
+            if hooksOn { return oauthOn ? nil : "Hooks on" }
+            if oauthKnownDown { return "Not connected" }
             return nil
         }()
         return ProviderRow(
@@ -546,6 +564,20 @@ struct TopologyRail: View {
     /// "don't trust this yet" or it shows fresh data with a real reset
     /// timer — no silent middle state.
     private var rateLimitChips: [RateChip] {
+        // Progressive enhancement gate: Claude subscription quota gauges
+        // depend on OAuth token / sibling relay data the sandboxed App
+        // Store build can't produce on its own. When no external Node
+        // daemon is relaying usage (`isUsingExternalDaemon == false`) and
+        // there's genuinely no cached percent to show, yield no chips so
+        // the Claude row collapses cleanly instead of reserving empty
+        // space. Stale-cache fallback (`usagePct != nil`) keeps the chip
+        // alive across brief daemon restarts — otherwise hiding would
+        // flicker every time the external daemon blipped.
+        #if os(macOS)
+        let hasPercent = stateHolder.state.fiveHourPercent != nil
+            || stateHolder.state.sevenDayPercent != nil
+        guard daemonService.isUsingExternalDaemon || hasPercent else { return [] }
+        #endif
         var chips: [RateChip] = []
         let isStale = stateHolder.state.usageStale == true
         if let pct = stateHolder.state.fiveHourPercent {
@@ -733,8 +765,12 @@ private struct ProviderRow: View {
                 Text(subtitle)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(TerrariumHUD.subtext)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    // Wrap instead of truncating: MLX with two models + OpenClaw
+                    // pairing hints with deviceId previously got "…"-clipped.
+                    // `fixedSize(horizontal:false, vertical:true)` lets the Text
+                    // grow vertically inside the available row width.
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 14)
             }
             if !rateLimits.isEmpty {

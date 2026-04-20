@@ -75,10 +75,12 @@ actor OpenClawAdapter {
 
     private var wsTask: URLSessionWebSocketTask?
     private var reconnectTask: Task<Void, Never>?
+    private var sessionsPollTask: Task<Void, Never>?
     private let gatewayUrl: String
     private var isConnected = false
     private var isStopping = false
     private var pairingRequired = false
+    private var sessionsSubscribed = false
     private var reconnectDelay: TimeInterval = 1
     private let maxReconnectDelay: TimeInterval = 30
     private let protocolVersion = 3
@@ -114,6 +116,13 @@ actor OpenClawAdapter {
 
     var isConnectedSnapshot: Bool { isConnected }
 
+    /// Snapshot of the locally-generated Ed25519 public-key SHA-256 hex that
+    /// identifies this Mac to the Gateway's pairing flow. Dashboard surfaces
+    /// the first few hex chars when auth is stuck on "device signature
+    /// invalid" so the user knows which deviceId to approve in the OpenClaw
+    /// Web UI. Returns nil when the identity has not been loaded yet.
+    func currentDeviceId() -> String? { deviceIdentity?.deviceId }
+
     init(gatewayUrl: String = "ws://127.0.0.1:18789") {
         self.gatewayUrl = gatewayUrl
     }
@@ -129,10 +138,13 @@ actor OpenClawAdapter {
         isStopping = true
         reconnectTask?.cancel()
         reconnectTask = nil
+        sessionsPollTask?.cancel()
+        sessionsPollTask = nil
         wsTask?.cancel(with: .goingAway, reason: nil)
         wsTask = nil
         let wasConnected = isConnected
         isConnected = false
+        sessionsSubscribed = false
         if wasConnected {
             self._onConnectionChanged?(false)
         }
@@ -261,11 +273,21 @@ actor OpenClawAdapter {
                 DaemonLogger.shared.error("OpenClaw handshake failed: \(json["error"] ?? "unknown" as Any)")
 
                 let authStatus = classifyAuthFailure(errorCode: errorCode, error: errorInfo)
-                pairingRequired = true
+                // Block reconnect only for states that require action in the Gateway Web UI.
+                // Token config errors (missing/mismatch) are fixable from Settings — let the
+                // adapter keep reconnecting so saving the token takes effect automatically.
+                let requiresWebUIAction = ["pairing_required", "device_auth_invalid",
+                                           "approval_pending", "unsupported_protocol"]
+                    .contains(authStatus.status)
+                if requiresWebUIAction {
+                    pairingRequired = true
+                }
                 emitAuthStatus(authStatus.status, requestId: authStatus.requestId, message: authStatus.message)
-                DaemonLogger.shared.error("OpenClaw: auth blocked reconnect — \(authStatus.status)")
+                DaemonLogger.shared.error("OpenClaw: auth status \(authStatus.status) — reconnect \(requiresWebUIAction ? "blocked" : "allowed")")
                 wsTask?.cancel(with: .goingAway, reason: nil)
                 wsTask = nil
+            } else {
+                DaemonLogger.shared.error("OpenClaw RPC '\(method ?? "?")' failed: \(errorInfo?["code"] as? String ?? errorInfo?["message"] as? String ?? "unknown")")
             }
             return
         }
@@ -285,6 +307,16 @@ actor OpenClawAdapter {
             requestBaselineState()
             requestSessionsList()
             Task { await self.emitModelCatalog() }
+        case "sessions.subscribe":
+            let subscribed = payload?["subscribed"] as? Bool ?? false
+            sessionsSubscribed = subscribed
+            DaemonLogger.shared.debug("OpenClaw", "sessions.subscribe: subscribed=\(subscribed)")
+            if !subscribed {
+                // Gateway didn't acknowledge subscription — fall back to periodic polling
+                // so session changes are still detected (e.g., shared-token mode without
+                // device auth may limit subscription access).
+                startSessionsPolling()
+            }
         case "sessions.list":
             if let payload {
                 applySessionsPayload(payload)
@@ -302,6 +334,9 @@ actor OpenClawAdapter {
         let wasConnected = isConnected
         isConnected = false
         wsTask = nil
+        sessionsSubscribed = false
+        sessionsPollTask?.cancel()
+        sessionsPollTask = nil
 
         if wasConnected {
             self._onConnectionChanged?(false)
@@ -551,18 +586,31 @@ actor OpenClawAdapter {
             "caps": ["tool-events"],
         ]
 
-        if let device = buildDeviceAuth(nonce: nonce, requestScopes: scopes) {
+        let sharedToken = OpenClawGatewayTokenStore.loadToken()
+        let hasSharedToken = sharedToken.map { !$0.isEmpty } ?? false
+        let hasDeviceToken = deviceAuthToken.map { !$0.token.isEmpty } ?? false
+
+        // Send device auth only when:
+        //  a) we already have a device-specific token from a previous pairing, OR
+        //  b) no shared token is configured — Gateway must issue a device token via
+        //     the pairing flow (approve in Web UI).
+        // When only a shared token is present (first launch), sending device auth
+        // causes the Gateway to reject the unknown Ed25519 key as DEVICE_AUTH_INVALID
+        // even though the shared token alone is sufficient.
+        let shouldSendDeviceAuth = hasDeviceToken || !hasSharedToken
+        if shouldSendDeviceAuth, let device = buildDeviceAuth(nonce: nonce, requestScopes: scopes) {
             params["device"] = device
-            var auth: [String: Any] = [:]
-            if let gatewayToken = OpenClawGatewayTokenStore.loadToken(), !gatewayToken.isEmpty {
-                auth["token"] = gatewayToken
-            }
-            if let deviceToken = deviceAuthToken?.token, !deviceToken.isEmpty {
-                auth["deviceToken"] = deviceToken
-            }
-            if !auth.isEmpty {
-                params["auth"] = auth
-            }
+        }
+
+        var auth: [String: Any] = [:]
+        if let token = sharedToken, !token.isEmpty {
+            auth["token"] = token
+        }
+        if let deviceToken = deviceAuthToken?.token, !deviceToken.isEmpty {
+            auth["deviceToken"] = deviceToken
+        }
+        if !auth.isEmpty {
+            params["auth"] = auth
         }
 
         sendRPC(method: "connect", params: params)
@@ -570,6 +618,17 @@ actor OpenClawAdapter {
 
     private func requestSessionsList() {
         sendRPC(method: "sessions.list", params: [:])
+    }
+
+    private func startSessionsPolling() {
+        sessionsPollTask?.cancel()
+        sessionsPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { break }
+                await self?.requestSessionsList()
+            }
+        }
     }
 
     private func requestBaselineState() {

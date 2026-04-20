@@ -69,6 +69,10 @@ final class DaemonServer {
     private var cachedGatewayAuthStatus: String = "gateway_not_found"
     private var cachedGatewayAuthRequestId: String?
     private var cachedGatewayAuthMessage: String?
+    /// Locally-generated Gateway identity (Ed25519 public-key SHA-256 hex).
+    /// Surfaced in state_update so dashboards can render "approve this
+    /// deviceId in OpenClaw Web UI" when pairing is still pending.
+    private var cachedGatewayDeviceId: String?
 
     // State caches
     private var cachedSessions: [DaemonSessionEntry] = []
@@ -1477,6 +1481,35 @@ final class DaemonServer {
         // state when session.state is nil.
         let sessionId = (json["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
 
+        // Resurrection: Claude Code only fires `session_start` once per
+        // claude process lifetime. If the AgentDeck daemon restarts mid-
+        // session, the next event from that ongoing process (tool_start,
+        // user_prompt_submit, stop, notification) is the first hook we
+        // see — without an entry, `updateSessionHookState` would no-op
+        // and the sessions list would stay empty until the user killed
+        // and restarted every claude. Synthesize a minimal entry on any
+        // non-end event when the sessionId is unknown; the subsequent
+        // per-event `updateSessionHookState` then sets the right state.
+        if let sessionId, event != "session_end", event != "session_start", pushedSessionsById[sessionId] == nil {
+            var entry = DaemonSessionEntry(
+                id: sessionId,
+                port: Int(port),
+                pid: 0,
+                projectName: projectNameFromHookPayload(json),
+                agentType: "claude-code",
+                tmuxSession: nil,
+                tty: nil,
+                parentTty: nil,
+                startedAt: ISO8601DateFormatter().string(from: Date())
+            )
+            entry.state = "idle"
+            pushedSessionsById[sessionId] = entry
+            upsertIntoCachedSessions(entry)
+            DaemonLogger.shared.debug("Hook", "Resurrected session entry for \(sessionId) on \(event)")
+            // Intentionally no broadcast here — the event's own
+            // updateSessionHookState (or session_start path) will broadcast.
+        }
+
         switch event {
         case "session_start":
             _ = stateMachine.transition(trigger: "session_start", source: .hook)
@@ -1570,6 +1603,19 @@ final class DaemonServer {
         }
 
         broadcastStateUpdate()
+    }
+
+    /// Derive a project label from a Claude Code hook payload. Prefers an
+    /// explicit `project_name` field, falls back to the last path component
+    /// of `cwd`. Used by both the `session_start` synthesis path and the
+    /// resurrection path for sessions whose `session_start` fired before
+    /// this daemon process was running.
+    private func projectNameFromHookPayload(_ json: [String: Any]) -> String {
+        if let p = json["project_name"] as? String, !p.isEmpty { return p }
+        if let cwd = json["cwd"] as? String, !cwd.isEmpty {
+            return URL(fileURLWithPath: cwd).lastPathComponent
+        }
+        return ""
     }
 
     /// Evict hook-driven sessions whose last hook is older than
@@ -1697,6 +1743,14 @@ final class DaemonServer {
                 }
             }
             await adapter.start()
+            // Cache the locally-generated deviceId so state_update can carry
+            // it even before the first successful handshake (which is when
+            // pairing UI most needs to show the id). `currentDeviceId()` is
+            // populated by `loadDeviceIdentity()` inside `start()`.
+            let deviceId = await adapter.currentDeviceId()
+            await MainActor.run {
+                self.cachedGatewayDeviceId = deviceId
+            }
             self.gatewayAdapter = adapter
             self.gatewayConnecting = false
         }
@@ -2042,10 +2096,18 @@ final class DaemonServer {
     }
 
     private func enrichSessionsWithState(_ sessions: [DaemonSessionEntry]) async -> [DaemonSessionEntry] {
-        await withTaskGroup(of: DaemonSessionEntry.self) { group in
+        // Hook-synthesized sessions share this daemon's port, so probing
+        // `/health` would loop back to us and every entry would end up
+        // carrying our *global* stateMachine.state — which makes every
+        // creature mirror the most recently active session and fire
+        // "idle" on another session's Stop. Skip the self-probe; the
+        // per-session state we set in handleHookEvent is already right.
+        let selfPort = Int(self.port)
+        return await withTaskGroup(of: DaemonSessionEntry.self) { group in
             for session in sessions {
                 group.addTask {
                     var s = session
+                    guard session.port != selfPort else { return s }
                     if let health = await SessionRegistry.shared.probeDaemonHealth(port: session.port) {
                         s.agentType = health["agentType"] as? String ?? s.agentType
                         s.state = health["state"] as? String
@@ -2340,6 +2402,7 @@ final class DaemonServer {
         e["gatewayConnected"] = cachedGatewayConnected
         e["gatewayHasError"] = cachedGatewayHasError
         e["gatewayAuthStatus"] = cachedGatewayAuthStatus
+        if let id = cachedGatewayDeviceId { e["gatewayDeviceId"] = id }
         e["daemonPort"] = Int(port)
         if let requestId = cachedGatewayAuthRequestId { e["gatewayAuthRequestId"] = requestId }
         if let message = cachedGatewayAuthMessage { e["gatewayAuthMessage"] = message }

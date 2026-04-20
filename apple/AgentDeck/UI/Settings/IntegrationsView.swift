@@ -169,12 +169,27 @@ enum IntegrationStatusEvaluator {
     }
 
     private static func claudeStatus(state: DashboardState, preferences: AppPreferences) -> IntegrationStatus {
-        // Connected when OAuth is detected. If hooks are off we still
-        // call the row "Connected" because subscription quota works
-        // without hooks; hooks add live telemetry, not auth.
-        if (state.oauthConnected ?? false) {
-            let detail = preferences.hooksInstalled ? "Pro/Max · hooks on" : "Pro/Max · hooks off"
-            return .connected(detail: detail)
+        // Claude is "connected" as soon as either the hook relay or the
+        // OAuth token is wired up — both are independently usable signals.
+        //   • Hooks on  → real-time session telemetry (sandbox-safe path
+        //                  and the only one that works in the App Store
+        //                  build without an external Node daemon).
+        //   • OAuth on  → subscription quota fetch (direct Anthropic API;
+        //                  needs the token on disk, which the sandboxed
+        //                  daemon can't read — flows in via CLI relay).
+        // Earlier code gated on oauthConnected alone, so App Store users
+        // with working hooks still saw "not connected" despite sessions
+        // flowing through the dashboard.
+        let hooksOn = preferences.hooksInstalled
+        let oauthOn = state.oauthConnected ?? false
+        if hooksOn && oauthOn {
+            return .connected(detail: "Pro/Max · hooks on")
+        }
+        if hooksOn {
+            return .connected(detail: "Hooks on")
+        }
+        if oauthOn {
+            return .connected(detail: "Pro/Max · hooks off")
         }
         return .awaiting(detail: "Enable Claude Code Hooks below to relay live sessions.")
     }
@@ -187,20 +202,35 @@ enum IntegrationStatusEvaluator {
     }
 
     private static func openClawStatus(state: DashboardState) -> IntegrationStatus {
+        // Short deviceId (first 8 hex chars) for pairing copy so the user
+        // can match what they see here against the entry OpenClaw's Web UI
+        // shows when approving a new device. Nil → omit the identifier
+        // entirely rather than showing a stub.
+        let deviceIdHint: String = state.gatewayDeviceId
+            .flatMap { $0.isEmpty ? nil : String($0.prefix(8)) }
+            .map { " — deviceId `\($0)…`" } ?? ""
+
         switch state.gatewayAuthStatus {
         case "connected":
             return .connected(detail: "Paired through Gateway")
         case "approval_pending", "pairing_required", "gateway_reachable":
-            return .awaiting(detail: "Approve this Mac in OpenClaw's Web UI (http://localhost:18789).")
+            return .awaiting(detail: "Approve this Mac in OpenClaw's Web UI (http://localhost:18789)\(deviceIdHint).")
         case "gateway_token_missing":
             return .awaiting(detail: "Gateway is in shared-token mode. Paste the token in Advanced.")
-        case "auth_failed", "token_mismatch", "device_auth_invalid":
-            return .failed(detail: state.gatewayAuthMessage ?? "Revoke this Mac in OpenClaw and re-approve.")
+        case "token_mismatch":
+            return .failed(detail: "Shared token doesn't match. Paste the correct Gateway token in Advanced\(deviceIdHint).")
+        case "device_auth_invalid":
+            // Expected on first launch and after identity reset — device key not yet
+            // in Gateway's approved list. Shown as "Awaiting" (amber) not "Auth failed"
+            // (red) because this is a normal step in the pairing flow, not a hard error.
+            return .awaiting(detail: "Approve this Mac in OpenClaw's Web UI (http://localhost:18789)\(deviceIdHint).")
+        case "auth_failed":
+            return .failed(detail: "Authentication error. Check OpenClaw Gateway logs\(deviceIdHint).")
         case "unsupported_protocol":
             return .unsupported(detail: "Update OpenClaw Gateway to a 2026.4.14+ build.")
         default:
             if state.gatewayAvailable {
-                return .awaiting(detail: "Gateway reachable. Open the OpenClaw Web UI to approve this Mac.")
+                return .awaiting(detail: "Gateway reachable. Open the OpenClaw Web UI to approve this Mac\(deviceIdHint).")
             }
             return .notConfigured(detail: "Start OpenClaw on ws://127.0.0.1:18789 to begin pairing.")
         }
