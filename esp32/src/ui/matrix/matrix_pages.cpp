@@ -392,6 +392,12 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
     unlockState();
 
     // === Crayfish: fixed at right (x=27, y=1) ===
+    // Authenticated Gateway → state-driven color. OpenClaw-session-alive-but-
+    // Gateway-not-authenticated → dim "present but idle" glyph so the matrix
+    // isn't blank during pairing handshakes, token-mismatch states, or the
+    // brief reconnect window where `gatewayConnected` has dropped but the
+    // openclaw session is still enumerated in sessions_list.
+    bool drewCrayfish = false;
     if (connected && gatewayConn) {
         CRGB cfColor;
         if (gatewayError) {
@@ -407,10 +413,17 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             cfColor = CRGB(25, 5, 5);  // DORMANT: very dim red
         }
         drawSprite(leds, 27, 1, SPR_CRAYFISH, 5, 6, cfColor);
+        drewCrayfish = true;
+    } else if (connected && openclawAlive) {
+        // Gateway not authenticated yet (or reconnecting) but the OpenClaw
+        // session is live — draw a very dim crayfish so the user sees
+        // "OpenClaw is here, waiting" instead of a fully black matrix.
+        drawSprite(leds, 27, 1, SPR_CRAYFISH, 5, 6, CRGB(12, 3, 3));
+        drewCrayfish = true;
     }
 
     // === Agents: left area (x 0 to cfX-2) ===
-    int cfX = (connected && gatewayConn) ? 27 : 32;  // crayfish position (or off-screen)
+    int cfX = drewCrayfish ? 27 : 32;   // crayfish position (or off-screen)
     int agentMaxX = cfX - 7;            // rightmost sprite start (5px sprite + 2px gap)
 
     if (agentCount == 0) {
@@ -418,6 +431,11 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             renderDisconnectStatus(leds, animTime);
             return;
         }
+        // Only OpenClaw is alive — the crayfish glyph above is our signal.
+        // Skip the idle octopus so we don't imply a phantom Claude session.
+        // (Previously this `return` could land on a completely black matrix
+        // when Gateway wasn't authenticated; the crayfish fallback above
+        // guarantees at least one sprite is lit in that case.)
         if (openclawAlive) {
             return;
         }
