@@ -14,10 +14,11 @@
 
 import { randomUUID, createHash } from 'crypto';
 import { execSync } from 'child_process';
-import { basename, join } from 'path';
+import { join } from 'path';
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { debug } from '../logger.js';
+import { resolveProjectName } from '../utils/project-name.js';
 import type { UsageSnapshot } from '../types.js';
 import type { SessionEntry } from '../session-registry.js';
 import type { ApmeStore } from './store.js';
@@ -94,7 +95,7 @@ export class ApmeCollector {
       sessionId: input.sessionId,
       agentType: input.agentType,
       modelId: input.modelId ?? null,
-      projectName: input.projectName ?? (input.projectPath ? basename(input.projectPath) : null),
+      projectName: input.projectName ?? (input.projectPath ? resolveProjectName({ cwd: input.projectPath }) : null),
       projectPath: input.projectPath ?? null,
       taskPrompt: input.taskPrompt ?? null,
       startedAt: Date.now(),

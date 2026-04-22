@@ -92,6 +92,7 @@
 		4AA7D220242CD3041FB589D8 /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */; };
 		4B34D6CBC040FE9BE5E51856 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
 		4BE94600C86341D01E166A9C /* AttentionTheaterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1853443C348441BF748662A /* AttentionTheaterView.swift */; };
+		4C5100ED3B4CE6BEDA3F2721 /* ProjectNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */; };
 		4D0E6511F2638CDF14C798AD /* MdnsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D130EAC9287841A5BC8770DC /* MdnsModule.swift */; };
 		4D4A0A6C0120C440966AEFB3 /* DisplaySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89F9A134A1BC3EDEE8309695 /* DisplaySyncService.swift */; };
 		4D7595686B60FDBDE4A5210D /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
@@ -163,6 +164,7 @@
 		8BD045F864776BC79B8BDA5F /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC67585E8BFBBB8B0250FF2 /* WebSocketServer.swift */; };
 		8DE4D71A8BA18D7373FA3147 /* ApmeParseJudgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB04CEEDD6C769AD9056561 /* ApmeParseJudgeTests.swift */; };
 		8E47C081C0CF3F45715D6E45 /* AnthropicAdminApiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4C24732A9A2DB27CC5F7C0 /* AnthropicAdminApiClient.swift */; };
+		91FD7626FCF73226181BD900 /* ProjectNameResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7897FE76F480951CD34749 /* ProjectNameResolver.swift */; };
 		93AB7595B2EC62D78A09A58F /* DeskPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83D5CE0F7637C0913938BA6B /* DeskPreviews.swift */; };
 		942DEF7F0BE77DF0FA264AF8 /* StateTimelineGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C2485BC8700CBDD9EDE70E /* StateTimelineGenerator.swift */; };
 		94B29531B163BDB547232F79 /* MdnsModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D130EAC9287841A5BC8770DC /* MdnsModule.swift */; };
@@ -177,10 +179,12 @@
 		9E30D4D0BEE3CB402E8741D8 /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
 		9ED5461741C1FC0A6ADC249F /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
 		9F873E9EA03C9927B275638C /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */; };
+		A12AD232C2625E0919A0CFDF /* ProjectNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */; };
 		A14FF06EAC0C5B5CCFC81875 /* DaemonTimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE17EFB01F43FCB1A53F644D /* DaemonTimelineStore.swift */; };
 		A2D382D31BFCC8EAEE6F19F4 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E42A4F5681EFB215B43645 /* AppPreferences.swift */; };
 		A320BAAC52861E8F41588F75 /* ApmeOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DB3C4DCB23D09CFA856786 /* ApmeOutcome.swift */; };
 		A50EA56C00F6A51F498DD20E /* MonitorScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */; };
+		A574521C09137ADFCCD9495A /* ProjectNameResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7897FE76F480951CD34749 /* ProjectNameResolver.swift */; };
 		A7C44EC8857DB5EA6890BACA /* MatrixTerminalPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AECC310DB5852BD8814BC04 /* MatrixTerminalPreviews.swift */; };
 		A8293F557BD8D3FB91BF4CF4 /* StateTimelineGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C2485BC8700CBDD9EDE70E /* StateTimelineGenerator.swift */; };
 		A869C24476DAE485D0B950EC /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B05AD3CC720BD76A681F9 /* QRScannerView.swift */; };
@@ -365,6 +369,7 @@
 		5AECC310DB5852BD8814BC04 /* MatrixTerminalPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixTerminalPreviews.swift; sourceTree = "<group>"; };
 		5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		5F15B92A652880A05BEE9213 /* D200hHidModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D200hHidModule.swift; sourceTree = "<group>"; };
+		5F7897FE76F480951CD34749 /* ProjectNameResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectNameResolver.swift; sourceTree = "<group>"; };
 		6165A6BFF174139F6AF07CED /* PortFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortFormatting.swift; sourceTree = "<group>"; };
 		6186E147F760B85461F02022 /* ActivityPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityPanel.swift; sourceTree = "<group>"; };
 		61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAggregator.swift; sourceTree = "<group>"; };
@@ -443,6 +448,7 @@
 		DC62763B9E0E57235CFDACED /* NotificationPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPermission.swift; sourceTree = "<group>"; };
 		DCA36B13CDF6548B698F4C55 /* ApmeDashboardWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeDashboardWindow.swift; sourceTree = "<group>"; };
 		DDCFF40AB9C71F147D7576C5 /* AgentDeck-Debug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "AgentDeck-Debug.entitlements"; sourceTree = "<group>"; };
+		DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectNameResolverTests.swift; sourceTree = "<group>"; };
 		E2A135216D37932FE68501F4 /* CloudCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudCreature.swift; sourceTree = "<group>"; };
 		E47A555A3917875178A5B7E5 /* WaterEffect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterEffect.swift; sourceTree = "<group>"; };
 		E532E5457B6DFDE324D8F11C /* Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Protocol.swift; sourceTree = "<group>"; };
@@ -482,6 +488,7 @@
 				B6E0B3C7EBBFFD8C2EB08F11 /* HookInstaller.swift */,
 				908DB05568DE4E828CD7FCE6 /* Logger.swift */,
 				15083D65B8571C662DD6E2CE /* PortDiagnostics.swift */,
+				5F7897FE76F480951CD34749 /* ProjectNameResolver.swift */,
 				31609846ED73DC70F674FCF0 /* SessionLauncher.swift */,
 				DA46D3D4A84FBDE6C8B3AB62 /* StateMachine.swift */,
 				DBBD731AC01994F5C7C1A78A /* UsageAPIClient.swift */,
@@ -518,6 +525,7 @@
 				2DB04CEEDD6C769AD9056561 /* ApmeParseJudgeTests.swift */,
 				D54B6A5B14E7FEFC4CD93EF2 /* ApmeTaskBoundaryTests.swift */,
 				234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */,
+				DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */,
 				5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */,
 				41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */,
 				7847FA7381FB8075331B0F12 /* TimelineTests.swift */,
@@ -1088,6 +1096,7 @@
 				3AB4FFE7850E2A1AB615E162 /* ApmeParseJudgeTests.swift in Sources */,
 				B3A9C1B59F3239A9C482540F /* ApmeTaskBoundaryTests.swift in Sources */,
 				D369DAE31A2E86FD08922453 /* GatewayParityTests.swift in Sources */,
+				A12AD232C2625E0919A0CFDF /* ProjectNameResolverTests.swift in Sources */,
 				27F0FAF7D849BC85134C3333 /* ProtocolTests.swift in Sources */,
 				6D2EA7E15F98B8510CF048E9 /* SessionLauncherTests.swift in Sources */,
 				DBE7242898F7F03CB3463B6D /* TimelineTests.swift in Sources */,
@@ -1103,6 +1112,7 @@
 				8DE4D71A8BA18D7373FA3147 /* ApmeParseJudgeTests.swift in Sources */,
 				F608EB171F09E38587FE9BA7 /* ApmeTaskBoundaryTests.swift in Sources */,
 				5E39A0DA9E8B9E175292E84D /* GatewayParityTests.swift in Sources */,
+				4C5100ED3B4CE6BEDA3F2721 /* ProjectNameResolverTests.swift in Sources */,
 				3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */,
 				9B1DF1D553619B6728566E86 /* SessionLauncherTests.swift in Sources */,
 				4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */,
@@ -1200,6 +1210,7 @@
 				2DDD8DC9B5918E9D0001AE28 /* PlanktonSystem.swift in Sources */,
 				F60BAA5ABF7B75282B785F15 /* PortDiagnostics.swift in Sources */,
 				CB3B1034257089A73707A651 /* PortFormatting.swift in Sources */,
+				A574521C09137ADFCCD9495A /* ProjectNameResolver.swift in Sources */,
 				7D1FA2E1BD47D35C7E3FEB23 /* Protocol.swift in Sources */,
 				16BE41E2233EEE895F569E27 /* QRPairingWindow.swift in Sources */,
 				AC658605D32EEDED79556598 /* QRScannerView.swift in Sources */,
@@ -1337,6 +1348,7 @@
 				0061BF09A7B22C7ADFE7C175 /* PlanktonSystem.swift in Sources */,
 				C4F117E796C0C81A8E52A02B /* PortDiagnostics.swift in Sources */,
 				D0A70501108B295ED44C169E /* PortFormatting.swift in Sources */,
+				91FD7626FCF73226181BD900 /* ProjectNameResolver.swift in Sources */,
 				2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */,
 				58B1139E0CFD432AC3D07C6E /* QRPairingWindow.swift in Sources */,
 				A869C24476DAE485D0B950EC /* QRScannerView.swift in Sources */,

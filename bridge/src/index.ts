@@ -32,6 +32,7 @@ import {
   detectTmuxSession,
   findDaemonPortAsync,
 } from './session-registry.js';
+import { resolveProjectName } from './utils/project-name.js';
 import { DaemonWsClient } from './daemon-ws-client.js';
 import { fetchUsageFromApi, hasOAuthToken } from './usage-api.js';
 import { buildUsageEvent } from './usage-event.js';
@@ -181,7 +182,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     try { return execSync('tty', { stdio: ['inherit', 'pipe', 'pipe'] }).toString().trim(); }
     catch { return undefined; }
   })();
-  const projectName = process.cwd().split('/').pop() || 'unknown';
+  const projectName = resolveProjectName();
 
   // Warn if same project already has a non-daemon session running
   const existingSessions = listActiveSessions();
@@ -216,7 +217,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   // ===== BridgeCore =====
   const core = new BridgeCore({
     port,
-    projectName: adapter.getProjectName() || projectName,
+    projectName,
     httpServer: adapter.getHttpServer(),
   });
 

@@ -1547,7 +1547,7 @@ final class DaemonServer {
                 id: sessionId,
                 port: Int(port),
                 pid: 0,
-                projectName: projectNameFromHookPayload(json),
+                projectName: ProjectNameResolver.projectName(fromHookPayload: json),
                 agentType: "claude-code",
                 tmuxSession: nil,
                 tty: nil,
@@ -1565,13 +1565,7 @@ final class DaemonServer {
         switch event {
         case "session_start":
             _ = stateMachine.transition(trigger: "session_start", source: .hook)
-            let projectName: String = {
-                if let p = json["project_name"] as? String, !p.isEmpty { return p }
-                if let cwd = json["cwd"] as? String, !cwd.isEmpty {
-                    return URL(fileURLWithPath: cwd).lastPathComponent
-                }
-                return ""
-            }()
+            let projectName = ProjectNameResolver.projectName(fromHookPayload: json)
             if !projectName.isEmpty { stateMachine.projectName = projectName }
             // App Store standalone: hook POST is the only Claude Code session
             // signal (sandbox blocks sessions.json; no WS push arrives without
@@ -1699,19 +1693,6 @@ final class DaemonServer {
             cachedStreamDeck = nil
             broadcastStateUpdate()
         }
-    }
-
-    /// Derive a project label from a Claude Code hook payload. Prefers an
-    /// explicit `project_name` field, falls back to the last path component
-    /// of `cwd`. Used by both the `session_start` synthesis path and the
-    /// resurrection path for sessions whose `session_start` fired before
-    /// this daemon process was running.
-    private func projectNameFromHookPayload(_ json: [String: Any]) -> String {
-        if let p = json["project_name"] as? String, !p.isEmpty { return p }
-        if let cwd = json["cwd"] as? String, !cwd.isEmpty {
-            return URL(fileURLWithPath: cwd).lastPathComponent
-        }
-        return ""
     }
 
     /// Evict hook-driven sessions whose last hook is older than
