@@ -183,7 +183,7 @@ Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    �
 
 The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 13 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, TUI, ESP32) display state.
 
-On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (30 files, ~5500 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/D200H), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
+On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (47 files, ~20,500 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/D200H), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
 
 ---
 
@@ -514,7 +514,7 @@ Monitor and control your AI agents from iPhone, iPad, or Mac — a native SwiftU
   <img src="docs/media/ipad-iphone-closeup.jpg" width="720" alt="Apple dashboard — iPad and iPhone showing terrarium with pixel art creatures and HUD overlay">
 </p>
 
-The Apple app is a SwiftUI multiplatform app that connects to the bridge on iOS/iPadOS, and **on macOS ships with a full in-process Swift daemon** (30 files, ~5500 LOC) — mDNS, device modules (ADB/Serial/Pixoo/D200H), Gateway proxy, and WebSocket server — so the macOS build works standalone without Node.js. You can still use the `agentdeck` CLI alongside it for Claude Code / Codex / OpenCode PTY sessions; the app's daemon auto-detects and defers to a running CLI daemon on the same port.
+The Apple app is a SwiftUI multiplatform app that connects to the bridge on iOS/iPadOS, and **on macOS ships with a full in-process Swift daemon** (47 files, ~20,500 LOC) — mDNS, device modules (ADB/Serial/Pixoo/D200H), Gateway proxy, and WebSocket server — so the macOS build works standalone without Node.js. You can still use the `agentdeck` CLI alongside it for Claude Code / Codex / OpenCode PTY sessions; the app's daemon auto-detects and defers to a running CLI daemon on the same port.
 
 ### Three-Tab Navigation
 
@@ -523,6 +523,18 @@ The Apple app is a SwiftUI multiplatform app that connects to the bridge on iOS/
 | **Monitor** | Terrarium background + HUD overlay — agent status, rate limits, timeline |
 | **Deck** | Stream Deck+ mirror — encoder panels + button grid with touch gestures |
 | **Settings** | Bridge connection, display preferences |
+
+### macOS Menu Bar Popup
+
+On macOS the app always lives in the menu bar — one click reveals the full topology without taking over a window.
+
+<p align="center">
+  <img src="docs/media/macos-menubar-popup.png" width="720" alt="AgentDeck macOS menu bar popup — session list, Jump To quick actions, and UPSTREAM/DOWNSTREAM topology over the Dashboard aquarium">
+</p>
+
+- **Sessions** — live session list with agent, state, and model; per-row Jump To buttons open the Pixoo view, the Stream Deck Code view, the full Dashboard window, or reveal the session data folder in Finder
+- **Topology** — `UPSTREAM` (Claude Code hooks, OpenClaw Gateway, MLX, Ollama) and `DOWNSTREAM` (D200H, Pixoo, ESP32, Android) with LED dots driven by the shared `ProviderRailEvaluator`, so Settings / Dashboard / menu bar can never disagree about "is Claude connected?"
+- **Tabs** — Launch · Dashboard · Evaluation switch the popup body without opening a window; a `Start at Login` toggle + `Quit` sit in the footer
 
 ### Connect to Bridge
 
@@ -853,10 +865,10 @@ GitHub Pages publishes the current test dashboard at `https://puritysb.github.io
 
 | Framework | Scope | Current inventory | Notes |
 |-----------|-------|-------------------|-------|
-| **Vitest** | `bridge`, `plugin`, `shared`, `hooks` | 26 `.test.ts` files | Root `pnpm test` and CI path |
+| **Vitest** | `bridge`, `plugin`, `shared`, `hooks` | 42 `.test.ts` files | Root `pnpm test` and CI path |
 | **JUnit + Robolectric** | Android unit tests | 4 Kotlin test files | Run via `./gradlew testDebugUnitTest` or `pnpm test:report` |
-| **XCTest** | Apple app tests | 2 Swift test files | Run via `xcodebuild test` or `pnpm test:report` |
-| **Robot Framework** | ESP32 validation | 3 Robot suites | Hardware-oriented, run via report script |
+| **XCTest** | Apple app tests | 10 Swift test files | Run via `xcodebuild test` or `pnpm test:report` |
+| **Robot Framework** | ESP32 validation | 4 Robot suites | Hardware-oriented, run via report script |
 
 Coverage thresholds currently enforced by `vitest.config.ts` are lines ≥17%, functions ≥15%, branches ≥14%, statements ≥16%.
 
@@ -904,7 +916,7 @@ AgentDeck is actively working on two critical areas to prepare for production re
 
 ### 1. App Store Distribution (macOS + iOS)
 
-The SwiftUI dashboard is ready for App Store submission. The macOS app ships a full in-process Swift daemon (30+ files, ~5500 LOC) — mDNS discovery, device modules (ADB/Serial/Pixoo/D200H HID), OpenClaw Gateway WebSocket client, HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/` (routed through `AgentDeckPaths.swift`; never hand-write the path). USB device entitlements cover D200H HID; Input Monitoring is handled with the standard TCC prompt. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
+The SwiftUI dashboard is ready for App Store submission. The macOS app ships a full in-process Swift daemon (47 files, ~20,500 LOC) — mDNS discovery, device modules (ADB/Serial/Pixoo/D200H HID), OpenClaw Gateway WebSocket client, HTTP + WebSocket server. App Store compliance is gated by the `AGENTDECK_APP_STORE` compile flag: no bundled Node.js / `adb` / D200H helper, no subprocess spawn, no AppleScript (per Apple Review Guideline 2.5.2). User data lives in `~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/` (routed through `AgentDeckPaths.swift`; never hand-write the path). USB device entitlements cover D200H HID; Input Monitoring is handled with the standard TCC prompt. OpenClaw integration uses Gateway-native pairing (self-generated Ed25519 identity in Keychain + Gateway-issued device token) — no file read of `~/.openclaw/identity/`. `apple/scripts/verify-appstore-archive.sh` is wired into CI and asserts these invariants on every archive.
 
 ### 2. Personalized Agent Evaluation System (APME)
 
