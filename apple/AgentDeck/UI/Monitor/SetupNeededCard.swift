@@ -22,29 +22,31 @@ import AppKit
 
 struct SetupNeededCard: View {
     let items: [SetupItem]
-    /// iOS fallback — on macOS we use `SettingsLink` to open the Settings
-    /// scene directly, so the callback is never invoked there. iOS has no
-    /// Settings scene and still needs a sheet-driven approach.
+    /// iOS fallback — on macOS we route through the `settings` Window
+    /// via `openWindow(id:)` so the callback is never invoked there.
+    /// iOS has no Settings scene and still needs a sheet-driven approach.
     let onOpenSettings: () -> Void
+
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     @State private var pulse = false
 
-    /// Open-Settings call-to-action. Uses `SettingsLink` on macOS 14+ so the
-    /// Settings scene is opened via SwiftUI's first-party path — the older
-    /// `NSApp.sendAction(showSettingsWindow:)` route was flaky when the
-    /// Monitor window had keyboard focus and silently failed under the
-    /// MenuBarExtra responder chain. `SettingsLink` wraps the same label
-    /// so styling matches the rest of the card.
+    /// Open-Settings call-to-action. Drives the `settings` Window via
+    /// `openWindow(id:)` — the Settings scene was converted to a regular
+    /// Window so NavigationSplitView's sidebar-toggle lands in the
+    /// titlebar toolbar consistently with Device Preview.
     @ViewBuilder
     private var openSettingsButton: some View {
         #if os(macOS)
-        SettingsLink {
+        Button {
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "settings")
+        } label: {
             settingsButtonLabel
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture().onEnded {
-            NSApp.activate(ignoringOtherApps: true)
-        })
         #else
         Button {
             onOpenSettings()

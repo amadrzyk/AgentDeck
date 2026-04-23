@@ -12,18 +12,18 @@ struct LaunchSessionDialog: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Launch Session")
-                .font(.headline)
+                .font(HUDFont.title)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Project Folder")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(HUDFont.caption.weight(.medium))
+                    .foregroundStyle(TerrariumHUD.subtext)
                 HStack {
                     Text(displayFolder)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(HUDFont.mono)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .foregroundStyle(folderPath.isEmpty ? .secondary : .primary)
+                        .foregroundStyle(folderPath.isEmpty ? TerrariumHUD.subtext : TerrariumHUD.text)
                     Spacer()
                     Button("Choose…") { pickFolder() }
                         .controlSize(.small)
@@ -32,8 +32,8 @@ struct LaunchSessionDialog: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Agent")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(HUDFont.caption.weight(.medium))
+                    .foregroundStyle(TerrariumHUD.subtext)
                 Picker("", selection: $agentRaw) {
                     ForEach(LaunchAgentType.allCases, id: \.rawValue) { agent in
                         Text(agent.displayName).tag(agent.rawValue)
@@ -53,6 +53,7 @@ struct LaunchSessionDialog: View {
         }
         .padding(20)
         .frame(width: 420)
+        .aquariumSurface()
     }
 
     private var displayFolder: String {

@@ -33,15 +33,17 @@ struct QRPairingWindow: View {
     var body: some View {
         VStack(spacing: 18) {
             Text("Pair your iPad or iPhone")
-                .font(.system(size: 18, weight: .semibold))
+                .font(HUDFont.title)
 
             Text("Open AgentDeck on your iOS device and tap **Scan QR**, or copy the URL into the manual field.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .font(HUDFont.body)
+                .foregroundStyle(TerrariumHUD.subtext)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 20)
 
+            // QR card keeps a white fill so iPad cameras can scan it — an
+            // aquarium-tinted QR would lower contrast and break pairing.
             qrImage
                 .frame(width: 280, height: 280)
                 .background(
@@ -51,8 +53,8 @@ struct QRPairingWindow: View {
 
             VStack(spacing: 6) {
                 Text(pairingURL)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(HUDFont.mono)
+                    .foregroundStyle(TerrariumHUD.subtext)
                     .textSelection(.enabled)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
@@ -69,10 +71,10 @@ struct QRPairingWindow: View {
                 } label: {
                     Label(showCopiedToast ? "Copied" : "Copy URL",
                           systemImage: showCopiedToast ? "checkmark.circle.fill" : "doc.on.doc")
-                        .font(.system(size: 11))
+                        .font(HUDFont.caption)
                 }
                 .buttonStyle(.borderless)
-                .tint(showCopiedToast ? .green : .accentColor)
+                .tint(showCopiedToast ? TerrariumHUD.ledGreen : TerrariumColors.tetraNeon)
             }
 
             Spacer()
@@ -85,6 +87,7 @@ struct QRPairingWindow: View {
         }
         .padding(20)
         .frame(width: 400, height: 480)
+        .aquariumSurface()
     }
 
     /// Render a QR code for `pairingURL` at 280×280 pixels. The CIImage is

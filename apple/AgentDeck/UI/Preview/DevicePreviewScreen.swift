@@ -56,10 +56,12 @@ struct DevicePreviewScreen: View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+                .scrollContentBackground(.hidden)
         } detail: {
             detail
         }
         .frame(minWidth: 900, minHeight: 600)
+        .aquariumSurface()
         .onAppear {
             if !preferences.hasSeenDevicePreview {
                 preferences.hasSeenDevicePreview = true
@@ -78,6 +80,7 @@ struct DevicePreviewScreen: View {
             Divider()
             detail
         }
+        .aquariumSurface()
         #endif
     }
 
@@ -94,7 +97,9 @@ struct DevicePreviewScreen: View {
                 if !entries.isEmpty {
                     Section(cat.displayName) {
                         ForEach(entries) { dev in
-                            Text(dev.displayName).tag(dev)
+                            Text(dev.displayName)
+                                .tag(dev)
+                                .listRowBackground(Color.clear)
                         }
                     }
                 }
@@ -144,7 +149,10 @@ struct DevicePreviewScreen: View {
                 .padding(24)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(white: 0.04))
+            // Detail stays transparent — aquariumSurface paints the window.
+            // A translucent dark veil keeps the preview area subtly distinct
+            // from the sidebar without interrupting the gradient.
+            .background(Color.black.opacity(0.18))
         }
     }
 

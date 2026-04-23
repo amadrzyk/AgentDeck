@@ -55,6 +55,7 @@ struct ESP32ProvisionSheet: View {
         }
         .padding(20)
         .frame(width: 480, height: 440)
+        .aquariumSurface()
         .onAppear(perform: detectPort)
     }
 

@@ -27,7 +27,7 @@ struct SettingsScreen: View {
     /// Whether the Advanced group in the sidebar is expanded. Collapsed
     /// by default so the first read is only 4 rows (Integrations, Dashboard,
     /// About, Advanced ►).
-    @State private var advancedExpanded: Bool = false
+    @State private var advancedExpanded: Bool = true
     #endif
     #if os(iOS)
     /// iOS QR pairing scanner modal presentation flag.
@@ -217,6 +217,7 @@ struct SettingsScreen: View {
             macOSDetail
         }
         .frame(minWidth: 720, minHeight: 520)
+        .aquariumSurface()
     }
 
     private var macOSSidebar: some View {
@@ -225,18 +226,25 @@ struct SettingsScreen: View {
                 ForEach(Self.essentialSections) { section in
                     Label(section.title, systemImage: section.icon)
                         .tag(section)
+                        .listRowBackground(Color.clear)
                 }
             }
             Section(isExpanded: $advancedExpanded) {
                 ForEach(Self.advancedSections) { section in
                     Label(section.title, systemImage: section.icon)
                         .tag(section)
+                        .listRowBackground(Color.clear)
                 }
             } header: {
                 Text("Advanced")
             }
         }
         .listStyle(.sidebar)
+        // Hide the List's default opaque material fill so the aquarium
+        // gradient underneath is visible. Without this the sidebar
+        // renders as an opaque light-vibrancy panel that clashes with
+        // the dark detail area.
+        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder

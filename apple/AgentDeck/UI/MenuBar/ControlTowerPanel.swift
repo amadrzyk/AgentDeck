@@ -400,27 +400,15 @@ struct ControlTowerPanel: View {
                 .foregroundColor(connected ? TerrariumHUD.subtext : .orange)
                 .fixedSize(horizontal: false, vertical: true)
             if !connected {
-                if #available(macOS 14.0, *) {
-                    SettingsLink {
-                        Text("Open Settings →")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(TerrariumColors.tetraNeon)
-                    }
-                    .buttonStyle(.plain)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        NSApp.activate(ignoringOtherApps: true)
-                    })
-                } else {
-                    Button {
-                        NSApp.activate(ignoringOtherApps: true)
-                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                    } label: {
-                        Text("Open Settings →")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(TerrariumColors.tetraNeon)
-                    }
-                    .buttonStyle(.plain)
+                Button {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "settings")
+                } label: {
+                    Text("Open Settings →")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(TerrariumColors.tetraNeon)
                 }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -662,36 +650,20 @@ struct ControlTowerPanel: View {
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
     private var settingsPillButton: some View {
-        if #available(macOS 14.0, *) {
-            SettingsLink {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(TerrariumHUD.text)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.white.opacity(0.08)))
-            }
-            .buttonStyle(.plain)
-            .help("Open Settings")
-            .simultaneousGesture(TapGesture().onEnded {
-                NSApp.activate(ignoringOtherApps: true)
-            })
-        } else {
-            Button {
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(TerrariumHUD.text)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.white.opacity(0.08)))
-            }
-            .buttonStyle(.plain)
+        Button {
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "settings")
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(TerrariumHUD.text)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
         }
+        .buttonStyle(.plain)
+        .help("Open Settings")
     }
 
     private func stateColor(_ state: AgentConnectionState) -> Color {

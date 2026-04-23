@@ -32,13 +32,45 @@ struct IntegrationDescriptor: Identifiable, Hashable {
     let id: String
     let displayName: String
     let kind: IntegrationKind
+    /// SF Symbol name used as a fallback when no `iconAssetName` is set,
+    /// or when the asset lookup fails (iOS without bundled assets).
     let iconSystemName: String
+    /// Optional brand asset bundled in the asset catalog. When present,
+    /// the row prefers this over `iconSystemName` so users see the
+    /// service's actual logo instead of a generic SF Symbol. Assets are
+    /// template-rendered so the row can tint them with `iconTint`.
+    let iconAssetName: String?
+    /// Tint to apply when rendering the brand asset. Uses the agent
+    /// brand palette so Claude Code reads terracotta, Codex reads
+    /// slate, OpenClaw reads crayfish red — matching creature dots in
+    /// the Dashboard topology rail.
+    let iconTint: Color?
     /// One-line, ≤ 100 chars. Describes WHAT the integration unlocks,
     /// not HOW to set it up.
     let oneLineHelp: String
     /// 1-line setup guidance shown only when the row is in a
     /// "needs action" state.
     let connectInstructions: String?
+
+    init(
+        id: String,
+        displayName: String,
+        kind: IntegrationKind,
+        iconSystemName: String,
+        iconAssetName: String? = nil,
+        iconTint: Color? = nil,
+        oneLineHelp: String,
+        connectInstructions: String?
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.kind = kind
+        self.iconSystemName = iconSystemName
+        self.iconAssetName = iconAssetName
+        self.iconTint = iconTint
+        self.oneLineHelp = oneLineHelp
+        self.connectInstructions = connectInstructions
+    }
 }
 
 enum IntegrationCatalog {
@@ -52,6 +84,8 @@ enum IntegrationCatalog {
         displayName: "Claude Code",
         kind: .accountLinked,
         iconSystemName: "bolt.fill",
+        iconAssetName: "CreatureClaudeCode",
+        iconTint: TerrariumHUD.claudeBody,
         oneLineHelp: claudeOneLineHelp,
         connectInstructions: claudeConnectInstructions
     )
@@ -61,6 +95,11 @@ enum IntegrationCatalog {
         displayName: "Codex (ChatGPT)",
         kind: .accountLinked,
         iconSystemName: "person.badge.key",
+        iconAssetName: "CreatureCodex",
+        // Codex / OpenAI brand reads as a soft cloud-blue in the
+        // Dashboard — keeping the same tone here so the row matches
+        // the creature dot next to running Codex sessions.
+        iconTint: Color(red: 0.38, green: 0.40, blue: 0.88),
         oneLineHelp: codexOneLineHelp,
         connectInstructions: codexConnectInstructions
     )
@@ -70,6 +109,8 @@ enum IntegrationCatalog {
         displayName: "OpenClaw Gateway",
         kind: .accountLinked,
         iconSystemName: "network",
+        iconAssetName: "CreatureOpenClaw",
+        iconTint: Color(red: 1.0, green: 0.30, blue: 0.30),
         oneLineHelp: "Routes agent traffic through a local Gateway. Pairing happens in OpenClaw's Web UI.",
         connectInstructions: "Start OpenClaw, then approve this Mac in the OpenClaw Web UI."
     )
@@ -78,6 +119,9 @@ enum IntegrationCatalog {
         id: "antigravity",
         displayName: "Antigravity",
         kind: .accountLinked,
+        // Google Antigravity ships no public brand SVG we can bundle,
+        // so stay on the atom glyph — reads as "physics / gravity" and
+        // holds the row until we import an official mark.
         iconSystemName: "atom",
         oneLineHelp: "Plan name and remaining credits, read from the local Antigravity app.",
         connectInstructions: "Pick the Antigravity state.vscdb file once so the sandboxed app can read it."
@@ -88,6 +132,8 @@ enum IntegrationCatalog {
         displayName: "Anthropic Admin API",
         kind: .apiKey,
         iconSystemName: "chart.line.uptrend.xyaxis",
+        iconAssetName: "BrandAnthropic",
+        iconTint: TerrariumHUD.claudeBody,
         oneLineHelp: "Org-wide token usage (today + 30 days). Separate from Pro/Max subscription quota.",
         connectInstructions: "Paste an Admin API key from console.anthropic.com/settings/keys."
     )
@@ -310,10 +356,7 @@ struct IntegrationRow: View {
     private var settingsBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: descriptor.iconSystemName)
-                    .font(.system(size: 12))
-                    .foregroundStyle(TerrariumHUD.subtext)
-                    .frame(width: 16)
+                integrationIcon(size: 14)
                 Text(descriptor.displayName)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 8)
@@ -336,9 +379,7 @@ struct IntegrationRow: View {
 
     private var onboardingBody: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: descriptor.iconSystemName)
-                .font(.system(size: 16))
-                .foregroundStyle(Color.accentColor)
+            integrationIcon(size: 20, fallbackTint: Color.accentColor)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Text(descriptor.displayName)
@@ -359,9 +400,9 @@ struct IntegrationRow: View {
 
     private var setupCardBody: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: descriptor.iconSystemName)
-                .font(.system(size: 10))
-                .foregroundStyle(status.tint)
+            // Setup card echoes the attention tint (amber / red) over
+            // the brand mark so the eye lands on "needs action" first.
+            integrationIcon(size: 12, fallbackTint: status.tint, overrideTint: status.tint)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: 1) {
                 Text(descriptor.displayName)
@@ -384,6 +425,34 @@ struct IntegrationRow: View {
             Text(status.label)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(status.tint)
+        }
+    }
+
+    /// Renders the integration's brand asset when available, falling
+    /// back to the SF Symbol. Brand assets are template-rendered so the
+    /// caller's tint (per-descriptor, or a status override for the
+    /// Setup card) controls the color.
+    @ViewBuilder
+    private func integrationIcon(
+        size: CGFloat,
+        fallbackTint: Color? = nil,
+        overrideTint: Color? = nil
+    ) -> some View {
+        let tint: Color = overrideTint
+            ?? descriptor.iconTint
+            ?? fallbackTint
+            ?? TerrariumHUD.subtext
+        if let assetName = descriptor.iconAssetName {
+            Image(assetName)
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .foregroundStyle(tint)
+        } else {
+            Image(systemName: descriptor.iconSystemName)
+                .font(.system(size: size))
+                .foregroundStyle(tint)
         }
     }
 }
@@ -463,5 +532,84 @@ struct IntegrationsView<AccountSlot: View, ApiKeySlot: View>: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Topology-rail evaluator (Dashboard + MenuBar shared)
+
+/// Thin rail-specific evaluator that maps `DashboardState` + `AppPreferences`
+/// into a `(LEDStatus, subtitle)` pair. Shares the `hooks || oauth` Claude
+/// formula with `IntegrationStatusEvaluator` so the three surfaces (Settings
+/// → Integrations, Dashboard `TopologyRail`, and menu-bar
+/// `MenuBarTopologyList`) never drift again. Earlier drift caused the
+/// menu-bar rail to show "Not connected" while the Dashboard and Settings
+/// both read Claude as connected via hooks.
+///
+/// The rail consumers keep their own presentation logic (model catalog,
+/// rate-limit chips, consumer creature dots, palette) — this evaluator only
+/// decides the LED color and the short fallback subtitle.
+enum ProviderRailEvaluator {
+    struct RowState: Equatable {
+        let status: LEDStatus
+        let subtitle: String?
+    }
+
+    /// Claude is reachable when EITHER the hook relay is wired up OR the
+    /// OAuth token is readable. In App Store mode the sandbox blocks
+    /// `~/.claude/` OAuth reads, so hooks are the primary signal.
+    static func claude(
+        state: DashboardState,
+        hooksInstalled: Bool
+    ) -> RowState {
+        let oauthOn = state.oauthConnected == true
+        let oauthKnownDown = state.oauthConnected == false
+        let status: LEDStatus = {
+            if hooksInstalled || oauthOn { return .ok }
+            if oauthKnownDown            { return .warn }
+            return .dim
+        }()
+        let subtitle: String? = {
+            if hooksInstalled && !oauthOn { return "Hooks on" }
+            if oauthKnownDown             { return "Not connected" }
+            return nil
+        }()
+        return RowState(status: status, subtitle: subtitle)
+    }
+
+    /// Returns `nil` when the OpenClaw gateway hasn't been discovered yet —
+    /// rails use that to suppress the row entirely rather than render a
+    /// dim placeholder for a provider the user never opted into. Mirrors
+    /// the gating done by the pre-existing rail code.
+    static func openClaw(state: DashboardState) -> RowState? {
+        guard state.gatewayAvailable || state.gatewayHasError else { return nil }
+        let status: LEDStatus = state.gatewayHasError
+            ? .error
+            : (state.gatewayConnected ? .ok : .warn)
+        let subtitle: String? = {
+            switch state.gatewayAuthStatus {
+            case "approval_pending":
+                return "Approve in OpenClaw"
+            // Normal first-pairing states — show a single "Pairing required"
+            // message so the menu-bar and dashboard subtitle can't confuse
+            // users with different wording for the same underlying ask.
+            case "pairing_required",
+                 "device_auth_invalid",
+                 "gateway_reachable":
+                return "Pairing required"
+            case "gateway_token_missing":
+                return "Gateway token required"
+            case "auth_failed", "token_mismatch":
+                return "Auth failed — re-approve"
+            case "unsupported_protocol":
+                return "Unsupported — update OpenClaw"
+            case "reconnecting":
+                return "Reconnecting…"
+            case "connected":
+                return nil
+            default:
+                return state.gatewayHasError ? "Gateway error" : nil
+            }
+        }()
+        return RowState(status: status, subtitle: subtitle)
     }
 }

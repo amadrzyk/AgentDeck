@@ -157,24 +157,15 @@ struct TopologyRail: View {
     }
 
     private var claudeRow: some View {
-        // Claude is reachable when EITHER the hook relay is wired up OR the
-        // OAuth token is readable. In App Store mode the sandbox blocks
-        // `~/.claude/` OAuth reads, so hooks are the primary signal — gating
-        // the LED on oauthConnected alone made hook-only users see a warn
-        // LED + "Not connected" subtitle even while Claude sessions were
-        // flowing through the dashboard.
         #if os(macOS)
         let hooksOn = preferences.hooksInstalled
         #else
         let hooksOn = false
         #endif
-        let oauthOn = stateHolder.state.oauthConnected == true
-        let oauthKnownDown = stateHolder.state.oauthConnected == false
-        let status: LEDStatus = {
-            if hooksOn || oauthOn { return .ok }
-            if oauthKnownDown { return .warn }
-            return .dim
-        }()
+        let base = ProviderRailEvaluator.claude(
+            state: stateHolder.state,
+            hooksInstalled: hooksOn
+        )
         // Only read `modelCatalog` here when the primary session is a
         // Claude session — otherwise the catalog belongs to some other
         // provider and spilling it into the Claude row is actively wrong.
@@ -184,17 +175,12 @@ struct TopologyRail: View {
                 .filter(\.available)
                 .map { shortClaudeModel($0.name) }
         }()
-        let subtitle: String? = {
-            if !claudeModels.isEmpty {
-                return claudeModels.joined(separator: ", ")
-            }
-            if hooksOn { return oauthOn ? nil : "Hooks on" }
-            if oauthKnownDown { return "Not connected" }
-            return nil
-        }()
+        let subtitle: String? = claudeModels.isEmpty
+            ? base.subtitle
+            : claudeModels.joined(separator: ", ")
         return ProviderRow(
             name: "Claude",
-            status: status,
+            status: base.status,
             subtitle: subtitle,
             rateLimits: rateLimitChips,
             consumers: consumerCreatures(for: .claude)
@@ -202,39 +188,22 @@ struct TopologyRail: View {
     }
 
     private var openClawRow: some View {
-        guard stateHolder.state.gatewayAvailable || stateHolder.state.gatewayHasError else {
+        guard let base = ProviderRailEvaluator.openClaw(state: stateHolder.state) else {
             return AnyView(EmptyView())
         }
-        let status: LEDStatus = stateHolder.state.gatewayHasError ? .error
-            : (stateHolder.state.gatewayConnected ? .ok : .warn)
         // Same catalog-ownership gate as Claude — only surface the catalog
         // under OpenClaw when an OpenClaw-hosted session is primary.
         let lines: [String] = {
             guard catalogOwner == .openclaw else { return [] }
             return DashboardDataRules.openClawDisplayLines(stateHolder.state.modelCatalog)
         }()
-        let subtitle: String? = {
-            if !lines.isEmpty { return lines.joined(separator: ", ") }
-            // Fall back to a pairing/approval hint so the user knows why
-            // the row is amber instead of green — the single most common
-            // reason when `modelCatalog` is empty is waiting on OpenClaw
-            // approval / pairing.
-            switch stateHolder.state.gatewayAuthStatus {
-            case "approval_pending":  return "Approve in OpenClaw"
-            case "pairing_required":  return "Pairing required"
-            case "gateway_token_missing": return "Gateway token required"
-            case "auth_failed",
-                 "token_mismatch",
-                 "device_auth_invalid": return "Auth failed — re-approve"
-            case "unsupported_protocol": return "Unsupported — update OpenClaw"
-            default:
-                return stateHolder.state.gatewayHasError ? "Gateway error" : nil
-            }
-        }()
+        let subtitle: String? = lines.isEmpty
+            ? base.subtitle
+            : lines.joined(separator: ", ")
         return AnyView(
             ProviderRow(
                 name: "OpenClaw",
-                status: status,
+                status: base.status,
                 subtitle: subtitle,
                 rateLimits: [],
                 consumers: consumerCreatures(for: .openclaw)
@@ -767,6 +736,14 @@ enum LEDStatus {
         case .ok, .warn, .error: return "●"
         case .dim:               return "○"
         }
+    }
+
+    /// Rails that render the status as a filled `Circle().fill(...)` vs an
+    /// outlined `Circle().stroke(...)` (the menu-bar palette prefers the
+    /// outline for `.dim` so "inactive / stopped" reads differently from
+    /// "live but unhealthy"). Mirrors the `.glyph` filled/outline split.
+    var isFilled: Bool {
+        self != .dim
     }
 }
 

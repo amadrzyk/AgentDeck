@@ -116,11 +116,29 @@ struct AgentDeckApp: App {
         }
         #endif
         #if os(macOS)
-        Settings {
+        // Preferences live in a regular `Window` scene instead of the
+        // system `Settings` scene so the chrome matches Device Preview +
+        // Launch Session: NavigationSplitView's auto sidebar-toggle
+        // lands in the titlebar toolbar instead of drifting into the
+        // sidebar header. The trade-off is that we wire up the
+        // `App → Settings…` menu item and ⌘, shortcut ourselves via
+        // `.commands`, which is cheap.
+        Window("AgentDeck Settings", id: "settings") {
             SettingsScreen()
                 .environmentObject(stateHolder)
                 .environmentObject(preferences)
                 .environmentObject(daemonService)
+        }
+        .defaultPosition(.center)
+        .defaultSize(width: 820, height: 580)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "settings")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
         MenuBarExtra {
             ControlTowerPanel()

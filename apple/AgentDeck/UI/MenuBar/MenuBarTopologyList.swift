@@ -12,6 +12,11 @@
 //     this view), so duplicating them here is noise.
 //   * Device rows surface ADB / D200H / Pixoo / ESP32 from `moduleHealth`.
 //   * Hub node = AgentDeck logo + port, nothing more.
+//
+// Status/subtitle for Claude + OpenClaw is delegated to
+// `ProviderRailEvaluator` (in IntegrationsView.swift) so Settings,
+// Dashboard, and menu-bar can't drift on the "is Claude connected?"
+// formula again. LEDStatus is the shared palette.
 
 #if os(macOS)
 import SwiftUI
@@ -19,6 +24,7 @@ import SwiftUI
 struct MenuBarTopologyList: View {
     @EnvironmentObject private var stateHolder: AgentStateHolder
     @EnvironmentObject private var daemonService: DaemonService
+    @EnvironmentObject private var preferences: AppPreferences
 
     /// Palette is a thin alias over the shared `TerrariumHUD` /
     /// `TerrariumColors` tokens so the menu-bar popup reads as part of
@@ -31,10 +37,6 @@ struct MenuBarTopologyList: View {
         static let cardBg    = Color.white.opacity(0.04)
         static let hubFill   = TerrariumColors.midWater
         static let hubAccent = TerrariumColors.tetraNeon
-        static let ok        = TerrariumHUD.ledGreen
-        static let warn      = TerrariumHUD.ledAmber
-        static let error     = TerrariumHUD.ledRed
-        static let dim       = TerrariumHUD.subtext.opacity(0.5)
     }
 
     var body: some View {
@@ -123,55 +125,25 @@ struct MenuBarTopologyList: View {
     }
 
     private var claudeRow: some View {
-        let status = claudeStatus
-        return RailRow(
-            status: status,
-            name: "Claude",
-            subtitle: claudeSubtitle
+        let base = ProviderRailEvaluator.claude(
+            state: stateHolder.state,
+            hooksInstalled: preferences.hooksInstalled
         )
-    }
-
-    private var claudeStatus: RailStatus {
-        switch stateHolder.state.oauthConnected {
-        case .some(true):  return .ok
-        case .some(false): return .warn
-        case .none:        return .dim
-        }
-    }
-
-    /// Claude has rate limits rendered in a separate section; no need to
-    /// echo them here. Just carry OAuth / availability in one short line.
-    private var claudeSubtitle: String? {
-        if stateHolder.state.oauthConnected == false {
-            return "Not connected"
-        }
-        return nil
+        return RailRow(
+            status: base.status,
+            name: "Claude",
+            subtitle: base.subtitle
+        )
     }
 
     @ViewBuilder
     private var openClawRow: some View {
-        if stateHolder.state.gatewayAvailable || stateHolder.state.gatewayHasError {
-            let status: RailStatus = stateHolder.state.gatewayHasError ? .error
-                : (stateHolder.state.gatewayConnected ? .ok : .warn)
+        if let base = ProviderRailEvaluator.openClaw(state: stateHolder.state) {
             RailRow(
-                status: status,
+                status: base.status,
                 name: "OpenClaw",
-                subtitle: openClawSubtitle
+                subtitle: base.subtitle
             )
-        }
-    }
-
-    private var openClawSubtitle: String? {
-        switch stateHolder.state.gatewayAuthStatus {
-        case "approval_pending":       return "Approve in OpenClaw"
-        case "pairing_required":       return "Pairing required"
-        case "gateway_token_missing":  return "Gateway token required"
-        case "auth_failed",
-             "token_mismatch",
-             "device_auth_invalid":    return "Auth failed — re-approve"
-        case "unsupported_protocol":   return "Unsupported — update OpenClaw"
-        default:
-            return stateHolder.state.gatewayHasError ? "Gateway error" : nil
         }
     }
 
@@ -188,7 +160,7 @@ struct MenuBarTopologyList: View {
     @ViewBuilder
     private var ollamaRow: some View {
         if let ollama = stateHolder.state.ollamaStatus {
-            let status: RailStatus = ollama.available ? .ok : .dim
+            let status: LEDStatus = ollama.available ? .ok : .dim
             let subtitle: String = {
                 if !ollama.available { return "stopped" }
                 let running = ollama.models.filter { $0.sizeVram > 0 }
@@ -323,32 +295,10 @@ struct MenuBarTopologyList: View {
     }
 }
 
-// MARK: - Row primitives
-
-private enum RailStatus {
-    case ok, warn, error, dim
-
-    var color: Color {
-        switch self {
-        case .ok:    return MenuBarTopologyList.Pal.ok
-        case .warn:  return MenuBarTopologyList.Pal.warn
-        case .error: return MenuBarTopologyList.Pal.error
-        case .dim:   return MenuBarTopologyList.Pal.dim
-        }
-    }
-
-    /// Outline glyph for `.dim` so "inactive / stopped" reads differently
-    /// from "live but unhealthy" at a glance.
-    var filled: Bool {
-        switch self {
-        case .dim: return false
-        default:   return true
-        }
-    }
-}
+// MARK: - Row primitive
 
 private struct RailRow: View {
-    let status: RailStatus
+    let status: LEDStatus
     let name: String
     let subtitle: String?
 
@@ -374,7 +324,7 @@ private struct RailRow: View {
 
     @ViewBuilder
     private var statusDot: some View {
-        if status.filled {
+        if status.isFilled {
             Circle().fill(status.color)
         } else {
             Circle()

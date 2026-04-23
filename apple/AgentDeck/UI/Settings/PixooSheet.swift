@@ -49,6 +49,7 @@ struct PixooSheet: View {
         }
         .padding(20)
         .frame(width: 520, height: 520)
+        .aquariumSurface()
         .onAppear(perform: loadDevices)
     }
 

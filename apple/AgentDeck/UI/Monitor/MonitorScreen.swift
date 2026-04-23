@@ -248,28 +248,19 @@ struct MonitorScreen: View {
         }
     }
 
-    /// Gear icon that opens Settings. On macOS we wrap `SettingsLink`
-    /// rather than invoking `NSApp.sendAction(showSettingsWindow:)` —
-    /// the responder-chain route silently dropped taps when the
-    /// Monitor window lacked keyboard focus. iOS keeps the sheet path.
+    /// Gear icon that opens Settings. Routes through `openWindow(id:)`
+    /// on macOS — Settings is now a regular `Window` scene so the
+    /// NavigationSplitView sidebar-toggle lands in the titlebar instead
+    /// of drifting into the sidebar header (Settings-scene limitation).
+    /// iOS keeps the sheet path.
     @ViewBuilder
     private var settingsGearButton: some View {
-        #if os(macOS)
-        SettingsLink {
-            gearLabel
-        }
-        .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture().onEnded {
-            NSApp.activate(ignoringOtherApps: true)
-        })
-        #else
         Button {
             openSettings()
         } label: {
             gearLabel
         }
         .buttonStyle(.plain)
-        #endif
     }
 
     private var gearLabel: some View {
@@ -319,11 +310,7 @@ struct MonitorScreen: View {
     private func openSettings() {
         #if os(macOS)
         NSApp.activate(ignoringOtherApps: true)
-        if #available(macOS 14.0, *) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
+        openWindow(id: "settings")
         #else
         showSettingsSheet = true
         #endif
