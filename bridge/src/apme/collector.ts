@@ -23,7 +23,7 @@ import type { UsageSnapshot } from '../types.js';
 import type { SessionEntry } from '../session-registry.js';
 import type { ApmeStore } from './store.js';
 import type { ApmeRunRow } from './types.js';
-import type { AgentType } from '@agentdeck/shared';
+import type { AgentType, TelemetrySpan } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
 import { classifyRunSmart } from './classifier.js';
 
@@ -367,6 +367,88 @@ export class ApmeCollector {
         efficiencyJson,
       });
     } catch { /* ignore */ }
+  }
+
+  /** Single-entrypoint ingestion using the shared TelemetrySpan envelope.
+   *
+   *  Adapters in `bridge/src/apme/adapters/*` translate per-source events
+   *  (Claude hooks / PTY parser / OpenClaw timeline / Codex) into spans;
+   *  this method dispatches each span to the appropriate legacy collector
+   *  method so existing race-handling and step-row insertion logic stays
+   *  intact. New ingestion paths should prefer this entrypoint over
+   *  `ingestHook` / `setTurnResponse` directly. */
+  ingestSpan(sessionId: string, span: TelemetrySpan): void {
+    if (!this.store.enabled) return;
+    const a = span.attributes;
+    switch (span.kind) {
+      case 'turn_start': {
+        const prompt = (a['agentdeck.prompt_text'] as string | undefined) ?? '';
+        // Reuse the canonical UserPromptSubmit path so step row, prev-turn close,
+        // task auto-open, and run.task_prompt seeding all behave identically.
+        this.ingestHook(sessionId, 'UserPromptSubmit', { message: { content: prompt } });
+        return;
+      }
+      case 'turn_response': {
+        const text = (a['agentdeck.response_text'] as string | undefined) ?? '';
+        const fallback = a['agentdeck.fallback_to_last_closed'] === true;
+        if (fallback) this.setLastClosedTurnResponse(sessionId, text);
+        else this.setTurnResponse(sessionId, text);
+        return;
+      }
+      case 'turn_end':
+        // No-op: turns auto-close on the next `turn_start` or session end.
+        return;
+      case 'tool_call': {
+        const toolName = (a['gen_ai.tool.name'] ?? a['agentdeck.tool_name']) as string | undefined;
+        const raw = (a['agentdeck.raw_payload'] as Record<string, unknown> | undefined) ?? {};
+        this.ingestHook(sessionId, 'PreToolUse', { tool_name: toolName, ...raw });
+        return;
+      }
+      case 'tool_result': {
+        const toolName = (a['gen_ai.tool.name'] ?? a['agentdeck.tool_name']) as string | undefined;
+        const raw = (a['agentdeck.raw_payload'] as Record<string, unknown> | undefined) ?? {};
+        // PostToolUse + TodoWrite all-completed → existing ingestHook path
+        // detects todo_complete boundary automatically, so adapters don't
+        // need to emit a separate task_boundary span for that case.
+        this.ingestHook(sessionId, 'PostToolUse', { tool_name: toolName, ...raw });
+        return;
+      }
+      case 'task_boundary': {
+        const signal = a['agentdeck.boundary_signal'] as string | undefined;
+        if (signal === 'clear') {
+          this.splitRun(sessionId, (a['agentdeck.cwd'] as string | undefined));
+          return;
+        }
+        // Other boundary signals (todo_complete, session_end) are handled
+        // automatically: tool_result detects todo_complete, closeRun closes
+        // the current task with session_end. Adapters that emit those
+        // spans explicitly are no-ops here by design — preserving the
+        // single-source-of-truth for those transitions.
+        return;
+      }
+      case 'session_meta': {
+        const model = a['gen_ai.request.model'] as string | undefined;
+        if (model) this.updateModel(sessionId, model);
+        const inputTokens = a['agentdeck.usage.input_tokens'] as number | undefined;
+        const outputTokens = a['agentdeck.usage.output_tokens'] as number | undefined;
+        const costUsd = a['agentdeck.usage.cost_usd'] as number | undefined;
+        if (inputTokens !== undefined || outputTokens !== undefined || costUsd !== undefined) {
+          // Synthesize a UsageSnapshot-compatible shape. Missing fields stay null.
+          this.updateUsage(sessionId, {
+            inputTokens: inputTokens ?? 0,
+            outputTokens: outputTokens ?? 0,
+            estimatedCostUsd: costUsd ?? null,
+          } as unknown as UsageSnapshot);
+        }
+        return;
+      }
+      case 'raw_step': {
+        const event = (a['agentdeck.raw_event'] as string | undefined) ?? 'raw';
+        const payload = (a['agentdeck.raw_payload'] as Record<string, unknown> | undefined) ?? {};
+        this.ingestHook(sessionId, event, payload);
+        return;
+      }
+    }
   }
 
   /** Ingest a generic timeline-style event (non-hook). */

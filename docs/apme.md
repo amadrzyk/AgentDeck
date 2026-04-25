@@ -479,3 +479,63 @@ composite = 0.40 × outcomeScore
 | `apme-http.test.ts` | 10 | 503 uninit, GET runs/run/scorecard/rubric, POST vibe/recommend, 404, agent filter |
 
 **총 75 tests.** 모든 테스트는 실제 SQLite (`better-sqlite3` `createRequire` 해석) + 실제 `spawn` 명령 실행.
+
+## Schema versioning — `agentdeck-eval/v1`
+
+APME 의 외부 노출 데이터는 **`agentdeck-eval/v1`** 라는 안정 계약을 따른다. 외부 도구(자체 dashboard, exporter 스크립트, 미래 통합) 가 안심하고 소비할 수 있도록 버전을 고정한다.
+
+### 어디에 사는가
+
+- 타입 정의: [`shared/src/eval-schema.ts`](../shared/src/eval-schema.ts) — `@agentdeck/shared` 에서 export.
+- 버전 상수: `EVAL_SCHEMA_VERSION = 'agentdeck-eval/v1'`
+- 모든 GET HTTP 응답 본문에 `schema` 필드가 포함된다 — 예: `GET /apme/runs` → `{ "schema": "agentdeck-eval/v1", "runs": [...] }`. POST write-ack 응답(`/apme/vibe`, `/apme/tune` 등) 은 envelope 미포함.
+- bridge 내부 `bridge/src/apme/types.ts` 는 shared 의 type 을 그대로 re-export — 동일한 contract 위에서 동작.
+
+### 버전 규칙
+
+| 변경 종류 | 버전 |
+|---|---|
+| 새 optional 필드 추가 | v1 유지 (additive) |
+| 새 axis (rubric 안에서) 추가 | v1 유지 |
+| 새 카테고리 / 새 boundary signal | v1 유지 |
+| 새 layer (`task_judge` 같은 enum 값 추가) | v1 유지 |
+| 기존 필드 이름 변경 / 제거 | **v2 필요** |
+| 기존 필드의 의미·타입 변경 | **v2 필요** |
+| 응답 envelope 의 키 구조 변경 | **v2 필요** |
+
+v2 가 필요할 때는 `EVAL_SCHEMA_VERSION` 을 bump 하고, 한 메이저 사이클 정도는 양쪽 schema 를 동시에 노출해 외부 소비자에게 마이그레이션 시간을 준다.
+
+### 핵심 타입 (요약)
+
+| Type | 의미 |
+|---|---|
+| `ApmeRunRow` | 한 세션. `compositeScore`, `taskCategory`, `outcome`, `agentType` 포함 |
+| 개별 turn row | turn(Q&A) 단위. `prompt`, `response`, `efficiency_json` |
+| `ApmeTaskRow` | turn 들을 boundary signal 로 묶은 단위 — `todo_complete` / `clear` / `session_end` |
+| `ApmeStepRow` | 모든 hook event 원본 로그 |
+| `ApmeEvalRowDb` | layer 별 axis 점수 + `raw` (JSON judge 출력) |
+| `ApmeRubricRow` | versioned rubric (general / 7개 category 별 / `task_rollup`) |
+| `ApmeVibeRow` | 사용자 라벨 (`approve` / `reject` / `neutral`) |
+| `ParsedJudge` | judge LLM JSON 응답의 파싱 결과 — `scores`, `reasoning`, `done`, `missed`, `summary` |
+
+### Judge JSON 계약
+
+Layer 2 judge 는 `parseJudgeJson()` ([runner.ts](../bridge/src/apme/runner.ts)) 가 받는 strict JSON 을 출력한다:
+
+```json
+{
+  "task_completion": 0.85,
+  "code_quality": 0.8,
+  "efficiency": 0.7,
+  "overall": 0.82,
+  "reasoning": "...",
+  "done": ["item1", "item2"],
+  "missed": ["item3"]
+}
+```
+
+axes 이름은 rubric 별로 다르다 (general / conversation / planning / research / debugging / refactoring / review / ops / task_rollup). 모든 axes 점수는 `[0,1]` float, judge 가 0–10 으로 반환하면 `parseJudgeJson` 이 자동 정규화. `task_rollup` 만 `summary` 필드를 추가로 가진다.
+
+### OTel / 외부 표준화 정책
+
+이 schema 는 **OTel 호환이 목표가 아니다.** judge axes / vibe / composite_score 는 OpenTelemetry GenAI semantic conventions 에 1급 시민으로 매핑되지 않는다. lifecycle 정렬은 별도의 internal envelope (`shared/src/telemetry-envelope.ts`) 가 담당한다 — 자세한 근거: [otel-standardization-study.md](otel-standardization-study.md).

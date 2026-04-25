@@ -17,6 +17,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import type { ApmeModule } from './index.js';
 import { loadApmeConfig } from './settings.js';
 import { apmeDashboardHtml } from './dashboard-html.js';
+import { EVAL_SCHEMA_VERSION } from '@agentdeck/shared';
 
 export async function handleApmeRequest(
   req: IncomingMessage,
@@ -65,7 +66,7 @@ export async function handleApmeRequest(
           vibe: vibe ? { verdict: vibe.verdict } : null,
         };
       });
-      sendJson(res, 200, { runs: withEvals });
+      sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, runs: withEvals });
       return true;
     }
 
@@ -86,6 +87,7 @@ export async function handleApmeRequest(
         turnEvals: apme.store.listEvalsForTurn(t.id as string),
       }));
       sendJson(res, 200, {
+        schema: EVAL_SCHEMA_VERSION,
         run,
         evals,
         steps,
@@ -98,12 +100,12 @@ export async function handleApmeRequest(
 
     // ── Scorecard ───────────────────────────────────────────────────────────
     if (method === 'GET' && path === '/apme/scorecard') {
-      sendJson(res, 200, { scorecards: apme.store.scorecard() });
+      sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, scorecards: apme.store.scorecard() });
       return true;
     }
 
     if (method === 'GET' && path === '/apme/categories') {
-      sendJson(res, 200, { categories: apme.store.categoryScorecard() });
+      sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, categories: apme.store.categoryScorecard() });
       return true;
     }
 
@@ -114,7 +116,7 @@ export async function handleApmeRequest(
         sendJson(res, 404, { error: 'no rubric seeded' });
         return true;
       }
-      sendJson(res, 200, { rubric });
+      sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, rubric });
       return true;
     }
 

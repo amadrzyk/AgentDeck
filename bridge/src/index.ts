@@ -8,6 +8,12 @@
 import { BridgeCore } from './bridge-core.js';
 import { initApme } from './apme/index.js';
 import { readLastTurn as readClaudeTranscriptLastTurn } from './apme/claude-transcript-reader.js';
+import { claudeHookToSpans } from './apme/adapters/claude-hook.js';
+import { claudePtyParserEventToSpans, claudePtyResponseToSpan } from './apme/adapters/claude-pty.js';
+import { timelineEntryToSpans } from './apme/adapters/timeline.js';
+import type { AdapterContext as ApmeAdapterContext, TelemetrySpan } from '@agentdeck/shared';
+import { spanNameForKind } from '@agentdeck/shared';
+import { randomUUID } from 'crypto';
 import { VoiceManager } from './voice.js';
 import { checkDependencies } from './check-deps.js';
 import { enableDebugLog, log, logError, debug, setPtyMode } from './logger.js';
@@ -478,30 +484,32 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     switch (evt.source) {
       case 'hook':
         journal.write('hook', 'hook', { event: evt.event, data: evt.data });
-        // APME: detect /clear → split run before ingestHook processes the prompt
-        if (evt.event === 'UserPromptSubmit' && apme) {
-          const msg = evt.data?.message;
-          const promptText = (evt.data?.prompt as string)
-            || (typeof msg === 'object' && msg !== null ? (msg as Record<string, unknown>).content as string : '')
-            || '';
-          if (/^\s*\/clear\s*$/i.test(promptText)) {
-            apme.collector.splitRun(core.sessionId, process.cwd());
-            // Don't ingestHook the /clear prompt — it's not a real task prompt
-            break;
+        // APME ingestion via the shared TelemetrySpan envelope. The Claude
+        // hook adapter handles `/clear` (emits a `task_boundary` span) so
+        // there's no separate splitRun branch here. Path B/C below preserve
+        // the existing PTY-vs-hook race coordination — that's about timing,
+        // not ingestion semantics, so it stays in this file.
+        if (apme) {
+          const ctx = makeApmeAdapterCtx(apme, core.sessionId, agentType);
+          for (const span of claudeHookToSpans(ctx, evt.event, evt.data ?? {})) {
+            apme.collector.ingestSpan(core.sessionId, span);
           }
         }
-        apme?.collector.ingestHook(core.sessionId, evt.event, evt.data);
         if (evt.event === 'UserPromptSubmit' && apme) {
           // Path B: apply buffered response to the NEW turn (idle fired before hook)
           if (pendingPtyResponse) {
             debug('APME', `hook:UPS Path B: applying pending (${pendingPtyResponse.length} chars)`);
-            apme.collector.setTurnResponse(core.sessionId, pendingPtyResponse);
+            const ctx = makeApmeAdapterCtx(apme, core.sessionId, agentType);
+            const span = claudePtyResponseToSpan(ctx, pendingPtyResponse);
+            if (span) apme.collector.ingestSpan(core.sessionId, span);
             pendingPtyResponse = null;
           }
           // Path C: prev turn was just closed by ingestHook — apply pending response
           if (pendingPtyResponse) {
             debug('APME', `hook:UPS Path C: applying pending to closed turn (${pendingPtyResponse.length} chars)`);
-            apme.collector.setLastClosedTurnResponse(core.sessionId, pendingPtyResponse);
+            const ctx = makeApmeAdapterCtx(apme, core.sessionId, agentType);
+            const span = claudePtyResponseToSpan(ctx, pendingPtyResponse, { fallbackToLastClosed: true });
+            if (span) apme.collector.ingestSpan(core.sessionId, span);
             pendingPtyResponse = null;
           }
         }
@@ -516,15 +524,13 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       case 'parser':
         journal.write('parser_emit', 'pty', { event: evt.event, ...evt.data });
         core.stateMachine.handleParserEvent(evt.event, evt.data);
-        // APME: also record parser events as steps (fallback when Claude Code
-        // hooks don't fire — PTY parser still detects tool use and state changes).
+        // APME ingestion fallback: PTY parser sees tool use + state changes
+        // even when Claude Code hooks are flaky (memory: feedback_apme_stop_hook).
         if (apme && evt.event) {
-          const parserToHook: Record<string, string> = {
-            tool_start: 'PreToolUse', tool_end: 'PostToolUse',
-            spinner_start: 'processing', idle: 'idle',
-          };
-          const mapped = parserToHook[evt.event] ?? evt.event;
-          apme.collector.ingestHook(core.sessionId, mapped, evt.data ?? {});
+          const ctx = makeApmeAdapterCtx(apme, core.sessionId, agentType);
+          for (const span of claudePtyParserEventToSpans(ctx, evt.event, evt.data ?? {})) {
+            apme.collector.ingestSpan(core.sessionId, span);
+          }
         }
         // APME: Path A — spinner_stop fires when Claude finishes responding.
         // Delay 500ms to let response render in PTY, then extract text after ⏺ marker.
@@ -558,7 +564,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
             if (response.length > 2) {
               const turnId = apme.collector.getActiveTurnId(sid);
               if (turnId) {
-                apme.collector.setTurnResponse(sid, response);
+                const ctx = makeApmeAdapterCtx(apme, sid, agentType);
+                const span = claudePtyResponseToSpan(ctx, response);
+                if (span) apme.collector.ingestSpan(sid, span);
                 pendingPtyResponse = null;
                 await classifyAndEnqueueTurn(apme, sid);
               } else {
@@ -1277,47 +1285,43 @@ function wireAgentApme(
 
   adapter.on('event', (evt: import('./types.js').AdapterEvent) => {
     // ── Timeline events (OpenCode / OpenClaw) ──
-    // Both adapters emit { source: 'timeline', entry: TimelineEntry }
+    // Both adapters emit { source: 'timeline', entry: TimelineEntry }.
+    // The timeline adapter normalizes them to AgentDeck telemetry spans.
     if (evt.source === 'timeline' && evt.entry) {
       const entry = evt.entry as import('@agentdeck/shared').TimelineEntry;
-      if (entry.type === 'chat_start') {
-        // Turn start: synthesize UserPromptSubmit from the timeline prompt
-        const prompt = entry.detail || entry.raw || '';
-        apme.collector.ingestHook(sid, 'UserPromptSubmit', {
-          message: { content: prompt },
-        });
+      const ctx = makeApmeAdapterCtx(apme, sid, agentType);
+      for (const span of timelineEntryToSpans(ctx, entry)) {
+        apme.collector.ingestSpan(sid, span);
       }
+      // Mid-session classification still runs once we've captured a response.
       if (entry.type === 'chat_response') {
-        // Response captured — save to current turn
-        const response = entry.detail || entry.raw || '';
-        if (response.length > 2) {
-          apme.collector.setTurnResponse(sid, response);
-          void classifyAndEnqueueTurn(apme, sid);
-        }
-      }
-      if (entry.type === 'chat_end' && !apme.collector.getActiveTurnId(sid)) {
-        // No turn was created (chat_start might have been missed) — skip
-      } else if (entry.type === 'chat_end') {
-        // If no response was captured via chat_response, use chat_end detail
-        const detail = entry.detail;
-        if (detail && detail.length > 2) {
-          apme.collector.setLastClosedTurnResponse(sid, detail);
-        }
-      }
-      if (entry.type === 'tool_request') {
-        apme.collector.ingestHook(sid, 'PreToolUse', { tool_name: entry.raw?.split(' ')[0] ?? 'tool' });
-      }
-      if (entry.type === 'tool_resolved') {
-        apme.collector.ingestHook(sid, 'PostToolUse', {});
+        void classifyAndEnqueueTurn(apme, sid);
       }
     }
 
     // ── Codex: PTY parser fallback ──
     if (evt.source === 'parser' && (agentType as string) === 'codex-cli') {
+      const ctx = makeApmeAdapterCtx(apme, sid, agentType);
       if (evt.event === 'user_prompt') {
         const text = (evt.data as Record<string, unknown>)?.text as string | undefined;
         if (text) {
-          apme.collector.ingestHook(sid, 'UserPromptSubmit', { message: { content: text } });
+          // PTY-derived prompt = synthetic turn_start span. We construct it
+          // inline rather than reusing claudeHookToSpans because the source
+          // is a parser event, not a hook payload.
+          const span: TelemetrySpan = {
+            traceId: ctx.traceId,
+            spanId: randomUUID(),
+            parentSpanId: ctx.activeTurnId,
+            name: spanNameForKind('turn_start'),
+            kind: 'turn_start',
+            ts: Date.now(),
+            attributes: {
+              'agentdeck.agent_type': ctx.agentType,
+              'agentdeck.prompt_text': text,
+              ...(ctx.cwd ? { 'agentdeck.cwd': ctx.cwd } : {}),
+            },
+          };
+          apme.collector.ingestSpan(sid, span);
         }
       }
       if (evt.event === 'spinner_stop') {
@@ -1332,13 +1336,32 @@ function wireAgentApme(
           );
           const response = clean.slice(-5).join('\n');
           if (response.length > 2) {
-            apme.collector.setTurnResponse(sid, response);
+            const span = claudePtyResponseToSpan(ctx, response);
+            if (span) apme.collector.ingestSpan(sid, span);
             void classifyAndEnqueueTurn(apme, sid);
           }
         }, 500);
       }
     }
   });
+}
+
+/** Build the AdapterContext used by every APME ingestion adapter. The
+ *  trace id mirrors the active run id so future OTLP exports tie spans
+ *  emitted in the same session together. `cwd` falls back to `process.cwd()`
+ *  because the bridge is started from the project directory. */
+function makeApmeAdapterCtx(
+  apme: import('./apme/index.js').ApmeModule,
+  sid: string,
+  agentType: AgentType,
+): ApmeAdapterContext {
+  return {
+    sessionId: sid,
+    agentType,
+    traceId: apme.collector.getRunId(sid) ?? sid,
+    cwd: process.cwd(),
+    activeTurnId: apme.collector.getActiveTurnId(sid) ?? undefined,
+  };
 }
 
 // ===== Claude Code timeline wiring =====

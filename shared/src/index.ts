@@ -12,3 +12,5 @@ export * from './session-utils.js';
 export * from './state-colors.js';
 export * from './svg-renderers/index.js';
 export * from './llm-settings.js';
+export * from './eval-schema.js';
+export * from './telemetry-envelope.js';

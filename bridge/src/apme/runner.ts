@@ -19,7 +19,7 @@ import type { ApmeStore } from './store.js';
 import type { ApmeConfig, ApmeJudgeConfig } from './settings.js';
 import { loadApmeConfig, shouldJudge } from './settings.js';
 import { loadMlxSettings, mlxChatUrl } from '@agentdeck/shared';
-import type { ApmeRunRow } from './types.js';
+import type { ApmeRunRow, ParsedJudge } from './types.js';
 import { execSync } from 'child_process';
 
 export interface EvalJob {
@@ -558,13 +558,7 @@ function runCommand(command: string, cwd: string, timeoutMs: number): Promise<Cm
 
 // ─── Layer 2 execution ────────────────────────────────────────────────────────
 
-interface ParsedJudge {
-  scores: Record<string, number>;
-  reasoning: string;
-  done?: string[];    // items the agent completed
-  missed?: string[];  // items the agent missed
-  summary?: string;   // task-level one-line summary (task_rollup rubric)
-}
+// `ParsedJudge` is the canonical eval v1 type imported from `@agentdeck/shared`.
 
 const NON_CODE_CATEGORIES = new Set(['conversation', 'planning', 'research', 'review']);
 
