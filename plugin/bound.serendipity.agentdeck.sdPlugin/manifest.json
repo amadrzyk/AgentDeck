@@ -20,6 +20,7 @@
       "Name": "Action",
       "States": [
         {
+          "Image": "static/imgs/option",
           "Name": "Action",
           "ShowTitle": false
         }
@@ -40,6 +41,7 @@
       "Name": "Voice",
       "States": [
         {
+          "Image": "static/imgs/voice",
           "Name": "Voice",
           "ShowTitle": false
         }
@@ -60,6 +62,7 @@
       "Name": "Utility",
       "States": [
         {
+          "Image": "static/imgs/utility",
           "Name": "Utility",
           "ShowTitle": false
         }
@@ -81,6 +84,7 @@
       "Name": "Usage",
       "States": [
         {
+          "Image": "static/imgs/utility",
           "Name": "Usage",
           "ShowTitle": false
         }
@@ -123,6 +127,13 @@
     {
       "Name": "agentdeck-sdplus",
       "DeviceType": 7,
+      "AutoInstall": true,
+      "DontAutoSwitchWhenInstalled": false,
+      "Readonly": false
+    },
+    {
+      "Name": "agentdeck-sd",
+      "DeviceType": 0,
       "AutoInstall": true,
       "DontAutoSwitchWhenInstalled": false,
       "Readonly": false

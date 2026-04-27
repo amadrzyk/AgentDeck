@@ -128,6 +128,55 @@ function capsForProxiedAgent(): import('@agentdeck/shared').AgentCapabilities {
   return connMgr.getCapabilities() ?? CLAUDE_CODE_CAPABILITIES;
 }
 
+function stateFromSession(session?: SessionInfo): State {
+  const state = session?.state;
+  if (
+    state === State.IDLE ||
+    state === State.PROCESSING ||
+    state === State.AWAITING_PERMISSION ||
+    state === State.AWAITING_OPTION ||
+    state === State.AWAITING_DIFF ||
+    state === State.DISCONNECTED
+  ) {
+    return state;
+  }
+  return session?.alive ? State.IDLE : State.DISCONNECTED;
+}
+
+function primeDetailViewFromSession(session?: SessionInfo): void {
+  updateDetailViewState(
+    stateFromSession(session),
+    [],
+    session?.currentTask,
+    undefined,
+    undefined,
+    session?.modelName,
+    undefined,
+    session?.effortLevel,
+  );
+}
+
+function stateEventTargetsFocusedDetail(ev: StateUpdateEvent): boolean {
+  const focused = getFocusedSession();
+  if (!focused) return true;
+  if (ev.sessionId) return ev.sessionId === focused.id;
+  return focused.agentType === 'openclaw' && ev.agentType === 'openclaw';
+}
+
+function sendFocusedSessionCommand(command: { type: string; [key: string]: unknown }): void {
+  const focused = getFocusedSession();
+  if (
+    focused &&
+    focused.agentType !== 'openclaw' &&
+    focused.controlMode !== 'observed' &&
+    focused.port > 0
+  ) {
+    connMgr.send({ type: 'session_command', sessionId: focused.id, command } as any);
+    return;
+  }
+  connMgr.send(command as any);
+}
+
 // ---- Instances ----
 const connMgr = new ConnectionManager();
 
@@ -163,8 +212,9 @@ initSessionSlots((result) => {
         connMgr.focusSession(result.sessionId);
       }
 
-      // Update detail view with current state (will be refreshed on state_update)
-      updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel);
+      // Prime with the selected session's own list-state. The focused
+      // session relay will replace this with full tool/options shortly.
+      primeDetailViewFromSession(session);
       broadcastStateUpdate();  // refresh encoders (timeline ↔ normal)
       break;
     }
@@ -176,13 +226,13 @@ initSessionSlots((result) => {
 
     case 'select-option':
       if (result.optionIndex != null) {
-        connMgr.send({ type: 'select_option', index: result.optionIndex });
+        sendFocusedSessionCommand({ type: 'select_option', index: result.optionIndex });
       }
       break;
 
     case 'send-prompt':
       if (result.promptText) {
-        connMgr.send({ type: 'send_prompt', text: result.promptText });
+        sendFocusedSessionCommand({ type: 'send_prompt', text: result.promptText });
       }
       break;
 
@@ -195,20 +245,20 @@ initSessionSlots((result) => {
     case 'switch-model': {
       const mgr = getSessionSlotManager();
       mgr.startModelSwitch();
-      connMgr.send({ type: 'send_prompt', text: '/model' });
+      sendFocusedSessionCommand({ type: 'send_prompt', text: '/model' });
       // Refresh to show loading state immediately
       if (isInDetailView()) {
-        updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel);
+        primeDetailViewFromSession(getFocusedSession());
       }
       break;
     }
 
     case 'stop':
-      connMgr.send({ type: 'interrupt' });
+      sendFocusedSessionCommand({ type: 'interrupt' });
       break;
 
     case 'esc':
-      connMgr.send({ type: 'escape' });
+      sendFocusedSessionCommand({ type: 'escape' });
       break;
   }
 });
@@ -301,7 +351,7 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
   }
 
   // v4: Update detail view state if in detail mode
-  if (isInDetailView()) {
+  if (isInDetailView() && stateEventTargetsFocusedDetail(ev)) {
     updateDetailViewState(currentState, currentOptions, currentTool, currentToolInput, currentQuestion, currentModelName, currentMode as string, currentEffortLevel);
   }
 
@@ -619,9 +669,13 @@ streamDeck.actions.onWillAppear((ev) => {
   const payload = ev.payload as any;
   const controller = payload.controller || 'Keypad';
   const column = payload.coordinates?.column ?? 0;
+  const row = payload.coordinates?.row ?? 0;
+  const device = (ev.action as any)?.device;
+  const columns = Number(device?.size?.columns ?? 4);
+  const keyColumns = Number.isFinite(columns) && columns > 0 ? columns : 4;
 
   appearedActions.set(ev.action.id, {
-    slot: column,
+    slot: row * keyColumns + column,
     controller,
     actionType,
     settings: payload.settings,
@@ -674,17 +728,26 @@ streamDeck.connect().then(() => {
   }
   connMgr.start();
 
-  // Auto-switch to bundled SD+ profile on first load. Renamed from
+  // Auto-switch to the bundled profile that matches the physical key grid.
+  // SD+ has 8 keys + encoders; classic Stream Deck has 15 keys and no
+  // encoders, so their ESC/Back/session layouts must not share a profile.
+  //
+  // SD+ profile was renamed from
   // `agentdeck-v4` → `agentdeck-sdplus` on 2026-04-20 because Elgato cached
   // the former as "dropped embedded profile" after an earlier bad package
   // install and refused to auto-install it thereafter. New name is treated
   // as fresh so AutoInstall fires cleanly.
   for (const device of streamDeck.devices) {
-    if ((device as any).type === 7) { // DeviceType 7 = Stream Deck+
-      dinfo('Plugin', `SD+ device found: ${device.id}, switching to bundled profile`);
-      void streamDeck.profiles.switchToProfile(device.id, 'agentdeck-sdplus').catch((e: Error) => {
-        dlog('Plugin', `profile switch failed (may already be active): ${e.message}`);
-      });
-    }
+    const type = (device as any).type;
+    const profile = type === 7
+      ? 'agentdeck-sdplus'
+      : type === 0
+        ? 'agentdeck-sd'
+        : null;
+    if (!profile) continue;
+    dinfo('Plugin', `Stream Deck device found: ${device.id} type=${type}, switching to ${profile}`);
+    void streamDeck.profiles.switchToProfile(device.id, profile).catch((e: Error) => {
+      dlog('Plugin', `profile switch failed (may already be active): ${e.message}`);
+    });
   }
 });

@@ -34,6 +34,13 @@ export interface SessionSlotConfig {
   isActive?: boolean;
 }
 
+export interface DeckLayout {
+  columns: number;
+  rows: number;
+  keyCount: number;
+  family?: string;
+}
+
 // ---- OpenClaw preset SVG icons (144x144 button canvas) ----
 
 const SUMMARIZE_ICON_SVG = [
@@ -73,7 +80,7 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-import { OC_BODY, OC_CLAW_L, OC_CLAW_R } from './renderers/agent-logos.js';
+import { OPENCLAW_LOGO_PATHS } from './renderers/agent-logos.js';
 
 const GATEWAY_ICON_SVG = [
   `<rect x="30" y="16" width="84" height="64" rx="6" fill="none" stroke="#94a3b8" stroke-width="2"/>`,
@@ -81,13 +88,9 @@ const GATEWAY_ICON_SVG = [
   `<circle cx="40" cy="23" r="2.5" fill="#ef4444"/>`,
   `<circle cx="48" cy="23" r="2.5" fill="#fbbf24"/>`,
   `<circle cx="56" cy="23" r="2.5" fill="#4ade80"/>`,
-  `<g transform="translate(51,32) scale(0.35)">`,
+  `<g transform="translate(52,34) scale(1.65)" fill="#ff4d4d" fill-rule="evenodd" clip-rule="evenodd">`,
   `<defs><linearGradient id="oc-btn-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff4d4d"/><stop offset="100%" stop-color="#991b1b"/></linearGradient></defs>`,
-  `<path d="${OC_BODY}" fill="url(#oc-btn-g)"/>`,
-  `<path d="${OC_CLAW_L}" fill="url(#oc-btn-g)"/>`,
-  `<path d="${OC_CLAW_R}" fill="url(#oc-btn-g)"/>`,
-  `<circle cx="45" cy="35" r="6" fill="#050810"/>`,
-  `<circle cx="75" cy="35" r="6" fill="#050810"/>`,
+  ...OPENCLAW_LOGO_PATHS.map((path) => `<path d="${path}" fill="url(#oc-btn-g)"/>`),
   `</g>`,
 ].join('');
 
@@ -112,12 +115,21 @@ const CC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; 
   { label: 'CLEAR', iconSvg: CLEAR_ICON_SVG, color: '#1e293b', textColor: '#94a3b8', prompt: '/clear' },
 ];
 
-const SLOTS_PER_PAGE = 7; // When paginating: 7 sessions + 1 nav
-const MAX_SESSIONS = 20;
-const MAX_SLOTS = 8;
+const DEFAULT_LAYOUT: DeckLayout = { columns: 4, rows: 2, keyCount: 8, family: 'streamdeckplus' };
+const MAX_SESSIONS = 32;
+
+function normalizeLayout(layout?: Partial<DeckLayout>): DeckLayout {
+  const columns = Math.max(1, Math.floor(layout?.columns ?? DEFAULT_LAYOUT.columns));
+  const rows = Math.max(1, Math.floor(layout?.rows ?? DEFAULT_LAYOUT.rows));
+  const keyCount = Math.max(1, Math.floor(layout?.keyCount ?? columns * rows));
+  return { columns, rows, keyCount, family: layout?.family ?? DEFAULT_LAYOUT.family };
+}
+
+function listSessionsPerPage(layout: DeckLayout, totalSessions: number): number {
+  return totalSessions > layout.keyCount ? Math.max(1, layout.keyCount - 1) : layout.keyCount;
+}
 
 export class SessionSlotManager {
-  private static readonly DETAIL_OPTIONS_PER_PAGE = 4;
   private static readonly MODEL_SWITCH_TIMEOUT_MS = 12000;
 
   private _view: SlotView = 'list';
@@ -265,15 +277,16 @@ export class SessionSlotManager {
     dlog('SlotMgr', `exitDetailView → list`);
   }
 
-  nextPage(): void {
+  nextPage(layout?: DeckLayout): void {
+    const deck = normalizeLayout(layout);
     if (this._view === 'detail') {
-      const total = this.detailOptionPages();
+      const total = this.detailOptionPages(deck);
       if (total <= 1) return;
       this._detailPage = (this._detailPage + 1) % total;
       dlog('SlotMgr', `nextDetailPage: ${this._detailPage + 1}/${total}`);
       return;
     }
-    const total = this.totalPages();
+    const total = this.totalPages(deck);
     if (total <= 1) return;
     this._currentPage = (this._currentPage + 1) % total;
     dlog('SlotMgr', `nextPage: ${this._currentPage}/${total}`);
@@ -281,17 +294,18 @@ export class SessionSlotManager {
 
   // ---- Slot configuration ----
 
-  getSlotConfig(slot: number): SessionSlotConfig {
-    if (slot < 0 || slot >= MAX_SLOTS) return { type: 'empty' };
+  getSlotConfig(slot: number, layout?: DeckLayout): SessionSlotConfig {
+    const deck = normalizeLayout(layout);
+    if (slot < 0 || slot >= deck.keyCount) return { type: 'empty' };
 
     if (this._view === 'detail') {
-      return this.getDetailSlotConfig(slot);
+      return this.getDetailSlotConfig(slot, deck);
     }
-    return this.getListSlotConfig(slot);
+    return this.getListSlotConfig(slot, deck);
   }
 
   /** Handle button press. Returns action to take. */
-  handleSlotPress(slot: number): {
+  handleSlotPress(slot: number, layout?: DeckLayout): {
     action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'none';
     sessionId?: string;
     sessionPort?: number;
@@ -299,7 +313,8 @@ export class SessionSlotManager {
     optionValue?: string;
     promptText?: string;
   } {
-    const config = this.getSlotConfig(slot);
+    const deck = normalizeLayout(layout);
+    const config = this.getSlotConfig(slot, deck);
 
     switch (config.type) {
       case 'session':
@@ -358,14 +373,14 @@ export class SessionSlotManager {
 
   // ---- Internal helpers ----
 
-  private totalPages(): number {
+  private totalPages(layout: DeckLayout = DEFAULT_LAYOUT): number {
     const count = this._sessions.length;
-    if (count <= MAX_SLOTS) return 1;
-    return Math.ceil(count / SLOTS_PER_PAGE);
+    if (count <= layout.keyCount) return 1;
+    return Math.ceil(count / listSessionsPerPage(layout, count));
   }
 
-  private needsPagination(): boolean {
-    return this._sessions.length > MAX_SLOTS;
+  private needsPagination(layout: DeckLayout): boolean {
+    return this._sessions.length > layout.keyCount;
   }
 
   private isAwaitingDetailState(): boolean {
@@ -374,21 +389,22 @@ export class SessionSlotManager {
       || this._detailState === State.AWAITING_DIFF;
   }
 
-  private detailOptionPages(): number {
+  private detailOptionPages(layout: DeckLayout = DEFAULT_LAYOUT): number {
     if (!this.isAwaitingDetailState()) return 1;
-    return Math.max(1, Math.ceil(this._detailOptions.length / SessionSlotManager.DETAIL_OPTIONS_PER_PAGE));
+    const capacity = Math.max(1, this.detailContentSlots(layout, true).length);
+    return Math.max(1, Math.ceil(this._detailOptions.length / capacity));
   }
 
-  private getListSlotConfig(slot: number): SessionSlotConfig {
-    const needsPage = this.needsPagination();
-    const sessionsOnPage = needsPage ? SLOTS_PER_PAGE : MAX_SLOTS;
+  private getListSlotConfig(slot: number, layout: DeckLayout): SessionSlotConfig {
+    const needsPage = this.needsPagination(layout);
+    const sessionsOnPage = listSessionsPerPage(layout, this._sessions.length);
 
     // Last slot on page = NEXT→ when paginating
-    if (needsPage && slot === MAX_SLOTS - 1) {
-      return { type: 'next-page', label: `${this._currentPage + 1}/${this.totalPages()}` };
+    if (needsPage && slot === layout.keyCount - 1) {
+      return { type: 'next-page', label: `${this._currentPage + 1}/${this.totalPages(layout)}` };
     }
 
-    const startIdx = this._currentPage * SLOTS_PER_PAGE;
+    const startIdx = this._currentPage * sessionsOnPage;
     const sessionIdx = startIdx + slot;
 
     if (sessionIdx < this._sessions.length) {
@@ -403,96 +419,107 @@ export class SessionSlotManager {
     return { type: 'empty' };
   }
 
-  private getDetailSlotConfig(slot: number): SessionSlotConfig {
+  private getDetailSlotConfig(slot: number, layout: DeckLayout): SessionSlotConfig {
     const session = this.getFocusedSession();
     const isAwaiting = this.isAwaitingDetailState();
     const isProcessing = this._detailState === State.PROCESSING;
     const isOpenClaw = session?.agentType === 'openclaw';
-    const detailOptionStart = this._detailPage * SessionSlotManager.DETAIL_OPTIONS_PER_PAGE;
-    const detailOptionPages = this.detailOptionPages();
+    const detailOptionPages = this.detailOptionPages(layout);
+    const reserveMore = isAwaiting && detailOptionPages > 1;
+    const contentSlots = this.detailContentSlots(layout, reserveMore);
+    const detailOptionStart = this._detailPage * Math.max(1, contentSlots.length);
+    const controls = this.detailControlSlots(layout);
 
-    // Layout (2×4 grid):
-    //   0=BACK   1=INFO   2=content  3=content
-    //   4=ESC/STOP  5=content  6=content  7=reserved(expand)
-    // Content slots: 1,2,3,5,6 (slot 1=info, rest=options/presets/info)
-
-    switch (slot) {
-      case 0:
-        return { type: 'back', label: 'BACK' };
-
-      case 4:
-        // ESC/STOP — below BACK, always visible (dimmed when not actionable)
-        if (isAwaiting) return { type: 'esc', label: 'active' };
-        if (isProcessing) return { type: 'stop', label: 'active' };
-        // IDLE/DISCONNECTED: show dimmed ESC (harmless, clears typed text)
-        return { type: 'esc', label: 'dim' };
-
-      case 1:
-        return { type: 'info', session, label: session ? this.displayNameFor(session) : 'Session' };
-
-      case 7:
-        if (isAwaiting && detailOptionPages > 1) {
-          return { type: 'next-page', label: `${this._detailPage + 1}/${detailOptionPages}` };
-        }
-        return { type: 'empty' };
-
-      default: {
-        // Content slots: 2,3,5,6 → option indices (paged)
-        const CONTENT_SLOTS = [2, 3, 5, 6];
-        const contentIdx = CONTENT_SLOTS.indexOf(slot);
-        if (contentIdx < 0) return { type: 'empty' };
-
-        const optionIndex = detailOptionStart + contentIdx;
-        if (isAwaiting && optionIndex < this._detailOptions.length) {
-          return {
-            type: 'option',
-            option: this._detailOptions[optionIndex],
-            optionIndex,
-          };
-        }
-
-        // OpenClaw presets (IDLE or PROCESSING without options)
-        if (isOpenClaw && !isAwaiting && contentIdx < OC_PRESET_DEFS.length) {
-          const def = OC_PRESET_DEFS[contentIdx];
-          const iconSvg = def.dynamicIcon === 'model'
-            ? buildModelIcon(this._detailModelName, this._modelSwitching)
-            : (def.iconSvg ?? '');
-          const preset: PresetAction = {
-            label: def.label,
-            iconSvg,
-            color: def.color,
-            textColor: def.textColor,
-            prompt: def.prompt,
-            localAction: def.localAction,
-            loading: def.dynamicIcon === 'model' ? this._modelSwitching : undefined,
-          };
-          return { type: 'preset', preset };
-        }
-
-        // PROCESSING: first content slot shows current tool
-        if (isProcessing && contentIdx === 0 && this._detailTool) {
-          return {
-            type: 'info',
-            label: this._detailTool,
-            session,
-          };
-        }
-
-        // Claude Code IDLE: show quick action presets (GO ON, REVIEW, COMMIT, CLEAR)
-        if (!isOpenClaw && this._detailState === State.IDLE && contentIdx < CC_PRESET_DEFS.length) {
-          const def = CC_PRESET_DEFS[contentIdx];
-          const preset: PresetAction = {
-            label: def.label,
-            iconSvg: def.iconSvg ?? '',
-            color: def.color,
-            textColor: def.textColor,
-            prompt: def.prompt,
-          };
-          return { type: 'preset', preset };
-        }
-
-        return { type: 'empty' };
-      }
+    if (slot === controls.back) {
+      return { type: 'back', label: 'BACK' };
     }
+
+    if (slot === controls.stop) {
+      if (isAwaiting) return { type: 'esc', label: 'active' };
+      if (isProcessing) return { type: 'stop', label: 'active' };
+      return { type: 'esc', label: 'dim' };
+    }
+
+    if (slot === controls.info) {
+      return { type: 'info', session, label: session ? this.displayNameFor(session) : 'Session' };
+    }
+
+    if (slot === controls.more && reserveMore) {
+      return { type: 'next-page', label: `${this._detailPage + 1}/${detailOptionPages}` };
+    }
+
+    const contentIdx = contentSlots.indexOf(slot);
+    if (contentIdx < 0) return { type: 'empty' };
+
+    const optionIndex = detailOptionStart + contentIdx;
+    if (isAwaiting && optionIndex < this._detailOptions.length) {
+      return {
+        type: 'option',
+        option: this._detailOptions[optionIndex],
+        optionIndex,
+      };
+    }
+
+    // OpenClaw presets (IDLE or PROCESSING without options)
+    if (isOpenClaw && !isAwaiting && contentIdx < OC_PRESET_DEFS.length) {
+      const def = OC_PRESET_DEFS[contentIdx];
+      const iconSvg = def.dynamicIcon === 'model'
+        ? buildModelIcon(this._detailModelName, this._modelSwitching)
+        : (def.iconSvg ?? '');
+      const preset: PresetAction = {
+        label: def.label,
+        iconSvg,
+        color: def.color,
+        textColor: def.textColor,
+        prompt: def.prompt,
+        localAction: def.localAction,
+        loading: def.dynamicIcon === 'model' ? this._modelSwitching : undefined,
+      };
+      return { type: 'preset', preset };
+    }
+
+    // PROCESSING: first content slot shows current tool
+    if (isProcessing && contentIdx === 0 && this._detailTool) {
+      return {
+        type: 'info',
+        label: this._detailTool,
+        session,
+      };
+    }
+
+    // Claude Code IDLE: show quick action presets (GO ON, REVIEW, COMMIT, CLEAR)
+    if (!isOpenClaw && this._detailState === State.IDLE && contentIdx < CC_PRESET_DEFS.length) {
+      const def = CC_PRESET_DEFS[contentIdx];
+      const preset: PresetAction = {
+        label: def.label,
+        iconSvg: def.iconSvg ?? '',
+        color: def.color,
+        textColor: def.textColor,
+        prompt: def.prompt,
+      };
+      return { type: 'preset', preset };
+    }
+
+    return { type: 'empty' };
+  }
+
+  private detailControlSlots(layout: DeckLayout): { back: number; info: number; more: number; stop: number } {
+    const stop = layout.keyCount - 1;
+    const back = 0;
+    const info = layout.keyCount > 1 ? 1 : 0;
+    const more = layout.keyCount > 4 ? layout.keyCount - 2 : Math.max(0, stop - 1);
+    return { back, info, more, stop };
+  }
+
+  private detailContentSlots(layout: DeckLayout, reserveMore: boolean): number[] {
+    const controls = this.detailControlSlots(layout);
+    const reserved = new Set([controls.back, controls.info, controls.stop]);
+    if (reserveMore) reserved.add(controls.more);
+
+    const slots: number[] = [];
+    for (let slot = 0; slot < layout.keyCount; slot++) {
+      if (!reserved.has(slot)) slots.push(slot);
+    }
+    return slots;
   }
 }

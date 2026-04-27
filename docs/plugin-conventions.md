@@ -101,6 +101,8 @@ Bridge(daemon)에서만 요약 수행 — plugin은 daemon 경유 단일 경로.
 
 Ulanzi D200H communicates via **stock HID protocol** (VID `0x2207`/PID `0x0019`, same as D200). No ADB, no firmware modification, no on-device agent. 1024-byte fixed packets (header `0x7C7C` + cmd + len + payload), ZIP chunking for `SET_BUTTONS`. Device boots into HID mode after 4s. D200H returns `DeviceType:"D200"` — protocol-compatible with D200 community libraries (`strmdck`).
 
+**Session icon invariant**: Session controls show AgentDeck's terrarium creatures, not provider/company logos. Stream Deck/Stream Deck+ SVG slots and D200H Swift PNG tiles render the same reduced creature language: Claude robot, Codex cloud prompt, OpenClaw crayfish, OpenCode nested square. Provider logos stay in brand/settings contexts only.
+
 **Two implementations** (daemon-only, session bridges never talk to D200H):
 
 - **Swift daemon** (`D200hHidModule.swift`, macOS app): IOKit `IOHIDManager`, non-seize keyboard open (D200H custom protocol doesn't need seize), Core Graphics PNG + device native text, heartbeat re-render (15s) prevents firmware timeout. **Multi-session agent controller**: session list view (13 sessions per page, slots 0-12 + slot 13 big merged button = usage monitor with color-coded border) + detail/option view with quick actions (GO ON/REVIEW/COMMIT/CLEAR) + STOP/ESC

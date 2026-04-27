@@ -14,7 +14,7 @@ import streamDeck, {
 } from '@elgato/streamdeck';
 import { State } from '@agentdeck/shared';
 import type { SessionInfo, PromptOption, AgentType } from '@agentdeck/shared';
-import { SessionSlotManager, type SessionSlotConfig } from '../session-slot-manager.js';
+import { SessionSlotManager, type DeckLayout, type SessionSlotConfig } from '../session-slot-manager.js';
 import {
   renderSessionSlot,
   renderEmptySlot,
@@ -36,8 +36,8 @@ import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
 const manager = new SessionSlotManager();
 
-/** Action instance ID → physical slot index (0-7) */
-const slotMap = new Map<string, number>();
+/** Action instance ID → physical slot + physical device layout */
+const slotMap = new Map<string, { slot: number; layout: DeckLayout }>();
 
 /** All registered action instance IDs */
 const actionIds: string[] = [];
@@ -145,15 +145,37 @@ function needsAnimation(): boolean {
 
 // ---- Rendering ----
 
+function familyForDeviceType(type: number | undefined): string {
+  switch (type) {
+    case 0: return 'streamdeck';
+    case 1: return 'streamdeckmini';
+    case 2: return 'streamdeckxl';
+    case 7: return 'streamdeckplus';
+    default: return 'streamdeck';
+  }
+}
+
+function layoutForEvent(ev: WillAppearEvent | KeyDownEvent): DeckLayout {
+  const device = (ev.action as any)?.device;
+  const columns = Number(device?.size?.columns ?? 4);
+  const rows = Number(device?.size?.rows ?? 2);
+  return {
+    columns: Number.isFinite(columns) && columns > 0 ? columns : 4,
+    rows: Number.isFinite(rows) && rows > 0 ? rows : 2,
+    keyCount: Math.max(1, (Number.isFinite(columns) && columns > 0 ? columns : 4) * (Number.isFinite(rows) && rows > 0 ? rows : 2)),
+    family: familyForDeviceType(Number(device?.type)),
+  };
+}
+
 function refreshAll(): void {
   // Daemon not connected → show "No Daemon" on all slots
   if (!daemonConnected) {
     for (const id of actionIds) {
-      const slot = slotMap.get(id);
-      if (slot == null) continue;
+      const entry = slotMap.get(id);
+      if (entry == null) continue;
       const act = streamDeck.actions.getActionById(id);
       if (!act) continue;
-      void act.setImage(svgToDataUrl(renderNoDaemonSlot(slot))).catch(() => {});
+      void act.setImage(svgToDataUrl(renderNoDaemonSlot(entry.slot))).catch(() => {});
     }
     stopAnimation();
     return;
@@ -167,13 +189,13 @@ function refreshAll(): void {
   }
 
   for (const id of actionIds) {
-    const slot = slotMap.get(id);
-    if (slot == null) continue;
+    const entry = slotMap.get(id);
+    if (entry == null) continue;
     const act = streamDeck.actions.getActionById(id);
     if (!act) continue;
 
-    const config = manager.getSlotConfig(slot);
-    const svg = renderSlotSvg(config, slot);
+    const config = manager.getSlotConfig(entry.slot, entry.layout);
+    const svg = renderSlotSvg(config, entry.slot);
     void act.setImage(svgToDataUrl(svg)).catch(() => {});
   }
 }
@@ -234,26 +256,28 @@ export class SessionSlotButtonAction extends SingletonAction {
       actionIds.push(id);
     }
 
-    // Auto-detect physical slot from coordinates
+    // Auto-detect physical slot from coordinates and actual device key grid.
     const col = (ev.payload as any)?.coordinates?.column ?? 0;
     const row = (ev.payload as any)?.coordinates?.row ?? 0;
-    const slot = row * 4 + col; // SD+ 2×4 grid: row 0 = slots 0-3, row 1 = slots 4-7
-    slotMap.set(id, slot);
+    const layout = layoutForEvent(ev);
+    const slot = row * layout.columns + col;
+    slotMap.set(id, { slot, layout });
 
-    dlog('SesSlot', `willAppear: id=${id.slice(-6)} slot=${slot} (row=${row} col=${col}) daemon=${daemonConnected}`);
+    dlog('SesSlot', `willAppear: id=${id.slice(-6)} slot=${slot} (row=${row} col=${col} grid=${layout.columns}x${layout.rows}) daemon=${daemonConnected}`);
 
     // Render appropriate state
     if (!daemonConnected) {
       await ev.action.setImage(svgToDataUrl(renderNoDaemonSlot(slot)));
     } else {
-      const config = manager.getSlotConfig(slot);
+      const config = manager.getSlotConfig(slot, layout);
       await ev.action.setImage(svgToDataUrl(renderSlotSvg(config, slot)));
     }
   }
 
   override async onKeyDown(ev: KeyDownEvent): Promise<void> {
-    const slot = slotMap.get(ev.action.id);
-    if (slot == null) return;
+    const entry = slotMap.get(ev.action.id);
+    if (entry == null) return;
+    const { slot, layout } = entry;
 
     // No daemon — slot 0 = START (launch macOS app)
     if (!daemonConnected && slot === 0) {
@@ -262,11 +286,11 @@ export class SessionSlotButtonAction extends SingletonAction {
       return;
     }
 
-    const result = manager.handleSlotPress(slot);
+    const result = manager.handleSlotPress(slot, layout);
     dlog('SesSlot', `keyDown: slot=${slot} action=${result.action}`);
 
     if (result.action === 'next-page') {
-      manager.nextPage();
+      manager.nextPage(layout);
       refreshAll();
       return;
     }
