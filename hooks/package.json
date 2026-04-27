@@ -3,6 +3,10 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "files": [
+    "dist",
+    "!dist/__tests__"
+  ],
   "main": "dist/install.js",
   "types": "dist/install.d.ts",
   "exports": {

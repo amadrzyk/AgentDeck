@@ -8,7 +8,10 @@
     "url": "https://github.com/puritysb/AgentDeck.git",
     "directory": "shared"
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "!dist/__tests__"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

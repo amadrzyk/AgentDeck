@@ -50,9 +50,6 @@ importers:
 
   bridge:
     dependencies:
-      '@agentdeck/hooks':
-        specifier: workspace:*
-        version: link:../hooks
       '@agentdeck/shared':
         specifier: workspace:*
         version: link:../shared
