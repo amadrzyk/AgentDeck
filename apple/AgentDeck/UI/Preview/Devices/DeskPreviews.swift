@@ -104,7 +104,7 @@ struct D200HKeyPreview: View {
                         sessionCount: selection.sessionCount,
                         compact: true
                     )
-                    PreviewCreature(agent: selection.agent, state: selection.state, size: 58)
+                    PreviewCreatureGlyph(agent: selection.agent, state: selection.state, size: 48)
                     Text(projectLabel)
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.8))

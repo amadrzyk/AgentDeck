@@ -24,63 +24,13 @@ struct EinkMonoPreview: View {
                 bezelColor: Color(white: 0.85),
                 screenColor: Color(red: 0.95, green: 0.94, blue: 0.90)
             ) {
-                ZStack {
-                    LinearGradient(
-                        colors: [Color(white: 0.85), Color(white: 0.90), Color(white: 0.95)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    
-                    GeometryReader { geo in
-                        Image(creatureAsset)
-                            .resizable()
-                            .renderingMode(.template)
-                            .interpolation(.high)
-                            .aspectRatio(contentMode: .fit)
-                            .foregroundStyle(.black.opacity(0.8))
-                            .frame(width: geo.size.width * 0.45)
-                            .opacity(selection.state == .disconnected ? 0.25 : 1)
-                            .position(x: geo.size.width * 0.55, y: geo.size.height * 0.45)
-                    }
-
-                    VStack {
-                        HStack {
-                            Text("AgentDeck").font(.system(size: 11, weight: .semibold, design: .serif))
-                            Spacer()
-                            Text("CREMAS")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(.black.opacity(0.5))
-                        }
-                        .foregroundStyle(.black.opacity(0.85))
-                        Spacer()
-                        VStack(spacing: 4) {
-                            Text(selection.agent.displayName)
-                                .font(.system(size: 13, weight: .bold, design: .serif))
-                                .foregroundStyle(.black)
-                            Text(stateLine)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.black.opacity(0.65))
-                        }
-                    }
-                }
+                EinkScreenLayout(selection: selection, isColor: false)
             }
             .frame(width: 240, height: 320)
             Text("E-ink mono • CremaS / Kobo")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private var creatureAsset: String {
-        switch selection.agent {
-        case .claudeCode: return "CreatureClaudeCode"
-        case .codex:      return "CreatureCodex"
-        case .opencode:   return "CreatureOpenCode"
-        case .openclaw:   return "CreatureOpenClaw"
-        }
-    }
-
-    private var stateLine: String {
-        "STATE: \(selection.state.displayName.uppercased()) • \(selection.sessionCount)x"
     }
 }
 
@@ -97,45 +47,111 @@ struct EinkColorPreview: View {
                 bezelColor: Color(white: 0.88),
                 screenColor: Color(red: 0.96, green: 0.95, blue: 0.88)
             ) {
-                ZStack {
-                    LinearGradient(
-                        colors: [Color(red: 0.80, green: 0.85, blue: 0.88),
-                                 Color(red: 0.90, green: 0.92, blue: 0.94),
-                                 Color(red: 0.96, green: 0.95, blue: 0.88)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-
-                    GeometryReader { geo in
-                        PreviewCreature(agent: selection.agent, state: selection.state, size: min(geo.size.width, geo.size.height) * 0.45)
-                            .position(x: geo.size.width * 0.55, y: geo.size.height * 0.45)
-                    }
-
-                    VStack {
-                        HStack {
-                            Text("AgentDeck").font(.system(size: 11, weight: .semibold, design: .serif))
-                                .foregroundStyle(.black)
-                            Spacer()
-                            Text("PANTONE6")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(.black.opacity(0.5))
-                        }
-                        Spacer()
-                        VStack(spacing: 4) {
-                            Text(selection.agent.displayName)
-                                .font(.system(size: 13, weight: .bold, design: .serif))
-                                .foregroundStyle(StateColors.brand(agent: selection.agent.rawValue))
-                            Text(selection.state.displayName.uppercased())
-                                .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                                .foregroundStyle(StateColors.color(for: selection.state.sessionStateStringForUI))
-                        }
-                    }
-                }
+                EinkScreenLayout(selection: selection, isColor: true)
             }
             .frame(width: 240, height: 320)
             Text("E-ink color • Pantone6")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct EinkScreenLayout: View {
+    let selection: DevicePreviewSelection
+    let isColor: Bool
+
+    var body: some View {
+        ZStack {
+            background
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("AgentDeck")
+                        .font(.system(size: 11, weight: .semibold, design: .serif))
+                    Spacer()
+                    Text(isColor ? "PANTONE6" : "CREMAS")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .opacity(0.55)
+                }
+                .foregroundStyle(.black.opacity(0.86))
+
+                HStack(alignment: .top, spacing: 7) {
+                    PreviewMiniSessionList(selection: selection, dark: false, compact: true)
+                        .frame(width: 70, height: 112)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(alignment: .center, spacing: 5) {
+                            PreviewCreatureGlyph(
+                                agent: selection.agent,
+                                state: selection.state,
+                                size: 54,
+                                tintOverride: creatureTint
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(selection.agent.displayName)
+                                    .font(.system(size: 13, weight: .bold, design: .serif))
+                                    .foregroundStyle(creatureTint)
+                                Text("STATE \(selection.state.displayName.uppercased())")
+                                    .font(.system(size: 7, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.black.opacity(0.58))
+                                Text("\(selection.sessionCount) SESSION\(selection.sessionCount == 1 ? "" : "S")")
+                                    .font(.system(size: 7, design: .monospaced))
+                                    .foregroundStyle(.black.opacity(0.45))
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        usageStrip
+                    }
+                }
+
+                Divider()
+                    .overlay(Color.black.opacity(0.28))
+
+                PreviewTimelineMini(selection: selection, dark: false, compact: true)
+                Spacer(minLength: 0)
+            }
+            .padding(9)
+        }
+    }
+
+    private var background: some View {
+        LinearGradient(
+            colors: isColor
+                ? [
+                    Color(red: 0.82, green: 0.87, blue: 0.89),
+                    Color(red: 0.92, green: 0.93, blue: 0.91),
+                    Color(red: 0.96, green: 0.95, blue: 0.88),
+                ]
+                : [Color(white: 0.84), Color(white: 0.90), Color(white: 0.95)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var creatureTint: Color {
+        isColor ? StateColors.brand(agent: selection.agent.rawValue) : .black.opacity(0.82)
+    }
+
+    private var usageStrip: some View {
+        HStack(spacing: 4) {
+            einkGauge("5h", fill: 0.42)
+            einkGauge("7d", fill: 0.68)
+        }
+    }
+
+    private func einkGauge(_ label: String, fill: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2)
+                .stroke(Color.black.opacity(0.32), lineWidth: 0.8)
+            RoundedRectangle(cornerRadius: 2)
+                .fill((isColor ? TerrariumHUD.ledGreen : Color.black).opacity(isColor ? 0.55 : 0.18))
+                .frame(width: 42 * fill)
+            Text(label)
+                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                .foregroundStyle(.black.opacity(0.62))
+                .padding(.leading, 4)
+        }
+        .frame(width: 42, height: 12)
     }
 }
 
@@ -197,10 +213,10 @@ private struct Esp32TerrariumScene<Content: View>: View {
             // it reads as "a creature is in the scene" instead of the
             // giant dashboard-style icon the old preview used.
             GeometryReader { geo in
-                PreviewCreature(
+                PreviewCreatureGlyph(
                     agent: selection.agent,
                     state: selection.state,
-                    size: min(geo.size.width, geo.size.height) * 0.45
+                    size: min(geo.size.width, geo.size.height) * 0.26
                 )
                 .position(
                     x: geo.size.width * 0.55,

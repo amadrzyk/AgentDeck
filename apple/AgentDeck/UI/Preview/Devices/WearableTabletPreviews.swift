@@ -30,10 +30,21 @@ struct AppleWatchPreview: View {
                         .fill(LinearGradient(
                             colors: [TerrariumColors.deepSea, TerrariumColors.midWater, TerrariumColors.shallowWater],
                             startPoint: .top, endPoint: .bottom))
-                    
+
                     GeometryReader { geo in
-                        PreviewCreature(agent: selection.agent, state: selection.state, size: min(geo.size.width, geo.size.height) * 0.45)
-                            .position(x: geo.size.width * 0.55, y: geo.size.height * 0.45)
+                        PreviewCreatureGlyph(
+                            agent: selection.agent,
+                            state: selection.state,
+                            size: min(geo.size.width, geo.size.height) * 0.30
+                        )
+                        .position(x: geo.size.width * 0.52, y: geo.size.height * 0.34)
+                        ForEach(0..<min(max(selection.sessionCount, 0), 4), id: \.self) { i in
+                            PreviewStateDot(
+                                state: i == 0 ? selection.state : .idle,
+                                size: 5
+                            )
+                            .position(x: geo.size.width * (0.38 + CGFloat(i) * 0.08), y: geo.size.height * 0.62)
+                        }
                     }
 
                     VStack(spacing: 4) {
@@ -74,56 +85,19 @@ struct IPadLandscapePreview: View {
     var body: some View {
         VStack(spacing: 12) {
             DeviceBezel(cornerRadius: 24, bezelWidth: 12) {
-                HStack(spacing: 12) {
-                    // Sidebar
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("SESSIONS").font(.system(size: 9, weight: .heavy, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        ForEach(0..<min(max(selection.sessionCount, 1), 4), id: \.self) { i in
-                            HStack(spacing: 4) {
-                                PreviewStateDot(state: i == 0 ? selection.state : .idle, size: 6)
-                                Text(agentLabel(for: i))
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.white.opacity(0.85))
-                                Spacer(minLength: 0)
-                            }
-                        }
-                        Spacer()
-                    }
-                    .frame(width: 110)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 8)
-                    .background(Color(white: 0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    // Main canvas — terrarium-like
-                    VStack(spacing: 8) {
-                        PreviewHUD(
-                            agent: selection.agent,
-                            state: selection.state,
-                            sessionCount: selection.sessionCount
-                        )
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(LinearGradient(
-                                    colors: [TerrariumColors.deepSea, TerrariumColors.midWater, TerrariumColors.shallowWater],
-                                    startPoint: .top, endPoint: .bottom))
-                            GeometryReader { geo in
-                                PreviewCreature(agent: selection.agent, state: selection.state, size: min(geo.size.width, geo.size.height) * 0.45)
-                                    .position(x: geo.size.width * 0.55, y: geo.size.height * 0.45)
-                            }
-                        }
-                    }
+                HStack(spacing: 8) {
+                    PreviewMiniSessionList(selection: selection)
+                        .frame(width: 108)
+                    PreviewAquariumScene(selection: selection)
+                    PreviewTopologyMini(selection: selection)
+                        .frame(width: 116)
                 }
             }
-            .frame(width: 440, height: 300)
+            .frame(width: 540, height: 330)
             Text("iPad landscape • dashboard")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private func agentLabel(for i: Int) -> String {
-        i == 0 ? selection.agent.displayName : ["Claude", "Codex", "OpenCode", "OpenClaw"][i % 4]
     }
 }
 
@@ -135,36 +109,27 @@ struct AndroidTabletPreview: View {
     var body: some View {
         VStack(spacing: 12) {
             DeviceBezel(cornerRadius: 20, bezelWidth: 10, bezelColor: Color(white: 0.12)) {
-                VStack(spacing: 8) {
-                    // Status bar
-                    HStack {
+                VStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        AgentDeckLogo(size: 12, color: TerrariumColors.tetraNeon)
                         Text("AgentDeck")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.8))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.84))
                         Spacer()
                         Text("\(selection.sessionCount) sessions")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.56))
                     }
-                    // Aquarium canvas
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(LinearGradient(
-                                colors: [TerrariumColors.deepSea, TerrariumColors.midWater, TerrariumColors.shallowWater],
-                                startPoint: .top, endPoint: .bottom))
-                        GeometryReader { geo in
-                            PreviewCreature(
-                                agent: selection.agent,
-                                state: selection.state,
-                                size: min(geo.size.width, geo.size.height) * 0.45
-                            )
-                            .position(x: geo.size.width * 0.55, y: geo.size.height * 0.45)
-                        }
+                    HStack(spacing: 7) {
+                        PreviewMiniSessionList(selection: selection, compact: true)
+                            .frame(width: 96)
+                        PreviewAquariumScene(selection: selection)
+                        PreviewTopologyMini(selection: selection)
+                            .frame(width: 122)
                     }
-                    Spacer(minLength: 0)
                 }
             }
-            .frame(width: 420, height: 280)
+            .frame(width: 540, height: 320)
             Text("Android tablet • Lenovo / generic")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)

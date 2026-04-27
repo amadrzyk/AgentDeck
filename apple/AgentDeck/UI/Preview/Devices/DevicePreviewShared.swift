@@ -95,6 +95,40 @@ struct PreviewCreature: View {
     }
 }
 
+/// Bare creature glyph used inside realistic device mockups. Unlike
+/// `PreviewCreature`, this has no circular badge, so tablet/e-ink previews
+/// read like the actual screens rather than a single oversized avatar.
+struct PreviewCreatureGlyph: View {
+    let agent: PixooPreviewAgent
+    let state: PixooPreviewState
+    var size: CGFloat = 40
+    var tintOverride: Color? = nil
+
+    private var tint: Color { tintOverride ?? StateColors.brand(agent: agent.rawValue) }
+
+    private var assetName: String {
+        switch agent {
+        case .claudeCode: return "CreatureClaudeCode"
+        case .codex:      return "CreatureCodex"
+        case .opencode:   return "CreatureOpenCode"
+        case .openclaw:   return "CreatureOpenClaw"
+        }
+    }
+
+    var body: some View {
+        Image(assetName)
+            .resizable()
+            .renderingMode(.template)
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .foregroundStyle(tint)
+            .padding(size * 0.04)
+            .frame(width: size, height: size)
+            .opacity(state == .disconnected ? 0.3 : 1.0)
+            .accessibilityLabel("\(agent.displayName) \(state.displayName)")
+    }
+}
+
 // Internal bridge: map PixooPreviewState to the canonical lowercase state key
 // used by StateColors.color(for:). Keeps the mapping in one place.
 extension PixooPreviewState {
@@ -105,6 +139,22 @@ extension PixooPreviewState {
         case .awaitingPrompt: return "awaiting_permission"
         case .disconnected:   return "disconnected"
         }
+    }
+}
+
+extension DevicePreviewSelection {
+    var previewAgents: [PixooPreviewAgent] {
+        guard sessionCount > 0 else { return [] }
+        let palette: [PixooPreviewAgent] = [agent, .claudeCode, .codex, .opencode, .openclaw]
+        var unique: [PixooPreviewAgent] = []
+        for entry in palette where !unique.contains(entry) {
+            unique.append(entry)
+        }
+        return Array(unique.prefix(max(1, sessionCount)))
+    }
+
+    func previewState(for index: Int) -> PixooPreviewState {
+        index == 0 ? state : .idle
     }
 }
 
@@ -172,11 +222,232 @@ struct PreviewSessionTile: View {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .strokeBorder(tint.opacity(0.5), lineWidth: 1)
                 )
-            PreviewCreature(agent: agent, state: state, size: size * 0.55)
+            PreviewCreatureGlyph(agent: agent, state: state, size: size * 0.54)
                 .padding(4)
             PreviewStateDot(state: state, size: 5)
                 .padding(4)
         }
         .frame(width: size, height: size)
     }
+}
+
+// MARK: - Realistic preview building blocks
+
+struct PreviewMiniSessionList: View {
+    let selection: DevicePreviewSelection
+    var dark: Bool = true
+    var compact: Bool = false
+
+    var body: some View {
+        let agents = selection.previewAgents
+        return VStack(alignment: .leading, spacing: compact ? 3 : 4) {
+            Text("SESSIONS")
+                .font(.system(size: compact ? 7 : 8, weight: .heavy, design: .monospaced))
+                .foregroundStyle(labelColor.opacity(0.72))
+            if agents.isEmpty {
+                Text("NO SESSIONS")
+                    .font(.system(size: compact ? 7 : 8, design: .monospaced))
+                    .foregroundStyle(labelColor.opacity(0.52))
+            } else {
+                ForEach(Array(agents.enumerated()), id: \.offset) { index, agent in
+                    HStack(spacing: compact ? 3 : 4) {
+                        PreviewCreatureGlyph(
+                            agent: agent,
+                            state: selection.previewState(for: index),
+                            size: compact ? 12 : 14,
+                            tintOverride: dark ? nil : .black.opacity(index == 0 ? 0.86 : 0.55)
+                        )
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(agent.displayName)
+                                .font(.system(size: compact ? 7 : 9, weight: index == 0 ? .semibold : .regular))
+                                .lineLimit(1)
+                            Text(index == 0 ? selection.state.displayName.uppercased() : "IDLE")
+                                .font(.system(size: compact ? 6 : 7, design: .monospaced))
+                                .foregroundStyle(rowStateColor(index: index))
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(labelColor.opacity(index == 0 ? 0.95 : 0.68))
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(compact ? 5 : 7)
+        .background(
+            RoundedRectangle(cornerRadius: dark ? 8 : 3)
+                .fill(dark ? Color.black.opacity(0.44) : Color.black.opacity(0.045))
+        )
+    }
+
+    private var labelColor: Color { dark ? .white : .black }
+
+    private func rowStateColor(index: Int) -> Color {
+        dark
+            ? StateColors.color(for: selection.previewState(for: index).sessionStateStringForUI)
+            : .black.opacity(index == 0 ? 0.7 : 0.45)
+    }
+}
+
+struct PreviewTopologyMini: View {
+    let selection: DevicePreviewSelection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("UPSTREAM")
+                .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.56))
+            topologyRow("Claude", active: selection.agent == .claudeCode)
+            topologyRow("Codex", active: selection.agent == .codex)
+            topologyRow("OpenClaw", active: selection.agent == .openclaw)
+
+            Rectangle()
+                .fill(TerrariumColors.tetraNeon.opacity(0.55))
+                .frame(height: 1)
+                .padding(.vertical, 2)
+
+            HStack(spacing: 4) {
+                AgentDeckLogo(size: 13, color: TerrariumColors.tetraNeon)
+                Text("AgentDeck")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(.white.opacity(0.9))
+
+            Text("DOWNSTREAM")
+                .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.56))
+                .padding(.top, 2)
+            topologyRow("This device", active: selection.sessionCount > 0)
+        }
+        .padding(7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.black.opacity(0.44))
+        )
+    }
+
+    private func topologyRow(_ text: String, active: Bool) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(active ? TerrariumHUD.ledGreen : Color.white.opacity(0.22))
+                .frame(width: 5, height: 5)
+            Text(text)
+                .font(.system(size: 8, design: .monospaced))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white.opacity(active ? 0.86 : 0.48))
+    }
+}
+
+struct PreviewAquariumScene: View {
+    let selection: DevicePreviewSelection
+    var showBottomHUD: Bool = true
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [TerrariumColors.deepSea, TerrariumColors.midWater, TerrariumColors.shallowWater],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            GeometryReader { geo in
+                ForEach(0..<5, id: \.self) { i in
+                    Capsule()
+                        .fill(Color.white.opacity(0.045))
+                        .frame(width: geo.size.width * 0.12, height: geo.size.height * 0.95)
+                        .rotationEffect(.degrees(-16))
+                        .offset(x: geo.size.width * (0.08 + CGFloat(i) * 0.19), y: -geo.size.height * 0.12)
+                }
+
+                ForEach(0..<6, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(TerrariumHUD.ledGreen.opacity(0.34))
+                        .frame(width: 3, height: geo.size.height * CGFloat(0.16 + Double(i % 3) * 0.05))
+                        .offset(x: geo.size.width * CGFloat(0.08 + Double(i) * 0.16), y: geo.size.height * 0.78)
+                }
+
+                ForEach(Array(selection.previewAgents.enumerated()), id: \.offset) { index, agent in
+                    let position = creaturePosition(index)
+                    let creatureState = selection.previewState(for: index)
+                    PreviewCreatureGlyph(
+                        agent: agent,
+                        state: creatureState,
+                        size: min(max(min(geo.size.width, geo.size.height) * 0.16, 24), 52)
+                    )
+                    .scaleEffect(creatureState == .processing ? 1.06 : 1.0)
+                    .position(x: geo.size.width * position.x, y: geo.size.height * position.y)
+                }
+            }
+
+            if showBottomHUD {
+                VStack {
+                    Spacer()
+                    PreviewHUD(
+                        agent: selection.agent,
+                        state: selection.state,
+                        sessionCount: selection.sessionCount,
+                        compact: true
+                    )
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.38))
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func creaturePosition(_ index: Int) -> (x: CGFloat, y: CGFloat) {
+        let points: [(CGFloat, CGFloat)] = [
+            (0.46, 0.48),
+            (0.64, 0.34),
+            (0.31, 0.38),
+            (0.70, 0.62),
+        ]
+        let p = points[index % points.count]
+        return (p.0, p.1)
+    }
+}
+
+struct PreviewTimelineMini: View {
+    let selection: DevicePreviewSelection
+    var dark: Bool = true
+    var compact: Bool = false
+
+    private var rows: [String] {
+        if selection.sessionCount == 0 { return ["waiting for bridge"] }
+        switch selection.state {
+        case .idle:
+            return ["idle · ready", "last turn complete"]
+        case .processing:
+            return ["tool · editing files", "response streaming", "usage gauge updated"]
+        case .awaitingPrompt:
+            return ["permission requested", "option list available"]
+        case .disconnected:
+            return ["device offline", "state cache cleared"]
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 2 : 3) {
+            Text("TIMELINE")
+                .font(.system(size: compact ? 7 : 8, weight: .heavy, design: .monospaced))
+                .foregroundStyle(foreground.opacity(dark ? 0.58 : 0.62))
+            ForEach(rows.prefix(compact ? 2 : 3), id: \.self) { row in
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(StateColors.color(for: selection.state.sessionStateStringForUI).opacity(dark ? 0.9 : 0.72))
+                        .frame(width: compact ? 3 : 4, height: compact ? 3 : 4)
+                    Text(row)
+                        .font(.system(size: compact ? 6 : 7, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(foreground.opacity(dark ? 0.78 : 0.66))
+            }
+        }
+    }
+
+    private var foreground: Color { dark ? .white : .black }
 }

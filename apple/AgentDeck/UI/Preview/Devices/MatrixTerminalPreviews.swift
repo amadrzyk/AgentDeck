@@ -10,11 +10,17 @@
 // The terminal preview uses TUITerrariumRenderer directly.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - Pixoo 64
 
 struct Pixoo64Preview: View {
     let selection: DevicePreviewSelection
+    #if os(macOS)
+    @EnvironmentObject private var daemonService: DaemonService
+    #endif
 
     var body: some View {
         VStack(spacing: 12) {
@@ -26,38 +32,121 @@ struct Pixoo64Preview: View {
                     fiveHourPercent: nil,
                     gatewayAvailable: false
                 )
-                PixooPreview.previewImage(config)
-                    .resizable()
-                    .interpolation(.none)
-                    .aspectRatio(1, contentMode: .fill)
+                #if os(macOS)
+                PixooDeviceFrameView(config: config, port: daemonService.port)
                     .frame(width: 320, height: 320)
-                    .cornerRadius(4)
-                    .overlay(
-                        // Faint pixel grid to evoke the LED look
-                        GeometryReader { geo in
-                            Path { p in
-                                let stepXY = geo.size.width / 64
-                                for i in 0...64 {
-                                    let pos = CGFloat(i) * stepXY
-                                    p.move(to: CGPoint(x: pos, y: 0))
-                                    p.addLine(to: CGPoint(x: pos, y: geo.size.height))
-                                    p.move(to: CGPoint(x: 0, y: pos))
-                                    p.addLine(to: CGPoint(x: geo.size.width, y: pos))
-                                }
-                            }
-                            .stroke(Color.black.opacity(0.35), lineWidth: 0.3)
-                        }
-                    )
+                #else
+                PixooStaticFrameView(config: config)
+                    .frame(width: 320, height: 320)
+                #endif
             }
             .frame(width: 380, height: 380)
             
             Text("Pixoo 64 • 64×64 LED Matrix")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
-            Text("Renderer uses exact pixel-art coordinate generation.")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        }
+    }
+}
+
+private struct PixooStaticFrameView: View {
+    let config: PixooPreviewConfig
+
+    var body: some View {
+        PixooPreview.previewImage(config)
+            .resizable()
+            .interpolation(.none)
+            .aspectRatio(1, contentMode: .fill)
+            .cornerRadius(4)
+            .overlay(PixooPixelGrid())
+    }
+}
+
+#if os(macOS)
+private struct PixooDeviceFrameView: View {
+    let config: PixooPreviewConfig
+    let port: UInt16
+
+    @State private var frameImage: NSImage?
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if let frameImage {
+                Image(nsImage: frameImage)
+                    .resizable()
+                    .interpolation(.none)
+                    .aspectRatio(1, contentMode: .fill)
+            } else {
+                PixooPreview.previewImage(config)
+                    .resizable()
+                    .interpolation(.none)
+                    .aspectRatio(1, contentMode: .fill)
+            }
+
+            Text(frameImage == nil ? "SIM" : "LIVE")
+                .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.86))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 4))
+                .padding(5)
+        }
+        .cornerRadius(4)
+        .overlay(PixooPixelGrid())
+        .task(id: Int(port)) {
+            await pollCurrentFrame()
+        }
+    }
+
+    private func pollCurrentFrame() async {
+        guard port > 0 else { return }
+        while !Task.isCancelled {
+            await refreshCurrentFrame()
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    private func refreshCurrentFrame() async {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/pixoo/frame?ts=\(Int(Date().timeIntervalSince1970 * 1000))") else {
+            return
+        }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 1.5
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard
+                let http = response as? HTTPURLResponse,
+                http.statusCode == 200,
+                let image = NSImage(data: data)
+            else {
+                return
+            }
+            await MainActor.run {
+                self.frameImage = image
+            }
+        } catch {
+            // Keep the last good frame; if none exists, the simulated frame remains visible.
+        }
+    }
+}
+#endif
+
+private struct PixooPixelGrid: View {
+    var body: some View {
+        GeometryReader { geo in
+            Path { p in
+                let stepXY = geo.size.width / 64
+                for i in 0...64 {
+                    let pos = CGFloat(i) * stepXY
+                    p.move(to: CGPoint(x: pos, y: 0))
+                    p.addLine(to: CGPoint(x: pos, y: geo.size.height))
+                    p.move(to: CGPoint(x: 0, y: pos))
+                    p.addLine(to: CGPoint(x: geo.size.width, y: pos))
+                }
+            }
+            .stroke(Color.black.opacity(0.35), lineWidth: 0.3)
         }
     }
 }
