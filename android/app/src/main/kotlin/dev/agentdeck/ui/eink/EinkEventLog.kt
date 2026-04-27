@@ -49,6 +49,16 @@ fun EinkEventLog(
             .padding(8.dp)
             .verticalScroll(scrollState),
     ) {
+        Text(
+            text = "TIMELINE",
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
         if (grouped.isEmpty()) {
             Text(
                 text = "No events yet",

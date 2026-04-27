@@ -45,11 +45,10 @@ import dev.agentdeck.util.formatResetTime
  * Reads top-to-bottom as:
  *
  *   UPSTREAM (Claude · OpenClaw · MLX · Ollama)
- *       ↓
- *   ⎔ AgentDeck :9120   (hub node, neon cyan)
- *       ↓
- *   DOWNSTREAM (devices — placeholder until the bridge ships moduleHealth
- *               for the Android client)
+ *       │
+ *   ⎔ AgentDeck :9120
+ *       │
+ *   DOWNSTREAM (this tablet)
  *
  * Each upstream provider row shows its status (LED glyph), label, compact
  * subtitle, optional inline rate-gauges (Claude's 5h/7d) and **consumer
@@ -75,12 +74,10 @@ fun TopologyRail(
         verticalArrangement = Arrangement.spacedBy(scale.topologyRowSpacing),
     ) {
         SectionHeader("UPSTREAM", scale)
-        UpstreamRows(state = state)
-        FlowArrow()
-        HubNode()
-        FlowArrow()
+        UpstreamRows(state = state, scale = scale)
+        HubZone(state = state, scale = scale)
         SectionHeader("DOWNSTREAM", scale)
-        DownstreamRows(state = state)
+        DownstreamRows(scale = scale)
     }
 }
 
@@ -111,59 +108,77 @@ private fun SectionHeader(title: String, scale: MonitorLayoutScale = MonitorLayo
 }
 
 @Composable
-private fun FlowArrow() {
-    Text(
-        text = "▼",
-        color = TerrariumColors.TetraNeon.copy(alpha = 0.55f),
-        fontSize = 9.sp,
-        fontFamily = FontFamily.Monospace,
-        textAlign = TextAlign.Center,
+private fun HubZone(
+    state: DashboardState,
+    scale: MonitorLayoutScale,
+) {
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        HubSpineSegment(scale.topologySectionSpacing)
+        HubRow(state = state, scale = scale)
+        HubSpineSegment(scale.topologySectionSpacing)
+    }
+}
+
+@Composable
+private fun HubSpineSegment(height: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(height)
+            .background(TerrariumColors.TetraNeon.copy(alpha = 0.35f)),
     )
 }
 
 @Composable
-private fun HubNode() {
+private fun HubRow(
+    state: DashboardState,
+    scale: MonitorLayoutScale,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                color = Color.Black.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(6.dp),
-            )
-            .border(
-                border = BorderStroke(1.dp, TerrariumColors.TetraNeon.copy(alpha = 0.55f)),
-                shape = RoundedCornerShape(6.dp),
-            )
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .background(TerrariumColors.HUDBg)
+            .padding(horizontal = 6.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        AgentDeckMark(size = 18.dp, color = TerrariumColors.TetraNeon)
-        Column {
-            Text(
-                text = "AgentDeck",
-                color = TerrariumColors.HUDText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-            )
-            Text(
-                text = ":9120",
-                color = TerrariumColors.HUDSubtext,
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-        }
+        AgentDeckMark(size = 16.dp, color = TerrariumColors.TetraNeon)
+        Text(
+            text = "AgentDeck",
+            color = TerrariumColors.HUDText,
+            fontSize = scale.fontHeader,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+        )
+        Text(
+            text = ":${daemonPortText(state)}",
+            color = TerrariumColors.HUDSubtext,
+            fontSize = scale.fontSub,
+            fontFamily = FontFamily.Monospace,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(0.5.dp)
+                .background(TerrariumColors.TetraNeon.copy(alpha = 0.25f)),
+        )
     }
 }
+
+private fun daemonPortText(state: DashboardState): String =
+    state.remoteUrl
+        ?.substringAfterLast(':', missingDelimiterValue = "")
+        ?.takeIf { it.all(Char::isDigit) }
+        ?: "9120"
 
 // MARK: - Upstream rows
 
 @Composable
-private fun UpstreamRows(state: DashboardState) {
+private fun UpstreamRows(state: DashboardState, scale: MonitorLayoutScale) {
     val usage = state.usage
     val ollama = state.ollamaStatus
     val modelCatalog = state.modelCatalog ?: emptyList()
@@ -178,7 +193,7 @@ private fun UpstreamRows(state: DashboardState) {
         else -> ProviderKey.UNKNOWN
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(scale.providerRowSpacing)) {
         // Claude — subtitle carries the actually-available model catalog
         // (Opus / Sonnet / Haiku) only when the catalog belongs to
         // Claude. Otherwise we fall back to OAuth status or nil.
@@ -381,7 +396,7 @@ private fun SubscriptionsFooter(subs: List<SubscriptionInfo>) {
 // MARK: - Downstream rows
 
 @Composable
-private fun DownstreamRows(state: DashboardState) {
+private fun DownstreamRows(scale: MonitorLayoutScale) {
     // The Android client sits ON the downstream side of the graph — it IS
     // one of the devices the bridge dispatches to. Until the Android
     // client starts receiving `moduleHealth` events the way the Swift
@@ -391,18 +406,11 @@ private fun DownstreamRows(state: DashboardState) {
     // This also keeps the Upstream → Hub → Downstream flow meaningful
     // even on a pure-client build — the user always sees "I am here" in
     // the downstream slot rather than a dead placeholder.
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(scale.providerRowSpacing)) {
         DeviceRailRow(
             name = "This tablet",
             status = LEDStatus.OK,
             detail = "dashboard client",
-        )
-        Text(
-            text = "other devices visible via the Node CLI or macOS app",
-            color = TerrariumColors.HUDSubtext.copy(alpha = 0.55f),
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }
@@ -685,4 +693,3 @@ private fun DeviceRailRow(
         )
     }
 }
-

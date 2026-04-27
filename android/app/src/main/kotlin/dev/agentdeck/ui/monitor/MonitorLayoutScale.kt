@@ -10,10 +10,9 @@ import androidx.compose.ui.unit.sp
 
 /**
  * Density + typography scale the Monitor HUD uses to adapt between phone
- * and tablet form-factors. Without this, the HUD panels stayed at phone
- * widths (220dp / 300dp) and 10sp fonts on a 10" tablet, leaving the
- * middle of the screen empty and rows cramped — the "줄 간격" complaint
- * in the parity review.
+ * and tablet form-factors. Tablet values intentionally stay close to the
+ * macOS HUD density: this is an operational dashboard, not a card-heavy
+ * tablet landing page.
  *
  * Keep this the single source: every panel reads from the same
  * `MonitorLayoutScale` instance so density stays consistent across the
@@ -50,20 +49,20 @@ data class MonitorLayoutScale(
             fontHeader = 11.sp,
         )
 
-        /** Tablet density — wider rails, taller rows, +2sp fonts. */
+        /** Tablet density — macOS HUD proportions, not enlarged tablet cards. */
         val tablet = MonitorLayoutScale(
             isTablet = true,
-            sessionPanelMaxWidth = 340.dp,
-            topologyPanelMaxWidth = 420.dp,
-            panelPadding = 14.dp,
-            panelEdgeInset = 20.dp,
-            sessionRowSpacing = 8.dp,
-            topologyRowSpacing = 4.dp,
-            topologySectionSpacing = 9.dp,
-            providerRowSpacing = 8.dp,
-            fontBody = 14.sp,
-            fontSub = 12.sp,
-            fontHeader = 12.sp,
+            sessionPanelMaxWidth = 220.dp,
+            topologyPanelMaxWidth = 300.dp,
+            panelPadding = 8.dp,
+            panelEdgeInset = 12.dp,
+            sessionRowSpacing = 4.dp,
+            topologyRowSpacing = 0.dp,
+            topologySectionSpacing = 6.dp,
+            providerRowSpacing = 5.dp,
+            fontBody = 12.sp,
+            fontSub = 10.sp,
+            fontHeader = 11.sp,
         )
     }
 }

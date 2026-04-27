@@ -723,15 +723,11 @@ private fun MonitorHUD(
     val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
     val scale = rememberMonitorLayoutScale()
     BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(top = systemBarsPadding.calculateTopPadding())) {
-        // Tablet-only: scale panel widths to a fraction of the available HUD
-        // width and cap at the preset max. Without the fraction, fixed
-        // 340+420dp panels overlap on portrait orientation (sw=800dp) and
-        // small 7" tablets (sw=600dp). The 0.26 / 0.32 ratios mirror the
-        // SwiftUI MonitorHUD (`min(geo.size.width * 0.22, 220)` etc.) so the
-        // Android tablet layout matches the macOS/iPad HUD proportionally
-        // while still benefiting from the wider tablet caps.
+        // Tablet-only: mirror the SwiftUI MonitorHUD proportions
+        // (`min(width * 0.22, 220)` / `min(width * 0.32, 300)`) so Android
+        // tablets do not inflate the dashboard rails into oversized cards.
         val parentWidth = maxWidth
-        val sessionPanelWidth = minOf(parentWidth * 0.26f, scale.sessionPanelMaxWidth)
+        val sessionPanelWidth = minOf(parentWidth * 0.22f, scale.sessionPanelMaxWidth)
         val topologyPanelWidth = minOf(parentWidth * 0.32f, scale.topologyPanelMaxWidth)
         // Top-left: Agent list (logo + sessions + mode). AnimatedVisibility
         // both fades AND removes from composition when hidden so the
