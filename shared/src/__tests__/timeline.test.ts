@@ -325,40 +325,44 @@ describe('parseLogLine', () => {
     })).toBeNull();
   });
 
-  it('parses memory patterns from message text', () => {
-    const result = parseLogLine({
+  it('does not synthesize memory_recall from message text alone', () => {
+    // Heuristic word-match removed — real memory/recall activity flows
+    // through the Gateway adapter, not log scraping.
+    expect(parseLogLine({
       message: 'memory recall: user context loaded',
       time: '2025-01-01T00:00:00Z',
-    });
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe('memory_recall');
+    })).toBeNull();
   });
 
-  it('parses tool patterns from message text', () => {
-    const result = parseLogLine({
+  it('does not synthesize tool_exec from message text alone', () => {
+    // Heuristic word-match removed — real tool activity flows through the
+    // Gateway adapter.
+    expect(parseLogLine({
       message: 'tool execution: grep for pattern',
       time: '2025-01-01T00:00:00Z',
-    });
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe('tool_exec');
+    })).toBeNull();
   });
 
-  it('parses ISO timestamp correctly', () => {
+  it('parses ISO timestamp correctly via error pattern', () => {
+    // Message contains "failed" + "error" → error matcher; preserves the
+    // ISO timestamp.
     const result = parseLogLine({
       message: 'command failed with error',
       time: '2025-06-15T10:30:00Z',
     });
     expect(result).not.toBeNull();
+    expect(result!.type).toBe('error');
     expect(result!.ts).toBe(new Date('2025-06-15T10:30:00Z').getTime());
   });
 
-  it('falls back to Date.now() for invalid timestamp', () => {
+  it('falls back to Date.now() for invalid timestamp on error message', () => {
     const before = Date.now();
     const result = parseLogLine({
       message: 'command execution error occurred',
       time: 'invalid-date',
     });
     expect(result).not.toBeNull();
+    expect(result!.type).toBe('error');
     expect(result!.ts).toBeGreaterThanOrEqual(before);
   });
 
@@ -370,18 +374,7 @@ describe('parseLogLine', () => {
     expect(result!.raw).toContain('...');
   });
 
-  it('does NOT filter user-facing whatsapp tool messages (non-infra subsystem)', () => {
-    // When message mentions "whatsapp" but is NOT from channel infra subsystem,
-    // it should pass through (not filtered as channel noise)
-    const result = parseLogLine({
-      message: 'tool exec: whatsapp send message completed',
-      time: '2025-01-01T00:00:00Z',
-    });
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe('tool_exec');
-  });
-
-  it('filters whatsapp noise only from channel infra subsystem', () => {
+  it('filters whatsapp noise from channel infra subsystem', () => {
     expect(parseLogLine({
       message: 'WebSocket error connecting to whatsapp',
       module: 'whatsapp',

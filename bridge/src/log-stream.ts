@@ -1,122 +1,36 @@
 /**
- * Bridge-side log stream parser for OpenClaw — spawns `openclaw logs --follow --json`
- * and emits TimelineEntry events for relay to Android/plugin clients.
+ * BridgeLogStream — no-op stub.
  *
- * Mirror of plugin/src/log-stream.ts but uses shared parseLogLine() and
- * EventEmitter instead of directly writing to a store.
+ * Earlier versions spawned `openclaw logs --follow --json` and converted every
+ * log line into a Timeline entry. The OpenClaw Gateway adapter
+ * (bridge/src/adapters/openclaw.ts) already emits chat_start, chat_end,
+ * tool_request, tool_resolved, and error timeline entries directly from
+ * Gateway RPC events, so the log-tail path was producing duplicates plus a
+ * lot of noise (benign log lines containing words like "command" or "memory"
+ * were being misclassified as tool_exec / memory_recall via broad fallback
+ * regexes in shared/src/timeline.ts).
+ *
+ * Apple's in-process daemon (apple/AgentDeck/Daemon/Timeline/BridgeLogStream.swift)
+ * already converted to a no-op stub for the same reason. This Node.js side now
+ * matches that shape — the class is retained so existing wireup in
+ * bridge/src/index.ts and bridge/src/daemon-server.ts compiles unchanged.
  */
-
 import { EventEmitter } from 'events';
-import { spawn, type ChildProcess } from 'child_process';
-import { createInterface } from 'readline';
-import { augmentedPath, resolveOpenClawBin } from '@agentdeck/shared';
-import type { TimelineEntry } from './types.js';
-import { parseLogLine } from './types.js';
-import { debug } from './logger.js';
 
 export class BridgeLogStream extends EventEmitter {
-  private proc: ChildProcess | null = null;
-  private running = false;
-  /** Recent tool_request raw texts for dedup against log-based tool_exec */
-  private recentToolRequests = new Map<string, number>();
-  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
   start(): void {
-    if (this.running) return;
-
-    const bin = resolveOpenClawBin();
-    debug('log-stream', `Starting log stream: ${bin} logs --follow --json`);
-
-    try {
-      this.proc = spawn(bin, ['logs', '--follow', '--json'], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-        env: { ...process.env, PATH: augmentedPath() },
-      });
-    } catch (err) {
-      debug('log-stream', `Failed to spawn openclaw logs: ${err}`);
-      return;
-    }
-
-    this.running = true;
-
-    if (this.proc.stdout) {
-      const rl = createInterface({ input: this.proc.stdout });
-      rl.on('line', (line) => {
-        try {
-          const parsed = JSON.parse(line);
-          const entry = parseLogLine(parsed);
-          if (!entry) return;
-
-          // Dedup: skip tool_exec if a matching tool_request was seen recently
-          if (entry.type === 'tool_exec' && this.isDuplicateToolExec(entry.raw)) {
-            return;
-          }
-
-          this.emit('entry', entry);
-        } catch {
-          // Not valid JSON — ignore
-        }
-      });
-
-      rl.on('close', () => {
-        debug('log-stream', 'Log stream closed');
-        this.running = false;
-      });
-    }
-
-    this.proc.on('error', (err) => {
-      debug('log-stream', `Log stream error: ${err.message}`);
-      this.running = false;
-    });
-
-    this.proc.on('exit', (code) => {
-      debug('log-stream', `Log stream exited (code=${code})`);
-      this.running = false;
-      this.proc = null;
-    });
-
-    // Periodic cleanup of stale dedup entries
-    this.cleanupTimer = setInterval(() => this.cleanupRecentRequests(), 10_000);
+    /* no-op — Gateway adapter is the timeline source */
   }
 
   stop(): void {
-    if (this.proc) {
-      debug('log-stream', 'Stopping log stream');
-      this.proc.kill('SIGTERM');
-      this.proc = null;
-    }
-    this.running = false;
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
-    this.recentToolRequests.clear();
+    /* no-op */
   }
 
   isRunning(): boolean {
-    return this.running;
-  }
-
-  /**
-   * Track a tool_request from the WS Gateway to avoid duplicating it
-   * when the same tool appears in the log stream.
-   */
-  trackToolRequest(raw: string): void {
-    this.recentToolRequests.set(raw, Date.now());
-  }
-
-  private isDuplicateToolExec(raw: string): boolean {
-    const ts = this.recentToolRequests.get(raw);
-    if (!ts) return false;
-    if (Date.now() - ts < 5_000) return true;
-    this.recentToolRequests.delete(raw);
     return false;
   }
 
-  private cleanupRecentRequests(): void {
-    const cutoff = Date.now() - 10_000;
-    for (const [key, ts] of this.recentToolRequests) {
-      if (ts < cutoff) this.recentToolRequests.delete(key);
-    }
+  trackToolRequest(_raw: string): void {
+    /* no-op — dedup against log-stream tool_exec is no longer needed */
   }
 }

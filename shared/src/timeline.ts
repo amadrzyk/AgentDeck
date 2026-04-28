@@ -504,16 +504,7 @@ export function parseLogLine(json: unknown): TimelineEntry | null {
     return null;
   }
 
-  // Memory patterns in message text
-  if (/\b(memory|recall|search)\b/i.test(message)) {
-    return { ts, type: 'memory_recall', raw: extractReadableMessage(message) };
-  }
-
-  // Tool/exec patterns in message text
-  if (/\b(tool|exec|execute|command)\b/i.test(message)) {
-    return { ts, type: 'tool_exec', raw: extractReadableMessage(message) };
-  }
-
-  // Unrecognized — skip
+  // Anything else — skip. Real chat/tool/error activity flows through the
+  // OpenClaw Gateway adapter's RPC events, not heuristic log parsing.
   return null;
 }
