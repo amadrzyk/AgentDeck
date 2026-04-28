@@ -35,6 +35,7 @@ struct SessionCreatureIcon: View {
     let agentType: String?
     let tint: Color
     let size: CGFloat
+    var contentInset: CGFloat = 0
 
     var body: some View {
         Group {
@@ -50,6 +51,7 @@ struct SessionCreatureIcon: View {
                     .aspectRatio(contentMode: .fit)
             }
         }
+        .padding(contentInset)
         .frame(width: size, height: size)
         .foregroundStyle(tint)
         .accessibilityLabel(Self.accessibilityLabel(for: agentType))

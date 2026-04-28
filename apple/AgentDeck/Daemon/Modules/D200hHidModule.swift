@@ -26,7 +26,7 @@ private let ICON_SIZE = 196
 
 private let POLL_INTERVAL: UInt64 = 500_000_000   // 500ms device detection
 private let KEEPALIVE_INTERVAL: TimeInterval = 15  // 15s keep-alive (D200H reverts to default after ~30s)
-private let D200H_RENDERER_REV = "creature-session-icons-v23"
+private let D200H_RENDERER_REV = "creature-session-icons-v24"
 
 // HID Commands
 private let CMD_SET_BUTTONS: UInt16    = 0x0001
@@ -2844,6 +2844,27 @@ private func fillSvgPathsGradient(
     end: CGPoint,
     eoFill: Bool = false
 ) {
+    // Even-odd fill must be applied per SVG path, not across the union of all
+    // paths. OpenClaw's claws overlap the shell; clipping all paths together
+    // with even-odd cancels those overlaps and makes the small D200H icon look
+    // bitten/warped.
+    if eoFill {
+        for path in paths {
+            fillSvgPathGradient(
+                ctx,
+                path: path,
+                viewBox: viewBox,
+                rect: rect,
+                colors: colors,
+                locations: locations,
+                start: start,
+                end: end,
+                eoFill: true
+            )
+        }
+        return
+    }
+
     guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: locations) else {
         for path in paths {
             fillSvgPath(ctx, path: path, viewBox: viewBox, rect: rect, fillColor: colors.last ?? rgb(255, 255, 255), eoFill: eoFill)

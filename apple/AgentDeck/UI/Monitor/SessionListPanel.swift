@@ -325,15 +325,29 @@ struct SessionListPanel: View {
             SessionCreatureIcon(
                 agentType: agentType,
                 tint: SessionBrand.color(for: agentType),
-                size: 13
+                size: 16,
+                contentInset: sessionListIconInset(for: agentType)
             )
-            .padding(1.5)
             .frame(width: 16, height: 16)
         default:
             Text("●")
                 .font(.system(size: 8))
                 .foregroundStyle(TerrariumHUD.subtext)
                 .frame(width: 16, height: 16)
+        }
+    }
+
+    private func sessionListIconInset(for agentType: String?) -> CGFloat {
+        switch agentType {
+        case "codex-cli":
+            // Codex's official SVG reaches the viewBox edges. Give it a real
+            // internal inset instead of padding outside the Image frame so
+            // the left/top anti-aliased pixels do not clip in the 16pt row slot.
+            return 2.0
+        case "openclaw":
+            return 1.8
+        default:
+            return 1.5
         }
     }
 
