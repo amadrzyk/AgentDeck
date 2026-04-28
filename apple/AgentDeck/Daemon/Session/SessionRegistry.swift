@@ -88,7 +88,10 @@ final class SessionRegistry: Sendable {
     static let defaultPort = 9120
     static let basePort = 9120
     static let maxPort = 9139
-    private static let ioQueue = DispatchQueue(label: "dev.agentdeck.registry.io", qos: .utility)
+    // QoS .userInitiated, not .utility: callers (DaemonServer.startServices on main,
+    // startAllPolling task) sync-wait via DispatchSemaphore; .utility triggers the
+    // Thread Performance Checker priority-inversion warning every read.
+    private static let ioQueue = DispatchQueue(label: "dev.agentdeck.registry.io", qos: .userInitiated)
     private static let readTimeout: DispatchTimeInterval = .milliseconds(700)
 
     /// Per-port consecutive health-probe failure counter. Shared across the

@@ -31,7 +31,10 @@ actor DaemonTimelineStore {
     private let maxEntries = 200
     private let persistFile = AuthManager.agentDeckDir.appendingPathComponent("timeline.json")
     private var dirty = false
-    private static let ioQueue = DispatchQueue(label: "dev.agentdeck.timeline.io", qos: .utility)
+    // .userInitiated to avoid Thread Performance Checker priority-inversion warnings
+    // during start() loadFromDisk(), which is invoked from DaemonServer.startServices
+    // on the main actor and sync-waits via DispatchSemaphore.
+    private static let ioQueue = DispatchQueue(label: "dev.agentdeck.timeline.io", qos: .userInitiated)
 
     init() {
         // loadFromDisk is called after actor init via start()

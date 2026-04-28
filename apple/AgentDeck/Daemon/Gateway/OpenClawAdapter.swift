@@ -327,7 +327,16 @@ actor OpenClawAdapter {
                 wsTask?.cancel(with: .goingAway, reason: nil)
                 wsTask = nil
             } else {
-                DaemonLogger.shared.error("OpenClaw RPC '\(method ?? "?")' failed: \(errorInfo?["code"] as? String ?? errorInfo?["message"] as? String ?? "unknown")")
+                let code = errorInfo?["code"] as? String
+                let message = errorInfo?["message"] as? String
+                let detail: String
+                switch (code, message) {
+                case let (c?, m?): detail = "\(c): \(m)"
+                case let (c?, nil): detail = c
+                case let (nil, m?): detail = m
+                default: detail = "unknown"
+                }
+                DaemonLogger.shared.error("OpenClaw RPC '\(method ?? "?")' failed: \(detail)")
             }
             return
         }

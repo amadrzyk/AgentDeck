@@ -115,7 +115,10 @@ enum ApmeSettings {
         return AgentDeckPaths.settingsJson.path
     }
 
-    private static let settingsReadQueue = DispatchQueue(label: "dev.agentdeck.apme-settings.read", qos: .utility)
+    // .userInitiated to match callers (ApmeRunner init on main, probeMLX) that
+    // sync-wait via DispatchSemaphore — avoids Thread Performance Checker priority
+    // inversion warnings.
+    private static let settingsReadQueue = DispatchQueue(label: "dev.agentdeck.apme-settings.read", qos: .userInitiated)
     private static let settingsReadTimeout: DispatchTimeInterval = .milliseconds(700)
 
     /// Load APME config from ~/.agentdeck/settings.json.

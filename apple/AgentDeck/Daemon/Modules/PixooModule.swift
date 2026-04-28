@@ -439,7 +439,10 @@ actor PixooModule: DeviceModule {
     // MARK: - Settings
 
     private static let settingsFile = AuthManager.agentDeckDir.appendingPathComponent("settings.json")
-    private static let settingsReadQueue = DispatchQueue(label: "dev.agentdeck.pixoo.settings-read", qos: .utility)
+    // .userInitiated to avoid Thread Performance Checker priority-inversion warnings
+    // when reloadDevicesFromSettings is called from main-actor / userInitiated contexts
+    // and sync-waits on this queue via DispatchSemaphore.
+    private static let settingsReadQueue = DispatchQueue(label: "dev.agentdeck.pixoo.settings-read", qos: .userInitiated)
     private static let settingsReadTimeout: DispatchTimeInterval = .milliseconds(700)
 
     private func reloadDevicesFromSettings(reason: String, force: Bool = false) async {

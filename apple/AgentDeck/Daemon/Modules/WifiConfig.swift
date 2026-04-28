@@ -34,7 +34,10 @@ private final class WifiConfigDataBox: @unchecked Sendable {
 
 enum WifiConfigManager {
     private static let configFile = AuthManager.agentDeckDir.appendingPathComponent("wifi-config.json")
-    private static let readQueue = DispatchQueue(label: "dev.agentdeck.wifi-config.read", qos: .utility)
+    // .userInitiated: load() is called from DaemonServer.startDeviceModules on the
+    // main actor and sync-waits via DispatchSemaphore; .utility caused Thread
+    // Performance Checker priority-inversion warnings every read.
+    private static let readQueue = DispatchQueue(label: "dev.agentdeck.wifi-config.read", qos: .userInitiated)
     private static let readTimeout: DispatchTimeInterval = .milliseconds(700)
 
     static func load() -> WifiConfig? {

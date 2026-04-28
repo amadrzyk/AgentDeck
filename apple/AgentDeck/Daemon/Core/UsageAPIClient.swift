@@ -67,7 +67,10 @@ final class UsageAPIClient: Sendable {
     private static let cacheFile = AuthManager.agentDeckDir.appendingPathComponent("usage-cache.json")
     private static let fileCacheTTL: TimeInterval = 120  // seconds
     private static let tokenExpiryMargin: TimeInterval = 600  // 10 minutes
-    private static let cacheIOQueue = DispatchQueue(label: "dev.agentdeck.usage.cache-io", qos: .utility)
+    // .userInitiated to avoid Thread Performance Checker priority-inversion
+    // warnings: fetchUsage()/fetchUsageRelayed() may sync-wait via DispatchSemaphore
+    // on this queue from main-actor or userInitiated tasks.
+    private static let cacheIOQueue = DispatchQueue(label: "dev.agentdeck.usage.cache-io", qos: .userInitiated)
     private static let cacheReadTimeout: DispatchTimeInterval = .milliseconds(700)
 
     /// Real home directory, resolved once at process start via the reentrant
