@@ -136,6 +136,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     /// press flash, label-style sync) skips before it can paint over the
     /// final OFFLINE frame. Reset in `start()` to support wake recovery.
     private var tearingDown = false
+    /// Scoped to `sendOfflineFrame()` so its `writePacket` calls bypass the
+    /// `tearingDown` gate. Every other write path goes through the gate.
+    private var sendingOfflineFrame = false
 
     private var pollTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
@@ -1026,6 +1029,13 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
 
 
     private func writePacket(_ data: Data) {
+        // Universal write gate: once `stop()` flips tearingDown, only
+        // sendOfflineFrame() may write. This catches the gaps that the
+        // entry-point gates leave open — applyDisplayState brightness packets,
+        // syncLabelStyleIfNeeded() called outside updateDisplay, and any late
+        // device-attach handler that sneaks past during the 50ms settle.
+        if tearingDown && !sendingOfflineFrame { return }
+
         guard let device = consumerDevice else { return }
 
         // IOKit HID setReport for output
@@ -1053,6 +1063,9 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     /// SIGKILL/crash bypasses stop(); that scenario stays out of scope.
     private func sendOfflineFrame() {
         guard connected, managerOpened, !displaySuppressed else { return }
+
+        sendingOfflineFrame = true
+        defer { sendingOfflineFrame = false }
 
         var slots = [ButtonSlot](repeating: .dim, count: 14)
         slots[7] = ButtonSlot(
