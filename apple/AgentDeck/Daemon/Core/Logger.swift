@@ -11,9 +11,15 @@ final class DaemonLogger: @unchecked Sendable {
     private let stateLock = NSLock()
     private var throttledKeys: [String: Date] = [:]
     private var sampledCounters: [String: Int] = [:]
+    // Serial DispatchQueue — every enqueued write runs in submission order on
+    // a background thread. Prior versions of this class also kept an
+    // `fileWriteInFlight` flag and dropped subsequent calls while a write was
+    // pending. That dropped diagnostics whenever a code path emitted multiple
+    // log lines back-to-back (e.g. the OpenClaw fallback decision logs every
+    // ERROR/INFO line within a few microseconds — only the first survived).
+    // The serial queue alone is sufficient for ordering; backpressure isn't a
+    // concern at the volume this daemon emits.
     private let fileWriteQueue = DispatchQueue(label: "dev.agentdeck.daemon.file-log", qos: .utility)
-    private let fileWriteLock = NSLock()
-    private var fileWriteInFlight = false
     private let fileReadQueue = DispatchQueue(label: "dev.agentdeck.daemon.file-log-read", qos: .utility)
 
     private let osLog = os.Logger(subsystem: "dev.agentdeck.daemon", category: "daemon")
@@ -23,21 +29,7 @@ final class DaemonLogger: @unchecked Sendable {
         let entry = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
         guard let data = entry.data(using: .utf8) else { return }
 
-        fileWriteLock.lock()
-        guard !fileWriteInFlight else {
-            fileWriteLock.unlock()
-            return
-        }
-        fileWriteInFlight = true
-        fileWriteLock.unlock()
-
         fileWriteQueue.async { [data, logFile] in
-            defer {
-                self.fileWriteLock.lock()
-                self.fileWriteInFlight = false
-                self.fileWriteLock.unlock()
-            }
-
             if let fh = try? FileHandle(forWritingTo: logFile) {
                 fh.seekToEndOfFile()
                 fh.write(data)
@@ -96,35 +88,21 @@ final class DaemonLogger: @unchecked Sendable {
         osLog.error("\(message)")
     }
 
-    func recentLines(limit: Int = 200) -> [String] {
-        let box = DaemonLogReadBox()
-        let semaphore = DispatchSemaphore(value: 0)
-        fileReadQueue.async { [logFile] in
-            box.set(try? String(contentsOf: logFile, encoding: .utf8))
-            semaphore.signal()
+    func recentLines(limit: Int = 200) async -> [String] {
+        await withCheckedContinuation { continuation in
+            fileReadQueue.async { [logFile] in
+                guard let text = try? String(contentsOf: logFile, encoding: .utf8) else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+                guard lines.count > limit else {
+                    continuation.resume(returning: lines)
+                    return
+                }
+                continuation.resume(returning: Array(lines.suffix(limit)))
+            }
         }
-        guard semaphore.wait(timeout: .now() + .milliseconds(500)) == .success,
-              let text = box.get() else { return [] }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        guard lines.count > limit else { return lines }
-        return Array(lines.suffix(limit))
-    }
-}
-
-private final class DaemonLogReadBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: String?
-
-    func set(_ value: String?) {
-        lock.lock()
-        self.value = value
-        lock.unlock()
-    }
-
-    func get() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
     }
 }
 #endif

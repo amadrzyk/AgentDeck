@@ -58,6 +58,39 @@ private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
 
+/// Manages the self-generated Ed25519 pairing identity stored in Keychain.
+/// Exposed so Settings can offer a "reset pairing" action for users stuck on
+/// `DEVICE_AUTH_SIGNATURE_INVALID` — wiping the identity forces the next
+/// connect to generate a fresh key pair and re-enter the pairing flow.
+enum OpenClawDeviceIdentityStore {
+    private static let service = "bound.serendipity.agentdeck.dashboard.openclaw.identity"
+    private static let account = "default"
+
+    static func hasIdentity() -> Bool {
+        var query = keychainQuery()
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        return status == errSecSuccess
+    }
+
+    /// Removes the stored Ed25519 key pair + cached deviceToken. The next
+    /// adapter start regenerates a fresh identity and re-runs pairing.
+    static func deleteIdentity() throws {
+        let status = SecItemDelete(keychainQuery() as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: nil)
+        }
+    }
+
+    private static func keychainQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+    }
+}
+
 /// Connects to OpenClaw Gateway via WebSocket, handles Ed25519 auth handshake,
 /// and relays events to the daemon.
 actor OpenClawAdapter {
@@ -80,10 +113,28 @@ actor OpenClawAdapter {
     private var isConnected = false
     private var isStopping = false
     private var pairingRequired = false
+    /// Set after a `DEVICE_AUTH_INVALID` response with a shared token configured.
+    /// Suppresses device-auth on the next connect so a Gateway running in
+    /// shared-token-only mode (which rejects unknown Ed25519 keys) can succeed
+    /// using the shared token alone. Reset on `start()` lifecycle.
+    private var disableDeviceAuthForNextConnect = false
+    /// Tagged with the specific `wsTask` whose close we initiated ourselves
+    /// (e.g. fallback path after a `connect` RPC error). The cancel produces
+    /// a `.failure` in receiveLoop, and the resulting `handleDisconnect`
+    /// would otherwise re-classify the same failed handshake's close reason —
+    /// re-blocking the very fallback we just scheduled. Storing the task
+    /// reference (instead of a plain Bool) keeps the suppression scoped to
+    /// the exact close it was set for: if a replacement socket's legitimate
+    /// close arrives first, identity comparison rejects this flag and the
+    /// reason is classified normally. Cleared on consume or on adapter
+    /// stop/start.
+    private var clientInitiatedCloseTask: URLSessionWebSocketTask?
     private var sessionsSubscribed = false
     private var reconnectDelay: TimeInterval = 1
     private let maxReconnectDelay: TimeInterval = 30
     private let protocolVersion = 3
+    private let connectRPCResponseTimeoutNanoseconds: UInt64 = 10_000_000_000
+    private let standardRPCResponseTimeoutNanoseconds: UInt64 = 20_000_000_000
 
     private var currentSessionKey: String?
     private var currentRunId: String?
@@ -96,6 +147,11 @@ actor OpenClawAdapter {
     }
     private struct PendingRPC {
         let method: String
+        // Task this RPC was sent on. Used by handleResponse to detect a stale
+        // response: if the current `wsTask` no longer matches `task`, the
+        // socket was canceled and replaced (e.g. fallback path). Acting on
+        // such a response would tag/cancel the live replacement.
+        weak var task: URLSessionWebSocketTask?
         let continuation: CheckedContinuation<RPCResponse, Never>?
     }
     private var pendingMethods: [String: PendingRPC] = [:]
@@ -131,6 +187,15 @@ actor OpenClawAdapter {
     func start() {
         isStopping = false
         pairingRequired = false
+        disableDeviceAuthForNextConnect = false
+        clientInitiatedCloseTask = nil
+        // Make every fresh-cycle visible in the file log. Without this, an
+        // observer inspecting daemon.log can't tell whether a new attempt is
+        // running on a brand-new adapter instance (state reset to defaults)
+        // or whether it's a reconnect on a stuck instance carrying stale
+        // `pairingRequired` / `disableDeviceAuthForNextConnect` flags from a
+        // prior cycle. Both cases produce identical "WebSocket opened…" lines.
+        DaemonLogger.shared.error("OpenClaw adapter start: state reset (pairingRequired=false, disableDeviceAuthForNextConnect=false)")
         loadDeviceIdentity()
         connect()
     }
@@ -141,7 +206,14 @@ actor OpenClawAdapter {
         reconnectTask = nil
         sessionsPollTask?.cancel()
         sessionsPollTask = nil
-        wsTask?.cancel(with: .goingAway, reason: nil)
+        if let task = wsTask {
+            task.cancel(with: .goingAway, reason: nil)
+            // Resolve any RPC continuations bound to this task before nil-ing.
+            // Without this, an in-flight `await sendRPC(...)` from another
+            // path (e.g. session shutdown) would dangle because the cancel
+            // bypasses the receiveLoop's normal response handling.
+            clearPendingRPCs(for: task, reason: "Adapter stopped")
+        }
         wsTask = nil
         let wasConnected = isConnected
         isConnected = false
@@ -158,6 +230,21 @@ actor OpenClawAdapter {
         guard let url = URL(string: gatewayUrl) else { return }
         reconnectTask?.cancel()
         reconnectTask = nil
+        // Cancel any pre-existing wsTask before allocating a new one.
+        // Without this guard, a concurrent reconnect path (handleDisconnect →
+        // scheduleReconnect → connect()) overwrites the just-set-up wsTask
+        // while the previous socket's pending sendConnectRequest is still in
+        // flight — producing "Socket is not connected" Send failures and a
+        // visible duplicate "WebSocket opened" line in the daemon log.
+        if let existing = wsTask {
+            existing.cancel(with: .goingAway, reason: nil)
+            // Drain any RPC continuations bound to the about-to-die task so
+            // their `await sendRPC(...)` callers don't dangle. The replacement
+            // task hasn't been installed yet, so this catches every pending
+            // RPC that the old socket would never get to answer.
+            clearPendingRPCs(for: existing, reason: "Socket replaced before response")
+            wsTask = nil
+        }
         let task = URLSession.shared.webSocketTask(with: url)
         self.wsTask = task
         task.resume()
@@ -179,21 +266,83 @@ actor OpenClawAdapter {
                 case .success(let message):
                     switch message {
                     case .string(let text):
-                        await self.handleMessage(text)
+                        // Pass the receiving task so handleMessage can drop
+                        // any payload that arrived on a socket we already
+                        // replaced. Otherwise a stale event/response could
+                        // re-enter handleResponse → fallback path and
+                        // tag/cancel the live replacement task.
+                        await self.handleMessage(text, source: task)
                     default:
                         break
                     }
                     await self.receiveLoop(task)
                 case .failure:
-                    await self.handleDisconnect()
+                    // URLSessionWebSocketTask retains the close code + reason
+                    // after the server closes the connection. Capture both so
+                    // handleDisconnect can pivot on transport-level rejections
+                    // (e.g. 1008 "device signature invalid" — never surfaces as
+                    // an RPC response, so the RPC-error fallback can't see it).
+                    let closeCode = task.closeCode
+                    let closeReason = task.closeReason
+                        .flatMap { String(data: $0, encoding: .utf8) }
+                    // Pass the closing task so handleDisconnect can identity-
+                    // check it against the current `wsTask`. A stale .failure
+                    // (e.g. from a task we canceled in the fallback path)
+                    // arriving after `connect()` already installed a fresh
+                    // replacement socket would otherwise wipe `wsTask = nil`,
+                    // leaving the live socket stranded with no receive loop
+                    // hooked up.
+                    await self.handleDisconnect(
+                        closingTask: task,
+                        closeCode: closeCode,
+                        reason: closeReason
+                    )
                 }
             }
         }
     }
 
-    private func handleMessage(_ text: String) {
+    private func handleMessage(_ text: String, source: URLSessionWebSocketTask) {
+        // Parse the envelope first — even for stale messages, because we may
+        // need to resolve a hanging RPC continuation before discarding.
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+
+        // Stale-message gate. Once `wsTask` has been replaced (e.g. fallback
+        // path canceled the prior socket and connect() installed a fresh
+        // task), any in-flight `.success` from the prior receiveLoop must
+        // not flow into handleEvent / sessions.list re-issue / fallback
+        // tag/cancel of `wsTask` / status emits — those side effects would
+        // hit the live replacement socket. handleDisconnect already gates
+        // the close path; this gate covers the open path.
+        //
+        // Exception: an RPC `res` carrying a known pending id must be
+        // resolved here, otherwise an `await sendRPC(...)` caller would
+        // dangle forever and the continuation would leak. Resolve with a
+        // synthetic STALE_TASK error so the caller can react if needed,
+        // then discard without invoking the regular handleResponse path
+        // (which would race the fallback/cancel branches against the live
+        // task).
+        if wsTask !== source {
+            if let type = json["type"] as? String, type == "res",
+               let responseId = json["id"] as? String,
+               let pending = pendingMethods.removeValue(forKey: responseId) {
+                DaemonLogger.shared.debug(
+                    "OpenClaw",
+                    "Resolving stale RPC response \(responseId) (method=\(pending.method)) before drop"
+                )
+                pending.continuation?.resume(returning: RPCResponse(
+                    ok: false,
+                    payload: nil,
+                    error: [
+                        "code": "STALE_TASK",
+                        "message": "Response arrived after socket was replaced",
+                    ]
+                ))
+            }
+            DaemonLogger.shared.debug("OpenClaw", "Dropping stale message (task replaced)")
+            return
+        }
 
         // Envelope parse via generated ADGatewayFrame — this anchors the Swift
         // adapter to shared/src/gateway-protocol.ts. Field extraction still
@@ -201,14 +350,15 @@ actor OpenClawAdapter {
         // but `.type` / `.event` come from the generated enums so any rename
         // in the single source fails compilation here.
         let frame = try? JSONDecoder().decode(ADGatewayFrame.self, from: data)
+        let rawType = json["type"] as? String
 
-        switch frame?.type {
-        case .event:
+        switch (frame?.type, rawType) {
+        case (.event, _), (_, "event"):
             handleGatewayEvent(frame?.event, rawEvent: json["event"] as? String,
                                payload: json["payload"] as? [String: Any] ?? [:])
-        case .res:
+        case (.res, _), (_, "res"):
             handleResponse(json)
-        case .req, .none:
+        case (.req, _), (_, "req"), (.none, _):
             break
         }
     }
@@ -306,6 +456,20 @@ actor OpenClawAdapter {
 
         DaemonLogger.shared.debug("OpenClaw", "Response: \(responseId) method=\(method ?? "?") ok=\(ok)")
 
+        // Stale-response guard. If this RPC was sent on a task that no longer
+        // matches the current `wsTask`, the socket was canceled and replaced
+        // (e.g. fallback path racing with a new connect()). Acting on the
+        // response now — especially in the failure branch below, which
+        // tags + cancels `wsTask` — would tag/cancel the live replacement
+        // instead of the dead originator. Drop the message after consuming
+        // its continuation.
+        if let pendingTask = pending?.task,
+           let current = wsTask,
+           pendingTask !== current {
+            DaemonLogger.shared.debug("OpenClaw", "Dropping stale response \(responseId) (task replaced)")
+            return
+        }
+
         guard ok else {
             if method == "connect" {
                 let errorCode = errorInfo?["code"] as? String
@@ -313,6 +477,49 @@ actor OpenClawAdapter {
                 DaemonLogger.shared.error("OpenClaw handshake failed: \(json["error"] ?? "unknown" as Any)")
 
                 let authStatus = classifyAuthFailure(errorCode: errorCode, error: errorInfo)
+
+                // Always log the classification + fallback decision inputs.
+                // Without this line a stuck `gateway_reachable` is undebuggable
+                // — past sessions hit a state where `Response ok=false` printed
+                // but every subsequent ERROR line was missing from the file
+                // logger. Forcing one line per decision covers all branches.
+                DaemonLogger.shared.error(
+                    "OpenClaw fallback decision: status=\(authStatus.status)" +
+                    " disableDeviceAuthForNextConnect=\(disableDeviceAuthForNextConnect)"
+                )
+
+                // Auto-fallback on DEVICE_AUTH_INVALID: retry once with device
+                // auth suppressed regardless of whether a shared token is set.
+                //  - If a shared token is configured and the Gateway is in
+                //    shared-token-only mode, the retry authenticates with token
+                //    alone and succeeds.
+                //  - If no shared token is set (or the token can't be loaded —
+                //    e.g. Debug vs App Store builds use different keychain
+                //    access groups so a token saved in one build is invisible
+                //    to the other), the retry sends no auth at all. The Gateway
+                //    will respond with an explicit "device identity required"
+                //    or "unauthorized" status that surfaces correctly in the UI
+                //    instead of looping on the same signature rejection.
+                if authStatus.status == "device_auth_invalid"
+                    && !disableDeviceAuthForNextConnect {
+                    disableDeviceAuthForNextConnect = true
+                    DaemonLogger.shared.error("OpenClaw: DEVICE_AUTH_INVALID — retrying without device auth")
+                    // Keep amber "Connecting…" while we retry; don't surface
+                    // device_auth_invalid red on a state we'll auto-recover from.
+                    emitAuthStatus("gateway_reachable", requestId: nil, message: nil)
+                    reconnectDelay = 1
+                    // Mark the upcoming close as client-initiated, scoped to
+                    // THIS specific wsTask, so handleDisconnect doesn't
+                    // re-classify the server's "device signature invalid"
+                    // reason that we already turned into a fallback retry.
+                    // Task-scoping keeps this from leaking onto a replacement
+                    // socket installed by a concurrent connect().
+                    clientInitiatedCloseTask = wsTask
+                    wsTask?.cancel(with: .goingAway, reason: nil)
+                    wsTask = nil
+                    return
+                }
+
                 // Block reconnect only for states that require action in the Gateway Web UI.
                 // Token config errors (missing/mismatch) are fixable from Settings — let the
                 // adapter keep reconnecting so saving the token takes effect automatically.
@@ -324,6 +531,11 @@ actor OpenClawAdapter {
                 }
                 emitAuthStatus(authStatus.status, requestId: authStatus.requestId, message: authStatus.message)
                 DaemonLogger.shared.error("OpenClaw: auth status \(authStatus.status) — reconnect \(requiresWebUIAction ? "blocked" : "allowed")")
+                // Same suppression applies here: we just emitted the canonical
+                // status, so the post-cancel handleDisconnect must not double-
+                // classify the same close. Tag this exact task so a stale
+                // close from a prior cycle can't accidentally consume the flag.
+                clientInitiatedCloseTask = wsTask
                 wsTask?.cancel(with: .goingAway, reason: nil)
                 wsTask = nil
             } else {
@@ -346,6 +558,7 @@ actor OpenClawAdapter {
             guard validateHelloOk(payload) else {
                 pairingRequired = true
                 emitAuthStatus("unsupported_protocol", requestId: nil, message: "OpenClaw Gateway version not supported")
+                clientInitiatedCloseTask = wsTask
                 wsTask?.cancel(with: .goingAway, reason: nil)
                 wsTask = nil
                 return
@@ -379,8 +592,43 @@ actor OpenClawAdapter {
         }
     }
 
-    private func handleDisconnect() {
+    private func handleDisconnect(
+        closingTask: URLSessionWebSocketTask? = nil,
+        closeCode: URLSessionWebSocketTask.CloseCode = .invalid,
+        reason: String? = nil
+    ) {
+        // Stale-close guard. If the caller identifies the closing task and it
+        // no longer matches `wsTask`, the .failure is for a socket we already
+        // canceled and replaced (e.g. fallback path → cancel old → connect()
+        // installed newTask → cancelled task's deferred .failure now arrives).
+        // Without this guard the handler would clear `wsTask = nil`, stranding
+        // the live replacement socket with no receive loop and no reconnect
+        // ever firing — the daemon would silently lose the Gateway link.
+        //
+        // Also clear the task-scoped suppression flag IFF it was tagged for
+        // this same stale task — leaves any flag set for a still-live task
+        // alone.
+        if let closingTask, let current = wsTask, closingTask !== current {
+            if clientInitiatedCloseTask === closingTask {
+                clientInitiatedCloseTask = nil
+            }
+            // Drain any RPCs still bound to the stale task. Otherwise their
+            // `await sendRPC(...)` callers would dangle because no later code
+            // path will see a response for a socket that's already gone.
+            clearPendingRPCs(for: closingTask, reason: "Stale-close: socket already replaced")
+            return
+        }
+
         let wasConnected = isConnected
+        // Drain pending RPCs bound to the closing task before nilling wsTask.
+        // Picks up any in-flight RPCs the server didn't get to answer.
+        if let closingTask {
+            clearPendingRPCs(for: closingTask, reason: "Socket disconnected")
+        } else if let current = wsTask {
+            // shutdown-event path doesn't supply closingTask; fall back to
+            // current wsTask which is the one being torn down.
+            clearPendingRPCs(for: current, reason: "Socket disconnected (shutdown event)")
+        }
         isConnected = false
         wsTask = nil
         sessionsSubscribed = false
@@ -392,6 +640,63 @@ actor OpenClawAdapter {
         }
 
         guard !isStopping else { return }
+
+        // Task-scoped suppression: this close suppresses reason classification
+        // ONLY if `clientInitiatedCloseTask` was set to the same task we're
+        // now disconnecting. A flag tagged for an older task that already
+        // went stale (or for the still-live task — but that branch never
+        // reaches here) won't accidentally swallow this close's classification.
+        // Treat the absence of a closingTask param (e.g. the shutdown event
+        // path that calls handleDisconnect()) as "no identity check", so the
+        // flag still consumes if it was set for the current wsTask before
+        // it was nilled above.
+        let suppressReason: Bool
+        if let closingTask {
+            suppressReason = clientInitiatedCloseTask === closingTask
+        } else {
+            suppressReason = clientInitiatedCloseTask != nil
+        }
+        clientInitiatedCloseTask = nil
+
+        // Map known transport-level close reasons to authStatus and decide on
+        // auto-fallback. The server side closes the WebSocket with code 1008
+        // ("policy violation") + a `reason` string for every authentication
+        // outcome — these never surface as RPC responses, so the RPC-error
+        // fallback in `handleResponse` can't see them.
+        if !suppressReason, let reason, !reason.isEmpty {
+            DaemonLogger.shared.error("OpenClaw ws closed: code=\(closeCode.rawValue) reason=\(reason)")
+            let lc = reason.lowercased()
+
+            if lc.contains("device signature invalid")
+                && !disableDeviceAuthForNextConnect {
+                // Crypto-level signature rejection: retry once without device
+                // auth regardless of shared-token presence (same rationale as
+                // the RPC fallback — see handleResponse). The retry will land
+                // on a more specific status (connected, device identity
+                // required, unauthorized) that the UI can act on.
+                disableDeviceAuthForNextConnect = true
+                emitAuthStatus("gateway_reachable", requestId: nil, message: nil)
+                DaemonLogger.shared.error("OpenClaw: signature rejected — retrying without device auth")
+                reconnectDelay = 1
+            } else if lc.contains("device identity required") {
+                emitAuthStatus("pairing_required", requestId: nil, message: reason)
+                pairingRequired = true
+            } else if lc.contains("gateway token missing") {
+                emitAuthStatus("gateway_token_missing", requestId: nil, message: reason)
+            } else if lc.contains("device signature invalid") {
+                // No shared token (or fallback already exhausted) — surface as
+                // device_auth_invalid so the UI directs the user to Web UI.
+                emitAuthStatus("device_auth_invalid", requestId: nil, message: reason)
+                pairingRequired = true
+            } else if lc.contains("unauthorized") {
+                emitAuthStatus("token_mismatch", requestId: nil, message: reason)
+            } else if lc.contains("invalid handshake")
+                || lc.contains("invalid connect params") {
+                emitAuthStatus("unsupported_protocol", requestId: nil, message: reason)
+                pairingRequired = true
+            }
+            // Any other reason: leave the existing reconnect logic to handle it.
+        }
 
         guard !pairingRequired else {
             return
@@ -594,14 +899,34 @@ actor OpenClawAdapter {
             "params": resolvedParams,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
-              let text = String(data: data, encoding: .utf8) else { return }
-        pendingMethods[requestId] = PendingRPC(method: method, continuation: continuation)
+              let text = String(data: data, encoding: .utf8) else {
+            DaemonLogger.shared.error("OpenClaw RPC \(method) serialization failed")
+            continuation?.resume(returning: RPCResponse(
+                ok: false,
+                payload: nil,
+                error: ["code": "SERIALIZATION_FAILED", "message": "Could not encode RPC frame"]
+            ))
+            return
+        }
+        pendingMethods[requestId] = PendingRPC(method: method, task: wsTask, continuation: continuation)
+        let timeoutNanoseconds = rpcResponseTimeoutNanoseconds(for: method)
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            await self?.completeRPCTimeout(requestId: requestId)
+        }
         wsTask.send(.string(text)) { error in
             if let error {
                 DaemonLogger.shared.debug("OpenClaw", "RPC \(method) send failed: \(error)")
                 Task { await self.completeRPCSendFailure(requestId: requestId, message: String(describing: error)) }
             }
         }
+    }
+
+    private func rpcResponseTimeoutNanoseconds(for method: String) -> UInt64 {
+        method == "connect"
+            ? connectRPCResponseTimeoutNanoseconds
+            : standardRPCResponseTimeoutNanoseconds
     }
 
     private func completeRPCSendFailure(requestId: String, message: String) {
@@ -613,10 +938,82 @@ actor OpenClawAdapter {
         ))
     }
 
+    private func completeRPCTimeout(requestId: String) {
+        guard let pending = pendingMethods.removeValue(forKey: requestId) else { return }
+        let code = pending.method == "connect" ? "CONNECT_TIMEOUT" : "RPC_TIMEOUT"
+        DaemonLogger.shared.error("OpenClaw RPC '\(pending.method)' timed out waiting for response")
+        pending.continuation?.resume(returning: RPCResponse(
+            ok: false,
+            payload: nil,
+            error: ["code": code, "message": "Gateway did not answer before timeout"]
+        ))
+        if pending.method == "connect" {
+            handleConnectTimeout(task: pending.task)
+        }
+    }
+
+    private func handleConnectTimeout(task: URLSessionWebSocketTask?) {
+        guard let task, let current = wsTask, task === current, !isStopping else { return }
+
+        if disableDeviceAuthForNextConnect {
+            DaemonLogger.shared.error("OpenClaw token-only connect timed out — reconnecting gateway adapter")
+            emitAuthStatus(
+                "connect_timeout",
+                requestId: nil,
+                message: "Gateway did not answer token-only connect before timeout"
+            )
+        } else {
+            disableDeviceAuthForNextConnect = true
+            reconnectDelay = 1
+            DaemonLogger.shared.error("OpenClaw connect timed out — retrying without device auth")
+            emitAuthStatus(
+                "gateway_reachable",
+                requestId: nil,
+                message: "Gateway connect timed out; retrying without device auth"
+            )
+        }
+
+        clientInitiatedCloseTask = task
+        task.cancel(with: .goingAway, reason: nil)
+    }
+
+    /// Resolves and removes every pending RPC bound to `task`. Used at every
+    /// task-replacement point so awaiting `sendRPC(...)` callers never dangle:
+    /// (1) `connect()` cancelling the previous `wsTask` before installing a
+    /// replacement, (2) `handleDisconnect` for the closing task whether it's
+    /// the current `wsTask` or a stale one. Each continuation gets a synthetic
+    /// `STALE_TASK` error so caller-side error handling treats the absence
+    /// of a server response as an explicit failure rather than a hang.
+    private func clearPendingRPCs(for task: URLSessionWebSocketTask, reason: String) {
+        let toResolve = pendingMethods.filter { $0.value.task === task }
+        guard !toResolve.isEmpty else { return }
+        for (id, _) in toResolve {
+            pendingMethods.removeValue(forKey: id)
+        }
+        DaemonLogger.shared.debug(
+            "OpenClaw",
+            "Clearing \(toResolve.count) pending RPC(s) for replaced/closed task: \(reason)"
+        )
+        for (_, pending) in toResolve {
+            pending.continuation?.resume(returning: RPCResponse(
+                ok: false,
+                payload: nil,
+                error: ["code": "STALE_TASK", "message": reason]
+            ))
+        }
+    }
+
     private func sendConnectRequest(nonce: String) {
-        var scopes = deviceAuthToken?.scopes ?? defaultScopes
-        if scopes.isEmpty {
+        // In fallback mode every device-derived value is suppressed so the
+        // request is genuinely token-only. Otherwise scopes inherit from the
+        // stored device token (so re-connects keep the operator scopes that
+        // were granted at pairing time) and fall back to defaults if empty.
+        var scopes: [String]
+        if disableDeviceAuthForNextConnect {
             scopes = defaultScopes
+        } else {
+            scopes = deviceAuthToken?.scopes ?? defaultScopes
+            if scopes.isEmpty { scopes = defaultScopes }
         }
 
         var params: [String: Any] = [
@@ -636,18 +1033,19 @@ actor OpenClawAdapter {
         ]
 
         let sharedToken = OpenClawGatewayTokenStore.loadToken()
-        let hasSharedToken = sharedToken.map { !$0.isEmpty } ?? false
-        let hasDeviceToken = deviceAuthToken.map { !$0.token.isEmpty } ?? false
 
-        // Send device auth only when:
-        //  a) we already have a device-specific token from a previous pairing, OR
-        //  b) no shared token is configured — Gateway must issue a device token via
-        //     the pairing flow (approve in Web UI).
-        // When only a shared token is present (first launch), sending device auth
-        // causes the Gateway to reject the unknown Ed25519 key as DEVICE_AUTH_INVALID
-        // even though the shared token alone is sufficient.
-        let shouldSendDeviceAuth = hasDeviceToken || !hasSharedToken
-        if shouldSendDeviceAuth, let device = buildDeviceAuth(nonce: nonce, requestScopes: scopes) {
+        // Default: attach device auth so dmPolicy=pairing Gateways can route to
+        // the device-pair plugin (silent-drop otherwise). `buildDeviceAuth` signs
+        // with `token=""` on first pairing.
+        //
+        // Exception: `disableDeviceAuthForNextConnect` is set when a previous
+        // attempt got `DEVICE_AUTH_INVALID` while a shared token is configured —
+        // i.e. Gateway is in shared-token-only mode and rejects unknown Ed25519
+        // keys. Skip device auth on this attempt so the shared token alone
+        // authenticates without forcing the user to manually pair in Web UI.
+        // The flag is reset on adapter restart and on connected handshake.
+        if !disableDeviceAuthForNextConnect,
+           let device = buildDeviceAuth(nonce: nonce, requestScopes: scopes) {
             params["device"] = device
         }
 
@@ -655,12 +1053,34 @@ actor OpenClawAdapter {
         if let token = sharedToken, !token.isEmpty {
             auth["token"] = token
         }
-        if let deviceToken = deviceAuthToken?.token, !deviceToken.isEmpty {
+        // Suppress deviceToken in fallback mode too. The Gateway just rejected
+        // our device identity; re-sending any device-derived credential
+        // (signature OR previously-issued deviceToken — same Ed25519 key behind
+        // both) would earn another rejection. Token-only means the shared
+        // token alone, with no device material in `params` or `auth`.
+        if !disableDeviceAuthForNextConnect,
+           let deviceToken = deviceAuthToken?.token, !deviceToken.isEmpty {
             auth["deviceToken"] = deviceToken
         }
         if !auth.isEmpty {
             params["auth"] = auth
         }
+
+        // Wire-shape diagnostic — exact composition of every connect attempt.
+        // Lets a single log tail prove which auth credentials were actually
+        // attached, so a `gateway_reachable` stuck-state can be distinguished
+        // between "fallback ran and Gateway silent-dropped token-only" vs
+        // "fallback never ran and we kept resending device auth that the
+        // Gateway already rejected." Token presence is logged as a boolean
+        // only — never the value itself.
+        let hasDeviceParam = params["device"] != nil
+        let hasSharedToken = (auth["token"] as? String).map { !$0.isEmpty } ?? false
+        let hasDeviceToken = (auth["deviceToken"] as? String).map { !$0.isEmpty } ?? false
+        DaemonLogger.shared.error(
+            "OpenClaw connect.RPC: fallback=\(disableDeviceAuthForNextConnect)" +
+            " hasDevice=\(hasDeviceParam) hasSharedToken=\(hasSharedToken)" +
+            " hasDeviceToken=\(hasDeviceToken) scopes=\(scopes.count)"
+        )
 
         sendRPC(method: "connect", params: params)
     }

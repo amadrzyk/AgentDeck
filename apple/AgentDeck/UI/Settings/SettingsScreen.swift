@@ -14,6 +14,8 @@ struct SettingsScreen: View {
     @State private var openClawGatewayTokenInput: String = ""
     @State private var openClawGatewayTokenSaved: Bool = false
     @State private var openClawGatewayTokenError: String?
+    @State private var openClawIdentityResetMessage: String?
+    @State private var openClawIdentityResetSucceeded: Bool = false
     @State private var anthropicAdminApiKeyInput: String = ""
     @State private var anthropicAdminApiKeySaved: Bool = false
     @State private var anthropicAdminApiKeyError: String?
@@ -597,7 +599,7 @@ struct SettingsScreen: View {
                                 NSPasteboard.general.setString(cmd, forType: .string)
                             }
                             .buttonStyle(.bordered)
-                            .help("Copies `\(cmd)` to clipboard — paste in Terminal to kill external processes")
+                            .help(Text(verbatim: "Copies \(cmd) to clipboard — paste in Terminal to kill external processes"))
                         }
                     }
                 }
@@ -926,7 +928,7 @@ struct SettingsScreen: View {
                     Label(
                         configured
                             ? "ANTHROPIC_API_KEY detected. Calls cost Anthropic credits."
-                            : "Set ANTHROPIC_API_KEY in env or ~/.agentdeck/settings.json. Paid backend — opt-in only.",
+                            : "Set ANTHROPIC_API_KEY in environment or AgentDeck settings. Paid backend — opt-in only.",
                         systemImage: configured ? "dollarsign.circle.fill" : "key.slash"
                     )
                     .font(.system(size: 11))
@@ -947,7 +949,7 @@ struct SettingsScreen: View {
 
             Divider()
 
-            Text("APME data lives in ~/.agentdeck/apme.sqlite and the dashboard is accessible from the menu bar APME button.")
+            Text("APME data is stored locally on this device. The dashboard is accessible from the menu bar APME button.")
                 .font(.system(size: 10))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
         }
@@ -994,7 +996,7 @@ struct SettingsScreen: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Paste the token configured on the OpenClaw Gateway, not an AgentDeck token. Saving stores it in Keychain and restarts the local daemon.")
+                Text("Paste your OpenClaw gateway token. Saved to Keychain; only the gateway adapter reconnects.")
                     .font(.system(size: 10))
                     .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
                     .fixedSize(horizontal: false, vertical: true)
@@ -1019,7 +1021,7 @@ struct SettingsScreen: View {
             openClawGatewayTokenInput = ""
             openClawGatewayTokenSaved = true
             openClawGatewayTokenError = nil
-            Task { await daemonService.restart() }
+            Task { await daemonService.reconnectGatewayAdapter() }
         } catch {
             openClawGatewayTokenError = "Could not save token: \(error.localizedDescription)"
         }
@@ -1033,9 +1035,292 @@ struct SettingsScreen: View {
             openClawGatewayTokenInput = ""
             openClawGatewayTokenSaved = false
             openClawGatewayTokenError = nil
-            Task { await daemonService.restart() }
+            Task { await daemonService.reconnectGatewayAdapter() }
         } catch {
             openClawGatewayTokenError = "Could not clear token: \(error.localizedDescription)"
+        }
+        #endif
+    }
+
+    private func reconnectOpenClawGatewayAdapter() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        openClawIdentityResetSucceeded = true
+        openClawIdentityResetMessage = "Reconnecting the gateway adapter — your other sessions are unaffected."
+        Task { await daemonService.reconnectGatewayAdapter() }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(6))
+            openClawIdentityResetMessage = nil
+            openClawIdentityResetSucceeded = false
+        }
+        #endif
+    }
+
+    private var shouldShowOpenClawTroubleshootInline: Bool {
+        let status = stateHolder.state.gatewayAuthStatus ?? ""
+        guard stateHolder.state.gatewayAvailable else { return false }
+        if !stateHolder.state.gatewayConnected { return true }
+        return [
+            "approval_pending",
+            "pairing_required",
+            "gateway_token_missing",
+            "token_mismatch",
+            "device_auth_invalid",
+            "auth_failed",
+            "unsupported_protocol",
+            "connect_timeout",
+        ].contains(status)
+    }
+
+    private var openClawTroubleshootHint: String {
+        switch stateHolder.state.gatewayAuthStatus {
+        case "gateway_token_missing":
+            return "Import the current Gateway token, then reconnect."
+        case "token_mismatch":
+            return "Re-import the current Gateway token."
+        case "connect_timeout":
+            return "Import the current token and reconnect. Reset identity only if pairing is still rejected."
+        case "device_auth_invalid", "auth_failed":
+            return "Open the Web UI to approve this Mac. Reset identity only if the approved entry is stale."
+        case "approval_pending", "pairing_required":
+            return "Open the Web UI to approve this Mac."
+        case "unsupported_protocol":
+            return "This Gateway build is not compatible with AgentDeck."
+        default:
+            return "Use these controls only when pairing or token refresh is stuck."
+        }
+    }
+
+    // MARK: - OpenClaw repair controls
+
+    /// Inline only while OpenClaw needs attention. The same controls remain
+    /// available behind Advanced for maintenance, but the normal connected state
+    /// should stay quiet: "Connected / Paired through Gateway" is enough.
+    @ViewBuilder
+    private var openClawTroubleshootRow: some View {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Troubleshoot")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(TerrariumHUD.subtext)
+            openClawRepairButtons(prominentImport: true)
+            if let openClawIdentityResetMessage {
+                Text(openClawIdentityResetMessage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(openClawIdentityResetSucceeded ? .green : .red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(openClawTroubleshootHint)
+                    .font(.system(size: 10))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    @ViewBuilder
+    private func openClawRepairButtons(prominentImport: Bool) -> some View {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                openClawImportButton(prominent: prominentImport)
+
+                Button {
+                    reconnectOpenClawGatewayAdapter()
+                } label: {
+                    Label("Reconnect adapter", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(Text(verbatim: "Restart only AgentDeck's OpenClaw Gateway client."))
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    if let url = URL(string: "http://localhost:18789") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label("Open Web UI", systemImage: "safari")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(Text(verbatim: "Open the local OpenClaw Gateway UI."))
+
+                Button(role: .destructive) {
+                    resetOpenClawDeviceIdentity()
+                } label: {
+                    Label("Reset identity", systemImage: "arrow.counterclockwise.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(Text(verbatim: "Clear this Mac's stored OpenClaw pairing key."))
+            }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    @ViewBuilder
+    private func openClawImportButton(prominent: Bool) -> some View {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        let label = Label("Import token", systemImage: "square.and.arrow.down")
+        if prominent {
+            Button {
+                importOpenClawTokenFromConfig()
+            } label: {
+                label
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .help(Text(verbatim: "Save the Gateway token from a selected JSON file to Keychain."))
+        } else {
+            Button {
+                importOpenClawTokenFromConfig()
+            } label: {
+                label
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(Text(verbatim: "Save the Gateway token from a selected JSON file to Keychain."))
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    /// Walks the JSON looking for the gateway token. OpenClaw's own
+    /// `openclaw gateway run` writes it to `gateway.auth.token`; some hand-
+    /// rolled exports put it at the top-level `auth.token`; a flat
+    /// `gateway.token` is a defensive third try. Returns the first non-empty
+    /// trimmed string found, or nil.
+    ///
+    /// `nonisolated` so XCTest (and any other off-main caller) can pass a
+    /// non-Sendable `[String: Any]` literal without Swift 6 strict-concurrency
+    /// flagging the call. The function is a pure dictionary walk — no UI
+    /// state, no shared mutable state.
+    nonisolated static func extractGatewayToken(from json: [String: Any]) -> String? {
+        let candidates: [[String]] = [
+            ["gateway", "auth", "token"],
+            ["auth", "token"],
+            ["gateway", "token"],
+        ]
+        for path in candidates {
+            var node: Any = json
+            var ok = true
+            for (i, key) in path.enumerated() {
+                guard let dict = node as? [String: Any], let next = dict[key] else {
+                    ok = false
+                    break
+                }
+                if i == path.count - 1 {
+                    if let str = next as? String {
+                        let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty { return trimmed }
+                    }
+                    ok = false
+                    break
+                }
+                node = next
+            }
+            _ = ok
+        }
+        return nil
+    }
+
+    /// Lets the user pick `openclaw.json` via NSOpenPanel and pulls the
+    /// gateway token out of it. The token can sit at any of three paths
+    /// depending on how OpenClaw was set up — `extractGatewayToken` walks
+    /// them in canonical-first order. The picker grants this app a one-shot
+    /// user-selected file scope, which is App Store sandbox-safe: the
+    /// existing `com.apple.security.files.user-selected.read-write`
+    /// entitlement covers it, no subprocess is spawned, and no path outside
+    /// the user's explicit selection is touched. The token is written to
+    /// Keychain via the existing `OpenClawGatewayTokenStore` and the gateway
+    /// adapter is bounced — Claude Code / Codex sessions keep running.
+    ///
+    /// Notes for App Store review:
+    /// - `panel.directoryURL` is only a Powerbox navigation hint. The app still
+    ///   receives access solely to the JSON file the user explicitly selects.
+    /// - `startAccessingSecurityScopedResource()` is paired with `defer` so
+    ///   the scope is released even if JSON parsing throws.
+    private func importOpenClawTokenFromConfig() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        let panel = NSOpenPanel()
+        panel.title = "Import OpenClaw Gateway Token"
+        panel.message = "Choose your OpenClaw config file (typically `~/.openclaw/openclaw.json`). AgentDeck will save the gateway token from it to your Keychain."
+        panel.prompt = "Import token"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.showsHiddenFiles = true
+        // Open the panel at the user's REAL home directory. Inside App Sandbox
+        // `ProcessInfo.environment["HOME"]` and `NSHomeDirectory()` both
+        // return the app's container path (`~/Library/Containers/<id>/Data/`),
+        // which is *not* where the user keeps OpenClaw's config. `getpwuid`
+        // bypasses sandbox-translated env to return `/Users/<name>/`, which
+        // the panel (running in Powerbox, outside the sandbox) is allowed to
+        // present as a navigation starting point — no read permission is
+        // granted by the hint itself, only by what the user selects. With
+        // `showsHiddenFiles = true` the user reaches `.openclaw/` in one click.
+        if let pw = getpwuid(getuid()), let realHome = pw.pointee.pw_dir.flatMap({ String(cString: $0) }) {
+            panel.directoryURL = URL(fileURLWithPath: realHome)
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+        do {
+            let data = try Data(contentsOf: url)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                openClawGatewayTokenError = "That file isn't a JSON object. Pick `~/.openclaw/openclaw.json` or paste the token manually below."
+                return
+            }
+            guard let token = Self.extractGatewayToken(from: json) else {
+                openClawGatewayTokenError = "Couldn't find a gateway token in that file. Looked at `gateway.auth.token`, `auth.token`, `gateway.token`. Pick a different file or paste the token below."
+                return
+            }
+            try OpenClawGatewayTokenStore.saveToken(token)
+            openClawGatewayTokenInput = ""
+            openClawGatewayTokenSaved = true
+            openClawGatewayTokenError = nil
+            openClawIdentityResetSucceeded = true
+            openClawIdentityResetMessage = "Token imported. Reconnecting the gateway adapter — your other sessions are unaffected."
+            Task { await daemonService.reconnectGatewayAdapter() }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(6))
+                openClawIdentityResetMessage = nil
+                openClawIdentityResetSucceeded = false
+            }
+        } catch {
+            openClawGatewayTokenError = "Could not read the file: \(error.localizedDescription)"
+        }
+        #endif
+    }
+
+    private func resetOpenClawDeviceIdentity() {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        do {
+            try OpenClawDeviceIdentityStore.deleteIdentity()
+            openClawIdentityResetSucceeded = true
+            openClawIdentityResetMessage = "Pairing identity cleared. Reconnecting OpenClaw — a fresh device key will be generated. Claude Code / Codex sessions are unaffected."
+            Task { await daemonService.reconnectGatewayAdapter() }
+            // Clear the inline message after a few seconds so the row returns
+            // to its general guidance text.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(6))
+                openClawIdentityResetMessage = nil
+                openClawIdentityResetSucceeded = false
+            }
+        } catch {
+            openClawIdentityResetSucceeded = false
+            openClawIdentityResetMessage = "Could not reset pairing identity: \(error.localizedDescription)"
         }
         #endif
     }
@@ -1238,12 +1523,27 @@ struct SettingsScreen: View {
         switch descriptor.id {
         case "openclaw":
             #if os(macOS) && AGENTDECK_APP_STORE
-            DisclosureGroup("Advanced — shared Gateway token") {
-                openClawGatewayTokenEditor
+            VStack(alignment: .leading, spacing: 8) {
+                if shouldShowOpenClawTroubleshootInline {
+                    openClawTroubleshootRow
+                }
+                DisclosureGroup("Advanced") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !shouldShowOpenClawTroubleshootInline {
+                            Text("Token refresh and repair tools.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(TerrariumHUD.subtext.opacity(0.75))
+                                .fixedSize(horizontal: false, vertical: true)
+                            openClawRepairButtons(prominentImport: false)
+                            Divider().opacity(0.4)
+                        }
+                        openClawGatewayTokenEditor
+                    }
                     .padding(.top, 6)
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
             }
-            .font(.system(size: 11))
-            .foregroundStyle(TerrariumHUD.subtext)
             #else
             EmptyView()
             #endif
