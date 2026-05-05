@@ -26,7 +26,7 @@ private let ICON_SIZE = 196
 
 private let POLL_INTERVAL: UInt64 = 500_000_000   // 500ms device detection
 private let KEEPALIVE_INTERVAL: TimeInterval = 15  // 15s keep-alive (D200H reverts to default after ~30s)
-private let D200H_RENDERER_REV = "creature-session-icons-v24"
+private let D200H_RENDERER_REV = "creature-session-icons-v27"
 
 // HID Commands
 private let CMD_SET_BUTTONS: UInt16    = 0x0001
@@ -263,6 +263,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         animationTask?.cancel()
         pressDispatchTasks.values.forEach { $0.cancel() }
         pressDispatchTasks.removeAll()
+        sendOfflineFrame()
         disconnect()
 
         if let manager = hidManager {
@@ -1025,6 +1026,42 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
         }
     }
 
+    /// Last graceful frame on app teardown — leaves the device showing
+    /// "OFFLINE / Open AgentDeck" instead of frozen on the last live session.
+    /// SIGKILL/crash bypasses stop(); that scenario stays out of scope.
+    private func sendOfflineFrame() {
+        guard connected, managerOpened, !displaySuppressed else { return }
+
+        var slots = [ButtonSlot](repeating: .dim, count: 14)
+        slots[7] = ButtonSlot(
+            title: "OFFLINE",
+            subtitle: "Open AgentDeck",
+            bg: rgb(7, 23, 15),
+            enabled: false,
+            borderStyle: .none,
+            icon: .agentDeck,
+            iconColor: rgb(187, 247, 208),
+            textOverlay: .infoTile
+        )
+
+        let zip = D200hRenderer.renderFullZip(
+            slots: slots,
+            sessions: [],
+            stateEvent: nil,
+            usageEvent: nil,
+            optionMode: false,
+            sessionPage: 0,
+            focusedSessionId: nil
+        )
+        guard !zip.isEmpty else {
+            debugLog("OFFLINE frame: renderFullZip returned empty — skipping")
+            return
+        }
+        let packets = buildZipPackets(zip)
+        for packet in packets { writePacket(packet) }
+        debugLog("OFFLINE frame sent: \(zip.count)b \(packets.count)pkt")
+    }
+
     private func disconnect() {
         if let dev = consumerDevice { IOHIDDeviceClose(dev, IOOptionBits(kIOHIDOptionsTypeNone)) }
         if let dev = keyboardDevice { IOHIDDeviceClose(dev, IOOptionBits(kIOHIDOptionsTypeNone)) }
@@ -1320,6 +1357,7 @@ private struct ButtonSlot {
     enum TextOverlayStyle {
         case none
         case sessionTile
+        case infoTile
         case usageStat
     }
 
@@ -1373,6 +1411,14 @@ private struct ButtonSlot {
         case commit
         case clear
         case tool
+        case model
+        case mode
+        case ready
+        case hub
+        case noSession
+        case agentDeck
+        case option
+        case esc
     }
 
     static let dim = ButtonSlot(title: "", subtitle: "", bg: rgb(17, 17, 17), enabled: false, borderStyle: .none, icon: .none, iconColor: nil)
@@ -1391,10 +1437,11 @@ private struct ButtonSlot {
         switch textOverlay {
         case .none: overlayKey = "n"
         case .sessionTile: overlayKey = "t"
+        case .infoTile: overlayKey = "i"
         case .usageStat: overlayKey = "u"
         }
 
-        return "\(title)|\(subtitle)|\(modelName)|\(stateLabel)|\(resetTime)|\(enabled ? 1 : 0)|\(borderKey)|\(overlayKey)"
+        return "\(title)|\(subtitle)|\(modelName)|\(stateLabel)|\(resetTime)|\(icon)|\(enabled ? 1 : 0)|\(borderKey)|\(overlayKey)"
     }
 
     func pressedFlash() -> ButtonSlot {
@@ -1527,6 +1574,23 @@ private enum D200hRenderer {
         var slots = [ButtonSlot](repeating: .dim, count: 14)
         var needsAnim = false
 
+        if sessions.isEmpty {
+            slots[0] = ButtonSlot(title: "HUB READY", subtitle: "CONNECTED",
+                                  bg: rgb(6, 22, 13), enabled: false, borderStyle: .solid(color: cStateIdle),
+                                  icon: .hub, iconColor: rgb(134, 239, 172),
+                                  statusColor: cStateIdle,
+                                  textOverlay: .infoTile)
+            slots[1] = ButtonSlot(title: "NO SESSION", subtitle: "WAITING",
+                                  bg: rgb(11, 19, 32), enabled: false, borderStyle: .solid(color: cPageNav),
+                                  icon: .noSession, iconColor: rgb(147, 197, 253),
+                                  textOverlay: .infoTile)
+            slots[2] = ButtonSlot(title: "AgentDeck", subtitle: "IDLE",
+                                  bg: rgb(20, 16, 22), enabled: false, borderStyle: .solid(color: rgb(192, 132, 252)),
+                                  icon: .agentDeck, iconColor: rgb(216, 180, 254),
+                                  textOverlay: .infoTile)
+            return (slots, false)
+        }
+
         // Slots 0-12: sessions (13 per page), slot 13: usage monitor (big merged button)
         let startIdx = page * 13
         for i in 0..<13 {
@@ -1633,8 +1697,8 @@ private enum D200hRenderer {
     ) -> [ButtonSlot] {
         var slots = [ButtonSlot](repeating: .dim, count: 14)
 
-        // Slot 0: ← BACK
-        slots[0] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
+        // Slot 0: BACK
+        slots[0] = ButtonSlot(title: "BACK", subtitle: "sessions", bg: cDark, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240), textOverlay: .infoTile)
 
         // Slot 1: Session info (full tile with creature icon + model + state, matching SD+ renderDetailInfo)
         let name = session.displayName.isEmpty ? session.agentType : String(session.displayName.prefix(12))
@@ -1671,21 +1735,48 @@ private enum D200hRenderer {
             ]
             let quickActionGlyphs: [ButtonSlot.IconGlyph] = [.goOn, .review, .commit, .clear]
             for (i, qa) in quickActions.enumerated() {
+                let subtitle = i == 0 ? "continue" : i == 1 ? "inspect" : i == 2 ? "save" : "reset"
                 slots[2 + i] = ButtonSlot(
                     title: qa.title,
-                    subtitle: "",
+                    subtitle: subtitle,
                     bg: qa.bg,
                     enabled: true,
                     borderStyle: .none,
                     icon: quickActionGlyphs[i],
-                    iconColor: rgb(241, 245, 249)
+                    iconColor: rgb(241, 245, 249),
+                    textOverlay: .infoTile
                 )
             }
-        } else if options.isEmpty && session.isProcessing {
-            // PROCESSING: show current tool info, no actions
-            if !session.currentTool.isEmpty {
-                slots[2] = ButtonSlot(title: "▶ \(session.currentTool)", subtitle: "", bg: cSessionAct, enabled: false, borderStyle: .none, icon: .tool, iconColor: rgb(191, 219, 254))
+            if !session.modelName.isEmpty {
+                slots[6] = ButtonSlot(title: "MODEL", subtitle: String(session.modelName.prefix(14)),
+                                      bg: cDetailBg, enabled: false, borderStyle: .none,
+                                      icon: .model, iconColor: rgb(191, 219, 254),
+                                      textOverlay: .infoTile)
             }
+            slots[7] = ButtonSlot(title: session.agentType == "openclaw" ? "STANDBY" : "READY", subtitle: "idle",
+                                  bg: rgb(6, 22, 13), enabled: false, borderStyle: .solid(color: cStateIdle),
+                                  icon: .ready, iconColor: rgb(134, 239, 172),
+                                  textOverlay: .infoTile)
+        } else if options.isEmpty && session.isProcessing {
+            // PROCESSING: show status context first; STOP remains the only action.
+            let toolTitle = session.currentTool.isEmpty
+                ? (session.agentType == "openclaw" ? "ROUTING" : "WORKING")
+                : "▶ \(String(session.currentTool.prefix(16)))"
+            slots[2] = ButtonSlot(title: toolTitle, subtitle: "RUNNING",
+                                  bg: cSessionAct, enabled: false, borderStyle: .solid(color: rgb(245, 185, 66)),
+                                  icon: .tool, iconColor: rgb(191, 219, 254),
+                                  statusColor: rgb(245, 185, 66),
+                                  textOverlay: .infoTile)
+            if !session.modelName.isEmpty {
+                slots[3] = ButtonSlot(title: "MODEL", subtitle: String(session.modelName.prefix(14)),
+                                      bg: cDetailBg, enabled: false, borderStyle: .none,
+                                      icon: .model, iconColor: rgb(191, 219, 254),
+                                      textOverlay: .infoTile)
+            }
+            slots[4] = ButtonSlot(title: "STOP", subtitle: "BOTTOM LEFT",
+                                  bg: cStopInact, enabled: false, borderStyle: .none,
+                                  icon: .stop, iconColor: rgb(248, 113, 113),
+                                  textOverlay: .infoTile)
         } else {
             // AWAITING: show actual options
             let startIdx = page * 8
@@ -1703,28 +1794,50 @@ private enum D200hRenderer {
                 slots[2 + i] = ButtonSlot(
                     title: "\(badge)\(displayLabel)", subtitle: "",
                     bg: bg, enabled: true, borderStyle: .none,
-                    icon: .review,
-                    iconColor: recommended ? rgb(250, 204, 21) : rgb(226, 232, 240)
+                    icon: optionGlyph(label: label, shortcut: shortcut),
+                    iconColor: recommended ? rgb(250, 204, 21) : rgb(226, 232, 240),
+                    textOverlay: .infoTile
                 )
+            }
+            if options.count <= page * 8 {
+                slots[2] = ButtonSlot(title: "AWAITING", subtitle: "choose option",
+                                      bg: cEscInact, enabled: false, borderStyle: .solid(color: cStateAwait),
+                                      icon: .option, iconColor: rgb(251, 191, 36),
+                                      textOverlay: .infoTile)
             }
         }
 
         // Slot 10: STOP/ESC combined (bottom-left)
         if session.isProcessing {
-            slots[10] = ButtonSlot(title: "■ STOP", subtitle: "", bg: cStopActive, enabled: true, borderStyle: .none, icon: .stop, iconColor: rgb(254, 226, 226))
+            slots[10] = ButtonSlot(title: "STOP", subtitle: "interrupt", bg: cStopActive, enabled: true, borderStyle: .none, icon: .stop, iconColor: rgb(254, 226, 226), textOverlay: .infoTile)
         } else {
-            slots[10] = ButtonSlot(title: "✖ ESC", subtitle: "", bg: cEscActive, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
+            slots[10] = ButtonSlot(title: "ESC", subtitle: "cancel", bg: cEscActive, enabled: true, borderStyle: .none, icon: .esc, iconColor: rgb(254, 215, 170), textOverlay: .infoTile)
         }
 
         // Slot 11: MORE (if overflow)
         if options.count > (page + 1) * 8 {
-            slots[11] = ButtonSlot(title: "▶ MORE", subtitle: "", bg: cSessionDef, enabled: true, borderStyle: .none, icon: .more, iconColor: rgb(226, 232, 240))
+            slots[11] = ButtonSlot(title: "MORE", subtitle: "\(page + 1)/\(max(1, (options.count + 7) / 8))", bg: cSessionDef, enabled: true, borderStyle: .none, icon: .more, iconColor: rgb(226, 232, 240), textOverlay: .infoTile)
         }
 
-        // Slot 13: ← BACK (big merged button)
-        slots[13] = ButtonSlot(title: "← BACK", subtitle: "", bg: cDark, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240))
+        // Slot 13: BACK (big merged button)
+        slots[13] = ButtonSlot(title: "BACK", subtitle: "sessions", bg: cDark, enabled: true, borderStyle: .none, icon: .back, iconColor: rgb(226, 232, 240), textOverlay: .infoTile)
 
         return slots
+    }
+
+    private static func optionGlyph(label: String, shortcut: String) -> ButtonSlot.IconGlyph {
+        let lower = label.lowercased()
+        let sc = shortcut.lowercased()
+        if lower.contains("diff") || lower.contains("review") || lower.contains("view") {
+            return .review
+        }
+        if sc == "y" || sc == "a" || lower.hasPrefix("yes") || lower.hasPrefix("allow") || lower.hasPrefix("apply") || lower.contains("always") {
+            return .ready
+        }
+        if sc == "n" || sc == "d" || lower.hasPrefix("no") || lower.hasPrefix("deny") || lower.hasPrefix("reject") {
+            return .clear
+        }
+        return .option
     }
 
     private static func sessionGlyph(for agentType: String) -> ButtonSlot.IconGlyph {
@@ -2432,6 +2545,8 @@ private func renderButtonPng(_ slot: ButtonSlot) -> Data {
     switch slot.textOverlay {
     case .sessionTile:
         drawSessionTextOverlay(ctx, slot: slot)
+    case .infoTile:
+        drawInfoTextOverlay(ctx, slot: slot)
     case .usageStat:
         drawUsageTextOverlay(ctx, slot: slot)
     case .none:
@@ -2519,6 +2634,17 @@ private func drawUsageTextOverlay(_ ctx: CGContext, slot: ButtonSlot) {
     }
 }
 
+private func drawInfoTextOverlay(_ ctx: CGContext, slot: ButtonSlot) {
+    let title = String(slot.title.prefix(14))
+    let subtitle = String(slot.subtitle.prefix(18))
+    if !title.isEmpty {
+        drawText(title, ctx: ctx, y: subtitle.isEmpty ? 136 : 128, color: rgb(241, 245, 249), font: ctFont(16, bold: true), leftBound: 20, rightBound: 176)
+    }
+    if !subtitle.isEmpty {
+        drawText(subtitle, ctx: ctx, y: 152, color: rgb(148, 163, 184), font: ctFont(11, bold: true), leftBound: 20, rightBound: 176)
+    }
+}
+
 private func drawButtonIcon(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color: CGColor, rect: CGRect) {
     drawInTopDownCoordinates(ctx) {
         if isSessionBrandGlyph(glyph) {
@@ -2562,6 +2688,13 @@ private func drawButtonIcon(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color
             ctx.strokePath()
         case .stop:
             ctx.fill(CGRect(x: midX - 15, y: midY - 15, width: 30, height: 30))
+        case .esc:
+            ctx.strokeEllipse(in: CGRect(x: midX - 25, y: midY - 25, width: 50, height: 50))
+            ctx.move(to: CGPoint(x: midX - 13, y: midY - 13))
+            ctx.addLine(to: CGPoint(x: midX + 13, y: midY + 13))
+            ctx.move(to: CGPoint(x: midX + 13, y: midY - 13))
+            ctx.addLine(to: CGPoint(x: midX - 13, y: midY + 13))
+            ctx.strokePath()
         case .more:
             ctx.move(to: CGPoint(x: midX - 16, y: midY + 12))
             ctx.addLine(to: CGPoint(x: midX - 2, y: midY))
@@ -2607,6 +2740,75 @@ private func drawButtonIcon(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color
             ctx.strokePath()
             ctx.strokeEllipse(in: CGRect(x: midX - 26, y: midY - 18, width: 16, height: 16))
             ctx.fillEllipse(in: CGRect(x: midX + 6, y: midY + 2, width: 14, height: 14))
+        case .model:
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: midX, y: midY - 27))
+            path.addLine(to: CGPoint(x: midX + 25, y: midY - 12))
+            path.addLine(to: CGPoint(x: midX + 25, y: midY + 16))
+            path.addLine(to: CGPoint(x: midX, y: midY + 30))
+            path.addLine(to: CGPoint(x: midX - 25, y: midY + 16))
+            path.addLine(to: CGPoint(x: midX - 25, y: midY - 12))
+            path.closeSubpath()
+            ctx.addPath(path)
+            ctx.strokePath()
+            ctx.move(to: CGPoint(x: midX - 25, y: midY - 12))
+            ctx.addLine(to: CGPoint(x: midX, y: midY + 2))
+            ctx.addLine(to: CGPoint(x: midX + 25, y: midY - 12))
+            ctx.move(to: CGPoint(x: midX, y: midY + 2))
+            ctx.addLine(to: CGPoint(x: midX, y: midY + 30))
+            ctx.strokePath()
+        case .mode:
+            ctx.setLineWidth(3)
+            for (dy, knobX) in [(-18, midX - 8), (0, midX + 14), (18, midX - 15)] {
+                ctx.move(to: CGPoint(x: midX - 25, y: midY + CGFloat(dy)))
+                ctx.addLine(to: CGPoint(x: midX + 25, y: midY + CGFloat(dy)))
+                ctx.strokePath()
+                ctx.fillEllipse(in: CGRect(x: knobX - 5, y: midY + CGFloat(dy) - 5, width: 10, height: 10))
+            }
+        case .ready:
+            ctx.strokeEllipse(in: CGRect(x: midX - 25, y: midY - 25, width: 50, height: 50))
+            ctx.move(to: CGPoint(x: midX - 13, y: midY + 1))
+            ctx.addLine(to: CGPoint(x: midX - 3, y: midY + 12))
+            ctx.addLine(to: CGPoint(x: midX + 16, y: midY - 12))
+            ctx.strokePath()
+        case .hub:
+            ctx.strokeEllipse(in: CGRect(x: midX - 10, y: midY - 10, width: 20, height: 20))
+            let nodes = [
+                CGPoint(x: midX, y: midY - 28),
+                CGPoint(x: midX - 26, y: midY + 18),
+                CGPoint(x: midX + 26, y: midY + 18),
+            ]
+            for node in nodes {
+                ctx.move(to: CGPoint(x: midX, y: midY))
+                ctx.addLine(to: node)
+                ctx.strokePath()
+                ctx.fillEllipse(in: CGRect(x: node.x - 5, y: node.y - 5, width: 10, height: 10))
+            }
+        case .noSession:
+            ctx.stroke(CGRect(x: midX - 26, y: midY - 2, width: 52, height: 30))
+            ctx.move(to: CGPoint(x: midX - 14, y: midY - 15))
+            ctx.addLine(to: CGPoint(x: midX + 14, y: midY - 15))
+            ctx.move(to: CGPoint(x: midX - 6, y: midY - 27))
+            ctx.addLine(to: CGPoint(x: midX + 6, y: midY - 27))
+            ctx.strokePath()
+            for offset in [-10, 0, 10] {
+                ctx.fillEllipse(in: CGRect(x: midX + CGFloat(offset) - 3, y: midY + 13, width: 6, height: 6))
+            }
+        case .agentDeck:
+            ctx.stroke(CGRect(x: midX - 25, y: midY - 20, width: 50, height: 38))
+            ctx.move(to: CGPoint(x: midX - 13, y: midY - 5))
+            ctx.addLine(to: CGPoint(x: midX + 13, y: midY - 5))
+            ctx.move(to: CGPoint(x: midX - 13, y: midY + 7))
+            ctx.addLine(to: CGPoint(x: midX + 5, y: midY + 7))
+            ctx.strokePath()
+            for offset in [-11, 0, 11] {
+                ctx.fillEllipse(in: CGRect(x: midX + CGFloat(offset) - 4, y: midY + 27, width: 8, height: 8))
+            }
+        case .option:
+            ctx.stroke(CGRect(x: midX - 25, y: midY - 19, width: 50, height: 38))
+            for offset in [-12, 0, 12] {
+                ctx.fillEllipse(in: CGRect(x: midX + CGFloat(offset) - 4, y: midY - 4, width: 8, height: 8))
+            }
         }
 
         ctx.restoreGState()
