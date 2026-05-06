@@ -1435,7 +1435,15 @@ function wireAgentApme(
     const duration = Math.round((endedAt - startedAt) / 1000);
     const topicHint = response ? extractTopicHint(response) : null;
     const label = topicHint || 'Codex turn completed';
-    addCodexEntryAndIngest({
+    // chat_end is a timeline-only marker for the UI (duration + topic
+    // hint). Do NOT route through addCodexEntryAndIngest: at this point
+    // the collector still has turn N as the ACTIVE turn (it gets closed
+    // later when ensureCodexChatStart fires for turn N+1). chat_end's
+    // mapping is `turn_response` with fallback_to_last_closed, which
+    // would attach this response to the previously closed turn (N-1) —
+    // the wrong target. The response is already on turn N from the
+    // chat_response ingestion above; chat_end has nothing new to add.
+    core.bridgeTimeline.addEntry({
       ts: endedAt,
       type: 'chat_end',
       raw: `${label} · ${duration}s`,

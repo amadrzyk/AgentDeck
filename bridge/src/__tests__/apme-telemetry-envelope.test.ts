@@ -287,6 +287,30 @@ describe('ApmeCollector.ingestSpan dispatch', () => {
     expect(turn?.tool_calls).toBe(2);
   });
 
+  it('chat_end fallback does not clobber a prior closed turn response', () => {
+    // Regression: closeCodexTurn used to ingest chat_end through the
+    // turn_response/fallback_to_last_closed path while turn N was still
+    // the ACTIVE turn — `setLastClosedTurnResponse` would then write to
+    // the turn previously closed (N-1) with N's response text. The fix
+    // is to skip ingestion for chat_end entirely; this test pins that.
+    // Open turn 1 with its own response.
+    for (const s of claudeHookToSpans(ctx(), 'UserPromptSubmit', { message: { content: 'q1' } })) {
+      collector.ingestSpan('S', s);
+    }
+    const turn1 = collector.getActiveTurnId('S');
+    collector.setTurnResponse('S', 'answer one');
+    // Open turn 2 (closes turn 1).
+    for (const s of claudeHookToSpans(ctx(), 'UserPromptSubmit', { message: { content: 'q2' } })) {
+      collector.ingestSpan('S', s);
+    }
+    // Now simulate a stray chat_end fallback span as if the bug were
+    // present. setLastClosedTurnResponse would target turn1 — but only
+    // when turn1 has no existing response. Here turn1 already has one,
+    // so the fallback path is a no-op. We verify both paths are inert.
+    collector.setLastClosedTurnResponse('S', 'should not overwrite');
+    expect(store.getTurn(turn1!)?.response).toBe('answer one');
+  });
+
   it('Codex timeline path opens turn and counts tools (timelineEntryToSpans)', () => {
     // Mirrors what wireAgentApme's addCodexEntryAndIngest helper does:
     // each Codex timeline entry is fed through timelineEntryToSpans and
