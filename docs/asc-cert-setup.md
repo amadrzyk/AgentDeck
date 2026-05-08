@@ -115,7 +115,7 @@ Recommended path:
 3. Right-click → **Export 2 items…**.
 4. File Format: **Personal Information Exchange (.p12)**.
 5. Save to `~/Desktop/apple-appstore-identities.p12`.
-6. Set a strong password — save it in your password manager; CI needs it as the `APPLE_CERTIFICATE_PASSWORD` secret.
+6. Set a strong password if desired. A passwordless `.p12` is also supported; leave `APPLE_CERTIFICATE_PASSWORD` empty in that case.
 
 Base64-encode for GitHub Secrets:
 
@@ -134,7 +134,7 @@ Go to [github.com/puritysb/AgentDeck/settings/secrets/actions](https://github.co
 | Secret name | Value | Notes |
 |---|---|---|
 | `APPLE_CERTIFICATE_BASE64` | paste from `pbcopy` above | Combined `.p12` containing Apple Distribution + 3rd Party Mac Developer Installer identities |
-| `APPLE_CERTIFICATE_PASSWORD` | password you set in Step 5 | Used to decrypt the combined `.p12` on the runner |
+| `APPLE_CERTIFICATE_PASSWORD` | password from Step 5, or empty for a passwordless `.p12` | Used to decrypt the combined `.p12` on the runner |
 | `MACOS_PROVISIONING_PROFILE_BASE64` | `base64 -i ~/Library/MobileDevice/Provisioning\ Profiles/AgentDeck_macOS_App_Store_Distribution.provisionprofile \| pbcopy` | The profile from Step 4 |
 
 Existing secrets stay as-is:
@@ -154,12 +154,13 @@ The workflow already runs both `build-ios` and `build-macos`. Verify that the ma
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           test -n "$APPLE_CERTIFICATE_BASE64"
-          test -n "$APPLE_CERTIFICATE_PASSWORD"
 
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          P12_PASSWORD="${APPLE_CERTIFICATE_PASSWORD:-}"
           ...
-          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" \
+            -A -k $KEYCHAIN_PATH >/dev/null
+          security find-identity -v -p codesigning $KEYCHAIN_PATH
 ```
 
 Also verify that the `release` job depends on both Apple platforms:
