@@ -195,6 +195,15 @@ export class ApmeCollector {
     }
   }
 
+  /** Public wrapper for the private `closeTurn`. Used by adapters that
+   *  see an explicit turn-end signal (Codex `codex_stop` hook) and want
+   *  to finalize the turn row immediately rather than wait for the next
+   *  UserPromptSubmit / closeRun to flush endedAt + buffered counters.
+   *  Idempotent — no-op when no active turn for the session. */
+  closeTurnForSession(sessionId: string): void {
+    this.closeTurn(sessionId);
+  }
+
   /** Close the current turn for a session (called on new prompt or session end). */
   private closeTurn(sessionId: string): void {
     const turn = this.sessionToTurn.get(sessionId);

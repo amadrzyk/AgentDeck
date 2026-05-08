@@ -105,6 +105,43 @@ describe('CodexTurnManager (hook-primary path)', () => {
     expect(types).toContain('chat_end');
   });
 
+  it('codex_stop finalizes APME turn (endedAt set, tool_calls flushed)', () => {
+    const { mgr, collector, store, setTail } = harness;
+    setTail('answer');
+
+    // Need a real ingestSpan path to open the APME turn — go through the
+    // hook adapter so the turn_start span lands. (CodexTurnManager hook
+    // path is timeline-only by design; it relies on upstream codex hook
+    // adapter to open the APME turn.)
+    collector.ingestHook('cdx-test', 'UserPromptSubmit', {
+      message: { content: 'list /tmp' },
+    });
+    const turnId = collector.getActiveTurnId('cdx-test');
+    expect(turnId).not.toBeNull();
+
+    // Tool counted via PreToolUse (the hook adapter's tool_call → ingestSpan
+    // → ingestHook PreToolUse path).
+    collector.ingestHook('cdx-test', 'PreToolUse', { tool_name: 'shell' });
+
+    mgr.onHookEvent(hookEvt('codex_user_prompt_submit', {
+      message: { content: 'list /tmp' },
+    }));
+    mgr.onHookEvent(hookEvt('codex_tool_start', { tool_name: 'shell' }));
+    mgr.onHookEvent(hookEvt('codex_tool_end', { tool_name: 'shell' }));
+    mgr.onHookEvent(hookEvt('codex_stop', {}));
+
+    const turn = store.getTurn(turnId!) as Record<string, unknown>;
+    expect(turn?.ended_at).toBeTruthy();
+    expect(turn?.response).toBe('answer');
+    // tool_calls includes the upstream PreToolUse + the one CodexTurnManager
+    // ingested via codex_tool_start → addEntryAndIngest? Wait — hook path's
+    // codex_tool_start in the manager is timeline-only, no APME ingest. So
+    // the count comes from collector.ingestHook PreToolUse only.
+    expect(turn?.tool_calls).toBe(1);
+    // After close, the turn is no longer the ACTIVE turn.
+    expect(collector.getActiveTurnId('cdx-test')).toBeNull();
+  });
+
   it('next prompt opens a fresh chat_start', () => {
     const { mgr, entries, setTail } = harness;
     setTail('first done');

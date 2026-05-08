@@ -400,6 +400,13 @@ export class CodexTurnManager {
       });
       void classifyAndEnqueueTurn(this.apme, this.sessionId);
     }
+    // Finalize the APME turn row: flushes endedAt + buffered tool_calls /
+    // file counters to the store. Order matters — setTurnResponse and
+    // classifyAndEnqueueTurn above need the turn to still be ACTIVE
+    // (they read from sessionToTurn). After this call the turn moves
+    // into sessionToLastTurnId; setLastClosedTurnResponse from any
+    // late chat_end fallback would target this turn.
+    this.apme.collector.closeTurnForSession(this.sessionId);
     const duration = Math.round((endedAt - startedAt) / 1000);
     const topicHint = response ? extractTopicHint(response) : null;
     const label = topicHint || 'Codex turn completed';
