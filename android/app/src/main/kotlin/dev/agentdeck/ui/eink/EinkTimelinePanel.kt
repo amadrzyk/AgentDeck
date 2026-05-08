@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -28,7 +30,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.agentdeck.state.GroupedEntry
 import dev.agentdeck.state.TimelineEntry
+import dev.agentdeck.state.groupConsecutive
+import dev.agentdeck.state.timelineDisplayGroups
+import dev.agentdeck.ui.component.BrandIcon
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -39,16 +45,19 @@ fun EinkTimelinePanel(
     entries: List<TimelineEntry>,
     modifier: Modifier = Modifier,
 ) {
-    val displayEntries = remember(entries) {
-        entries.filterNot { it.type == "chat_end" && it.agentType == "claude-code" }
+    val recentEntries = remember(entries) {
+        entries.takeLast(80)
+    }
+    val displayGroups = remember(recentEntries) {
+        timelineDisplayGroups(groupConsecutive(recentEntries))
     }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
     // Track entry count for new-item detection
-    var lastSeenCount by remember { mutableIntStateOf(displayEntries.size) }
-    val hasNewItems by remember(displayEntries.size) {
-        derivedStateOf { displayEntries.size > lastSeenCount }
+    var lastSeenCount by remember { mutableIntStateOf(displayGroups.size) }
+    val hasNewItems by remember(displayGroups.size) {
+        derivedStateOf { displayGroups.size > lastSeenCount }
     }
 
     // Check if scrolled near bottom
@@ -60,14 +69,14 @@ fun EinkTimelinePanel(
     }
 
     // Auto-scroll only if already at bottom
-    LaunchedEffect(displayEntries.size) {
-        if (isNearBottom && displayEntries.isNotEmpty()) {
-            listState.scrollToItem(displayEntries.size - 1)
+    LaunchedEffect(displayGroups.size) {
+        if (isNearBottom && displayGroups.isNotEmpty()) {
+            listState.scrollToItem(displayGroups.size - 1)
         }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (displayEntries.isEmpty()) {
+        if (displayGroups.isEmpty()) {
             Text(
                 text = "No timeline events",
                 style = MaterialTheme.typography.bodyMedium,
@@ -80,8 +89,8 @@ fun EinkTimelinePanel(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                items(displayEntries, key = { "${it.timestamp}-${it.type}-${it.summary}" }) { entry ->
-                    EinkTimelineItem(entry)
+                items(displayGroups, key = { "${it.entry.timestamp}-${it.entry.type}-${it.entry.summary}-${it.count}" }) { group ->
+                    EinkTimelineItem(group)
                     HorizontalDivider(
                         thickness = 1.dp,
                         color = Color.Black,
@@ -100,8 +109,8 @@ fun EinkTimelinePanel(
                         .padding(bottom = 8.dp)
                         .clickable {
                             scope.launch {
-                                listState.scrollToItem(displayEntries.size - 1)
-                                lastSeenCount = displayEntries.size
+                                listState.scrollToItem(displayGroups.size - 1)
+                                lastSeenCount = displayGroups.size
                             }
                         },
                 )
@@ -111,8 +120,10 @@ fun EinkTimelinePanel(
 }
 
 @Composable
-private fun EinkTimelineItem(entry: TimelineEntry) {
+private fun EinkTimelineItem(group: GroupedEntry) {
+    val entry = group.entry
     val source = sourceLabel(entry)
+    val countSuffix = if (group.count > 1) " (×${group.count})" else ""
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -125,6 +136,15 @@ private fun EinkTimelineItem(entry: TimelineEntry) {
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        Box(
+            modifier = Modifier
+                .width(18.dp)
+                .height(18.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BrandIcon(agentType = entry.agentType, isEink = true, size = 15.dp)
+        }
 
         // Type prefix
         Text(
@@ -149,7 +169,7 @@ private fun EinkTimelineItem(entry: TimelineEntry) {
                 )
             }
             Text(
-                text = entry.summary,
+                text = entry.summary + countSuffix,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -182,7 +202,10 @@ private fun sourceLabel(entry: TimelineEntry): String {
     val project = entry.projectName?.takeIf { it.isNotBlank() }
     val agent = when (entry.agentType) {
         "claude-code" -> "Claude"
+        "codex-cli" -> "Codex"
         "openclaw" -> "OpenClaw"
+        "opencode" -> "OpenCode"
+        "daemon" -> "Daemon"
         null -> ""
         else -> "Agent"
     }

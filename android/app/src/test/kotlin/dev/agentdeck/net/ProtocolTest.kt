@@ -192,6 +192,15 @@ class ProtocolTest {
     }
 
     @Test
+    fun `parse timeline_event with fractional timestamps`() {
+        val json = """{"type":"timeline_event","entry":{"ts":1711100000000.75,"startedAt":1711100000000.25,"endedAt":1711100001234.99,"type":"chat_end","raw":"Completed"}}"""
+        val event = parseBridgeMessage(json) as BridgeEvent.Timeline
+        assertEquals(1711100000000L, event.entry.ts)
+        assertEquals(1711100000000L, event.entry.startedAt)
+        assertEquals(1711100001234L, event.entry.endedAt)
+    }
+
+    @Test
     fun `parse timeline_event upsert`() {
         val json = """{"type":"timeline_event","entry":{"ts":1711100000000,"type":"chat_end","raw":"Updated summary"},"upsert":true}"""
         val event = parseBridgeMessage(json) as BridgeEvent.Timeline

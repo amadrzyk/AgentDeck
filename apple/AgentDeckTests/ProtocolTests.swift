@@ -388,16 +388,32 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(folded.first?["groupSize"])
     }
 
-    func testOpenClawDisplayLinesKeepDefaultFirstAndCompactFamilies() {
+    func testOpenClawDisplayLinesKeepsOnlyDefaultModel() {
         let lines = DashboardDataRules.openClawDisplayLines([
             ModelCatalogEntry(key: "gpt-5.4", name: "GPT 5.4", role: "default", available: true),
             ModelCatalogEntry(key: "glm-4.5", name: "GLM-4.5", role: "configured", available: true),
-            ModelCatalogEntry(key: "glm-4.5v", name: "GLM-4.5V", role: "configured", available: true),
+            ModelCatalogEntry(key: "glm-4.5v", name: "GLM-4.5V", role: "fallback-1", available: true),
             ModelCatalogEntry(key: "deepseek-r1", name: "DeepSeek R1", role: "configured", available: true),
         ])
 
-        XCTAssertEqual(lines.first, "GPT 5.4")
-        XCTAssertTrue(lines.contains("GLM-4.5, 4.5V"))
-        XCTAssertTrue(lines.contains("DeepSeek R1"))
+        XCTAssertEqual(lines, ["GPT 5.4"])
+    }
+
+    func testOpenClawDisplayLinesEmptyWhenNoDefaultTagged() {
+        let lines = DashboardDataRules.openClawDisplayLines([
+            ModelCatalogEntry(key: "glm-4.5", name: "GLM-4.5", role: "configured", available: true),
+            ModelCatalogEntry(key: "glm-4.5v", name: "GLM-4.5V", role: "fallback-1", available: true),
+        ])
+
+        XCTAssertEqual(lines, [])
+    }
+
+    func testOpenClawDisplayLinesEmptyWhenDefaultUnavailable() {
+        let lines = DashboardDataRules.openClawDisplayLines([
+            ModelCatalogEntry(key: "gpt-5.4", name: "GPT 5.4", role: "default", available: false),
+            ModelCatalogEntry(key: "glm-4.5", name: "GLM-4.5", role: "configured", available: true),
+        ])
+
+        XCTAssertEqual(lines, [])
     }
 }

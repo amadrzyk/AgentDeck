@@ -25,11 +25,6 @@ struct ControlTowerPanel: View {
     )
     @State private var streamDeckDetectionLastRun: Date? = nil
 
-    /// Session whose "Jump to…" grid is currently expanded. nil means every
-    /// row is collapsed. Reset when the underlying session list shape
-    /// changes so a stale id can't keep a row permanently-open.
-    @State private var expandedSessionId: String? = nil
-
     var body: some View {
         VStack(spacing: 0) {
             // Header: Attention Theater when any session awaits input,
@@ -101,13 +96,6 @@ struct ControlTowerPanel: View {
         .onReceive(
             Timer.publish(every: 5, on: .main, in: .common).autoconnect()
         ) { _ in refreshStreamDeckDetectionIfStale() }
-        .onChange(of: sortedSessions.map(\.id)) { _, _ in
-            // Collapse any stale jump-panel when the session list changes.
-            if let open = expandedSessionId,
-               !sortedSessions.contains(where: { $0.id == open }) {
-                expandedSessionId = nil
-            }
-        }
     }
 
     /// The session the attention theater should feature. Prefers the
@@ -232,22 +220,8 @@ struct ControlTowerPanel: View {
                         SessionJumpRow(
                             session: session,
                             tool: currentToolFor(session),
-                            expanded: expandedSessionId == session.id,
-                            onToggle: {
-                                expandedSessionId = (expandedSessionId == session.id) ? nil : session.id
-                            },
-                            onJumpDashboard: {
+                            onFocus: {
                                 stateHolder.sendCommand(.focusSession(sessionId: session.id))
-                                openDashboard()
-                            },
-                            onJumpExternal: { target in
-                                // TODO(projectPath): daemon payload needs a
-                                // `projectPath` / `cwd` field on SessionInfo.
-                                // Until `shared/src/protocol.ts` + bridge
-                                // expose it, we fall back to launching the
-                                // target app bare instead of opening the
-                                // project directory.
-                                SessionJumpLauncher.launch(target, projectPath: nil)
                             }
                         )
                     }

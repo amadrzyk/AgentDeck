@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.SessionMetrics
+import dev.agentdeck.ui.monitor.rememberCurrentInstant
+import dev.agentdeck.ui.monitor.subscriptionTrailing
 import dev.agentdeck.util.formatCount
 import dev.agentdeck.util.formatResetTime
 import dev.agentdeck.util.formatUptime
@@ -63,12 +65,13 @@ fun EinkStatusPanel(
 
         HorizontalDivider(thickness = 1.dp, color = Color.Black)
 
+        // OpenClaw — strict primary-only filter (matches HUD rail). If no
+        // model is tagged default the row collapses; promoting a non-default
+        // entry would silently override the explicit rule.
         val openClawPrimary = if (state.gatewayConnected == true && state.agentType == "openclaw") {
-            state.modelCatalog.orEmpty().let { catalog ->
-                val primary = catalog.firstOrNull { it.available && it.role == "default" }
-                    ?: catalog.firstOrNull { it.available }
-                primary?.let { abbreviateModelName(it.name) }
-            }
+            state.modelCatalog.orEmpty()
+                .firstOrNull { it.available && it.role == "default" }
+                ?.let { abbreviateModelName(it.name) }
         } else null
         if (openClawPrimary != null) {
             Text(text = "OpenClaw: $openClawPrimary", style = monoStyle, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
@@ -104,11 +107,15 @@ fun EinkStatusPanel(
         }
 
         if (state.subscriptions.isNotEmpty()) {
+            // `rememberCurrentInstant` ticks every 60s so an expiring window
+            // flips the suffix to "renewal needed" without depending on the
+            // daemon to push another state update first.
+            val now by rememberCurrentInstant()
             Text(
                 text = "Subscription: ${state.subscriptions.joinToString(", ") { sub ->
                     val name = abbreviateModelName(sub.name)
-                    val until = sub.until?.take(10)
-                    if (until != null) "$name ~$until" else name
+                    val trailing = subscriptionTrailing(sub.until, now)
+                    if (trailing != null) "$name ~${trailing.text}" else name
                 }}",
                 style = monoStyle,
                 color = MaterialTheme.colorScheme.onSurface,

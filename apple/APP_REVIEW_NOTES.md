@@ -4,7 +4,7 @@ _Paste the relevant sections into App Store Connect's "Notes" field when submitt
 
 ## What AgentDeck does
 
-AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding agents (Claude Code, Codex CLI, OpenCode). It shows live session status, tool activity, and quality scores on the Mac, and — via the free iOS companion app — on an iPad or iPhone used as a secondary display.
+AgentDeck Dashboard is a real-time monitoring and evaluation app for AI coding agents (Claude Code, opt-in Codex CLI lifecycle hooks, and OpenClaw Gateway sessions). It shows live session status, tool activity, and quality scores on the Mac, and — via the free iOS companion app — on an iPad or iPhone used as a secondary display. OpenCode monitoring is intentionally outside the App Store build and is available only through the optional developer bridge described below.
 
 **Works standalone on Mac.** All core features (dashboard, APME evaluation reports, Device Preview, Claude Code hook integration, and iOS pairing) work without any additional hardware or AgentDeck companion executable. Users run their AI agent in their own terminal; AgentDeck receives opt-in hook events.
 

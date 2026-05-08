@@ -3,11 +3,20 @@ package dev.agentdeck.net
 import android.util.Log
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 @Serializable
@@ -322,6 +331,7 @@ data class SerialPortInfo(
 
 @Serializable
 data class BridgeTimelineEntry(
+    @Serializable(with = FlexibleLongSerializer::class)
     val ts: Long,
     val type: String,
     val raw: String,
@@ -332,7 +342,9 @@ data class BridgeTimelineEntry(
     val projectName: String? = null,
     val sessionId: String? = null,
     val runId: String? = null,
+    @Serializable(with = FlexibleLongSerializer::class)
     val startedAt: Long? = null,
+    @Serializable(with = FlexibleLongSerializer::class)
     val endedAt: Long? = null,
 )
 
@@ -404,6 +416,24 @@ val protocolJson = Json {
     ignoreUnknownKeys = true
     isLenient = true
     coerceInputValues = true
+}
+
+object FlexibleLongSerializer : KSerializer<Long> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleLong", PrimitiveKind.LONG)
+
+    override fun deserialize(decoder: Decoder): Long {
+        if (decoder is JsonDecoder) {
+            val primitive = decoder.decodeJsonElement().jsonPrimitive
+            primitive.longOrNull?.let { return it }
+            primitive.doubleOrNull?.let { return it.toLong() }
+        }
+        return decoder.decodeLong()
+    }
+
+    override fun serialize(encoder: Encoder, value: Long) {
+        encoder.encodeLong(value)
+    }
 }
 
 fun parseBridgeMessage(text: String): BridgeEvent? {

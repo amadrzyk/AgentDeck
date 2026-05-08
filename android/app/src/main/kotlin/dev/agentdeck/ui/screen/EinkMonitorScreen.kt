@@ -75,6 +75,7 @@ import dev.agentdeck.terrarium.toTerrariumState
 import dev.agentdeck.ui.eink.EinkAnimatedRefreshZone
 import dev.agentdeck.ui.eink.EinkRefreshZone
 import dev.agentdeck.ui.eink.RefreshMode
+import dev.agentdeck.ui.eink.Zone
 import dev.agentdeck.data.DashboardOrientation
 import android.util.Log
 import androidx.compose.runtime.rememberCoroutineScope
@@ -241,12 +242,13 @@ fun EinkMonitorScreen(
 
             Row(modifier = Modifier.fillMaxSize()) {
                 if (showSessionList) {
-                    // Left (22%): Agent panel — refresh on state, session list, or worker count changes
+                    // Left: readable session rail — refresh on state, session list, or worker count changes.
+                    // ZONE: CHROME — fast A2 refresh; sessions list mutates often.
                     EinkRefreshZone(
-                        mode = RefreshMode.A2,
-                        debounceMs = 200,
+                        mode = Zone.CHROME.mode,
+                        debounceMs = Zone.CHROME.debounceMs,
                         triggerKey = Triple(state.agentState, sessionsKey, state.workerSessionCount),
-                        modifier = Modifier.weight(0.22f).fillMaxHeight(),
+                        modifier = Modifier.weight(0.28f).fillMaxHeight(),
                     ) {
                         EinkAgentPanel(
                             state = state,
@@ -264,11 +266,11 @@ fun EinkMonitorScreen(
                 // Main content: aquarium + context/status + timeline.
                 // Fixed weights prevent layout jump on state change; optional
                 // panels collapse according to the shared dashboard settings.
-                Column(modifier = Modifier.weight(if (showSessionList) 0.78f else 1f).fillMaxHeight()) {
+                Column(modifier = Modifier.weight(if (showSessionList) 0.72f else 1f).fillMaxHeight()) {
                     // Aquarium frame — animated EPD refresh via callback
                     EinkAnimatedRefreshZone(
                         stateKey = Pair(state.agentState, sessionsKey),
-                        modifier = Modifier.weight(0.50f).fillMaxWidth(),
+                        modifier = Modifier.weight(0.42f).fillMaxWidth(),
                     ) { onFrameRendered ->
                         EinkAquariumFrame(
                             state = terrariumState,
@@ -285,32 +287,34 @@ fun EinkMonitorScreen(
                         state.options.isNotEmpty() ||
                         timelineEntries.any { it.type == "tool_request" }
                     )
-                    val showContextArea = featuredAttention != null || hasContext
-                    if (showContextArea || showStatusPanel) {
-                        val fastContextRefresh = featuredAttention != null || isActive
+
+                    // ZONE: ATTENTION — split out as its own zone with FULL_ONCE policy.
+                    // Permission/option prompts are user blockers; one clean GC16 flash on
+                    // appearance, then quiet — never share an A2 waveform with neighbors.
+                    if (featuredAttention != null) {
+                        // Stable prompt identity — excludes cursorIndex / navigable so cursor
+                        // churn does not re-fire the GC16; includes the fields that change
+                        // when a new queued prompt takes over so the next prompt DOES flash.
+                        val attentionIdentity = listOf(
+                            featuredAttention.sessionId,
+                            featuredAttention.question,
+                            featuredAttention.promptType,
+                            featuredAttention.options.map { it.label },
+                        )
                         EinkRefreshZone(
-                            mode = if (fastContextRefresh) RefreshMode.A2 else RefreshMode.DU,
-                            debounceMs = if (fastContextRefresh) 200 else 2000,
-                            triggerKey = Triple(state.agentState, state.currentTool,
-                                listOf(
-                                    state.usage,
-                                    state.oauthConnected,
-                                    state.ollamaStatus,
-                                    state.moduleHealth,
-                                    featuredAttention,
-                                )),
+                            mode = Zone.ATTENTION.mode,
+                            debounceMs = Zone.ATTENTION.debounceMs,
+                            triggerKey = attentionIdentity,
+                            // Soft A2 refresh on cursor moves so navigation stays visible —
+                            // GC16 mode is sticky on Rockchip (would full-flash per keypress)
+                            // and absent on Onyx/Kobo (cursor would never repaint).
+                            softTriggerKey = featuredAttention.cursorIndex,
                             modifier = Modifier
-                                .weight(
-                                    when {
-                                        featuredAttention != null -> 0.22f
-                                        hasContext -> 0.12f
-                                        else -> 0.13f
-                                    }
-                                )
+                                .weight(0.30f)
                                 .fillMaxWidth(),
                         ) {
-                            when {
-                                featuredAttention != null && showStatusPanel -> Row(modifier = Modifier.fillMaxSize()) {
+                            if (showStatusPanel) {
+                                Row(modifier = Modifier.fillMaxSize()) {
                                     EinkAttentionPanel(
                                         featured = featuredAttention,
                                         onFocusSession = { connection.sendFocusSession(it) },
@@ -325,12 +329,34 @@ fun EinkMonitorScreen(
                                         modifier = Modifier.weight(0.38f).fillMaxHeight(),
                                     )
                                 }
-                                featuredAttention != null -> EinkAttentionPanel(
+                            } else {
+                                EinkAttentionPanel(
                                     featured = featuredAttention,
                                     onFocusSession = { connection.sendFocusSession(it) },
                                     onSelectOption = { connection.sendSelectOption(it) },
                                     modifier = Modifier.fillMaxSize(),
                                 )
+                            }
+                        }
+                    } else if (hasContext || showStatusPanel) {
+                        // ZONE: CONTEXT_FAST when active, STATUS_SLOW when idle (gauges only).
+                        // The ATTENTION case never reaches here, so no FULL_ONCE inheritance.
+                        val zone = if (isActive) Zone.CONTEXT_FAST else Zone.STATUS_SLOW
+                        EinkRefreshZone(
+                            mode = zone.mode,
+                            debounceMs = zone.debounceMs,
+                            triggerKey = Triple(state.agentState, state.currentTool,
+                                listOf(
+                                    state.usage,
+                                    state.oauthConnected,
+                                    state.ollamaStatus,
+                                    state.moduleHealth,
+                                )),
+                            modifier = Modifier
+                                .weight(if (hasContext) 0.22f else 0.20f)
+                                .fillMaxWidth(),
+                        ) {
+                            when {
                                 hasContext && showStatusPanel -> Row(modifier = Modifier.fillMaxSize()) {
                                     // Context area (50%)
                                     EinkContextArea(
@@ -373,12 +399,12 @@ fun EinkMonitorScreen(
                     if (showTimeline) {
                         HorizontalDivider(thickness = 1.dp, color = Color.Black)
 
-                        // Timeline
+                        // ZONE: TIMELINE — append-only A2; entries only grow.
                         EinkRefreshZone(
-                            mode = RefreshMode.A2,
-                            debounceMs = 300,
+                            mode = Zone.TIMELINE.mode,
+                            debounceMs = Zone.TIMELINE.debounceMs,
                             triggerKey = timelineEntries.size,
-                            modifier = Modifier.weight(0.37f).fillMaxWidth(),
+                            modifier = Modifier.weight(0.38f).fillMaxWidth(),
                         ) {
                             EinkEventLog(entries = timelineEntries)
                         }
@@ -765,10 +791,11 @@ private fun EinkPortraitLayout(
             HorizontalDivider(thickness = 1.dp, color = Color.Black)
 
             // Status (10%) — compact: limits + models + downstream devices.
+            // Mirrors landscape policy: A2 when active, DU when idle.
             if (isActive) {
                 EinkRefreshZone(
-                    mode = RefreshMode.A2,
-                    debounceMs = 200,
+                    mode = Zone.CONTEXT_FAST.mode,
+                    debounceMs = Zone.CONTEXT_FAST.debounceMs,
                     triggerKey = Triple(state.agentState, state.currentTool,
                         listOf(state.usage, state.oauthConnected, state.ollamaStatus, state.moduleHealth)),
                     modifier = Modifier.weight(0.10f).fillMaxWidth(),
@@ -781,8 +808,8 @@ private fun EinkPortraitLayout(
                 }
             } else {
                 EinkRefreshZone(
-                    mode = RefreshMode.DU,
-                    debounceMs = 2000,
+                    mode = Zone.STATUS_SLOW.mode,
+                    debounceMs = Zone.STATUS_SLOW.debounceMs,
                     triggerKey = listOf(state.usage, state.oauthConnected, state.ollamaStatus, state.modelCatalog?.size, state.moduleHealth),
                     modifier = Modifier.weight(0.10f).fillMaxWidth(),
                 ) {
@@ -795,41 +822,59 @@ private fun EinkPortraitLayout(
             }
         }
 
-        // Context area (15%) — only when active
-        if (featuredAttention != null || isActive) {
+        // Portrait ATTENTION (22%) — own zone with FULL_ONCE policy so permission /
+        // option prompts arrive with a single clean GC16 flash, never sharing the
+        // CONTEXT A2 waveform with the side panels.
+        if (featuredAttention != null) {
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
+
+            // Stable prompt identity — see landscape branch for rationale.
+            val attentionIdentity = listOf(
+                featuredAttention.sessionId,
+                featuredAttention.question,
+                featuredAttention.promptType,
+                featuredAttention.options.map { it.label },
+            )
+            EinkRefreshZone(
+                mode = Zone.ATTENTION.mode,
+                debounceMs = Zone.ATTENTION.debounceMs,
+                triggerKey = attentionIdentity,
+                softTriggerKey = featuredAttention.cursorIndex,
+                modifier = Modifier.weight(0.22f).fillMaxWidth(),
+            ) {
+                EinkAttentionPanel(
+                    featured = featuredAttention,
+                    onFocusSession = { connection.sendFocusSession(it) },
+                    onSelectOption = { connection.sendSelectOption(it) },
+                )
+            }
+
+            HorizontalDivider(thickness = 1.dp, color = Color.Black)
+        } else if (isActive) {
+            // Portrait CONTEXT (15%) — A2 fast refresh; never reached when
+            // featuredAttention != null, so no FULL_ONCE inheritance.
             HorizontalDivider(thickness = 1.dp, color = Color.Black)
 
             EinkRefreshZone(
-                mode = RefreshMode.A2,
-                debounceMs = 200,
+                mode = Zone.CONTEXT_FAST.mode,
+                debounceMs = Zone.CONTEXT_FAST.debounceMs,
                 triggerKey = listOf(
                     state.agentState,
                     state.currentTool,
                     state.question,
                     state.options,
                     state.cursorIndex,
-                    featuredAttention,
                 ),
-                modifier = Modifier
-                    .weight(if (featuredAttention != null) 0.22f else 0.15f)
-                    .fillMaxWidth(),
+                modifier = Modifier.weight(0.15f).fillMaxWidth(),
             ) {
-                if (featuredAttention != null) {
-                    EinkAttentionPanel(
-                        featured = featuredAttention,
-                        onFocusSession = { connection.sendFocusSession(it) },
-                        onSelectOption = { connection.sendSelectOption(it) },
-                    )
-                } else {
-                    EinkContextArea(
-                        state = state,
-                        timelineEntries = timelineEntries,
-                        onSelectOption = { index ->
-                            state.sessionId?.let { connection.sendFocusSession(it) }
-                            connection.sendSelectOption(index)
-                        },
-                    )
-                }
+                EinkContextArea(
+                    state = state,
+                    timelineEntries = timelineEntries,
+                    onSelectOption = { index ->
+                        state.sessionId?.let { connection.sendFocusSession(it) }
+                        connection.sendSelectOption(index)
+                    },
+                )
             }
 
             HorizontalDivider(thickness = 1.dp, color = Color.Black)
@@ -838,8 +883,8 @@ private fun EinkPortraitLayout(
         // Timeline (remaining: 0.40 idle / 0.25 active)
         if (showTimeline) {
             EinkRefreshZone(
-                mode = RefreshMode.A2,
-                debounceMs = 300,
+                mode = Zone.TIMELINE.mode,
+                debounceMs = Zone.TIMELINE.debounceMs,
                 triggerKey = timelineEntries.size,
                 modifier = Modifier.weight(if (isActive) 0.25f else 0.40f).fillMaxWidth(),
             ) {

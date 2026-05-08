@@ -167,9 +167,9 @@ class TimelineStoreTest {
     @Test
     fun `groupConsecutive groups tool_request within 10s`() {
         val entries = listOf(
-            entry(1000, "tool_request", "Read a.ts"),
-            entry(5000, "tool_request", "Write b.ts"),  // within 10s, same type
-            entry(8000, "tool_request", "Edit c.ts"),   // within 10s of prev
+            entry(1000, "tool_request", "Read a.ts").copy(sessionId = "s1"),
+            entry(5000, "tool_request", "Write b.ts").copy(sessionId = "s1"),  // within 10s, same session
+            entry(8000, "tool_request", "Edit c.ts").copy(sessionId = "s1"),   // within 10s of prev
         )
         val result = groupConsecutive(entries)
         assertEquals(1, result.size)
@@ -180,8 +180,28 @@ class TimelineStoreTest {
     @Test
     fun `groupConsecutive splits tool_request after 10s gap`() {
         val entries = listOf(
-            entry(1000, "tool_request", "Read a.ts"),
-            entry(20000, "tool_request", "Read b.ts"),  // >10s gap
+            entry(1000, "tool_request", "Read a.ts").copy(sessionId = "s1"),
+            entry(20000, "tool_request", "Read b.ts").copy(sessionId = "s1"),  // >10s gap
+        )
+        val result = groupConsecutive(entries)
+        assertEquals(2, result.size)
+    }
+
+    @Test
+    fun `groupConsecutive does not merge tool_request across sessions`() {
+        val entries = listOf(
+            entry(1000, "tool_request", "Read a.ts").copy(sessionId = "claude-a", projectName = "AgentDeck"),
+            entry(5000, "tool_request", "Write b.ts").copy(sessionId = "codex-a", projectName = "Compiler"),
+        )
+        val result = groupConsecutive(entries)
+        assertEquals(2, result.size)
+    }
+
+    @Test
+    fun `groupConsecutive does not merge distinct run ids on same session`() {
+        val entries = listOf(
+            entry(1000, "tool_request", "Read a.ts").copy(sessionId = "s1", runId = "run-a"),
+            entry(5000, "tool_request", "Write b.ts").copy(sessionId = "s1", runId = "run-b"),
         )
         val result = groupConsecutive(entries)
         assertEquals(2, result.size)
@@ -190,13 +210,23 @@ class TimelineStoreTest {
     @Test
     fun `groupConsecutive groups chat_end by type only within 60s`() {
         val entries = listOf(
-            entry(1000, "chat_end", "Summary A"),
-            entry(30000, "chat_end", "Summary B"),  // different summary, still groups
+            entry(1000, "chat_end", "Summary A").copy(sessionId = "s1"),
+            entry(30000, "chat_end", "Summary B").copy(sessionId = "s1"),  // different summary, still groups
         )
         val result = groupConsecutive(entries)
         assertEquals(1, result.size)
         assertEquals(2, result[0].count)
         assertEquals("Summary B", result[0].entry.summary)  // latest kept
+    }
+
+    @Test
+    fun `groupConsecutive does not merge chat_end across projects`() {
+        val entries = listOf(
+            entry(1000, "chat_end", "AgentDeck summary").copy(projectName = "AgentDeck", agentType = "claude-code"),
+            entry(30000, "chat_end", "Compiler summary").copy(projectName = "Compiler", agentType = "claude-code"),
+        )
+        val result = groupConsecutive(entries)
+        assertEquals(2, result.size)
     }
 
     @Test
@@ -229,6 +259,108 @@ class TimelineStoreTest {
         )
         val result = groupConsecutive(entries)
         assertEquals(3, result.size)
+    }
+
+    // --- timelineDisplayGroups ---
+
+    @Test
+    fun `timelineDisplayGroups keeps in-flight chat_start until completion`() {
+        val groups = groupConsecutive(listOf(
+            TimelineEntry(
+                timestamp = 1000,
+                type = "chat_start",
+                summary = "Refactor timeline",
+                sessionId = "s1",
+                projectName = "AgentDeck",
+            ),
+        ))
+
+        val result = timelineDisplayGroups(groups)
+
+        assertEquals(1, result.size)
+        assertEquals("chat_start", result[0].entry.type)
+    }
+
+    @Test
+    fun `timelineDisplayGroups replaces chat_start with same-session response`() {
+        val groups = groupConsecutive(listOf(
+            TimelineEntry(
+                timestamp = 1000,
+                type = "chat_start",
+                summary = "Refactor timeline",
+                sessionId = "s1",
+                projectName = "AgentDeck",
+                startedAt = 1000,
+            ),
+            TimelineEntry(
+                timestamp = 7000,
+                type = "chat_response",
+                summary = "Timeline rows now show summarized unit sessions",
+                sessionId = "s1",
+                projectName = "AgentDeck",
+                startedAt = 1000,
+                endedAt = 7000,
+            ),
+        ))
+
+        val result = timelineDisplayGroups(groups)
+
+        assertEquals(1, result.size)
+        assertEquals("chat_response", result[0].entry.type)
+        assertEquals("Timeline rows now show summarized unit sessions", result[0].entry.summary)
+    }
+
+    @Test
+    fun `timelineDisplayGroups keeps independent sessions visible`() {
+        val groups = groupConsecutive(listOf(
+            entry(1000, "chat_start", "Claude task").copy(sessionId = "claude-a", agentType = "claude-code", projectName = "AgentDeck"),
+            entry(2000, "chat_response", "Codex result").copy(sessionId = "codex-a", agentType = "codex-cli", projectName = "Compiler"),
+        ))
+
+        val result = timelineDisplayGroups(groups)
+
+        assertEquals(2, result.size)
+        assertEquals(listOf("chat_start", "chat_response"), result.map { it.entry.type })
+    }
+
+    @Test
+    fun `timelineDisplayGroups keeps in-flight start when later completion has distinct run id`() {
+        val groups = groupConsecutive(listOf(
+            entry(1000, "chat_start", "First task").copy(sessionId = "s1", runId = "run-a"),
+            entry(4000, "chat_response", "Second result").copy(sessionId = "s1", runId = "run-b"),
+        ))
+
+        val result = timelineDisplayGroups(groups)
+
+        assertEquals(2, result.size)
+        assertEquals(listOf("chat_start", "chat_response"), result.map { it.entry.type })
+    }
+
+    @Test
+    fun `timelineDisplayGroups hides chat_end when chat_response already represents the same turn`() {
+        val groups = groupConsecutive(listOf(
+            entry(1000, "chat_start", "Prompt").copy(sessionId = "s1", startedAt = 1000),
+            entry(5000, "chat_response", "Useful summary").copy(sessionId = "s1", startedAt = 1000),
+            entry(5200, "chat_end", "Completed").copy(sessionId = "s1", startedAt = 1000, endedAt = 5200),
+        ))
+
+        val result = timelineDisplayGroups(groups)
+
+        assertEquals(1, result.size)
+        assertEquals("chat_response", result[0].entry.type)
+    }
+
+    @Test
+    fun `timelineLifecycleBounds pairs response with prior start`() {
+        val entries = listOf(
+            entry(1000, "chat_start", "Prompt").copy(sessionId = "s1"),
+            entry(8500, "chat_response", "Summary").copy(sessionId = "s1"),
+        )
+
+        val (startedAt, endedAt) = timelineLifecycleBounds(entries[1], entries)
+
+        assertEquals(1000L, startedAt)
+        assertEquals(8500L, endedAt)
     }
 
     // --- clear ---

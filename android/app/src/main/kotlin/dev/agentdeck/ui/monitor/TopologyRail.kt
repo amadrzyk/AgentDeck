@@ -19,6 +19,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +43,7 @@ import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.ui.component.AgentDeckMark
 import dev.agentdeck.ui.component.brandColorForAgent
 import dev.agentdeck.util.formatResetTime
+import java.time.Instant
 
 /**
  * Relationship-centric rail that replaces the former `TankStatusPanel`.
@@ -209,45 +213,53 @@ private fun UpstreamRows(state: DashboardState, scale: MonitorLayoutScale) {
         } else {
             emptyList()
         }
-        ProviderRow(
-            name = "Claude",
-            status = when (state.oauthConnected) {
-                true -> LEDStatus.OK
-                false -> LEDStatus.WARN
-                null -> LEDStatus.DIM
-            },
-            subtitle = when {
-                claudeModels.isNotEmpty() -> claudeModels.joinToString(", ")
-                state.oauthConnected == false -> "Not connected"
-                else -> null
-            },
-            consumers = consumersFor(ProviderKey.CLAUDE, state),
-            rateLimits = buildList {
-                val isStale = usage.usageStale == true
-                val fiveHour = usage.fiveHourPercent
-                if (fiveHour != null) {
-                    add(
-                        RateChip(
-                            label = "5h",
-                            percent = fiveHour,
-                            reset = usage.fiveHourResetsAt?.let { formatResetTime(it) },
-                            stale = isStale,
-                        )
+        val claudeConsumers = consumersFor(ProviderKey.CLAUDE, state)
+        val claudeRateLimits = buildList {
+            val isStale = usage.usageStale == true
+            val fiveHour = usage.fiveHourPercent
+            if (fiveHour != null) {
+                add(
+                    RateChip(
+                        label = "5h",
+                        percent = fiveHour,
+                        reset = usage.fiveHourResetsAt?.let { formatResetTime(it) },
+                        stale = isStale,
                     )
-                }
-                val sevenDay = usage.sevenDayPercent
-                if (sevenDay != null) {
-                    add(
-                        RateChip(
-                            label = "7d",
-                            percent = sevenDay,
-                            reset = usage.sevenDayResetsAt?.let { formatResetTime(it) },
-                            stale = isStale,
-                        )
+                )
+            }
+            val sevenDay = usage.sevenDayPercent
+            if (sevenDay != null) {
+                add(
+                    RateChip(
+                        label = "7d",
+                        percent = sevenDay,
+                        reset = usage.sevenDayResetsAt?.let { formatResetTime(it) },
+                        stale = isStale,
                     )
-                }
-            },
-        )
+                )
+            }
+        }
+        val showClaudeRow = state.oauthConnected == true ||
+            claudeModels.isNotEmpty() ||
+            claudeConsumers.isNotEmpty() ||
+            claudeRateLimits.isNotEmpty()
+        if (showClaudeRow) {
+            ProviderRow(
+                name = "Claude",
+                status = when (state.oauthConnected) {
+                    true -> LEDStatus.OK
+                    false -> LEDStatus.WARN
+                    null -> LEDStatus.DIM
+                },
+                subtitle = when {
+                    claudeModels.isNotEmpty() -> claudeModels.joinToString(", ")
+                    state.oauthConnected == false -> "Not connected"
+                    else -> null
+                },
+                consumers = claudeConsumers,
+                rateLimits = claudeRateLimits,
+            )
+        }
 
         val openClawVisible = (state.gatewayAvailable == true || state.gatewayConnected == true)
         if (openClawVisible) {
@@ -342,23 +354,61 @@ private fun shortClaudeModel(name: String): String {
 }
 
 /**
- * Pull display lines for the OpenClaw model catalog. Ported from the iOS
- * `DashboardDataRules.openClawDisplayLines` behaviour: the default role
- * wins the head slot, remaining entries are grouped by family name.
- * Compact here — returns the list of names rather than pre-joined.
+ * Pull display lines for the OpenClaw model catalog. The HUD upstream rail
+ * (and the e-ink TANK STATUS panel) surfaces only the model marked primary
+ * (`role == "default"`) so the row reads as "what OpenClaw is routing to
+ * right now" instead of dumping the full catalog. If the user hasn't
+ * tagged any model as default the list collapses to empty — promoting a
+ * non-default entry would silently override the explicit primary-only
+ * rule. Mirrors iOS `DashboardDataRules`.
+ *
+ * Names are normalised to strip provider duplication (`DeepSeek: DeepSeek X`
+ * → `DeepSeek X`) so compact subtitles read cleanly.
  */
-private fun openClawDisplayLines(catalog: List<ModelCatalogEntry>): List<String> {
-    val available = catalog.filter { it.available }
-    if (available.isEmpty()) return emptyList()
-    val ordered = available.sortedWith(
-        compareByDescending<ModelCatalogEntry> { it.role == "default" }
-            .thenBy { it.name }
-    )
-    return ordered.map { it.name }
+internal fun openClawDisplayLines(catalog: List<ModelCatalogEntry>): List<String> {
+    val primary = catalog.firstOrNull { it.available && it.role == "default" } ?: return emptyList()
+    return listOf(normalizeOpenClawName(primary.name))
 }
+
+internal fun normalizeOpenClawName(name: String): String =
+    name
+        .replace("DeepSeek: DeepSeek ", "DeepSeek ")
+        .replace("DeepSeek:", "DeepSeek")
+        .replace("GPT: GPT ", "GPT ")
+        .replace("GLM: GLM ", "GLM ")
+        .trim()
+
+/**
+ * Snapshot of the wall clock that re-emits every `periodMillis` so views
+ * keyed on time invalidate without depending on incidental state changes.
+ * Used by the SUBSCRIPTIONS footer (HUD rail) and the e-ink TANK STATUS
+ * subscription line so a row can flip from a future date to
+ * "renewal needed" the moment the underlying timestamp becomes past — a
+ * dashboard left open across an expiry would otherwise hold the stale
+ * date until the daemon next pushes a state update.
+ *
+ * 60s cadence keeps battery cost negligible while still landing the flip
+ * within a minute of the actual expiry, which is more than fine for
+ * subscription windows that span days.
+ */
+@Composable
+internal fun rememberCurrentInstant(periodMillis: Long = 60_000L): State<Instant> =
+    produceState(initialValue = Instant.now(), periodMillis) {
+        while (true) {
+            value = Instant.now()
+            kotlinx.coroutines.delay(periodMillis)
+        }
+    }
 
 @Composable
 private fun SubscriptionsFooter(subs: List<SubscriptionInfo>) {
+    // `rememberCurrentInstant` re-emits `now` every 60s and invalidates this
+    // composable, so a subscription that expires while the dashboard is
+    // open flips from its date suffix to "renewal needed" without needing
+    // unrelated state to change first. Reading `Instant.now()` inline
+    // would only refresh on incidental recomposition, which can be rare
+    // when the daemon is idle.
+    val now by rememberCurrentInstant()
     Column(
         verticalArrangement = Arrangement.spacedBy(1.dp),
         modifier = Modifier.padding(top = 4.dp),
@@ -379,12 +429,12 @@ private fun SubscriptionsFooter(subs: List<SubscriptionInfo>) {
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                 )
-                val until = sub.until?.take(10)
-                if (until != null) {
+                val trailing = subscriptionTrailing(sub.until, now)
+                if (trailing != null) {
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
-                        text = until,
-                        color = TerrariumColors.HUDSubtext,
+                        text = trailing.text,
+                        color = if (trailing.expired) TerrariumColors.LEDAmber else TerrariumColors.HUDSubtext,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                     )

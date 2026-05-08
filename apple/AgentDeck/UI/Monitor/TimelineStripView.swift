@@ -193,10 +193,10 @@ struct TimelineStripView: View {
                 .padding(.horizontal, 8)
                 .padding(.top, 4)
 
-                // Agent tag
-                let agentTag = agentTag(group.entry.agentType)
-                if !agentTag.isEmpty {
-                    Text(agentTag + countSuffix)
+                // Source tag
+                let sourceLabel = sourceLabel(for: group.entry)
+                if !sourceLabel.isEmpty {
+                    Text(sourceLabel + countSuffix)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
                         .padding(.horizontal, 8)
@@ -292,14 +292,24 @@ struct TimelineStripView: View {
     }
 
     private func sameTimelineContext(_ a: TimelineEntry, _ b: TimelineEntry) -> Bool {
-        if let ar = a.runId, let br = b.runId, !ar.isEmpty, ar == br { return true }
-        if let asid = a.sessionId, let bsid = b.sessionId, !asid.isEmpty, asid == bsid { return true }
+        let ar = a.runId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let br = b.runId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ar?.isEmpty == false, br?.isEmpty == false {
+            return ar == br
+        }
+
+        let asid = a.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bsid = b.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if asid?.isEmpty == false, bsid?.isEmpty == false {
+            return asid == bsid
+        }
+
         if let ap = a.projectName, let bp = b.projectName, !ap.isEmpty, ap == bp,
            a.agentType == b.agentType {
             return true
         }
-        return a.runId == nil && b.runId == nil &&
-            a.sessionId == nil && b.sessionId == nil &&
+        return (ar == nil || ar?.isEmpty == true) && (br == nil || br?.isEmpty == true) &&
+            (asid == nil || asid?.isEmpty == true) && (bsid == nil || bsid?.isEmpty == true) &&
             a.projectName == nil && b.projectName == nil &&
             a.agentType == b.agentType
     }
@@ -361,6 +371,15 @@ struct TimelineStripView: View {
         case nil: ""
         default: "Agent"
         }
+    }
+
+    private func sourceLabel(for entry: TimelineEntry) -> String {
+        let project = entry.projectName?.isEmpty == false ? entry.projectName : nil
+        let tag = agentTag(entry.agentType)
+        if let project, !tag.isEmpty {
+            return "\(project) · \(tag)"
+        }
+        return project ?? tag
     }
 
     private func formatType(_ type: TimelineEntryType) -> String {

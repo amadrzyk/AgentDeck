@@ -591,16 +591,6 @@ struct SettingsScreen: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
-
-                        let cmd = PortDiagnostics.terminalCommand(for: daemonService.blockingProcesses)
-                        if !cmd.isEmpty {
-                            Button("Copy Terminal Command") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(cmd, forType: .string)
-                            }
-                            .buttonStyle(.bordered)
-                            .help(Text(verbatim: "Copies \(cmd) to clipboard — paste in Terminal to kill external processes"))
-                        }
                     }
                 }
             } else if let error = daemonService.errorMessage {

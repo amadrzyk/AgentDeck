@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -130,9 +131,13 @@ fun TankStatusPanel(
             lines = antigravityDisplayLines(state.antigravityStatus),
         )
 
+        // Subscriptions row reads "wall clock now" so an expiring window
+        // flips to "renewal needed" without depending on incidental state
+        // changes — the ticker is shared with the HUD rail's footer.
+        val now by rememberCurrentInstant()
         EngineSection(
             title = "Subscriptions",
-            lines = subscriptionDisplayLines(state.subscriptions),
+            lines = subscriptionDisplayLines(state.subscriptions, now),
         )
     }
 }
@@ -330,101 +335,42 @@ private fun ollamaDisplayLines(ollamaStatus: OllamaStatus?): List<String> {
     return if (items.isEmpty()) emptyList() else listOf(items.distinct().joinToString(", "))
 }
 
-private fun openClawDisplayLines(modelCatalog: List<ModelCatalogEntry>): List<String> {
-    val available = modelCatalog.filter { it.available }
-    if (available.isEmpty()) return emptyList()
+// `openClawDisplayLines` and `normalizeOpenClawName` live in TopologyRail.kt
+// (same package) so the HUD rail and the e-ink TANK STATUS panel stay in
+// sync on the primary-only filter rule.
 
-    val ordered = available.sortedWith(
-        compareByDescending<ModelCatalogEntry> { it.role == "default" }
-            .thenBy { normalizeOpenClawName(it.name) }
-    )
+private fun subscriptionDisplayLines(
+    subscriptions: List<SubscriptionInfo>,
+    now: Instant,
+): List<String> = subscriptions.map { formatSubscriptionLine(it, now) }
 
-    val primary = normalizeOpenClawName(ordered.first().name)
-    val remainder = ordered.drop(1).map { normalizeOpenClawName(it.name) }
-    if (remainder.isEmpty()) return listOf(primary)
+/**
+ * Trailing label rendered to the right of the subscription name. `null`
+ * means the subscription has no `until` field at all (e.g. Claude billing
+ * type). When `until` is present but in the past or unparseable we surface
+ * `"renewal needed"` (`expired = true`) so the user sees an actionable hint
+ * — Codex writes `chatgpt_subscription_active_until` once at login and
+ * never refreshes it on auto-renewal, so a stale past date is the common
+ * case. Caller passes `now` so unit tests can pin time.
+ */
+internal data class SubscriptionTrailing(val text: String, val expired: Boolean)
 
-    val grouped = linkedMapOf<String, MutableList<String>>()
-    remainder.forEach { normalized ->
-        val family = openClawFamilyKey(normalized)
-        grouped.getOrPut(family) { mutableListOf() }.add(normalized)
+internal fun subscriptionTrailing(until: String?, now: Instant): SubscriptionTrailing? {
+    val raw = until?.trim().takeUnless { it.isNullOrEmpty() } ?: return null
+    val parsed = parseUntilInstant(raw)
+    if (parsed != null && parsed.isAfter(now)) {
+        return SubscriptionTrailing(text = raw.take(10), expired = false)
     }
-
-    return listOf(primary) + grouped.values.map { compactOpenClawFamily(it) }.filter { it.isNotBlank() }
-}
-
-private fun normalizeOpenClawName(name: String): String =
-    name
-        .replace("DeepSeek: DeepSeek ", "DeepSeek ")
-        .replace("DeepSeek:", "DeepSeek")
-        .replace("GPT: GPT ", "GPT ")
-        .replace("GLM: GLM ", "GLM ")
-        .trim()
-
-private fun openClawFamilyKey(name: String): String {
-    val lower = name.lowercase()
-    return when {
-        lower.startsWith("glm") -> "glm"
-        lower.startsWith("gpt") -> "gpt"
-        lower.startsWith("deepseek") -> "deepseek"
-        lower.startsWith("claude") -> "claude"
-        lower.startsWith("gemini") -> "gemini"
-        lower.startsWith("qwen") -> "qwen"
-        lower.startsWith("llama") -> "llama"
-        else -> name
-    }
-}
-
-private fun compactOpenClawFamily(names: List<String>): String {
-    val deduped = names.distinct()
-    val first = deduped.firstOrNull() ?: return ""
-    if (deduped.size == 1) return first
-
-    val prefix = familyDisplayPrefix(first)
-    if (prefix.isEmpty()) return deduped.joinToString(", ")
-
-    return deduped.mapIndexed { index, name ->
-        if (index > 0 && name.startsWith(prefix)) {
-            name.removePrefix(prefix).trim()
-        } else {
-            name
-        }
-    }.joinToString(", ")
-}
-
-private fun familyDisplayPrefix(name: String): String {
-    val lower = name.lowercase()
-    return when {
-        lower.startsWith("glm-") -> "GLM-"
-        lower.startsWith("gpt-") -> "GPT-"
-        lower.startsWith("deepseek ") -> "DeepSeek "
-        lower.startsWith("claude ") -> "Claude "
-        lower.startsWith("gemini ") -> "Gemini "
-        lower.startsWith("qwen ") -> "Qwen "
-        lower.startsWith("llama ") -> "Llama "
-        else -> ""
-    }
-}
-
-private fun subscriptionDisplayLines(subscriptions: List<SubscriptionInfo>): List<String> {
-    val now = Instant.now()
-    return subscriptions.map { formatSubscriptionLine(it, now) }
+    return SubscriptionTrailing(text = "renewal needed", expired = true)
 }
 
 /**
- * Render one subscription row. Drops the `until` suffix when the parsed
- * timestamp is missing, malformed, or already in the past — otherwise the
- * dashboard surfaces a stale "ChatGPT Plus · 2025-03-04" once the underlying
- * Codex JWT falls behind the user's actual subscription state. Caller passes
- * `now` so unit tests can pin time without touching the system clock.
+ * Render one subscription row. Past or unparseable `until` becomes a
+ * `"renewal needed"` hint instead of the stale date itself.
  */
 internal fun formatSubscriptionLine(sub: SubscriptionInfo, now: Instant): String {
-    val raw = sub.until
-    val parsed = raw?.let { parseUntilInstant(it) }
-    return if (raw != null && parsed != null && parsed.isAfter(now)) {
-        "${sub.name} · ${raw.take(10)}"
-    } else {
-        sub.name
-    }
+    val trailing = subscriptionTrailing(sub.until, now) ?: return sub.name
+    return "${sub.name} · ${trailing.text}"
 }
 
 /**

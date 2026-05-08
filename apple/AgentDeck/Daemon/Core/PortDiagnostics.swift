@@ -3,8 +3,8 @@
 //
 // When NWListener bind fails, this collects information about what's blocking
 // the port from sessions.json (AgentDeck sessions) and sysctl (process status).
-// External processes can't be killed from App Sandbox — we provide PID + a
-// copyable Terminal command instead.
+// External processes can't be killed from App Sandbox, so we surface PID and
+// status details while keeping remediation inside app-owned controls.
 
 import AppKit
 import Foundation
@@ -45,7 +45,7 @@ enum PortDiagnostics {
             let ownBundle = isOwnBundle(Int32(pid), myBundle: myBundle)
             result.append(BlockingProcess(
                 id: Int32(pid), port: daemonPort,
-                name: ownBundle ? "AgentDeck (previous)" : "agentdeck daemon (CLI)",
+                name: ownBundle ? "AgentDeck (previous)" : "External AgentDeck process",
                 project: "daemon",
                 startedAt: info["startedAt"] as? String,
                 isOwnBundle: ownBundle,
@@ -64,7 +64,7 @@ enum PortDiagnostics {
             let agentType = s["agentType"] as? String ?? "unknown"
             result.append(BlockingProcess(
                 id: Int32(pid), port: sPort,
-                name: ownBundle ? "AgentDeck (\(agentType))" : "agentdeck \(agentType) (CLI)",
+                name: ownBundle ? "AgentDeck (\(agentType))" : "External \(agentType) session",
                 project: s["projectName"] as? String,
                 startedAt: s["startedAt"] as? String,
                 isOwnBundle: ownBundle,
@@ -94,14 +94,6 @@ enum PortDiagnostics {
             SessionRegistry.shared.removeDaemonInfo()
         }
         return (killed, before - after)
-    }
-
-    /// Build a single terminal command that kills all blocking external PIDs.
-    static func terminalCommand(for blockers: [BlockingProcess]) -> String {
-        let externalAlive = blockers.filter { !$0.isOwnBundle && $0.isAlive && !$0.isZombie }
-        if externalAlive.isEmpty { return "" }
-        let pids = externalAlive.map { String($0.id) }.joined(separator: " ")
-        return "kill \(pids)"
     }
 
     // MARK: - Helpers

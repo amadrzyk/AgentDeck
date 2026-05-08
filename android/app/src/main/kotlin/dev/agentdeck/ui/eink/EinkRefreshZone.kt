@@ -6,6 +6,7 @@ import android.widget.FrameLayout
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +25,16 @@ import kotlinx.coroutines.delay
 enum class RefreshMode {
     /** Full GC16 refresh — flash, no ghosting. For terrarium creatures. */
     FULL,
+    /**
+     * GC16 flash on [triggerKey] change for high-priority UI that must be
+     * perfectly clean on appearance — permission / option prompts (the
+     * ATTENTION zone). Same waveform call as [FULL]; the "one-shot per
+     * prompt appearance" semantic is enforced at the CALL SITE: pass a
+     * STABLE prompt identity (e.g. sessionId + question + options) so
+     * cursor / navigation churn does not re-fire, but a queued next
+     * prompt with different identity does fire its own clean flash.
+     */
+    FULL_ONCE,
     /** DU (direct update) — fast, slight ghosting. For usage gauges. */
     DU,
     /** A2 (animation mode) — fastest, binary. For state markers, timeline. */
@@ -38,6 +49,14 @@ enum class RefreshMode {
  * [mode] after [debounceMs] milliseconds of stability.
  *
  * On non-e-ink devices or unsupported vendors, falls back to standard invalidation.
+ *
+ * [softTriggerKey] is an optional secondary trigger for sub-state churn
+ * inside the zone (e.g. cursor / option-list navigation inside an ATTENTION
+ * prompt) that needs the EPD to re-paint but does not warrant a primary
+ * waveform burst. When non-null and changed, fires a cheap A2 partial
+ * refresh after [softDebounceMs]. Suppressed when [triggerKey] just fired
+ * within the recent window so primary always wins simultaneous-change
+ * races (e.g. a new prompt appearing fires GC16 cleanly, not A2-then-GC16).
  */
 @Composable
 fun EinkRefreshZone(
@@ -45,6 +64,8 @@ fun EinkRefreshZone(
     debounceMs: Long,
     triggerKey: Any,
     modifier: Modifier = Modifier,
+    softTriggerKey: Any? = null,
+    softDebounceMs: Long = 120L,
     content: @Composable () -> Unit,
 ) {
     // Keep a snapshot-backed reference to the latest content lambda so
@@ -55,24 +76,81 @@ fun EinkRefreshZone(
     // Track the view reference for vendor API calls
     var viewRef by remember { mutableStateOf<View?>(null) }
     var lastTrigger by remember { mutableLongStateOf(0L) }
+    // Race-protection state for the soft refresh path. Two gates so the
+    // protection is ORDER-INDEPENDENT of debounceMs vs softDebounceMs and
+    // robust to primary effect cancellation/relaunch:
+    //   1. primaryActiveCount — number of currently alive primary effects
+    //                            that have not yet completed (fired or
+    //                            finished cancelling). A counter (not a
+    //                            boolean) so a stale OLD effect's finally
+    //                            running AFTER a NEW effect's start never
+    //                            drops the gate to "not pending" while a
+    //                            new primary is still in flight. Covers
+    //                            "primary about to fire" races regardless
+    //                            of debounce ordering.
+    //   2. lastPrimaryFireMs   — wall-clock of the most recent primary
+    //                            fire. Covers "primary just fired" race
+    //                            when soft was already past its delay
+    //                            when primary completed.
+    var primaryActiveCount by remember { mutableIntStateOf(0) }
+    var lastPrimaryFireMs by remember { mutableLongStateOf(0L) }
 
-    // Debounced refresh on trigger change
+    // Debounced refresh on trigger change.
+    //
+    // FULL_ONCE shares the same vendor call as FULL — the "one-shot" semantic
+    // is enforced at the CALL SITE by passing a STABLE prompt identity as
+    // triggerKey (e.g. sessionId+question), so navigation / cursor churn
+    // does not re-fire the GC16 flash, but a genuinely new queued prompt
+    // (different sessionId or question) does. Adding a zone-lifetime gate
+    // here would suppress the flash for the next queued prompt when the
+    // composable instance is reused across the dismiss-less transition.
     LaunchedEffect(triggerKey) {
-        val now = System.currentTimeMillis()
-        lastTrigger = now
-        delay(debounceMs)
+        // Increment ON ENTRY so a relaunched effect's count contribution is
+        // visible BEFORE the previous (cancelled) effect's finally decrements.
+        // Net count stays >= 1 while ANY primary is in flight.
+        primaryActiveCount++
+        try {
+            val now = System.currentTimeMillis()
+            lastTrigger = now
+            delay(debounceMs)
 
-        // Only refresh if no newer trigger arrived during debounce
-        if (lastTrigger == now) {
-            val view = viewRef
-            if (view != null) {
-                when (mode) {
-                    RefreshMode.FULL -> EinkRefreshHelper.requestFullRefresh(view)
-                    RefreshMode.DU -> EinkRefreshHelper.requestDURefresh(view)
-                    RefreshMode.A2 -> EinkRefreshHelper.requestA2Refresh(view)
+            // Only refresh if no newer trigger arrived during debounce
+            if (lastTrigger == now) {
+                val view = viewRef
+                if (view != null) {
+                    when (mode) {
+                        RefreshMode.FULL -> EinkRefreshHelper.requestFullRefresh(view)
+                        RefreshMode.FULL_ONCE -> EinkRefreshHelper.requestFullRefresh(view)
+                        RefreshMode.DU -> EinkRefreshHelper.requestDURefresh(view)
+                        RefreshMode.A2 -> EinkRefreshHelper.requestA2Refresh(view)
+                    }
+                    lastPrimaryFireMs = System.currentTimeMillis()
                 }
             }
+        } finally {
+            // Each effect decrements its OWN contribution. A cancelled OLD
+            // effect's finally only undoes ITS increment — it does not
+            // affect the NEW effect's count.
+            primaryActiveCount--
         }
+    }
+
+    // Soft refresh — A2 partial for sub-state churn (cursor / options) that
+    // would otherwise leave the EPD stale (Onyx, Kobo) or trigger a full
+    // flash (Rockchip with mode-2 sticky) on every keypress.
+    //
+    // Suppress when (a) any primary effect is alive and not yet fired, or
+    // (b) primary fired within the last 250 ms — either way primary owns
+    // the EPD right now and an A2 paint would either ghost stale content
+    // before primary's GC16 (a flicker) or land redundantly on top of a
+    // freshly cleaned panel.
+    LaunchedEffect(softTriggerKey) {
+        if (softTriggerKey == null) return@LaunchedEffect
+        delay(softDebounceMs)
+        if (primaryActiveCount > 0) return@LaunchedEffect
+        val sincePrimary = System.currentTimeMillis() - lastPrimaryFireMs
+        if (sincePrimary in 0..250) return@LaunchedEffect
+        viewRef?.let { EinkRefreshHelper.requestA2Refresh(it) }
     }
 
     // Use AndroidView as bridge to get a real View reference

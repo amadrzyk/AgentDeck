@@ -423,8 +423,8 @@ final class DaemonService: ObservableObject {
             let reason: String
             if fallbackAttempted || !onDefault {
                 reason = "Port \(stuckPort) is held by another process. " +
-                    "Close any stale `agentdeck daemon` CLI processes (try " +
-                    "`sudo lsof -nP -iTCP:\(stuckPort)` in Terminal), or " +
+                    "Use Clean Up & Retry for stale AgentDeck windows, quit " +
+                    "the listed external process from its owning app, or " +
                     "change the daemon port in Settings."
             } else {
                 reason = "All ports in range are busy. Close other agentdeck " +

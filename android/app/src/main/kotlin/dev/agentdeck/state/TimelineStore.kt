@@ -59,6 +59,7 @@ private fun canGroup(group: GroupedEntry, entry: TimelineEntry): Boolean {
         else -> 60_000L
     }
     if (entry.timestamp - group.lastTs > window) return false
+    if (!sameTimelineContext(prev, entry)) return false
     // chat_end: group by type only (keep latest summary)
     if (entry.type == "chat_end") return true
     // tool_request: group by type only

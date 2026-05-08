@@ -38,7 +38,10 @@ import androidx.compose.ui.unit.sp
 import dev.agentdeck.state.GroupedEntry
 import dev.agentdeck.state.TimelineEntry
 import dev.agentdeck.state.groupConsecutive
+import dev.agentdeck.state.timelineDisplayGroups
+import dev.agentdeck.state.timelineLifecycleBounds
 import dev.agentdeck.terrarium.TerrariumColors
+import dev.agentdeck.ui.component.BrandIcon
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,10 +58,11 @@ fun TimelineStrip(
     val listState = rememberLazyListState()
     val displayEntries = remember(entries) {
         entries
-            .filterNot { it.type == "chat_end" && it.agentType == "claude-code" }
-            .takeLast(50)
+            .takeLast(80)
     }
-    val grouped = remember(displayEntries) { groupConsecutive(displayEntries) }
+    val grouped = remember(displayEntries) {
+        timelineDisplayGroups(groupConsecutive(displayEntries)).takeLast(50)
+    }
 
     // Focus tracking: -1 = auto-follow latest
     var focusedIndex by remember { mutableIntStateOf(-1) }
@@ -141,6 +145,7 @@ fun TimelineStrip(
             // Right pane: detail panel (35%)
             DetailPane(
                 focusedGroup = focusedGroup,
+                entries = displayEntries,
                 modifier = Modifier
                     .weight(0.35f)
                     .fillMaxHeight()
@@ -207,6 +212,18 @@ private fun CompactLogRow(
             fontFamily = FontFamily.Monospace,
             style = tight,
         )
+        Box(
+            modifier = Modifier
+                .width(12.dp)
+                .height(12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BrandIcon(
+                agentType = entry.agentType,
+                isEink = false,
+                size = 10.dp,
+            )
+        }
         if (sessionLabel.isNotEmpty()) {
             Text(
                 text = sessionLabel,
@@ -239,6 +256,7 @@ private fun CompactLogRow(
 @Composable
 private fun DetailPane(
     focusedGroup: GroupedEntry?,
+    entries: List<TimelineEntry>,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -266,6 +284,7 @@ private fun DetailPane(
             val iconColor = typeColor(entry.type)
             val sourceLabel = sourceLabel(entry)
             val countSuffix = if (focusedGroup.count > 1) " (×${focusedGroup.count})" else ""
+            val lifecycleRows = lifecycleDetailRows(entry, entries)
 
             // Header: type badge + timestamp
             Row(
@@ -305,6 +324,36 @@ private fun DetailPane(
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
+            }
+
+            if (lifecycleRows.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Column(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    lifecycleRows.forEach { row ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = row.first,
+                                color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.width(34.dp),
+                            )
+                            Text(
+                                text = row.second,
+                                color = TerrariumColors.HUDSubtext.copy(alpha = 0.82f),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -380,7 +429,10 @@ private fun typeColor(type: String) = when (type) {
 
 private fun agentTag(agentType: String?): String = when (agentType) {
     "claude-code" -> "Claude"
+    "codex-cli" -> "Codex"
     "openclaw" -> "OpenClaw"
+    "opencode" -> "OpenCode"
+    "daemon" -> "Daemon"
     null -> ""
     else -> "Agent"
 }
@@ -400,6 +452,28 @@ private fun sourceLabel(entry: TimelineEntry): String {
         project != null -> project
         else -> tag
     }
+}
+
+private fun lifecycleDetailRows(entry: TimelineEntry, entries: List<TimelineEntry>): List<Pair<String, String>> {
+    val (startedAt, endedAt) = timelineLifecycleBounds(entry, entries)
+    val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    val rows = mutableListOf<Pair<String, String>>()
+    if (startedAt != null) rows += "START" to timeFormat.format(Date(startedAt))
+    if (endedAt != null) rows += "END" to timeFormat.format(Date(endedAt))
+    if (startedAt != null && endedAt != null && endedAt >= startedAt) {
+        rows += "DUR" to formatDuration(endedAt - startedAt)
+    }
+    return rows
+}
+
+private fun formatDuration(ms: Long): String {
+    val seconds = maxOf(0, ((ms + 500) / 1000).toInt())
+    if (seconds < 60) return "${seconds}s"
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    if (minutes < 60) return "${minutes}m ${remainingSeconds}s"
+    val hours = minutes / 60
+    return "${hours}h ${minutes % 60}m"
 }
 
 private fun formatType(type: String): String = when (type) {

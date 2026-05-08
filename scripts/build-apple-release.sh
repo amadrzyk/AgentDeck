@@ -41,9 +41,15 @@ build_ios() {
         -archivePath "$ARCHIVE_PATH" \
         -allowProvisioningUpdates \
         MARKETING_VERSION="$VERSION" \
-        CODE_SIGN_STYLE=Automatic \
+        CODE_SIGN_STYLE=Manual \
+        CODE_SIGN_IDENTITY="Apple Distribution" \
+        PROVISIONING_PROFILE_SPECIFIER="AgentDeck Dashboard AppStore" \
         DEVELOPMENT_TEAM=R22679GY5Z \
         | tail -5
+
+    echo ">>> Verifying iOS App Store archive invariants..."
+    bash "$APPLE_DIR/scripts/verify-appstore-archive.sh" \
+        "$ARCHIVE_PATH/Products/Applications/AgentDeck.app"
 
     echo ">>> Exporting IPA..."
     EXPORT_PATH="$DIST_DIR/export_ios"
@@ -79,7 +85,9 @@ build_macos() {
         -archivePath "$ARCHIVE_PATH" \
         -allowProvisioningUpdates \
         MARKETING_VERSION="$VERSION" \
-        CODE_SIGN_STYLE=Automatic \
+        CODE_SIGN_STYLE=Manual \
+        CODE_SIGN_IDENTITY="Apple Distribution" \
+        PROVISIONING_PROFILE_SPECIFIER="AgentDeck Dashboard macOS AppStore" \
         DEVELOPMENT_TEAM=R22679GY5Z \
         | tail -5
 

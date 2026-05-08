@@ -8,12 +8,12 @@ import org.junit.Test
 import java.time.Instant
 
 /**
- * Guards against the dashboard surfacing stale Codex subscription dates.
- * Bug context: when the user renews ChatGPT Plus but does not re-run
- * `codex login`, ~/.codex/auth.json keeps the previous JWT and the
- * `chatgpt_subscription_active_until` claim lags behind the real billing
- * state. Once that timestamp is in the past, the renderer must drop it
- * instead of showing "ChatGPT Plus · 2025-03-04" forever.
+ * Guards subscription rendering against stale Codex `subscription_active_until`
+ * dates. When the user renews ChatGPT Plus but does not re-run `codex login`,
+ * ~/.codex/auth.json keeps the previous JWT and the claim lags behind the real
+ * billing state — surfacing "ChatGPT Plus · 2025-03-04" forever is misleading,
+ * so the renderer swaps a past date for a `renewal needed` hint that nudges
+ * the user toward re-auth without hiding the row entirely.
  */
 class SubscriptionLineTest {
 
@@ -32,9 +32,9 @@ class SubscriptionLineTest {
     }
 
     @Test
-    fun `past until drops date suffix`() {
+    fun `past until renders renewal needed`() {
         val sub = SubscriptionInfo(name = "ChatGPT Plus", until = "2025-03-04T00:00:00Z")
-        assertEquals("ChatGPT Plus", formatSubscriptionLine(sub, now))
+        assertEquals("ChatGPT Plus · renewal needed", formatSubscriptionLine(sub, now))
     }
 
     @Test
@@ -44,9 +44,9 @@ class SubscriptionLineTest {
     }
 
     @Test
-    fun `malformed until renders name only`() {
+    fun `malformed until renders renewal needed`() {
         val sub = SubscriptionInfo(name = "ChatGPT Plus", until = "not-a-date")
-        assertEquals("ChatGPT Plus", formatSubscriptionLine(sub, now))
+        assertEquals("ChatGPT Plus · renewal needed", formatSubscriptionLine(sub, now))
     }
 
     @Test
@@ -56,9 +56,32 @@ class SubscriptionLineTest {
     }
 
     @Test
-    fun `bare date in past drops suffix`() {
+    fun `bare date in past renders renewal needed`() {
         val sub = SubscriptionInfo(name = "ChatGPT Plus", until = "2024-01-01")
-        assertEquals("ChatGPT Plus", formatSubscriptionLine(sub, now))
+        assertEquals("ChatGPT Plus · renewal needed", formatSubscriptionLine(sub, now))
+    }
+
+    @Test
+    fun `subscriptionTrailing flags expired for past dates`() {
+        val trailing = subscriptionTrailing("2025-03-04T00:00:00Z", now)
+        assertNotNull(trailing)
+        assertEquals("renewal needed", trailing!!.text)
+        assertEquals(true, trailing.expired)
+    }
+
+    @Test
+    fun `subscriptionTrailing returns date for future`() {
+        val trailing = subscriptionTrailing("2099-01-01T00:00:00Z", now)
+        assertNotNull(trailing)
+        assertEquals(false, trailing!!.expired)
+        assertEquals("2099-01-01", trailing.text)
+    }
+
+    @Test
+    fun `subscriptionTrailing returns null for blank or null`() {
+        assertNull(subscriptionTrailing(null, now))
+        assertNull(subscriptionTrailing("", now))
+        assertNull(subscriptionTrailing("   ", now))
     }
 
     @Test

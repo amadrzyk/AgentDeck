@@ -185,7 +185,7 @@ fun MonitorScreen(
     // Pre-compute attention card visibility so we can gate the background
     // tap detector — tapping outside the question card during an awaiting
     // turn shouldn't accidentally collapse the HUD behind it.
-    val attentionVisible = !dev.agentdeck.util.EinkDetector.isEinkDevice() && run {
+    val attentionVisible = run {
         val awaiting = buildAwaitingList(dashState)
         (awaiting.firstOrNull { it.id == dashState.sessionId } ?: awaiting.firstOrNull()) != null
     }
@@ -896,13 +896,11 @@ private fun MonitorHUD(
         }
 
         // Floating attention theater — renders whatever PromptOption[] the
-        // bridge is currently surfacing. Suppressed on e-ink: the slow
-        // refresh makes interactive popups unusable, so e-ink users
-        // instead see the "?" creature indicator and are expected to
-        // answer from the tablet / phone / Mac dashboards.
+        // bridge is currently surfacing. E-ink handles the same commands in
+        // its readable projection, while this overlay is tablet-focused.
         val awaiting = buildAwaitingList(dashState)
         val featuredSession = awaiting.firstOrNull { it.id == dashState.sessionId } ?: awaiting.firstOrNull()
-        if (featuredSession != null && !dev.agentdeck.util.EinkDetector.isEinkDevice()) {
+        if (featuredSession != null) {
             val isFocused = featuredSession.id == dashState.sessionId
             val featured = buildAttentionFeatured(
                 session = featuredSession,

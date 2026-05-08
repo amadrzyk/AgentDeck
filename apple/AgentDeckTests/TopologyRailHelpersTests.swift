@@ -9,6 +9,7 @@
 import XCTest
 @testable import AgentDeck
 
+@MainActor
 final class TopologyRailHelpersTests: XCTestCase {
     func testParseFutureISO8601WithFractionalSeconds() {
         let parsed = TopologyRail.parseUntilDate("2099-12-31T23:59:59.999Z")
@@ -43,6 +44,34 @@ final class TopologyRailHelpersTests: XCTestCase {
         XCTAssertNil(TopologyRail.parseUntilDate("not-a-date"))
         XCTAssertNil(TopologyRail.parseUntilDate("2026/05/06"))
         XCTAssertNil(TopologyRail.parseUntilDate("forever"))
+    }
+
+    func testSubscriptionTrailingFutureRendersShortDate() {
+        let now = ISO8601DateFormatter().date(from: "2026-05-06T00:00:00Z")!
+        let trailing = TopologyRail.subscriptionTrailing(for: "2099-12-31T00:00:00Z", now: now)
+        XCTAssertNotNil(trailing)
+        XCTAssertFalse(trailing!.expired)
+        XCTAssertFalse(trailing!.text.isEmpty)
+    }
+
+    func testSubscriptionTrailingPastRendersRenewalNeeded() {
+        let now = ISO8601DateFormatter().date(from: "2026-05-06T00:00:00Z")!
+        let trailing = TopologyRail.subscriptionTrailing(for: "2025-03-04T00:00:00Z", now: now)
+        XCTAssertEqual(trailing?.text, "renewal needed")
+        XCTAssertEqual(trailing?.expired, true)
+    }
+
+    func testSubscriptionTrailingMalformedRendersRenewalNeeded() {
+        let now = Date()
+        let trailing = TopologyRail.subscriptionTrailing(for: "not-a-date", now: now)
+        XCTAssertEqual(trailing?.text, "renewal needed")
+        XCTAssertEqual(trailing?.expired, true)
+    }
+
+    func testSubscriptionTrailingNilOrBlankReturnsNil() {
+        let now = Date()
+        XCTAssertNil(TopologyRail.subscriptionTrailing(for: nil, now: now))
+        XCTAssertNil(TopologyRail.subscriptionTrailing(for: "   ", now: now))
     }
 }
 #endif

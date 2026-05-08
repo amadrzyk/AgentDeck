@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
@@ -25,6 +26,8 @@ import androidx.compose.ui.unit.sp
 import dev.agentdeck.net.ModuleHealthState
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
+import dev.agentdeck.ui.monitor.rememberCurrentInstant
+import dev.agentdeck.ui.monitor.subscriptionTrailing
 import dev.agentdeck.util.formatBytes
 import dev.agentdeck.util.formatResetTime
 import kotlin.math.roundToInt
@@ -149,8 +152,8 @@ private fun GaugeText(label: String, percent: Double, resetTime: String, stale: 
     val gauge = blockGauge(percent)
     Text(
         text = "$label $gauge ${percent.toInt()}%$stale",
-        fontSize = 11.sp,
-        lineHeight = 14.sp,
+        fontSize = 13.sp,
+        lineHeight = 17.sp,
         fontFamily = FontFamily.Monospace,
         color = gaugeColor(percent),
         maxLines = 1,
@@ -158,8 +161,8 @@ private fun GaugeText(label: String, percent: Double, resetTime: String, stale: 
     if (resetTime.isNotEmpty()) {
         Text(
             text = "   \u27F2 $resetTime",
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
+            fontSize = 12.sp,
+            lineHeight = 15.sp,
             fontFamily = FontFamily.Monospace,
             color = Color.DarkGray,
             maxLines = 1,
@@ -173,13 +176,13 @@ private fun GaugeText(label: String, percent: Double, resetTime: String, stale: 
 private fun ModelsColumn(state: DashboardState, showDeviceDiagnostic: Boolean) {
     val labelColor = if (einkColorEnabled) Color(0xFF335588) else Color.DarkGray
 
-    // OpenClaw
+    // OpenClaw — strict primary-only filter (matches HUD rail). If the user
+    // hasn't tagged any model as default, the row collapses; promoting a
+    // non-default entry would silently override the explicit rule.
     val openClawPrimary = if (state.gatewayConnected == true && state.agentType == "openclaw") {
-        state.modelCatalog.orEmpty().let { catalog ->
-            val primary = catalog.firstOrNull { it.available && it.role == "default" }
-                ?: catalog.firstOrNull { it.available }
-            primary?.let { abbreviateModelName(it.name) }
-        }
+        state.modelCatalog.orEmpty()
+            .firstOrNull { it.available && it.role == "default" }
+            ?.let { abbreviateModelName(it.name) }
     } else null
     if (openClawPrimary != null) {
         InlineModelLine("OpenClaw", openClawPrimary, labelColor = labelColor)
@@ -208,14 +211,17 @@ private fun ModelsColumn(state: DashboardState, showDeviceDiagnostic: Boolean) {
         )
     }
 
-    // Subscriptions
+    // Subscriptions — `rememberCurrentInstant` ticks every 60s so an
+    // expired window flips from its date suffix to "renewal needed"
+    // without depending on incidental state changes.
     if (state.subscriptions.isNotEmpty()) {
+        val now by rememberCurrentInstant()
         InlineModelLine(
             "Subscription",
             state.subscriptions.joinToString(", ") { sub ->
                 val name = abbreviateModelName(sub.name)
-                val until = sub.until?.take(10) // "2026-05-01T..." → "2026-05-01"
-                if (until != null) "$name ~$until" else name
+                val trailing = subscriptionTrailing(sub.until, now)
+                if (trailing != null) "$name ~${trailing.text}" else name
             },
             labelColor = labelColor,
             dataColor = if (einkColorEnabled) Color(0xFF227733) else Color.Black,
@@ -291,11 +297,10 @@ private fun countLabel(label: String, count: Int): String {
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        fontSize = 11.sp,
-        lineHeight = 12.sp,
+        fontSize = 12.sp,
+        lineHeight = 15.sp,
         fontWeight = FontWeight.Bold,
         fontFamily = FontFamily.Monospace,
-        letterSpacing = 1.sp,
         color = if (einkColorEnabled) Color(0xFF335588) else Color.DarkGray,
         modifier = Modifier.padding(bottom = 1.dp),
     )
@@ -305,8 +310,8 @@ private fun SectionLabel(text: String) {
 private fun DataLine(text: String, maxLines: Int = 1, color: Color = Color.Black) {
     Text(
         text = text,
-        fontSize = 11.sp,
-        lineHeight = 13.sp,
+        fontSize = 13.sp,
+        lineHeight = 17.sp,
         fontFamily = FontFamily.Monospace,
         color = color,
         maxLines = maxLines,
@@ -326,15 +331,15 @@ private fun InlineModelLine(
 ) {
     Text(
         text = buildAnnotatedString {
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = labelColor, letterSpacing = 0.5.sp)) {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = labelColor)) {
                 append("$label: ")
             }
             withStyle(SpanStyle(color = dataColor)) {
                 append(data)
             }
         },
-        fontSize = 11.sp,
-        lineHeight = 13.sp,
+        fontSize = 13.sp,
+        lineHeight = 17.sp,
         fontFamily = FontFamily.Monospace,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,

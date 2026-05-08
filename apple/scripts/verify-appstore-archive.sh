@@ -15,8 +15,9 @@
 #   COMMON:
 #     1. No bundled Node.js, bridge CLI, adb binary, or D200H shell helper.
 #     2. No embedded executable other than the main AgentDeck Mach-O.
-#     3. Shipped entitlements must not contain the home-relative-path
-#        temporary exception.
+#     3. Shipped entitlements must be readable, must not contain the
+#        home-relative-path temporary exception, and macOS archives must carry
+#        the app sandbox entitlement.
 #     4. No embedded subprocess path string (`/usr/bin/env`, `/bin/sh`,
 #        `/usr/bin/security`, `/usr/bin/sqlite3`) in the main binary.
 #     5. No companion-install prompt strings (`npm i @agentdeck/...`,
@@ -26,8 +27,9 @@
 #        binary" applies to embedded log/alert strings too, since `strings`
 #        on the Mach-O reveals them during review.
 #   macOS ONLY:
-#     5. `Contents/Info.plist` must not contain `LSRequiresIPhoneOS`
-#        (iOS-only key must be auto-stripped by Xcode).
+#     5. `Contents/Info.plist` must not contain iOS-only launch/orientation
+#        keys (`LSRequiresIPhoneOS`, `UILaunchScreen`,
+#        `UISupportedInterfaceOrientations*`).
 #
 # Usage:
 #   ./verify-appstore-archive.sh /path/to/AgentDeck.app
@@ -107,21 +109,48 @@ while IFS= read -r f; do
         && fail "extra executable embedded: ${f#$APP/}"
 done <<< "$EXEC_FILES"
 
-# (3) macOS-only: Info.plist must not declare LSRequiresIPhoneOS.
-# iOS Info.plist legitimately carries this key, so skip on iOS bundles.
+# (3) macOS-only: Info.plist must not declare iOS-only launch/orientation
+# keys. iOS Info.plist legitimately carries these keys, so skip on iOS
+# bundles.
 if [ "$PLATFORM" = "macos" ] && [ -f "$INFO" ]; then
-    if /usr/libexec/PlistBuddy -c "Print :LSRequiresIPhoneOS" "$INFO" 2>/dev/null; then
-        fail "Info.plist contains LSRequiresIPhoneOS (iOS-only key leaked to macOS archive)"
-    fi
+    IOS_ONLY_PLIST_KEYS=(
+        "LSRequiresIPhoneOS"
+        "UILaunchScreen"
+        "UISupportedInterfaceOrientations"
+        "UISupportedInterfaceOrientations~ipad"
+    )
+    for key in "${IOS_ONLY_PLIST_KEYS[@]}"; do
+        if /usr/libexec/PlistBuddy -c "Print :$key" "$INFO" >/dev/null 2>&1; then
+            fail "Info.plist contains $key (iOS-only key leaked to macOS archive)"
+        fi
+    done
 fi
 
 # (4) Shipped entitlements must not have home-relative-path exception. The
 # signed entitlements live in the code signature, not as a file in the
-# bundle — extract via `codesign -d --entitlements :-`.
+# bundle — extract via `codesign -d --entitlements -`.
 if command -v codesign >/dev/null 2>&1; then
-    ENT=$(codesign -d --entitlements :- "$APP" 2>/dev/null || true)
+    ENT=$(codesign -d --entitlements - "$APP" 2>&1 || true)
+    SIGNING_INFO=$(codesign -dv --verbose=4 "$APP" 2>&1 || true)
+    if echo "$ENT" | grep -qi "invalid entitlements"; then
+        fail "signed entitlements blob is invalid"
+    fi
+    if echo "$SIGNING_INFO" | grep -qi "Apple Development\\|iPhone Developer"; then
+        fail "archive is signed with a development certificate"
+    fi
     if echo "$ENT" | grep -q "home-relative-path"; then
         fail "signed entitlements still contain home-relative-path exception"
+    fi
+    if echo "$ENT" | awk '
+        /\[Key\] get-task-allow/ { in_key = 1; next }
+        in_key && /\[Key\]/ { in_key = 0 }
+        in_key && /\[Bool\] true/ { found = 1 }
+        END { exit(found ? 0 : 1) }
+    '; then
+        fail "signed entitlements have get-task-allow=true (development signing)"
+    fi
+    if [ "$PLATFORM" = "macos" ] && ! echo "$ENT" | grep -q "com.apple.security.app-sandbox"; then
+        fail "macOS archive is missing com.apple.security.app-sandbox entitlement"
     fi
 fi
 

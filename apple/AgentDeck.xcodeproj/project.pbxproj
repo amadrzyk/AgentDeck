@@ -26,6 +26,7 @@
 		0AC3F569F362D121D985EA52 /* KelpField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0815111538C63CAF8766B367 /* KelpField.swift */; };
 		0B04CA71C040BE9955B8C032 /* AdbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83589BA4C41B89C8EF1A46FD /* AdbModule.swift */; };
 		0B12EC87653840EF7BA4555C /* SessionAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */; };
+		0E60D3FBC7626624FF7B5A2E /* TopologyRailHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D05CE505E1EC5729C69752E /* TopologyRailHelpersTests.swift */; };
 		0ED91B65645B05541D82E446 /* NotificationPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC62763B9E0E57235CFDACED /* NotificationPermission.swift */; };
 		1055170019B2376B38A0B8FE /* SessionAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */; };
 		10B201D2AF96C0838CCEC4CF /* SerialModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F618D3253FD55D4DD7D5AF /* SerialModule.swift */; };
@@ -210,6 +211,7 @@
 		AC7E59A42A23408F8FEC3AC5 /* WaterEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = E47A555A3917875178A5B7E5 /* WaterEffect.swift */; };
 		ADD8AE7242AA662A3ACBB98B /* AgentDeckLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125A43BCFF7E55A34B4C5FC1 /* AgentDeckLogo.swift */; };
 		AFF6EF70E6B6A6BC16048A65 /* WaterSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F134F38758589B5D47652C8 /* WaterSurface.swift */; };
+		AFF81F64527A02F26615AB61 /* TopologyRailHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D05CE505E1EC5729C69752E /* TopologyRailHelpersTests.swift */; };
 		B13C4855773086AA7115A5D4 /* UsageAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBBD731AC01994F5C7C1A78A /* UsageAPIClient.swift */; };
 		B1B90826D46626CD1211ED7A /* TerrariumView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69BCA057209786EF62993762 /* TerrariumView.swift */; };
 		B26650019DB2ED1B70E0B349 /* ApmeJudgeMlx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64EB18086FC44B69D1CBE171 /* ApmeJudgeMlx.swift */; };
@@ -365,7 +367,7 @@
 		38C2485BC8700CBDD9EDE70E /* StateTimelineGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateTimelineGenerator.swift; sourceTree = "<group>"; };
 		3A70C6FAC4BDE4DAAFA08E74 /* CodexConfigInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigInstaller.swift; sourceTree = "<group>"; };
 		3B1754EEF69FF454C638CF1C /* MiniTomlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniTomlTests.swift; sourceTree = "<group>"; };
-		3B886C1F467A011D242E296E /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3B886C1F467A011D242E296E /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayfishCreature.swift; sourceTree = "<group>"; };
 		403CDDF7DDFCF5D8702491EA /* TerrariumConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumConfig.swift; sourceTree = "<group>"; };
 		40755F64E4C39A49B99D88CA /* SessionListPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListPanel.swift; sourceTree = "<group>"; };
@@ -414,6 +416,7 @@
 		788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFocusRelay.swift; sourceTree = "<group>"; };
 		7AC67585E8BFBBB8B0250FF2 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		7BCC68BE56702DFD637FFE02 /* GatewayProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayProbe.swift; sourceTree = "<group>"; };
+		7D05CE505E1EC5729C69752E /* TopologyRailHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyRailHelpersTests.swift; sourceTree = "<group>"; };
 		7E7E35423FAC15B8DB49BBB2 /* GatewayFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GatewayFrame.swift; path = ../../generated/protocol/GatewayFrame.swift; sourceTree = "<group>"; };
 		7FF390BEA92326B1152B55A9 /* HTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServer.swift; sourceTree = "<group>"; };
 		80BD296835DE366BFDBB15B9 /* DaemonService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonService.swift; sourceTree = "<group>"; };
@@ -431,9 +434,9 @@
 		8EF540FF89BA54744CF94CC4 /* ApmeCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeCollector.swift; sourceTree = "<group>"; };
 		908DB05568DE4E828CD7FCE6 /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		92F84E0AB4261F8308A45186 /* AgentStateHolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStateHolder.swift; sourceTree = "<group>"; };
-		93F845B5C2D610A38007523C /* AgentDeck_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; name = AgentDeck_iOS.app; path = AgentDeck.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		93F845B5C2D610A38007523C /* AgentDeck_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgentDeck_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		95824B0CF6571507DBAF27C5 /* TimelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineStore.swift; sourceTree = "<group>"; };
-		960777CE6214381ADD730F6D /* AgentDeck.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentDeck.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		960777CE6214381ADD730F6D /* AgentDeck_macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentDeck_macOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		965AE4E31EBD72B1A484DE25 /* DevicePreviewScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicePreviewScreen.swift; sourceTree = "<group>"; };
 		979988BB4CB2A4B5948FD360 /* Adapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adapter.swift; sourceTree = "<group>"; };
 		9965CED8937C8C1F27DFCC68 /* OnboardingScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingScreen.swift; sourceTree = "<group>"; };
@@ -570,6 +573,7 @@
 				41CF82AE8E20EDCAE99DCEDD /* SessionLauncherTests.swift */,
 				BB282455F078889B6DB35F93 /* TerrariumCloudFoldTests.swift */,
 				7847FA7381FB8075331B0F12 /* TimelineTests.swift */,
+				7D05CE505E1EC5729C69752E /* TopologyRailHelpersTests.swift */,
 				B9841FBF8AFC5D5C65809F8B /* UsageAPIClientThreadingTests.swift */,
 			);
 			path = AgentDeckTests;
@@ -635,7 +639,7 @@
 			isa = PBXGroup;
 			children = (
 				93F845B5C2D610A38007523C /* AgentDeck_iOS.app */,
-				960777CE6214381ADD730F6D /* AgentDeck.app */,
+				960777CE6214381ADD730F6D /* AgentDeck_macOS.app */,
 				BACE8D6702379152FF2F5E46 /* AgentDeckTests_iOS.xctest */,
 				4FD4B5CF393BD9B6CEDBCFAF /* AgentDeckTests_macOS.xctest */,
 			);
@@ -1026,7 +1030,7 @@
 			packageProductDependencies = (
 			);
 			productName = AgentDeck_macOS;
-			productReference = 960777CE6214381ADD730F6D /* AgentDeck.app */;
+			productReference = 960777CE6214381ADD730F6D /* AgentDeck_macOS.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -1134,6 +1138,7 @@
 				6D2EA7E15F98B8510CF048E9 /* SessionLauncherTests.swift in Sources */,
 				56228049434E99DBC2BFD016 /* TerrariumCloudFoldTests.swift in Sources */,
 				DBE7242898F7F03CB3463B6D /* TimelineTests.swift in Sources */,
+				AFF81F64527A02F26615AB61 /* TopologyRailHelpersTests.swift in Sources */,
 				CB4DB4586BC5196412C3429C /* UsageAPIClientThreadingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1156,6 +1161,7 @@
 				9B1DF1D553619B6728566E86 /* SessionLauncherTests.swift in Sources */,
 				7409E65BFDFE78944B389B63 /* TerrariumCloudFoldTests.swift in Sources */,
 				4F6DEDF8FD3A71AFD059278D /* TimelineTests.swift in Sources */,
+				0E60D3FBC7626624FF7B5A2E /* TopologyRailHelpersTests.swift in Sources */,
 				DD57AEBB6F916C984C85F48F /* UsageAPIClientThreadingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1513,7 +1519,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1534,7 +1540,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1599,7 +1605,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1614,7 +1620,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1629,18 +1635,19 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AgentDeck/Resources/AgentDeck.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = R22679GY5Z;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_FILE = "AgentDeck/Resources/Info-macOS.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
+				PROVISIONING_PROFILE_SPECIFIER = "AgentDeck Dashboard macOS AppStore";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = AGENTDECK_APP_STORE;
 			};
@@ -1700,8 +1707,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = R22679GY5Z;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
@@ -1711,6 +1718,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = bound.serendipity.agentdeck.dashboard;
 				PRODUCT_NAME = AgentDeck;
+				PROVISIONING_PROFILE_SPECIFIER = "AgentDeck Dashboard AppStore";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1725,8 +1733,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = R22679GY5Z;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = AgentDeck/Resources/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_FILE = "AgentDeck/Resources/Info-macOS.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

@@ -318,13 +318,12 @@ struct TopologyRail: View {
                     Text(sub.name)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.text)
-                    if let until = sub.until,
-                       let untilDate = Self.parseUntilDate(until),
-                       untilDate > Date() {
+                    let trailing = Self.subscriptionTrailing(for: sub.until, now: Date())
+                    if let trailing {
                         Spacer(minLength: 4)
-                        Text(formatShortDate(until))
+                        Text(trailing.text)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(TerrariumHUD.subtext)
+                            .foregroundStyle(trailing.expired ? TerrariumHUD.ledAmber : TerrariumHUD.subtext)
                     }
                 }
             }
@@ -332,16 +331,43 @@ struct TopologyRail: View {
         .padding(.top, 4)
     }
 
+    /// Resolve what (if anything) sits to the right of the subscription
+    /// name. Codex writes `chatgpt_subscription_active_until` once at login
+    /// and never refreshes it on auto-renewal, so a past date here is the
+    /// common case after a few months — surface it as "renewal needed"
+    /// instead of hiding the row silently. `nil` means "no trailing text"
+    /// (the subscription has no `until` field at all, e.g. Claude).
+    static func subscriptionTrailing(for until: String?, now: Date) -> (text: String, expired: Bool)? {
+        guard let until, !until.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        guard let parsed = parseUntilDate(until) else {
+            return ("renewal needed", true)
+        }
+        if parsed > now {
+            return (formatShortDate(until), false)
+        }
+        return ("renewal needed", true)
+    }
+
+    private static func formatShortDate(_ input: String) -> String {
+        guard let date = parseUntilDate(input) else { return input }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d"
+        return fmt.string(from: date)
+    }
+
     // MARK: - Downstream rows
     //
     // Behaviour across build variants:
     //
-    //   * App Store build — ADB is the only module compiled out (spawning
-    //     `adb` violates Apple 2.5.2). D200H / Pixoo / ESP32-serial all
-    //     run: `device.usb` and `device.serial` entitlements are granted,
-    //     and serial I/O + Wi-Fi provisioning to ESP32 go through direct
-    //     FileHandle writes (no Process()). So `moduleHealth.adb` is nil
-    //     but `.serial`, `.d200h`, `.pixoo` are all populated.
+    //   * App Store build — ADB is status-only: the in-process daemon never
+    //     spawns `adb` (Apple 2.5.2) and its stub snapshot stays
+    //     `available=false` with no devices, so no Android rows render.
+    //     D200H / Pixoo / ESP32-serial all run: `device.usb` and
+    //     `device.serial` entitlements are granted, and serial I/O + Wi-Fi
+    //     provisioning to ESP32 go through direct FileHandle writes
+    //     (no Process()).
     //
     //   * Node CLI / unsigned dev build — every module runs, including
     //     ADB, so Android / Ulanzi TC001 devices become visible too.
@@ -761,18 +787,14 @@ struct TopologyRail: View {
         }
     }
 
-    private func formatShortDate(_ input: String) -> String {
-        guard let date = Self.parseUntilDate(input) else { return input }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d"
-        return fmt.string(from: date)
-    }
-
     /// Parse an ISO8601 timestamp from `SubscriptionInfo.until`. Returns `nil`
     /// when the string is empty, malformed, or unparseable. The renderer uses
-    /// the result to drop expired or invalid dates so the dashboard never
-    /// shows a stale "ChatGPT Plus · 2025-03-04" once the underlying JWT
-    /// fell behind the user's actual subscription state.
+    /// the result to decide between "Mar 4" (date in the future) and
+    /// "renewal needed" (date in the past) — see `subscriptionTrailing`. The
+    /// bare-date branch gates on a regex because `DateFormatter` quietly
+    /// accepts variants like `2026/05/06` even with `dateFormat =
+    /// "yyyy-MM-dd"`, which would smuggle malformed strings past the
+    /// expired-vs-future check.
     static func parseUntilDate(_ input: String) -> Date? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -783,11 +805,15 @@ struct TopologyRail: View {
         if let date = plain.date(from: trimmed) { return date }
         // Tolerate "YYYY-MM-DD" (no time component) — `chatgpt_subscription_active_until`
         // sometimes lands as a date-only string after token rewrites.
+        guard trimmed.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
         let dateOnly = DateFormatter()
         dateOnly.calendar = Calendar(identifier: .iso8601)
         dateOnly.locale = Locale(identifier: "en_US_POSIX")
         dateOnly.timeZone = TimeZone(secondsFromGMT: 0)
         dateOnly.dateFormat = "yyyy-MM-dd"
+        dateOnly.isLenient = false
         return dateOnly.date(from: trimmed)
     }
 }

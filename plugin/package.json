@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rollup -c",
+    "build": "node scripts/build.mjs",
     "dev": "rollup -c --watch",
     "clean": "rm -rf .sdPlugin/bin",
     "typecheck": "tsc --noEmit"

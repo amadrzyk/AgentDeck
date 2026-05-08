@@ -109,8 +109,8 @@ fun EinkAttentionPanel(
                 Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = "ATTENTION",
-                    fontSize = 11.sp,
-                    lineHeight = 12.sp,
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
                     color = accent,
@@ -119,8 +119,8 @@ fun EinkAttentionPanel(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "+${featured.queuedCount}",
-                        fontSize = 10.sp,
-                        lineHeight = 12.sp,
+                        fontSize = 12.sp,
+                        lineHeight = 15.sp,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -128,8 +128,8 @@ fun EinkAttentionPanel(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = featured.projectName ?: "Session",
-                    fontSize = 12.sp,
-                    lineHeight = 14.sp,
+                    fontSize = 15.sp,
+                    lineHeight = 19.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -138,8 +138,8 @@ fun EinkAttentionPanel(
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -150,8 +150,8 @@ fun EinkAttentionPanel(
             featured.question?.takeIf { it.isNotBlank() }?.let { question ->
                 Text(
                     text = question,
-                    fontSize = 11.sp,
-                    lineHeight = 13.sp,
+                    fontSize = 14.sp,
+                    lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -202,8 +202,8 @@ private fun AttentionOptionRow(
     ) {
         Text(
             text = indexLabel,
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
+            fontSize = 12.sp,
+            lineHeight = 15.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -211,8 +211,8 @@ private fun AttentionOptionRow(
         )
         Text(
             text = option.label,
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
             fontWeight = if (option.recommended == true || selected) FontWeight.Bold else FontWeight.Normal,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,

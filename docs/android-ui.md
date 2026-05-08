@@ -1,6 +1,6 @@
 # Android UI/UX Vision
 
-두 디바이스에서 iOS Dashboard 와 같은 에이전트 정보를 같은 조작 모델로 시각화한다. Android tablet 은 iOS Dashboard 의 UX parity 를 목표로 하고, e-ink 는 별도 “기능 UX”가 아니라 느린 화면 갱신/저대비/작은 화면을 위한 렌더링·레이아웃 제약만 둔다. 빌드/기기 레퍼런스는 [android.md](android.md) 참조.
+두 디바이스에서 iOS Dashboard 와 같은 에이전트 정보를 같은 조작 모델로 시각화한다. Android tablet 은 iOS Dashboard 의 UX parity 를 목표로 하고, e-ink 는 별도 “기능 UX”가 아니라 느린 화면 갱신/저대비/작은 화면을 위한 고대비 projection 을 둔다. 빌드/기기 레퍼런스는 [android.md](android.md) 참조.
 
 ## 표시 정보 (공통)
 
@@ -11,17 +11,32 @@
 - **Ollama Status**: ollama 프로세스 상태 (running/stopped) + 실행 중 모델 목록
 - **Creature Animation**: 도트/픽셀 아트 형태의 에이전트 캐릭터 애니메이션
 
-## E-ink (Crema/Pantone/Kobo) — 같은 Dashboard, refresh-constrained presentation
+Timeline 은 raw event feed 가 아니라 의미 단위 projection 이다. `chat_start` 는 같은
+session/project 의 completion 이 생기기 전까지만 진행 중 row 로 남고, completion 이후에는
+`chat_response` / `chat_end` / `eval_result` 가 요약된 단위 session row 를 대표한다. Android tablet 과
+e-ink 는 `TimelineDisplay.kt` 의 같은 projection 을 사용하며, 그룹화는 `runId → sessionId →
+projectName+agentType` context 가 같을 때만 허용한다.
 
-E-ink 는 tablet/iOS 와 다른 제품 경험을 만들지 않는다. 보존해야 할 차이는 다음뿐이다.
+## E-ink (Crema/Pantone/Kobo) — shared Dashboard model, readable projection
+
+E-ink 는 tablet/iOS 와 같은 화면 배치를 강제하지 않는다. 공통화 대상은 상태 모델, 세션 focus,
+option 응답, settings 의미, topology 관계, timeline 의미다. 표현은 e-ink 에 맞는 `EinkMonitorScreen`
+projection 을 사용한다.
 
 - EPD refresh zones / debounce / full-refresh timing: ghosting, flicker, battery를 제어하기 위한 장치 로직
 - grayscale/color e-ink rendering path: path 연산 실패, 16-level gray snap, color e-ink A2 partial refresh 등 실제 렌더링 제약
 - 작은 화면/강제 landscape/immersive mode: Crema/Pantone 등 물리 디스플레이 한계
+- 고대비 정보 배치: 투명 overlay, 작은 컬러 텍스트, 장식 배경 위 텍스트, 색상만으로 구분하는 상태 표시 금지
 
-따라서 세션 focus, option 응답, connection/settings 의미, topology 관계는 iOS/tablet Dashboard 와 동일해야 한다. e-ink 전용 화면은 이 공통 Dashboard 의미를 저빈도 갱신 화면에 맞게 압축한 표현이다.
+따라서 세션 focus, option 응답, connection/settings 의미, topology 관계는 iOS/tablet Dashboard 와 동일해야
+한다. 다만 같은 정보를 같은 픽셀 위치에 놓는 것은 parity 가 아니다. e-ink 전용으로 남겨야 하는 코드는
+`EinkMonitorScreen`, `EinkAquariumFrame`, `EinkRenderer`, EPD refresh helper, grayscale/color palette,
+hardware rotation fallback 처럼 판독성과 물리 표시 장치에 직접 연결된 부분이다.
 
-### 현재 refresh-constrained 레이아웃 — 좌측 에이전트 + 우측 아쿠아리움 중심
+### Refresh-constrained projection
+
+아래 3-zone layout 이 e-ink 의 기본 projection 이다. 신규 구현은 tablet `MonitorScreen` overlay 를
+e-ink 에 그대로 얹지 말고, 이 projection 에 공통 Dashboard state/action 을 연결한다.
 
 Row(fillMaxSize): 좌측 에이전트 패널 | 우측 아쿠아리움+정보
 
@@ -38,11 +53,11 @@ Row(fillMaxSize): 좌측 에이전트 패널 | 우측 아쿠아리움+정보
                      10:33 [S] IDLE → PROCESSING
 ```
 
-- 좌측(22%): AgentDeck 로고 + 에이전트 목록 (primary + siblings + gateway-detected)
-- 우측(78%): 아쿠아리움 수조(상단 40-50%) + context/status(중간, PROCESSING시만) + 타임라인(하단 35-38%)
-- IDLE시 context 숨김 → 수조 50% + 상태바 13% + 타임라인 37%. PROCESSING시 context 없으면(OpenClaw 등) IDLE과 동일 레이아웃
+- 좌측(28%): AgentDeck 로고 + 에이전트 목록 (primary + siblings + gateway-detected). 14sp 미만의 핵심 텍스트 금지
+- 우측(72%): 아쿠아리움 수조(상단 40-45%) + context/status(중간, 항상 판독 가능한 높이 확보) + 타임라인(하단 35-40%)
+- IDLE시 context 숨김 → 수조 42% + 상태바 20% + 타임라인 38%. PROCESSING/attention 은 context band 를 22-30% 로 키워 touch/reading target 을 우선한다.
 - **Status 2-column**: LIMITS(30%, Unicode 블록 게이지 `█░`) | MODELS/DEVICES(70%, OAuth catalog + Ollama + downstream device summary). `Display panels` 의 `Tank status` 와 `Device diagnostic` 토글은 이 압축 패널 안에서도 분리되어 반영된다.
-- **Settings parity**: tablet/iOS 와 같은 Connection / Mac integrations(read-only) / Display panels / Display & sleep / About 의미를 유지하되, e-ink 는 흑백 Surface/segment/switch 로 렌더링한다. 세션 focus 와 option 응답은 tablet 과 동일하게 bridge 명령을 보낸다.
+- **Settings parity**: tablet/iOS 와 같은 Connection / Mac integrations(read-only) / Display panels / Display & sleep / About 의미를 유지한다. 세션 focus 와 option 응답은 tablet 과 동일하게 bridge 명령을 보낸다.
 - **Attention parity**: 어떤 세션이든 `awaiting_*` 상태가 되면 e-ink context band 에 `ATTENTION` 패널을 띄운다. focused session 이면 실제 question/options/cursor 를 표시하고, 다른 session 이면 iOS/tablet 과 동일하게 focus 후 `select_option` 을 보내며 parser 가 옵션을 못 준 경우 `Yes/No/Always` fallback 을 제공한다.
 - **Orientation**: portrait/landscape 둘 다 지원한다. rotate control 은 `Settings button` 표시 여부와 독립적으로 남겨 화면 전환을 잃지 않게 하고, Pantone/RK3566 처럼 `requestedOrientation` 을 무시하는 기기는 `USER_ROTATION` fallback 을 함께 적용한다. `Auto` 는 `ACCELEROMETER_ROTATION` 을 다시 켜 system rotation 을 복원한다. 기본값은 e-ink landscape 고정, 일반 tablet 은 Auto 다.
 - 수조: Compose `clip(RoundedCornerShape)` 둥근 모서리 (내부 테두리 없음), 수면 파도, 해초, 자갈, 거품 — 수족관 느낌

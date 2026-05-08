@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import dev.agentdeck.state.GroupedEntry
 import dev.agentdeck.state.TimelineEntry
 import dev.agentdeck.state.groupConsecutive
+import dev.agentdeck.state.timelineDisplayGroups
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -27,7 +28,7 @@ import java.util.Locale
 
 /**
  * Compact event log for e-ink center column.
- * Shows recent 14 events with type icons and grouping, "HH:MM ▶ summary" monospace format.
+ * Shows the most recent grouped events with large monospace text.
  */
 @Composable
 fun EinkEventLog(
@@ -37,10 +38,11 @@ fun EinkEventLog(
     val scrollState = rememberScrollState()
     val recent = remember(entries) {
         entries
-            .filterNot { it.type == "chat_end" && it.agentType == "claude-code" }
-            .takeLast(20)
+            .takeLast(40)
     }
-    val grouped = remember(recent) { groupConsecutive(recent).takeLast(14) }
+    val grouped = remember(recent) {
+        timelineDisplayGroups(groupConsecutive(recent)).takeLast(10)
+    }
 
     // Auto-scroll to bottom when new entries arrive
     LaunchedEffect(recent.size) {
@@ -57,7 +59,8 @@ fun EinkEventLog(
             text = "TIMELINE",
             style = MaterialTheme.typography.bodySmall.copy(
                 fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
                 fontWeight = FontWeight.Bold,
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -85,8 +88,8 @@ fun EinkEventLog(
                     text = line,
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
+                        fontSize = 15.sp,
+                        lineHeight = 21.sp,
                         fontWeight = if (entry.type == "chat_start") FontWeight.Bold else FontWeight.Normal,
                     ),
                     color = eventColor ?: MaterialTheme.colorScheme.onSurface,
@@ -98,8 +101,8 @@ fun EinkEventLog(
                         text = "  ${entry.detail}",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            lineHeight = 14.sp,
+                            fontSize = 13.sp,
+                            lineHeight = 17.sp,
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

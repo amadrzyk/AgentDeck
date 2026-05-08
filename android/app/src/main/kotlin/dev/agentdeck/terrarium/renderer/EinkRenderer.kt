@@ -1619,8 +1619,31 @@ object EinkRefreshHelper {
             return
         } catch (_: Exception) {}
 
+        // Kobo / Tolino / KOReader-style: write the EPD waveform via mxcfb ioctl
+        // wrapper exposed as a system property bridge on some devices.
+        if (tryKoboRefresh(view, koboMode = "GC16")) return
+
         // Fallback: standard invalidate
         view.invalidate()
+    }
+
+    /**
+     * Kobo / Tolino fallback (KOReader-compatible).
+     * Devices that ship neither EinkManager nor the Onyx SDK still expose a
+     * waveform hint through the `sys.eink.update` system property, which the
+     * vendor's display HAL picks up. This path is best-effort and silently
+     * degrades to a normal invalidate on devices that ignore it.
+     */
+    private fun tryKoboRefresh(view: View, koboMode: String): Boolean {
+        return try {
+            val systemProps = Class.forName("android.os.SystemProperties")
+            val set = systemProps.getMethod("set", String::class.java, String::class.java)
+            set.invoke(null, "sys.eink.update", koboMode)
+            view.invalidate()
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun requestPartialRefresh(view: View) {

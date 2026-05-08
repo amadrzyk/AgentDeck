@@ -117,8 +117,8 @@ fun EinkAgentPanel(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         // Brand logo — centered with accent bar
         AgentDeckLogo(isEink = true, modifier = Modifier.fillMaxWidth())
@@ -155,7 +155,8 @@ fun EinkAgentPanel(
         state.workerSessionCount?.takeIf { state.gatewayConnected == true && it > 0 }?.let {
             Text(
                 text = "Workers: $it",
-                fontSize = 13.sp,
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -235,7 +236,8 @@ internal fun EinkAgentBlock(
             BrandIcon(agentType = agentType, isEink = true)
             Text(
                 text = displayName,
-                fontSize = 14.sp,
+                fontSize = 16.sp,
+                lineHeight = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
@@ -244,7 +246,8 @@ internal fun EinkAgentBlock(
         }
         Text(
             text = subLine,
-            fontSize = 13.sp,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
             fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,

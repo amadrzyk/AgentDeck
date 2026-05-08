@@ -3318,6 +3318,10 @@ final class DaemonServer {
         }
         // Module health for device diagnostic panel
         e["moduleHealth"] = buildModuleHealthSync()
+        // Subscription rows belong on every state_update — the SwiftUI rail
+        // reads `state.subscriptions` from this event, not from usage_update.
+        let subscriptions = buildSubscriptions()
+        if !subscriptions.isEmpty { e["subscriptions"] = subscriptions }
         return e
     }
 

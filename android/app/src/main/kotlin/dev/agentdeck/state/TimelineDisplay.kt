@@ -1,0 +1,79 @@
+package dev.agentdeck.state
+
+/**
+ * Dashboard-facing timeline projection.
+ *
+ * The raw timeline is intentionally low-level; this projection turns it into
+ * meaningful lifecycle rows. An in-flight chat_start remains visible until a
+ * same-session completion arrives. Once a chat_response/model_response/chat_end
+ * arrives, the completion row becomes the user-visible unit.
+ */
+fun timelineDisplayGroups(groups: List<GroupedEntry>): List<GroupedEntry> =
+    groups.filter { group ->
+        val entry = group.entry
+        when (entry.type) {
+            "chat_start" -> !hasLaterCompletion(entry, groups)
+            "chat_end" -> !hasPairedChatResponse(entry, groups)
+            else -> true
+        }
+    }
+
+fun isTimelineCompletionEntry(entry: TimelineEntry): Boolean =
+    entry.type == "chat_response" || entry.type == "chat_end" || entry.type == "model_response"
+
+fun sameTimelineContext(a: TimelineEntry, b: TimelineEntry): Boolean {
+    val aRunId = a.runId?.takeIf { it.isNotBlank() }
+    val bRunId = b.runId?.takeIf { it.isNotBlank() }
+    if (aRunId != null && bRunId != null) return aRunId == bRunId
+
+    val aSessionId = a.sessionId?.takeIf { it.isNotBlank() }
+    val bSessionId = b.sessionId?.takeIf { it.isNotBlank() }
+    if (aSessionId != null && bSessionId != null) return aSessionId == bSessionId
+
+    if (a.projectName.hasText() && a.projectName == b.projectName && a.agentType == b.agentType) return true
+
+    return aRunId == null && bRunId == null &&
+        aSessionId == null && bSessionId == null &&
+        !a.projectName.hasText() && !b.projectName.hasText() &&
+        a.agentType == b.agentType
+}
+
+fun pairedTimelineStart(entry: TimelineEntry, entries: List<TimelineEntry>): TimelineEntry? =
+    entries.lastOrNull { candidate ->
+        candidate.type == "chat_start" &&
+            candidate.timestamp <= entry.timestamp &&
+            entry.timestamp - candidate.timestamp <= 12 * 60 * 60 * 1000L &&
+            sameTimelineContext(candidate, entry)
+    }
+
+fun timelineLifecycleBounds(entry: TimelineEntry, entries: List<TimelineEntry>): Pair<Long?, Long?> {
+    val startedAt = entry.startedAt ?: pairedTimelineStart(entry, entries)?.timestamp
+    val endedAt = entry.endedAt ?: if (isTimelineCompletionEntry(entry) || entry.type == "eval_result") {
+        entry.timestamp
+    } else {
+        null
+    }
+    return startedAt to endedAt
+}
+
+private fun hasLaterCompletion(start: TimelineEntry, groups: List<GroupedEntry>): Boolean =
+    groups.any { other ->
+        isTimelineCompletionEntry(other.entry) &&
+            other.entry.timestamp >= start.timestamp &&
+            sameTimelineContext(start, other.entry)
+    }
+
+private fun hasPairedChatResponse(end: TimelineEntry, groups: List<GroupedEntry>): Boolean =
+    groups.any { other ->
+        if (other.entry.type != "chat_response") return@any false
+        if (!sameTimelineContext(end, other.entry)) return@any false
+        val endStartedAt = end.startedAt
+        val responseStartedAt = other.entry.startedAt
+        if (endStartedAt != null && responseStartedAt != null) {
+            kotlin.math.abs(endStartedAt - responseStartedAt) < 1000L
+        } else {
+            kotlin.math.abs(end.timestamp - other.entry.timestamp) <= 10_000L
+        }
+    }
+
+private fun String?.hasText(): Boolean = !isNullOrBlank()

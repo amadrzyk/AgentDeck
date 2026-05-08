@@ -173,28 +173,17 @@ enum DashboardDataRules {
         return byKey.values.sorted(by: compareModelRows)
     }
 
+    /// Subtitle shown under the OpenClaw row in the HUD upstream rail. We
+    /// only surface the model the user has marked as primary in OpenClaw
+    /// (`role == "default"`); fallback tiers and user-configured extras stay
+    /// hidden so the row reads as "what OpenClaw is routing to right now"
+    /// instead of dumping the entire catalog. If no model carries the
+    /// default role the row collapses to empty — promoting a non-default
+    /// entry would silently override the explicit "primary only" rule.
     static func openClawDisplayLines(_ modelCatalog: [ModelCatalogEntry]) -> [String] {
-        let available = sortedModelCatalog(modelCatalog).filter(\.available)
-        guard !available.isEmpty else { return [] }
-
-        let primary = normalizedModelName(available[0].name)
-        let remainder = available.dropFirst().map { normalizedModelName($0.name) }
-        guard !remainder.isEmpty else { return [primary] }
-
-        var groups: [String: [String]] = [:]
-        var familyOrder: [String] = []
-        for normalized in remainder {
-            let family = modelFamilyKey(normalized)
-            if groups[family] == nil { familyOrder.append(family) }
-            groups[family, default: []].append(normalized)
-        }
-
-        let compacted = familyOrder.compactMap { family -> String? in
-            guard let names = groups[family] else { return nil }
-            let line = compactModelFamily(names)
-            return line.isEmpty ? nil : line
-        }
-        return [primary] + compacted
+        let primary = sortedModelCatalog(modelCatalog).first { $0.available && $0.role == "default" }
+        guard let primary else { return [] }
+        return [normalizedModelName(primary.name)]
     }
 
     private static func compareModelEntries(_ lhs: ModelCatalogEntry, _ rhs: ModelCatalogEntry) -> Bool {
@@ -327,48 +316,6 @@ enum DashboardDataRules {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func modelFamilyKey(_ name: String) -> String {
-        let lower = name.lowercased()
-        if lower.hasPrefix("glm") { return "glm" }
-        if lower.hasPrefix("gpt") { return "gpt" }
-        if lower.hasPrefix("deepseek") { return "deepseek" }
-        if lower.hasPrefix("claude") { return "claude" }
-        if lower.hasPrefix("gemini") { return "gemini" }
-        if lower.hasPrefix("qwen") { return "qwen" }
-        if lower.hasPrefix("llama") { return "llama" }
-        return name
-    }
-
-    private static func compactModelFamily(_ names: [String]) -> String {
-        let deduped = names.reduce(into: [String]()) { result, name in
-            if !result.contains(name) {
-                result.append(name)
-            }
-        }
-        guard let first = deduped.first else { return "" }
-        guard deduped.count > 1 else { return first }
-
-        let prefix = familyDisplayPrefix(first)
-        guard !prefix.isEmpty else { return deduped.joined(separator: ", ") }
-
-        return deduped.enumerated().map { index, name in
-            guard index > 0, name.hasPrefix(prefix) else { return name }
-            return String(name.dropFirst(prefix.count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }.joined(separator: ", ")
-    }
-
-    private static func familyDisplayPrefix(_ name: String) -> String {
-        let lower = name.lowercased()
-        if lower.hasPrefix("glm-") { return "GLM-" }
-        if lower.hasPrefix("gpt-") { return "GPT-" }
-        if lower.hasPrefix("deepseek ") { return "DeepSeek " }
-        if lower.hasPrefix("claude ") { return "Claude " }
-        if lower.hasPrefix("gemini ") { return "Gemini " }
-        if lower.hasPrefix("qwen ") { return "Qwen " }
-        if lower.hasPrefix("llama ") { return "Llama " }
-        return ""
-    }
 }
 
 struct OcSessionStatus: Codable, Sendable {

@@ -21,10 +21,6 @@ struct SessionListPanel: View {
     /// Maximum visible sessions before showing overflow summary
     private let maxVisibleSessions = 10
 
-    /// Id of the session row with its "Jump to…" grid expanded. macOS-only
-    /// because `SessionJumpLauncher` launches AppKit workspace URLs.
-    @State private var expandedSessionId: String? = nil
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // Brand logo — stacked-deck mark + "AgentDeck" wordmark. Unified
@@ -115,15 +111,6 @@ struct SessionListPanel: View {
         /// (local) session, which uses `stateHolder.state.sessionId` as
         /// the focus target.
         let sessionId: String?
-
-        /// Stable key used for `expandedSessionId` so tapping the same row
-        /// twice toggles it closed even when the underlying sibling list
-        /// re-orders. Primary session falls back to a composite key since
-        /// it doesn't have a session.id from the SessionInfo list.
-        func stableId(suffix: String) -> String {
-            if let sid = sessionId { return sid }
-            return "primary|\(projectName)|\(agentType ?? "")\(suffix)"
-        }
     }
 
     private func buildEntries() -> [SessionEntry] {
@@ -205,76 +192,21 @@ struct SessionListPanel: View {
 
     // MARK: - Session Row (interactive wrapper + row)
 
-    /// Row wrapper that handles taps:
-    /// * Always: `focusSession` so the dashboard/terrarium centers this
-    ///   session. Mirrors the existing creature-tap behavior.
-    /// * macOS: toggles a "Jump to…" grid beneath the row (iTerm / VS Code /
-    ///   Cursor / Reveal folder). Dashboard itself isn't a jump target from
-    ///   here since we're already in it.
+    /// Row wrapper that handles taps: dispatches `focusSession` so the
+    /// dashboard/terrarium centers this session. Mirrors the existing
+    /// creature-tap behavior.
     @ViewBuilder
     private func sessionRowInteractive(entry: SessionEntry, suffix: String) -> some View {
-        let rowId = entry.stableId(suffix: suffix)
-        VStack(alignment: .leading, spacing: 2) {
-            Button {
-                if let sid = entry.sessionId {
-                    stateHolder.sendCommand(.focusSession(sessionId: sid))
-                }
-                #if os(macOS)
-                expandedSessionId = (expandedSessionId == rowId) ? nil : rowId
-                #endif
-            } label: {
-                sessionRow(entry: entry, suffix: suffix)
-                    .contentShape(Rectangle())
+        Button {
+            if let sid = entry.sessionId {
+                stateHolder.sendCommand(.focusSession(sessionId: sid))
             }
-            .buttonStyle(.plain)
-
-            #if os(macOS)
-            if expandedSessionId == rowId {
-                jumpGrid(for: entry)
-                    .transition(.opacity)
-            }
-            #endif
+        } label: {
+            sessionRow(entry: entry, suffix: suffix)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
-
-    #if os(macOS)
-    /// 4-cell "Jump to…" grid rendered in terrarium dark palette. Dashboard
-    /// is absent (we're already here); Reveal folder is included but only
-    /// fires if we have a project path — today SessionInfo doesn't carry
-    /// one, so it falls back to just launching Finder.
-    private func jumpGrid(for entry: SessionEntry) -> some View {
-        let targets: [SessionJumpRow.JumpTarget] = [.iterm, .vscode, .cursor, .finder]
-        return HStack(spacing: 3) {
-            ForEach(targets) { target in
-                Button {
-                    SessionJumpLauncher.launch(target, projectPath: nil)
-                } label: {
-                    VStack(spacing: 1) {
-                        Image(systemName: target.symbol)
-                            .font(.system(size: 11))
-                        Text(target.label)
-                            .font(.system(size: 8, design: .monospaced))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(TerrariumHUD.text)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.black.opacity(0.5))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(TerrariumHUD.tetraNeon.opacity(0.25), lineWidth: 0.5)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.top, 2)
-        .padding(.bottom, 4)
-    }
-    #endif
 
     private func sessionRow(entry: SessionEntry, suffix: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
