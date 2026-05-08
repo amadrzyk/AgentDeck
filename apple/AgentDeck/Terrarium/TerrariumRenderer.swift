@@ -36,6 +36,14 @@ final class TerrariumRenderer {
     private var crayfishBubbleTimer: Float = 0
     private var opencodeBubbleTimer: Float = 0
 
+    // Focus halo
+    private var focusedSessionId: String?
+    private var focusPulse: Float = 0
+    /// 0..1 envelope. Ramps up when a creature gains focus, fades down when
+    /// the focused creature has no on-screen sprite (or focus cleared).
+    /// Avoids halo "snapping" on/off when sessions reorganize.
+    private var focusPresence: Float = 0
+
     // MARK: - Delta Time
 
     /// Compute dt from wall-clock, storing lastDate internally to avoid @State mutation.
@@ -66,6 +74,16 @@ final class TerrariumRenderer {
         syncOctopuses(state: state)
         syncClouds(state: state)
         syncOpenCode(state: state)
+
+        // Focus halo state
+        focusedSessionId = state.focusedSessionId
+        focusPulse += dt * 1.6
+        let hasVisibleFocus: Bool = {
+            guard let id = focusedSessionId else { return false }
+            return octopuses[id] != nil || clouds[id] != nil || opencodeCreatures[id] != nil
+        }()
+        let presenceTarget: Float = hasVisibleFocus ? 1.0 : 0.0
+        focusPresence += (presenceTarget - focusPresence) * min(1.0, dt * 6.0)
 
         // Update all subsystems
         waterEffect.update(dt: dt)
@@ -181,6 +199,12 @@ final class TerrariumRenderer {
         // Layer 6.5: Back-layer fish (behind creatures for 3D depth)
         tetra.drawBackLayer(context: &context, size: size)
 
+        // Layer 6.7: Focus halo (drawn behind every creature so the sprite
+        // sits cleanly inside the glow). Driven by stateHolder's focused
+        // session id; dashboards send a `focus_session` command on session
+        // row taps so this is the visible feedback for that gesture.
+        drawFocusHalo(context: &context, size: size)
+
         // Layer 7: Crayfish
         crayfish.draw(context: &context, size: size)
 
@@ -216,6 +240,68 @@ final class TerrariumRenderer {
             let rect = CGRect(origin: .zero, size: size)
             context.fill(Path(rect), with: .color(TerrariumColors.errorTint))
         }
+    }
+
+    // MARK: - Focus Halo
+
+    /// Soft cyan glow + ring drawn behind the creature whose session id is
+    /// currently focused. Pulses gently so the user can spot the focus
+    /// shift after tapping a row in `SessionListPanel` / menubar
+    /// `ControlTowerPanel`. Falls through silently when the focused id has
+    /// no on-screen sprite (e.g. focus on a non-cloud sibling that lives
+    /// off-canvas, or no creatures yet).
+    private func drawFocusHalo(context: inout GraphicsContext, size: CGSize) {
+        guard let id = focusedSessionId, focusPresence > 0.01 else { return }
+
+        let pos: (x: Float, y: Float, scale: Float)?
+        if let oct = octopuses[id] {
+            pos = (oct.currentX, oct.currentY, oct.scale)
+        } else if let cl = clouds[id] {
+            pos = (cl.currentX, cl.currentY, cl.scale)
+        } else if let oc = opencodeCreatures[id] {
+            pos = (oc.currentX, oc.currentY, oc.scale)
+        } else {
+            pos = nil
+        }
+        guard let p = pos else { return }
+
+        let cx = CGFloat(p.x) * size.width
+        let cy = CGFloat(p.y) * size.height
+
+        let pulse = 0.5 + 0.5 * sin(focusPulse)
+        let presence = CGFloat(focusPresence)
+
+        let minDim = min(size.width, size.height)
+        let baseRadius = CGFloat(p.scale) * 0.085 * minDim
+        let pulseRadius = baseRadius * (1.0 + 0.10 * CGFloat(pulse))
+
+        // Soft inner disc — subtle glow filling the halo.
+        let discRect = CGRect(
+            x: cx - pulseRadius,
+            y: cy - pulseRadius,
+            width: pulseRadius * 2,
+            height: pulseRadius * 2
+        )
+        let discAlpha = (0.18 + 0.18 * Double(pulse)) * Double(presence)
+        context.fill(
+            Path(ellipseIn: discRect),
+            with: .color(TerrariumColors.tetraNeon.opacity(discAlpha))
+        )
+
+        // Crisp neon outline ring.
+        let ringRadius = pulseRadius * 1.05
+        let ringRect = CGRect(
+            x: cx - ringRadius,
+            y: cy - ringRadius,
+            width: ringRadius * 2,
+            height: ringRadius * 2
+        )
+        let ringAlpha = (0.55 + 0.25 * Double(pulse)) * Double(presence)
+        context.stroke(
+            Path(ellipseIn: ringRect),
+            with: .color(TerrariumColors.tetraNeon.opacity(ringAlpha)),
+            lineWidth: 1.5
+        )
     }
 
     // MARK: - Background (3-color gradient, environment-adaptive)

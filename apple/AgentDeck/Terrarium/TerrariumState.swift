@@ -92,6 +92,12 @@ struct TerrariumState {
 
     /// Pop burst positions (from ASKING exit)
     var popBurstPositions: [(x: Float, y: Float)] = []
+
+    /// Visual id of the creature corresponding to the focused session.
+    /// Resolved through codex-cli folding so a focused thread id maps to the
+    /// representative cloud sprite. Renderer draws a focus halo behind the
+    /// matching creature.
+    var focusedSessionId: String? = nil
 }
 
 // MARK: - Mapping from DashboardState
@@ -266,6 +272,10 @@ extension DashboardState {
 
         let cloudSlots = CreatureLayout.layoutCloudCreatures(count: cloudGroupOrder.count)
         var cloudCreatures: [CloudCreatureState] = []
+        // Resolve a focused codex thread id to its representative so the
+        // halo lights up the visible cloud sprite even when the focus relay
+        // points at a folded thread id.
+        var resolvedFocusId: String? = sessionId
         for (slotIdx, key) in cloudGroupOrder.enumerated() {
             guard let members = cloudGroups[key], !members.isEmpty else { continue }
             // Aggregate state = highest-priority member.
@@ -288,8 +298,12 @@ extension DashboardState {
                 scale: slot.scale,
                 groupSize: members.count
             ))
+            if let focused = sessionId, members.contains(where: { $0.id == focused }) {
+                resolvedFocusId = representative.id
+            }
         }
         result.cloudCreatures = cloudCreatures
+        result.focusedSessionId = resolvedFocusId
 
         // OpenCode creatures
         let primaryIsOpenCode = state != .disconnected && agentType == "opencode"
