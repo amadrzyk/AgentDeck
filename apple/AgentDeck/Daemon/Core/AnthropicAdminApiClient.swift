@@ -156,21 +156,23 @@ final class AnthropicAdminApiClient: Sendable {
             let bucketStart = iso.date(from: bucket.startingAt) ?? Date.distantPast
             let isToday = calendar.isDate(bucketStart, inSameDayAs: now)
             for result in bucket.results {
-                month.input += result.uncached_input_tokens ?? result.input_tokens ?? 0
-                month.output += result.output_tokens ?? 0
-                month.cacheRead += result.cache_read_input_tokens ?? 0
-                month.cacheCreation += result.cache_creation_input_tokens ?? 0
+                let inputTokens = result.uncached_input_tokens ?? result.input_tokens ?? 0
+                let outputTokens = result.output_tokens ?? 0
+                let cacheReadTokens = result.cache_read_input_tokens ?? 0
+                let cacheCreationTokens = result.cache_creation_input_tokens ?? 0
+
+                month.input += inputTokens
+                month.output += outputTokens
+                month.cacheRead += cacheReadTokens
+                month.cacheCreation += cacheCreationTokens
                 if isToday {
-                    today.input += result.uncached_input_tokens ?? result.input_tokens ?? 0
-                    today.output += result.output_tokens ?? 0
-                    today.cacheRead += result.cache_read_input_tokens ?? 0
-                    today.cacheCreation += result.cache_creation_input_tokens ?? 0
+                    today.input += inputTokens
+                    today.output += outputTokens
+                    today.cacheRead += cacheReadTokens
+                    today.cacheCreation += cacheCreationTokens
                 }
                 if let model = result.model {
-                    let tokens = (result.uncached_input_tokens ?? result.input_tokens ?? 0)
-                        + (result.output_tokens ?? 0)
-                        + (result.cache_read_input_tokens ?? 0)
-                        + (result.cache_creation_input_tokens ?? 0)
+                    let tokens = inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
                     modelTotals[model, default: 0] += tokens
                 }
             }
