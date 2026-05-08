@@ -1,8 +1,8 @@
 #if os(macOS)
 // ApmeStore.swift — SQLite3 C API wrapper for APME data.
 // Shares the same DDL as bridge/src/apme/store.ts. Path resolves via
-// AuthManager.agentDeckDir → AgentDeckPaths (App Group container on signed
-// App Store builds, ~/.agentdeck/apme.sqlite fallback otherwise). The Node
+// AuthManager.agentDeckDir → AgentDeckPaths (App Store sandbox container on
+// signed App Store builds, ~/.agentdeck/apme.sqlite fallback otherwise). The Node
 // bridge still writes to ~/.agentdeck/apme.sqlite; the two only coexist on
 // unsigned dev builds — WAL + busy_timeout keeps that case safe.
 

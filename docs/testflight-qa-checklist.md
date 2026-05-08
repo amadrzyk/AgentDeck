@@ -136,16 +136,16 @@ Skip if you don't have OpenClaw 2026.4.14+ installed.
 
 - [ ] **I1**. Open Activity Monitor → find the AgentDeck process. Under the **Open Files and Ports** tab, confirm no subprocess children are spawned during normal use (no `bash`, `node`, `adb`, `whisper-cli`, `openclaw`).
 - [ ] **I2**. Try the menu bar's "Launch Session" — no process invocation should appear. It should only show the App Store-safe guidance dialog.
-- [ ] **I3**. Verify data is in the Group Container:
+- [ ] **I3**. Verify data is in the App Sandbox data container:
   ```bash
-  ls ~/Library/Group\ Containers/group.bound.serendipity.agentdeck.dashboard/
+  ls ~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application\ Support/AgentDeck/
   # Should show: daemon.json, sessions.json, auth-token, settings.json, apme.sqlite, …
   ```
 - [ ] **I4**. Verify `~/.agentdeck/` is NOT created (App Store build never writes there):
   ```bash
   ls -la ~/.agentdeck/ 2>/dev/null && echo "REGRESSION" || echo "OK (doesn't exist)"
   ```
-  If a pre-existing `~/.agentdeck/` exists from CLI usage, migration should have copied relevant files to Group Container on first launch (check AgentDeck.app log for "Migrated N file(s)").
+  If a pre-existing `~/.agentdeck/` exists from CLI usage, the App Store build must not write to it. Current 1.0 builds keep App Store state in the sandbox container and leave CLI state untouched.
 - [ ] **I5**. Run `apple/scripts/verify-appstore-archive.sh /Applications/AgentDeck.app` — should print `✓ ... passes App Store archive verification`.
 - [ ] **I6**. Speak a voice command. Open Network Utility / Little Snitch. Confirm no traffic to `*.apple.com` or any speech-related endpoint — audio must stay on-device.
 - [ ] **I7**. Generate an APME judge score (finish a Claude Code session). Confirm no outbound HTTPS traffic to `api.anthropic.com` (default backend is Foundation Models, on-device).

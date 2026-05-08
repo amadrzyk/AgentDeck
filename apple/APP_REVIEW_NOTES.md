@@ -26,9 +26,9 @@ The app is sandboxed. All non-trivial entitlements below are used for local-netw
 
 Used so the iOS companion can discover the Mac dashboard on the same LAN without asking the user for an IP address. `NSLocalNetworkUsageDescription` in Info.plist explains this to the user at the system prompt.
 
-## Group Container
+## Sandbox Data Container
 
-`com.apple.security.application-groups` = `group.bound.serendipity.agentdeck.dashboard` stores the daemon state (session registry, auth token, cached usage metrics, APME evaluation SQLite database). A future helper or login-item may share this data, hence the group. No user-identifiable data leaves the device.
+AgentDeck stores daemon state (session registry, auth token, cached usage metrics, APME evaluation SQLite database) inside the app's own sandbox container at `Application Support/AgentDeck`. The build does not request the optional App Groups entitlement because the submitted app has no helper, extension, or login item that needs shared container access. No user-identifiable data leaves the device.
 
 ## Hook installation (Claude Code settings file)
 

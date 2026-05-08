@@ -1,6 +1,6 @@
 // LocalSessionDiscovery.swift — macOS: read sessions.json from the AgentDeck
-// data directory (App Group container on signed builds, ~/.agentdeck/ fallback
-// otherwise — see AgentDeckPaths).
+// data directory (App Store sandbox container on signed builds, ~/.agentdeck/
+// fallback otherwise — see AgentDeckPaths).
 // On macOS the bridge runs on the same machine, so we can discover sessions
 // by reading the file system instead of relying on mDNS.
 

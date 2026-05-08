@@ -209,7 +209,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
     /// Merge the new backend choice into settings.json without clobbering
     /// other keys. Writes atomically so a crashed write doesn't leave the
     /// file half-parsed. The path resolves via AgentDeckPaths so signed
-    /// builds land in the App Group container.
+    /// builds land in the App Store sandbox container.
     private func writeApmeJudgeBackendToSettingsJson(_ backend: String) {
         #if os(macOS)
         let url = AgentDeckPaths.settingsJson

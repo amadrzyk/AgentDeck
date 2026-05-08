@@ -9,7 +9,7 @@
  *     in runner.ts is a stub that always throws. The Swift daemon
  *     (App Store macOS) does implement an Anthropic API adapter; users on
  *     macOS can set "api" through the Apple Settings picker because that
- *     value rides in a different Group Container settings.json. On the Node
+ *     value rides in the App Store sandbox settings.json. On the Node
  *     bridge, "api" is silently downgraded to "mlx" with a warning so a
  *     misconfigured value never produces silent zero-eval sessions.
  *   - `sampleRate` + `onlyWhenDisagreement` gate how often layer 2 runs at all.

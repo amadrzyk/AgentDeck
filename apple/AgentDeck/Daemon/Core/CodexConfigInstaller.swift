@@ -44,7 +44,7 @@ enum CodexConfigInstaller {
         return "http://127.0.0.1:\(port)/otel/v1/traces"
     }
 
-    /// Read `daemon.json` (Group Container path on App Store builds, or
+    /// Read `daemon.json` (sandbox container path on App Store builds, or
     /// `~/.agentdeck/` on Node builds) and return whichever port the
     /// daemon is actually listening on. Prefers `httpPort` over `port`
     /// because the Swift daemon splits HTTP/WS across ports.
@@ -304,7 +304,7 @@ enum CodexConfigInstaller {
         let lines = [
             #"PORT="${AGENTDECK_PORT:-}""#,
             #"if [ -z "$PORT" ]; then"#,
-            #"  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do"#,
+            #"  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do"#,
             #"    [ -f "$F" ] || continue"#,
             #"    P=$(python3 -c "import json;d=json.load(open('$F'));print(d.get('httpPort') or d.get('port',''))" 2>/dev/null)"#,
             #"    [ -n "$P" ] && curl -sf --max-time 0.3 "http://127.0.0.1:$P/health" >/dev/null 2>&1 && { PORT="$P"; break; }"#,
@@ -351,7 +351,7 @@ enum CodexConfigInstaller {
         let lines = [
             #"PORT="${AGENTDECK_PORT:-}""#,
             #"if [ -z "$PORT" ]; then"#,
-            #"  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do"#,
+            #"  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do"#,
             #"    [ -f "$F" ] || continue"#,
             #"    P=$(python3 -c "import json;d=json.load(open('$F'));print(d.get('httpPort') or d.get('port',''))" 2>/dev/null)"#,
             #"    [ -n "$P" ] && curl -sf --max-time 0.3 "http://127.0.0.1:$P/health" >/dev/null 2>&1 && { PORT="$P"; break; }"#,

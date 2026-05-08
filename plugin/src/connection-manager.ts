@@ -173,16 +173,18 @@ export class ConnectionManager extends EventEmitter implements AgentLink {
   /** Read daemon.json to find the daemon's port.
    *
    * The Node.js CLI writes `~/.agentdeck/daemon.json`; the Swift in-process
-   * daemon (App Store sandboxed macOS app) writes to its Group Container.
-   * Try both so the plugin works regardless of which daemon is hosting —
-   * matches the dual-path logic hook scripts already use (see memory:
-   * cross_dir_daemon_discovery.md). First live match wins.
+   * daemon (App Store sandboxed macOS app) writes inside the app sandbox.
+   * A legacy App Group path remains as a read fallback for pre-1.0 App Store
+   * candidates. First live match wins.
    */
   private findDaemonPort(): number | null {
     this.lastProbeAt = Date.now();
     const home = homedir();
     const candidates = [
       join(home, '.agentdeck', 'daemon.json'),
+      join(home, 'Library', 'Containers',
+           'bound.serendipity.agentdeck.dashboard', 'Data',
+           'Library', 'Application Support', 'AgentDeck', 'daemon.json'),
       join(home, 'Library', 'Group Containers',
            'group.bound.serendipity.agentdeck.dashboard', 'daemon.json'),
     ];

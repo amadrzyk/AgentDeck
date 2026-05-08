@@ -3,53 +3,39 @@
 // App Store blocker #7: The `~/.agentdeck/` directory lived behind the
 // `com.apple.security.temporary-exception.files.home-relative-path.read-write`
 // entitlement, which App Review rejects. App Sandbox requires data to live
-// inside the app's own container or a declared Group Container. We use a
-// Group Container so the macOS Dashboard app and any future App Store-friendly
-// helper can share a single store, and so data survives app reinstalls.
+// inside the app's own container or a declared Group Container. The App Store
+// build uses the app's own sandbox container so the provisioning profile does
+// not need the optional App Groups capability.
 //
 // Runtime behavior:
-//   - When the app is signed with the `com.apple.security.application-groups`
-//     entitlement listing `appGroupID`, `containerURL(forSecurityApplicationGroupIdentifier:)`
-//     returns `~/Library/Group Containers/<team>.<group>/`.
-//   - When running without that entitlement (unsigned dev builds, `xcodebuild`
-//     smoke tests, xctest), `containerURL` returns nil. We fall back to the
-//     legacy `~/.agentdeck/` path so nothing breaks during local development.
-//   - The fallback uses `NSHomeDirectory()` (inside sandbox it's the container
-//     home; outside sandbox it's the real home) — both work for unsigned runs.
+//   - Sandboxed App Store runs write to:
+//     `~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/`.
+//   - Unsandboxed dev builds and xctest continue to use the legacy
+//     `~/.agentdeck/` path so local CLI/plugin workflows remain unchanged.
 //
 // Migration: Users who were on a pre-Group-Container build have data in
 // `~/.agentdeck/`. `migrateLegacyDataIfNeeded()` was intended to copy those
-// files into the Group Container *while the legacy entitlement exception was
-// still present*. That exception was removed on 2026-04-17, so the shipped
-// App Store binary can no longer read the legacy directory — `stat(2)` still
-// reports it as existing across the sandbox, but `contentsOfDirectory` throws
-// NSCocoaErrorDomain 257. The migration therefore short-circuits under
-// `AgentDeckRuntime.isSandboxed` and remains functional only for unsandboxed
-// dev builds / xctest.
+// files while the legacy entitlement exception was still present. That
+// exception was removed on 2026-04-17, so the shipped App Store binary can no
+// longer read the legacy directory — `stat(2)` still reports it as existing
+// across the sandbox, but `contentsOfDirectory` throws NSCocoaErrorDomain 257.
+// The migration therefore short-circuits under `AgentDeckRuntime.isSandboxed`
+// and remains functional only for unsandboxed dev builds / xctest.
 
 import Foundation
 
 enum AgentDeckPaths {
-    /// App Group identifier. Must match the value in
-    /// `apple/AgentDeck/Resources/AgentDeck.entitlements` →
-    /// `com.apple.security.application-groups`. Mac App Store signing injects
-    /// the team prefix at archive time, so we reference the suffix here and
-    /// the runtime API resolves the full path.
-    static let appGroupID = "group.bound.serendipity.agentdeck.dashboard"
-
-    /// Root directory for all AgentDeck persistent state. Prefers the App
-    /// Group container when the entitlement is active; falls back to the
-    /// legacy `~/.agentdeck/` layout when it isn't (unsigned dev builds /
-    /// xctest / command-line `xcodebuild`).
+    /// Root directory for all AgentDeck persistent state. Sandboxed App Store
+    /// runs use the app container's Application Support directory; unsandboxed
+    /// dev builds and xctest use the legacy `~/.agentdeck/` layout.
     static let baseDirectory: URL = {
         let fm = FileManager.default
-        if let container = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) {
+        if AgentDeckRuntime.isSandboxed,
+           let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let container = appSupport.appendingPathComponent("AgentDeck", isDirectory: true)
             try? fm.createDirectory(at: container, withIntermediateDirectories: true)
             return container
         }
-        // Fallback: NSHomeDirectory() is the container root inside the sandbox
-        // and the real home otherwise — both are writable paths where the
-        // app can put state.
         let fallback = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".agentdeck", isDirectory: true)
         try? fm.createDirectory(at: fallback, withIntermediateDirectories: true)
@@ -107,7 +93,7 @@ enum AgentDeckPaths {
         let fm = FileManager.default
         guard fm.fileExists(atPath: legacy.path) else { return 0 }
 
-        // If source == destination (fallback mode before Group Container is
+        // If source == destination (fallback mode before sandbox routing is
         // active), nothing to do. We canonicalize by resolving symlinks and
         // comparing standardized paths.
         let legacyStd = legacy.standardizedFileURL.resolvingSymlinksInPath().path

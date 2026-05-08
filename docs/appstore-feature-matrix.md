@@ -62,7 +62,7 @@
 |---|:---:|:---:|
 | In-process Swift daemon (macOS) | ✅ | — |
 | Node.js bridge process | — | ✅ |
-| Data directory | `~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/` | `~/.agentdeck/` |
+| Data directory | `~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/` | `~/.agentdeck/` |
 
 ## 요약
 

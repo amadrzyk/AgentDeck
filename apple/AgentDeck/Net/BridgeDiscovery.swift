@@ -251,8 +251,8 @@ final class BridgeDiscovery: ObservableObject, @unchecked Sendable {
 
     /// Fetch token and agentType from bridge /health endpoint
     private func fetchHealthInfo(host: String, port: Int, completion: @escaping @Sendable (HealthInfo) -> Void) {
-        // macOS: read auth-token from the App Group container (or the legacy
-        // ~/.agentdeck/ fallback when the entitlement isn't active).
+        // macOS: read auth-token from AgentDeckPaths (App Store sandbox
+        // container for signed builds, ~/.agentdeck/ for dev).
         #if os(macOS)
         let tokenURL = AgentDeckPaths.authToken
         let localToken = try? String(contentsOf: tokenURL, encoding: .utf8)

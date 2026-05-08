@@ -107,7 +107,7 @@ private final class ApmeSettingsDataBox: @unchecked Sendable {
 enum ApmeSettings {
     /// Path to the shared settings file. Env override (used by tests) takes
     /// precedence; otherwise we route through `AgentDeckPaths` so signed
-    /// App Store builds land in the App Group container.
+    /// App Store builds land in the sandbox data container.
     static var settingsPath: String {
         if let override = ProcessInfo.processInfo.environment["AGENTDECK_DATA_DIR"] {
             return (override as NSString).appendingPathComponent("settings.json")

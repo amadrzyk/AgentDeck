@@ -97,6 +97,7 @@ fi
 mkdir -p "$OUT_DIR"
 mkdir -p "$OUT_DIR/log-files" "$OUT_DIR/state-files" "$OUT_DIR/process"
 
+APPSTORE_DIR="$HOME/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck"
 GROUP_DIR="$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard"
 LEGACY_DIR="$HOME/.agentdeck"
 PORT_DETECTION="not attempted"
@@ -129,7 +130,7 @@ discover_port() {
   local file
   local stale=""
 
-  for file in "$GROUP_DIR/daemon.json" "$LEGACY_DIR/daemon.json"; do
+  for file in "$APPSTORE_DIR/daemon.json" "$GROUP_DIR/daemon.json" "$LEGACY_DIR/daemon.json"; do
     detected="$(read_port_from_daemon_json "$file" || true)"
     if [[ -n "$detected" ]]; then
       if is_live_status_port "$detected"; then
@@ -269,12 +270,15 @@ fetch_endpoint "/devices" "devices.json"
 fetch_endpoint "/usage" "usage.json"
 fetch_endpoint "/health" "health.json"
 
-tail_if_exists "$GROUP_DIR/swift-daemon.log" "group-swift-daemon.log"
+tail_if_exists "$APPSTORE_DIR/swift-daemon.log" "appstore-swift-daemon.log"
+tail_if_exists "$GROUP_DIR/swift-daemon.log" "legacy-group-swift-daemon.log"
 tail_if_exists "$LEGACY_DIR/swift-daemon.log" "legacy-swift-daemon.log"
 tail_if_exists "$LEGACY_DIR/bridge.log" "legacy-bridge.log"
 
-copy_if_exists "$GROUP_DIR/daemon.json" "group-daemon.json"
-copy_if_exists "$GROUP_DIR/sessions.json" "group-sessions.json"
+copy_if_exists "$APPSTORE_DIR/daemon.json" "appstore-daemon.json"
+copy_if_exists "$APPSTORE_DIR/sessions.json" "appstore-sessions.json"
+copy_if_exists "$GROUP_DIR/daemon.json" "legacy-group-daemon.json"
+copy_if_exists "$GROUP_DIR/sessions.json" "legacy-group-sessions.json"
 copy_if_exists "$LEGACY_DIR/daemon.json" "legacy-daemon.json"
 copy_if_exists "$LEGACY_DIR/sessions.json" "legacy-sessions.json"
 

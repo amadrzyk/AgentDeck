@@ -34,10 +34,11 @@ export const HOOK_EVENTS = [
  *      so the hook targets the *owning* daemon even when several daemons
  *      are running in parallel)
  *   2. `~/.agentdeck/daemon.json`                                  (CLI)
- *   3. App Store group container `daemon.json`                     (Swift)
- *   4. `9120` fallback (legacy, never reached in practice)
+ *   3. App Store sandbox container `daemon.json`                   (Swift)
+ *   4. Legacy App Store group container `daemon.json`              (Swift)
+ *   5. `9120` fallback (legacy, never reached in practice)
  *
- * For (2) and (3) the snippet prefers the daemon's `httpPort` field when
+ * For (2)-(4) the snippet prefers the daemon's `httpPort` field when
  * present — Swift runs WS and HTTP on separate ports. Each candidate is
  * verified with a short `/health` probe so a stale daemon.json from a
  * crashed daemon doesn't swallow the hook.
@@ -46,7 +47,7 @@ export function buildHookCommand(eventName: string): string {
   return [
     `PORT="\${AGENTDECK_PORT:-}"`,
     `if [ -z "$PORT" ]; then`,
-    `  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do`,
+    `  for F in "$HOME/.agentdeck/daemon.json" "$HOME/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/daemon.json" "$HOME/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard/daemon.json"; do`,
     `    [ -f "$F" ] || continue`,
     `    P=$(python3 -c "import json;d=json.load(open('$F'));print(d.get('httpPort') or d.get('port',''))" 2>/dev/null)`,
     `    [ -n "$P" ] && curl -sf --max-time 0.3 "http://127.0.0.1:$P/health" >/dev/null 2>&1 && { PORT="$P"; break; }`,

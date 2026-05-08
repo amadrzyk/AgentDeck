@@ -20,7 +20,7 @@ struct AgentDeckApp: App {
         _ = SingletonGuard.enforce()
         SingletonGuard.installCleanupHandlers()
         // One-shot migration from legacy ~/.agentdeck/ (pre-sandbox builds) into
-        // the App Group container. Best-effort; per-file errors are logged but
+        // the App Store data container. Best-effort; per-file errors are logged but
         // never thrown so startup never blocks on migration.
         _ = AgentDeckPaths.migrateLegacyDataIfNeeded()
         _daemonService = StateObject(wrappedValue: DaemonService())

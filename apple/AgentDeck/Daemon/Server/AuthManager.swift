@@ -9,8 +9,8 @@ final class AuthManager: Sendable {
     static let shared = AuthManager()
 
     /// Base AgentDeck data directory. Delegates to `AgentDeckPaths` which
-    /// resolves to the App Group container when the entitlement is active
-    /// and falls back to the legacy `~/.agentdeck/` layout otherwise.
+    /// resolves to the App Store sandbox container when sandboxed and falls
+    /// back to the legacy `~/.agentdeck/` layout otherwise.
     static var agentDeckDir: URL { AgentDeckPaths.baseDirectory }
     static var tokenFile: URL { AgentDeckPaths.authToken }
     private static let tokenLength = 32 // 32 hex chars = 16 bytes
@@ -31,7 +31,7 @@ final class AuthManager: Sendable {
     // MARK: - Token Management
 
     private static func loadOrCreateToken() -> String {
-        // macOS 26 sandbox + Group Container can silently block the very
+        // macOS 26 sandbox container I/O can silently block the very
         // first `Data(contentsOf:)` on auth-token at `__open` syscall —
         // sample shows main thread stuck in `_fcntl_overlay_open` →
         // `__open`, no sandboxd deny in system log. That stalls the entire

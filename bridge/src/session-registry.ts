@@ -16,8 +16,9 @@ function getDataDir(): string {
  * Ordered list of data directories this process should READ from.
  *
  * The App Store macOS build writes its `daemon.json` / `sessions.json`
- * into `~/Library/Group Containers/group.bound.serendipity.agentdeck.dashboard`
- * (sandbox forces it), whereas the Node CLI writes to `~/.agentdeck`.
+ * inside its sandbox container, whereas the Node CLI writes to
+ * `~/.agentdeck`. Older App Store candidates used an App Group container,
+ * so reads keep that path as a legacy fallback.
  * Without cross-reads, `agentdeck claude` launched from Terminal can't
  * see the Swift daemon that's already listening on 9120, and session
  * bridges end up orphaned.
@@ -25,7 +26,8 @@ function getDataDir(): string {
  * Order:
  *   1. `AGENTDECK_DATA_DIR` env override (tests, explicit pinning)
  *   2. `~/.agentdeck`                   (CLI / Homebrew / Node default)
- *   3. App Store group container        (macOS App Store build)
+ *   3. App Store sandbox container      (macOS App Store build)
+ *   4. Legacy App Store group container (pre-1.0 App Store candidates)
  *
  * Writes stay in the process's own dir via `getDataDir()`. Only reads
  * iterate this list.
@@ -34,10 +36,15 @@ export function getCandidateDataDirs(): string[] {
   if (process.env.AGENTDECK_DATA_DIR) return [process.env.AGENTDECK_DATA_DIR];
   const dirs = [join(homedir(), '.agentdeck')];
   if (process.platform === 'darwin') {
+    const appSandboxContainer = join(
+      homedir(),
+      'Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck',
+    );
     const groupContainer = join(
       homedir(),
       'Library/Group Containers/group.bound.serendipity.agentdeck.dashboard',
     );
+    if (!dirs.includes(appSandboxContainer)) dirs.push(appSandboxContainer);
     if (!dirs.includes(groupContainer)) dirs.push(groupContainer);
   }
   return dirs;

@@ -33,20 +33,14 @@ The record starts in **"Prepare for Submission"** state. Metadata/screenshots co
 
 ---
 
-## Step 2 — Register the App Group identifier
+## Step 2 — Confirm App ID capabilities
 
-Required because `apple/AgentDeck/Resources/AgentDeck.entitlements` declares `com.apple.security.application-groups = [group.bound.serendipity.agentdeck.dashboard]`.
+AgentDeck uses the app's own sandbox container for App Store state. Do **not** add the optional App Groups capability unless a future helper, extension, or login item is added and the entitlement is restored in code first.
 
 1. Open [Apple Developer → Certificates, Identifiers & Profiles → Identifiers](https://developer.apple.com/account/resources/identifiers/list).
-2. Tab **App Groups** (top filter). Click **+**.
-3. **Description**: `AgentDeck Dashboard Group`.
-4. **Identifier**: `group.bound.serendipity.agentdeck.dashboard` (must match entitlements exactly).
-5. Register.
-
-Then link the group to the App ID:
-1. Back to Identifiers → **App IDs** tab → find `bound.serendipity.agentdeck.dashboard` → click it.
-2. Under **Capabilities**, enable **App Groups** if not already. Configure → check `group.bound.serendipity.agentdeck.dashboard`.
-3. Save.
+2. App IDs tab → find `bound.serendipity.agentdeck.dashboard` → click it.
+3. Confirm the App ID exists and is available for Mac App Store profiles.
+4. Leave **App Groups** unchecked for the current 1.0 submission.
 
 ---
 
@@ -89,13 +83,13 @@ If the line shows `unavailable`, the private key isn't in the same keychain as t
 2. **Distribution** section: select **Mac App Store**. Continue.
 3. App ID: `bound.serendipity.agentdeck.dashboard`. Continue.
 4. Select the **Apple Distribution** certificate (the one for signing the `.app`, not the Mac Installer one). Continue.
-5. Profile Name: `AgentDeck macOS App Store Distribution`.
+5. Profile Name: `AgentDeck Dashboard macOS AppStore` (must match `PROVISIONING_PROFILE_SPECIFIER` in `apple/project.yml` and `.github/workflows/apple-release.yml`).
 6. Generate. Download the `.provisionprofile` file.
 
 Install it locally:
 
 ```bash
-cp ~/Downloads/AgentDeck_macOS_App_Store_Distribution.provisionprofile \
+cp ~/Downloads/AgentDeck_Dashboard_macOS_AppStore.provisionprofile \
    ~/Library/MobileDevice/Provisioning\ Profiles/
 ```
 
@@ -135,7 +129,7 @@ Go to [github.com/puritysb/AgentDeck/settings/secrets/actions](https://github.co
 |---|---|---|
 | `APPLE_CERTIFICATE_BASE64` | paste from `pbcopy` above | Combined `.p12` containing Apple Distribution + 3rd Party Mac Developer Installer identities |
 | `APPLE_CERTIFICATE_PASSWORD` | password from Step 5, or empty for a passwordless `.p12` | Used to decrypt the combined `.p12` on the runner |
-| `MACOS_PROVISIONING_PROFILE_BASE64` | `base64 -i ~/Library/MobileDevice/Provisioning\ Profiles/AgentDeck_macOS_App_Store_Distribution.provisionprofile \| pbcopy` | The profile from Step 4 |
+| `MACOS_PROVISIONING_PROFILE_BASE64` | `base64 -i ~/Library/MobileDevice/Provisioning\ Profiles/AgentDeck_Dashboard_macOS_AppStore.provisionprofile \| pbcopy` | The profile from Step 4 |
 
 Existing secrets stay as-is:
 - `ASC_API_KEY_ID` / `ASC_ISSUER_ID` / `ASC_API_KEY_BASE64`
@@ -174,7 +168,7 @@ Also verify that the `release` job depends on both Apple platforms:
 
 ## Step 8 — Verify `apple/ExportOptions-macOS.plist`
 
-The existing file at `apple/ExportOptions-macOS.plist` already specifies the right method:
+The file at `apple/ExportOptions-macOS.plist` is intentionally manual so GitHub Actions uses the uploaded profile instead of attempting cloud-managed signing:
 
 ```xml
 <key>method</key>
@@ -182,12 +176,19 @@ The existing file at `apple/ExportOptions-macOS.plist` already specifies the rig
 <key>teamID</key>
 <string>R22679GY5Z</string>
 <key>signingStyle</key>
-<string>automatic</string>
+<string>manual</string>
 <key>signingCertificate</key>
 <string>Apple Distribution</string>
+<key>installerSigningCertificate</key>
+<string>Mac Installer Distribution</string>
+<key>provisioningProfiles</key>
+<dict>
+  <key>bound.serendipity.agentdeck.dashboard</key>
+  <string>AgentDeck Dashboard macOS AppStore</string>
+</dict>
 ```
 
-Apple's `altool --upload-app` step will pick up the Mac Installer cert automatically because `signingStyle = automatic` + the combined certificate bundle is now in the signing keychain. No additional manual specification needed.
+The `Mac Installer Distribution` value is Xcode's automatic selector for the newest installed `3rd Party Mac Developer Installer` identity.
 
 ---
 
@@ -220,7 +221,7 @@ After the upload, App Store Connect shows the build under **TestFlight → macOS
 ## What can the user skip?
 
 - **Mac Installer Distribution cert + provisioning profile**: Required for Mac App Store. Cannot skip.
-- **App Group registration (Step 2)**: Required — our entitlements reference it. Cannot skip.
+- **App Group registration**: Not used for the current App Store build. Do not add it unless the entitlement and data-path contract are intentionally changed.
 - **App Store Connect record creation (Step 1)**: Required before you can upload.
 - **Metadata (icons, screenshots, description)**: Can be filled in App Store Connect after the first successful TestFlight upload. See [appstore-metadata-draft.md](appstore-metadata-draft.md) for copy.
 
