@@ -2,6 +2,53 @@
 
 ---
 
+## 2026-05-09 — Pixoo 설정 즉시 반영 (5s 폴링 우회)
+
+### 문제
+
+App Store Swift 데몬에서 Settings → Pixoo UI 로 IP 추가 후 Dashboard 우측
+HUD (TopologyRail) 에 디바이스 타일이 즉시 안 나타남. 진단 결과 데몬은
+정상 활성화되어 `/health` 가 `online: true, hasFrame: true` 를 즉시
+반영하지만, `PixooModule.settingsReloadIntervalSec = 5` 로 settings.json
+을 5초 주기 폴링만 함 (file watcher 없음). UI 가 파일을 쓴 시점부터
+다음 폴링 tick 까지 0–5 초 + probe 1 회 만큼 HUD 가 비어 있음.
+
+추가 진단 메모: 사용자의 기존 `~/.agentdeck/settings.json` 에 등록된 IP
+는 App Store 샌드박스 데몬이 못 읽음 — 컨테이너의
+`Library/Containers/.../AgentDeck/settings.json` 만 봄. 별개 이슈로 이
+재설정은 사용자가 UI 에서 다시 추가해 해소.
+
+### 해결
+
+- `PixooModule.reloadFromSettingsExternal()` 추가 — 외부에서 폴링
+  cadence 우회용 진입. 내부 `reloadDevicesFromSettings(reason: "ui-trigger",
+  force: true)` 호출. `force` 는 파일이 새로 쓰였지만 IP 셋이 동일한
+  엣지 (brightness 등) 를 위해 line 462 equality guard 우회.
+- `Notification.Name.pixooSettingsChanged` 정의 + `DaemonServer` 가
+  `pixooModule` 인스턴스화 직후 main queue observer 등록, 알림 시
+  `Task { await pixoo.reloadFromSettingsExternal() }` 디스패치.
+- `PixooSheet.addDevice` / `removeDevice` 가 `saveDevices()` 성공 직후
+  `NotificationCenter.default.post(name: .pixooSettingsChanged)` 송출.
+- `DaemonServer.shutdown()` 에서 `removeObserver` 처리.
+
+### 핵심 설계 결정
+
+NotificationCenter 로 UI ↔ daemon 단방향 시그널. PixooSheet 가
+PixooModule ownership 을 알 필요 없고, 같은 패턴이 다른 settings 화면에
+확장 가능. DispatchSource file watcher 도입은 범위가 크고 (모든 모듈
+공통화 필요) 본 패치 범위에서 제외. 5 초 폴링은 fallback 으로 유지 —
+외부 파일 편집 (terminal vim 등) 은 여전히 catch up.
+
+### 검증
+
+- `xcodebuild -scheme AgentDeck_macOS -destination 'platform=macOS' build`
+  BUILD SUCCEEDED.
+- 런타임 검증은 사용자가 새 빌드 재실행 후 Settings → Pixoo 에서 IP
+  추가 시 swift-daemon.log 의 `Pixoo ui-trigger: N configured device(s)`
+  로그 즉시성 확인 + 우측 HUD ~1 초 내 표시.
+
+---
+
 ## 2026-05-08 — Codex hook protocol on Node bridge (PTY-only state machine retired)
 
 ### 문제
