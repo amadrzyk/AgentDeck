@@ -841,8 +841,11 @@ final class DaemonServer {
         moduleManager.register(pixoo)
         pixooSettingsObserver = NotificationCenter.default.addObserver(
             forName: .pixooSettingsChanged, object: nil, queue: .main
-        ) { _ in
-            Task { await pixoo.reloadFromSettingsExternal() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await pixoo.reloadFromSettingsExternal()
+                self?.broadcastStateUpdate()
+            }
         }
 
         // Start all
