@@ -1605,6 +1605,22 @@ object EinkRefreshHelper {
     private const val RK_EPD_A2 = "12"
     private const val RK_EPD_DU = "14"
 
+    // B&W animation policy — user priority: minimize flash, accept slower
+    // motion / more residual ghost.
+    //
+    // - No periodic full-frame GC16 cleanup. Forced full refresh on Rockchip
+    //   is GC16-only (sendOneFullFrame is hardcoded), and any cadence that
+    //   produces visible flashes was unwanted regardless of length. Natural
+    //   GC16 events (ATTENTION onset, agent state transition, explicit
+    //   [requestFullRefresh] calls) handle cleanup when they occur; pure-
+    //   idle terrarium stretches accept accumulated ghost as the trade-off.
+    //
+    // - Per-frame waveform: DU partial (4-level), not GC16 partial. The
+    //   4-level transition has noticeably less per-frame contrast inversion
+    //   than 16-level, so individual creature/fish frames read as a quiet
+    //   settle rather than a micro-flash. Grayscale detail compresses to
+    //   4 levels (creature shading flatter), accepted trade-off.
+
     /** Full/normal refresh — clears ghosting and exits fast animation mode. */
     fun requestFullRefresh(view: View) {
         // B&W e-ink gets an explicit full-frame GC16 flash. Color e-ink uses
@@ -1666,26 +1682,35 @@ object EinkRefreshHelper {
             return
         } catch (_: Exception) {}
 
+        // Kobo / Tolino — sys.eink.update bridge accepts mode strings.
+        if (tryKoboRefresh(view, koboMode = "A2")) return
+
         // Fallback
         view.invalidate()
     }
 
     /** Animation refresh — platform-specific:
-     *  B&W e-ink: GC16 partial (16-gray, no flash).
-     *  Color e-ink: fast animation/A2 mode. This mirrors the vendor path used
-     *    by browser video playback: lower fidelity, but far more continuous
-     *    motion than document-quality full color refresh.
+     *  B&W e-ink: DU partial (4-level) on every supported vendor path —
+     *    Rockchip mode "14", Onyx UpdateMode.DU, Kobo "sys.eink.update=DU".
+     *    Each path delivers a low-contrast partial transition per frame,
+     *    so flash is minimized uniformly across vendors (not just Rockchip).
+     *    No periodic cleanup; ghost accumulates between natural GC16 events
+     *    (ATTENTION onset, state transition). Trade-off: flash min > fidelity.
+     *  Color e-ink: fast animation/A2 mode. Self-cleaning per frame.
      */
     fun requestAnimationRefresh(view: View) {
         if (einkColorEnabled) {
             requestA2Refresh(view)
             return
         }
-        if (tryRockchipRefresh(view, RK_EPD_FULL_GC16, sendFullFrame = false)) return
-        view.invalidate()
+        // Delegate to the shared DU path — already wired for Rockchip + Onyx;
+        // Kobo branch added below in [requestDURefresh] so all three vendors
+        // honor the flash-min animation policy.
+        requestDURefresh(view)
     }
 
-    /** DU mode — fast monochrome refresh, ideal for usage gauges and footer. */
+    /** DU mode — fast monochrome refresh, ideal for usage gauges, footer,
+     *  and B&W animation frames (flash-min policy). */
     fun requestDURefresh(view: View) {
         if (tryRockchipRefresh(view, RK_EPD_DU)) return
 
@@ -1700,6 +1725,9 @@ object EinkRefreshHelper {
             view.invalidate()
             return
         } catch (_: Exception) {}
+
+        // Kobo / Tolino — sys.eink.update bridge.
+        if (tryKoboRefresh(view, koboMode = "DU")) return
 
         // Fallback
         view.invalidate()
