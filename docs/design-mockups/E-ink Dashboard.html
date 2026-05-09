@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>AgentDeck · E-ink Dashboard</title>
+<meta name="viewport" content="width=1400"/>
+<style>
+  html, body { margin: 0; padding: 0; background: #e6e1d2; font-family: "Inter", system-ui, sans-serif; color: #15140f; }
+  * { box-sizing: border-box; }
+  @keyframes swim { 0%,100%{transform:translateY(0) rotate(-2deg)} 50%{transform:translateY(-2px) rotate(2deg)} }
+  @keyframes bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-1px)} }
+  @keyframes wiggle { 0%,100%{transform:rotate(-3deg)} 50%{transform:rotate(3deg)} }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+Pro:wght@400;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"/>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="creatures.jsx"></script>
+<script type="text/babel" src="eink-screens.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+function App() {
+  const tBW = window.tokensBW;
+  const tCol = window.tokensColor;
+
+  return (
+    <DesignCanvas defaultZoom={0.55}>
+      <DCSection id="readme" title="AgentDeck — E-ink dashboard · real screens">
+        <DCArtboard id="brief" label="Brief" width={760} height={702}>
+          <div style={{ width: 760, height: 702, background: '#f4f1e8', padding: 56, fontFamily: '"Source Serif Pro", Georgia, serif', color: '#15140f' }}>
+            <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 12, letterSpacing: '0.18em', color: '#5a564a', textTransform: 'uppercase' }}>Design output · v2</div>
+            <h1 style={{ fontSize: 44, fontWeight: 700, margin: '6px 0 16px', lineHeight: 1.05, letterSpacing: '-0.01em' }}>AgentDeck for e-ink</h1>
+            <p style={{ fontSize: 17, lineHeight: 1.5, color: '#2b2820', maxWidth: 620 }}>
+              Real-pixel screens for <b>Crema S</b> (B&amp;W) and <b>Pantone 6</b> (color e-ink).
+              Creatures are the actual brand marks from <code style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 14 }}>assets/creatures/</code>:
+              Claude Code (Antigravity), Codex, OpenClaw, OpenCode.
+            </p>
+            <div style={{ marginTop: 28, fontFamily: '"JetBrains Mono", monospace', fontSize: 12.5, color: '#2b2820', lineHeight: 1.7 }}>
+              <div style={{ fontSize: 11, letterSpacing: '0.14em', color: '#5a564a', textTransform: 'uppercase', marginBottom: 4 }}>Scenarios covered</div>
+              <div>· 2× Claude + Codex + OpenClaw &nbsp;(typical day)</div>
+              <div>· 3× Claude + Codex + OpenCode &nbsp;(busy multi-Claude)</div>
+              <div>· Permission-request on one Claude &nbsp;(attention)</div>
+              <div>· 2× Codex + OpenCode + Claude idle &nbsp;(non-Claude heavy)</div>
+              <div>· Solo OpenCode &nbsp;(sparse)</div>
+            </div>
+            <div style={{ marginTop: 24, fontSize: 14.5, lineHeight: 1.55, color: '#2b2820', maxWidth: 620 }}>
+              Same dashboard layout adapts to <b>1–5+ sessions</b>. Sessions list grows vertically;
+              terrarium spreads creatures along x by index. Color variant tints each agent by brand
+              (Claude sienna, Codex indigo, OpenClaw vermilion, OpenCode graphite).
+            </div>
+          </div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="bw" title="Crema S — 1872×1404 · B&W e-ink">
+        <DCArtboard id="bw-multi" label="2× Claude + Codex + OpenClaw" width={936} height={702}>
+          <EinkScreen variant="bw" scenario="multi_claude" t={tBW}/>
+        </DCArtboard>
+        <DCArtboard id="bw-triple" label="3× Claude + Codex + OpenCode (busy)" width={936} height={702}>
+          <EinkScreen variant="bw" scenario="triple_claude" t={tBW}/>
+        </DCArtboard>
+        <DCArtboard id="bw-permission" label="Permission request on claude·cli" width={936} height={702}>
+          <EinkScreen variant="bw" scenario="permission" t={tBW}/>
+        </DCArtboard>
+        <DCArtboard id="bw-codex" label="2× Codex + OpenCode" width={936} height={702}>
+          <EinkScreen variant="bw" scenario="multi_codex" t={tBW}/>
+        </DCArtboard>
+        <DCArtboard id="bw-solo" label="Solo OpenCode" width={936} height={702}>
+          <EinkScreen variant="bw" scenario="solo_opencode" t={tBW}/>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="color" title="Pantone 6 — Kaleido 3 color · brand-tinted creatures">
+        <DCArtboard id="col-multi" label="2× Claude + Codex + OpenClaw" width={936} height={702}>
+          <EinkScreen variant="color" scenario="multi_claude" t={tCol}/>
+        </DCArtboard>
+        <DCArtboard id="col-triple" label="3× Claude + Codex + OpenCode" width={936} height={702}>
+          <EinkScreen variant="color" scenario="triple_claude" t={tCol}/>
+        </DCArtboard>
+        <DCArtboard id="col-permission" label="Permission request" width={936} height={702}>
+          <EinkScreen variant="color" scenario="permission" t={tCol}/>
+        </DCArtboard>
+        <DCArtboard id="col-codex" label="2× Codex + OpenCode" width={936} height={702}>
+          <EinkScreen variant="color" scenario="multi_codex" t={tCol}/>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="portrait" title="Portrait — 540×720 (7&quot; reader)">
+        <DCArtboard id="port-bw-triple" label="B&W · 3× Claude busy" width={540} height={720}>
+          <EinkScreenPortrait variant="bw" scenario="triple_claude" t={tBW}/>
+        </DCArtboard>
+        <DCArtboard id="port-bw-perm" label="B&W · permission" width={540} height={720}>
+          <EinkScreenPortrait variant="bw" scenario="permission" t={tBW}/>
+        </DCArtboard>
+        <DCArtboard id="port-col-perm" label="Color · permission" width={540} height={720}>
+          <EinkScreenPortrait variant="color" scenario="permission" t={tCol}/>
+        </DCArtboard>
+        <DCArtboard id="port-col-codex" label="Color · 2× Codex + OpenCode" width={540} height={720}>
+          <EinkScreenPortrait variant="color" scenario="multi_codex" t={tCol}/>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

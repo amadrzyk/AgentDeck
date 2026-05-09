@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>E-ink redesign — code reflection</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --paper: #f6f3ec;
+    --rule: #1a1a1a;
+    --muted: #6a6358;
+    --accent: #b3502a;
+    --added: #2f5d3a;
+    --removed: #8a2424;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); }
+  body {
+    font-family: "Iowan Old Style", "Source Serif Pro", Georgia, "Times New Roman", serif;
+    font-size: 16px;
+    line-height: 1.55;
+    padding: 56px 8vw 120px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  header { border-bottom: 2px solid var(--rule); padding-bottom: 24px; margin-bottom: 40px; }
+  .kicker {
+    font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+  h1 { font-size: 48px; line-height: 1.05; margin: 0 0 12px; font-weight: 600; letter-spacing: -0.01em; }
+  .lede { font-size: 19px; max-width: 60ch; color: #2c2820; margin: 0; }
+
+  h2 {
+    font-size: 26px;
+    margin: 56px 0 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 6px;
+  }
+  h3 { font-size: 17px; font-weight: 600; margin: 28px 0 8px; }
+  p { margin: 0 0 12px; max-width: 70ch; }
+  code, pre {
+    font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+    font-size: 13px;
+  }
+  code { background: #ebe5d6; padding: 1px 5px; border-radius: 3px; }
+  pre {
+    background: #1a1a1a;
+    color: #e8e3d4;
+    padding: 16px 18px;
+    border-radius: 4px;
+    overflow-x: auto;
+    line-height: 1.5;
+    margin: 12px 0 18px;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; }
+  .kw  { color: #d29a3a; }
+  .str { color: #a3c98a; }
+  .com { color: #8b8474; font-style: italic; }
+  .typ { color: #e0a16a; }
+  .add-line { color: #c4e4b3; }
+  .rm-line  { color: #e89c9c; }
+
+  table { border-collapse: collapse; width: 100%; margin: 14px 0 22px; font-size: 14px; }
+  th, td {
+    border-bottom: 1px solid #c9c2b1;
+    padding: 9px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    border-bottom: 2px solid var(--rule);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  td.risk-low  { color: var(--added); font-weight: 600; }
+  td.risk-med  { color: var(--accent); font-weight: 600; }
+
+  .files {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 14px 0 18px;
+  }
+  .file {
+    border: 1px solid var(--rule);
+    background: #fffdf7;
+    padding: 14px 16px;
+    border-radius: 3px;
+  }
+  .file .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: #2c2820;
+    word-break: break-all;
+  }
+  .file .tag {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    padding: 2px 6px;
+    border-radius: 2px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 600;
+  }
+  .tag.new   { background: #d6e7cd; color: var(--added); }
+  .tag.edit  { background: #f1ddc4; color: var(--accent); }
+  .file .desc { font-size: 13px; margin-top: 6px; color: #4a443a; line-height: 1.45; }
+
+  .matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    background: #fffdf7;
+    border: 1px solid var(--rule);
+  }
+  .matrix th, .matrix td {
+    border: 1px solid #c9c2b1;
+    padding: 8px 12px;
+  }
+  .matrix th { background: #ebe5d6; color: var(--ink); }
+  .mode-a2  { color: var(--accent); font-weight: 600; }
+  .mode-fo  { color: var(--added); font-weight: 600; }
+  .mode-du  { color: var(--muted); font-weight: 600; }
+  .mode-anim{ color: #2864a8; font-weight: 600; }
+
+  .scenarios {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin: 14px 0;
+  }
+  .scn {
+    border: 1px solid var(--rule);
+    background: #fffdf7;
+    padding: 12px;
+    border-radius: 3px;
+  }
+  .scn .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+  }
+  .scn .name {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    font-weight: 600;
+    margin: 4px 0 8px;
+  }
+  .scn .agents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .scn .agent {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    padding: 2px 5px;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    background: #f6f3ec;
+  }
+  .scn .agent.proc { background: #ebe5d6; }
+  .scn .agent.await { background: #f1ddc4; color: var(--accent); border-color: var(--accent); }
+  .scn .desc {
+    font-size: 11px;
+    color: #4a443a;
+    margin-top: 8px;
+    font-family: serif;
+    line-height: 1.4;
+  }
+
+  .commits {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+    margin: 14px 0;
+  }
+  .commits li {
+    counter-increment: step;
+    border-left: 3px solid var(--rule);
+    padding: 4px 0 14px 22px;
+    margin-left: 8px;
+    position: relative;
+  }
+  .commits li::before {
+    content: counter(step, upper-alpha);
+    position: absolute;
+    left: -16px;
+    top: 0;
+    width: 28px;
+    height: 28px;
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .commits .title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 17px;
+  }
+  .commits .meta {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+  .commits ul { margin: 4px 0 0 18px; padding: 0; }
+  .commits ul li { border: none; padding: 2px 0; margin: 0; font-size: 14px; }
+  .commits ul li::before { content: none; }
+
+  .footnote {
+    margin-top: 60px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .footnote a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="kicker">AgentDeck · android · ui/eink</p>
+  <h1>E-ink redesign — applied to the codebase</h1>
+  <p class="lede">
+    The design canvas (<code>E-ink Dashboard.html</code>) is the spec.
+    This page is the <strong>real-code reflection</strong>: every
+    decision from the canvas mapped to a concrete file in
+    <code>android/app/src/main/kotlin/dev/agentdeck/</code>, ready to
+    drop in.
+  </p>
+</header>
+
+<h2>Files changed</h2>
+
+<div class="files">
+  <div class="file">
+    <span class="tag edit">EDIT</span>
+    <div class="path">ui/eink/EinkRefreshZone.kt</div>
+    <div class="desc">New <code>RefreshMode.FULL_ONCE</code> variant — semantic "one clean GC16 flash on appearance, then stay quiet". Maps to the same vendor call as <code>FULL</code> but separates intent.</div>
+  </div>
+  <div class="file">
+    <span class="tag new">NEW</span>
+    <div class="path">ui/eink/EinkZonePolicy.kt</div>
+    <div class="desc">Single-source-of-truth refresh policy matrix. <code>Zone</code> enum captures mode + debounce per zone so call sites stop hardcoding waveform constants.</div>
+  </div>
+  <div class="file">
+    <span class="tag new">NEW</span>
+    <div class="path">ui/eink/EinkScenarios.kt</div>
+    <div class="desc">Five canonical multi-session fixtures (1×–5× sessions, mixed agent types) for <code>@Preview</code> and screenshot tests.</div>
+  </div>
+  <div class="file">
+    <span class="tag edit">EDIT</span>
+    <div class="path">terrarium/renderer/EinkRenderer.kt</div>
+    <div class="desc">Kobo / Tolino / KOReader fallback added to <code>EinkRefreshHelper.requestFullRefresh</code> via <code>SystemProperties.set("sys.eink.update", "GC16")</code>. Falls through to <code>view.invalidate()</code> on unsupported devices.</div>
+  </div>
+  <div class="file" style="grid-column: 1 / -1;">
+    <span class="tag edit">EDIT</span>
+    <div class="path">ui/screen/EinkMonitorScreen.kt</div>
+    <div class="desc">ATTENTION extracted as its own <code>EinkRefreshZone</code> with <code>FULL_ONCE</code> policy. All zone call sites (5 in landscape, 3 in portrait) now read mode + debounce from <code>Zone.CHROME / ATTENTION / CONTEXT_FAST / STATUS_SLOW / TIMELINE</code> instead of inline literals.</div>
+  </div>
+</div>
+
+<h2>The refresh matrix — one source, six zones</h2>
+
+<p>Before: every zone hardcoded its mode/debounce inline at the call site
+(<code>RefreshMode.A2, 200</code>). Six zones × landscape + portrait = 11
+duplicates that drifted over time. After: every call site reads from
+<code>Zone</code>.</p>
+
+<table class="matrix">
+  <thead>
+    <tr><th>Zone</th><th>Mode</th><th>Debounce</th><th>Trigger</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>CHROME       </td><td class="mode-a2">A2</td>       <td>200 ms</td>   <td>session list / agent states</td></tr>
+    <tr><td>TERRARIUM    </td><td class="mode-anim">animated</td><td>per-frame</td><td>creature animation loop</td></tr>
+    <tr><td>ATTENTION    </td><td class="mode-fo">FULL_ONCE</td><td>80 ms</td>    <td>awaiting state appears</td></tr>
+    <tr><td>CONTEXT_FAST </td><td class="mode-a2">A2</td>       <td>200 ms</td>   <td>tool / option changes</td></tr>
+    <tr><td>STATUS_SLOW  </td><td class="mode-du">DU</td>       <td>2000 ms</td>  <td>usage / health / models</td></tr>
+    <tr><td>TIMELINE     </td><td class="mode-a2">A2</td>       <td>300 ms</td>   <td>append-only entry count</td></tr>
+  </tbody>
+</table>
+
+<h2>Why ATTENTION moves to its own zone</h2>
+
+<p>In the old code the <code>featuredAttention != null</code> branch lived
+inside the Context+Status <code>EinkRefreshZone</code> on
+<code>RefreshMode.A2</code>. Two problems:</p>
+<ol style="max-width:70ch;">
+  <li>The prompt panel inherited residual A2 ghosting from neighbouring tool / gauge updates.</li>
+  <li>Onset of <code>AWAITING_PERMISSION</code> never forced a clean GC16 flash — the prompt just appeared in whatever waveform mode the zone happened to be in.</li>
+</ol>
+
+<pre><code><span class="com">// after — EinkMonitorScreen.kt</span>
+<span class="kw">if</span> (featuredAttention != <span class="kw">null</span>) {
+    EinkRefreshZone(
+        mode        = Zone.<span class="typ">ATTENTION</span>.mode,        <span class="com">// FULL_ONCE</span>
+        debounceMs  = Zone.<span class="typ">ATTENTION</span>.debounceMs,  <span class="com">// 80 ms</span>
+        triggerKey  = featuredAttention,
+    ) { <span class="com">/* permission / option panel */</span> }
+} <span class="kw">else if</span> (hasContext || showStatusPanel) {
+    <span class="com">// CONTEXT_FAST / STATUS_SLOW — never sees the prompt</span>
+}</code></pre>
+
+<h2>Driver port — what landed</h2>
+
+<p>The proposal called for a brand-new <code>EpdRefreshController</code>
+interface. Reading <code>EinkRefreshHelper</code> showed the helper IS
+the port — Rockchip + Onyx already covered. Minimal change instead:
+add a third fallback for Kobo / Tolino, document the chain.</p>
+
+<pre><code><span class="kw">fun</span> requestFullRefresh(view: <span class="typ">View</span>) {
+    <span class="com">// 1. Rockchip RK35xx (Crema S, Xiaomi Reader)</span>
+    <span class="kw">if</span> (tryRockchipRefresh(view, RK_EPD_FULL_GC16, sendFullFrame = !einkColorEnabled)) <span class="kw">return</span>
+
+    <span class="com">// 2. Onyx Boox (Qualcomm)</span>
+    <span class="kw">try</span> { onyxClass.getMethod(<span class="str">"requestScreenUpdate"</span>, View::<span class="kw">class</span>.java).invoke(<span class="kw">null</span>, view); <span class="kw">return</span> }
+    <span class="kw">catch</span> (_: <span class="typ">Exception</span>) {}
+
+    <span class="add-line">+   // 3. Kobo / Tolino / KOReader — system property bridge</span>
+    <span class="add-line">+   if (tryKoboRefresh(view, koboMode = "GC16")) return</span>
+
+    <span class="com">// 4. Fallback: standard invalidate</span>
+    view.invalidate()
+}</code></pre>
+
+<h2>Five canonical multi-agent scenarios</h2>
+
+<p>The design canvas illustrated five session topologies; they now exist
+as <code>EinkScenarios</code> fixtures consumable from
+<code>@Preview</code> parameters and screenshot tests.</p>
+
+<div class="scenarios">
+  <div class="scn">
+    <div class="num">01 · TYPICAL</div>
+    <div class="name">typical</div>
+    <div class="agents">
+      <span class="agent proc">Claude×2</span>
+      <span class="agent">Codex</span>
+      <span class="agent">OpenClaw</span>
+    </div>
+    <div class="desc">Everyday workload — primary Claude processing, peers idle.</div>
+  </div>
+  <div class="scn">
+    <div class="num">02 · CLAUDE-HEAVY</div>
+    <div class="name">claudeHeavy</div>
+    <div class="agents">
+      <span class="agent proc">Claude×3</span>
+      <span class="agent proc">Codex</span>
+      <span class="agent">OpenCode</span>
+    </div>
+    <div class="desc">Three Claude sessions concurrent — Opus, Sonnet, Haiku.</div>
+  </div>
+  <div class="scn">
+    <div class="num">03 · AWAIT-MIXED</div>
+    <div class="name">claudeAwaiting</div>
+    <div class="agents">
+      <span class="agent await">Claude AWAIT</span>
+      <span class="agent proc">Claude</span>
+      <span class="agent">Codex</span>
+      <span class="agent">OpenClaw</span>
+    </div>
+    <div class="desc">One Claude blocked on permission while peer keeps processing — the FULL_ONCE case.</div>
+  </div>
+  <div class="scn">
+    <div class="num">04 · CODEX-FOCUSED</div>
+    <div class="name">codexFocused</div>
+    <div class="agents">
+      <span class="agent proc">Codex×2</span>
+      <span class="agent proc">OpenCode</span>
+      <span class="agent">Claude</span>
+    </div>
+    <div class="desc">Claude not the primary — chrome must not assume Claude-first ordering.</div>
+  </div>
+  <div class="scn">
+    <div class="num">05 · SOLO</div>
+    <div class="name">soloOpenCode</div>
+    <div class="agents">
+      <span class="agent proc">OpenCode</span>
+    </div>
+    <div class="desc">Single sparse session — collapsed chrome, terrarium hosts one creature.</div>
+  </div>
+</div>
+
+<h2>Migration order — three commits</h2>
+
+<ol class="commits">
+  <li>
+    <div class="meta">RISK · LOW · ADDITIVE</div>
+    <div class="title">Add primitives, no UI change</div>
+    <ul>
+      <li>Add <code>RefreshMode.FULL_ONCE</code> in <code>EinkRefreshZone.kt</code></li>
+      <li>Create <code>EinkZonePolicy.kt</code> with the <code>Zone</code> enum</li>
+      <li>Create <code>EinkScenarios.kt</code> fixtures</li>
+      <li>Add Kobo fallback in <code>EinkRefreshHelper.requestFullRefresh</code></li>
+    </ul>
+  </li>
+  <li>
+    <div class="meta">RISK · LOW · MECHANICAL</div>
+    <div class="title">Wire <code>Zone.*</code> into <code>EinkMonitorScreen</code></div>
+    <ul>
+      <li>Replace inline <code>RefreshMode.A2, 200</code> with <code>Zone.CHROME.mode, Zone.CHROME.debounceMs</code></li>
+      <li>Cover all 5 landscape + 3 portrait zone call sites</li>
+      <li>Behavior identical — pure refactor</li>
+    </ul>
+  </li>
+  <li>
+    <div class="meta">RISK · MEDIUM · USER-VISIBLE</div>
+    <div class="title">Extract ATTENTION zone</div>
+    <ul>
+      <li>Pull <code>featuredAttention != null</code> branch out of Context+Status zone</li>
+      <li>Wrap in own <code>EinkRefreshZone(Zone.ATTENTION.mode, ...)</code></li>
+      <li>QA: permission prompts on Crema S + Pantone 6 must arrive ghost-free</li>
+    </ul>
+  </li>
+</ol>
+
+<h2>Risk summary</h2>
+
+<table>
+  <thead><tr><th>Path</th><th>Kind</th><th>Risk</th></tr></thead>
+  <tbody>
+    <tr><td><code>ui/eink/EinkRefreshZone.kt</code></td><td>add enum variant</td><td class="risk-low">LOW</td></tr>
+    <tr><td><code>ui/eink/EinkZonePolicy.kt</code></td><td>new file</td><td class="risk-low">LOW</td></tr>
+    <tr><td><code>ui/eink/EinkScenarios.kt</code></td><td>new file (test only)</td><td class="risk-low">LOW</td></tr>
+    <tr><td><code>terrarium/renderer/EinkRenderer.kt</code></td><td>add fallback driver</td><td class="risk-low">LOW</td></tr>
+    <tr><td><code>ui/screen/EinkMonitorScreen.kt</code></td><td>extract ATTENTION zone</td><td class="risk-med">MEDIUM</td></tr>
+  </tbody>
+</table>
+
+<p class="footnote">
+  Drop-in files live under <code>patches/</code> in this project.
+  <code>patches/new/</code> contains the three new files; the other
+  three are full pre-edited copies of the originals so you can diff
+  them against your working tree.
+</p>
+
+</body>
+</html>

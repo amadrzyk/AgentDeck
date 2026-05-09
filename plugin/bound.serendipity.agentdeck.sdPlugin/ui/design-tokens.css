@@ -1,0 +1,16 @@
+/* AgentDeck — Design tokens (subset for Stream Deck Property Inspectors).
+ *
+ * Mirror of design/tokens.css. Stream Deck loads PI HTMLs from the plugin
+ * bundle as standalone documents, so they can't <link> the canonical CSS.
+ * Keep this trimmed mirror in sync with the canonical file when the listed
+ * tokens change. Add new entries here if a PI starts using more tokens.
+ */
+
+:root {
+  --ink-900: #0e1f1f;
+  --ink-800: #15302f;
+  --ink-700: #1f4544;
+  --ink-500: #426664;
+  --ink-300: #7c9694;
+  --ui-tty-text: #c8d0d8;
+}

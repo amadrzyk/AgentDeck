@@ -1,0 +1,142 @@
+/* AgentDeck — Design Tokens
+ * The single source of truth for color, type, spacing, radius, shadow.
+ * Import this BEFORE any component CSS.
+ */
+
+:root {
+  /* === Tide (sand / paper) === */
+  --tide-50:   #f5f3ec;
+  --tide-100:  #ebe6d6;
+  --tide-200:  #d8cfb6;
+  --tide-300:  #a8b09a;
+
+  /* === Ink (deep aquarium) === */
+  --ink-900:   #0e1f1f;
+  --ink-800:   #15302f;
+  --ink-700:   #1f4544;
+  --ink-500:   #426664;
+  --ink-300:   #7c9694;
+
+  /* === Kelp (App Store / running / OK) === */
+  --kelp-700:  #1f6157;
+  --kelp-500:  #2f8a7c;
+  --kelp-300:  #6fb6a8;
+
+  /* === Coral (Developer / build) === */
+  --coral-500: #c0573a;
+  --coral-700: #8c3a23;
+
+  /* === Amber (attention only) === */
+  --amber-500: #c8923a;
+
+  /* === Agent brand marks — verbatim upstream colors. DESIGN.md §6.1.
+   * Only saturated reds/blues allowed in the system.
+   */
+  --brand-claude-code: #C07058;
+  --brand-codex:       #6166E0;
+  --brand-openclaw:    #FF4D4D;
+  --brand-opencode:    #3a3a3a;
+
+  /* === Semantic status (marketing / editorial surfaces) === */
+  --status-idle:       var(--ink-300);
+  --status-processing: var(--kelp-500);
+  --status-awaiting:   var(--amber-500);
+  --status-error:      var(--coral-500);
+
+  /* === Product UI palette (menubar / e-ink / hardware / terminal) ===
+   * Brighter, higher-contrast variants for in-product chrome.
+   * NEVER use these on landing pages or print — they will look off-brand.
+   * See DESIGN.md §2.6.
+   */
+  --ui-ok:        #52D988;   /* running / connected dot */
+  --ui-attn:      #FFA93D;   /* awaiting pulse */
+  --ui-error:     #FF6B6B;   /* failed / disconnected */
+  --ui-cyan:      #3ED6E8;   /* hub / link / focused chrome */
+  --ui-idle:      #9a9aa2;   /* neutral idle on light OS chrome */
+  --ui-idle-dark: #7a8a9c;   /* neutral idle on dark OS chrome */
+
+  --ui-popup-bg-dark:  #0a1a2a;   /* dark popup base (option A family) */
+  --ui-popup-bg-deep:  #061018;   /* dark popup deepest gradient stop */
+  --ui-popup-bg-mid:   #0a1520;   /* dark popup mid gradient stop */
+  --ui-popup-bg-light: #f6f3ee;   /* light popup base (option D family) */
+  --ui-tty-bg:         #0c0d10;   /* terminal / CLI surface */
+  --ui-tty-bg-mid:     #141820;   /* terminal radial gradient core */
+  --ui-tty-text:       #c8d0d8;
+  --ui-tty-dim:        #7a8493;
+  --ui-tty-faint:      #4a5060;
+
+  /* === Type === */
+  --font-sans: "IBM Plex Sans", "IBM Plex Sans KR", "IBM Plex Sans JP",
+               -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Type scale */
+  --t-hero:       clamp(54px, 7vw, 96px);
+  --t-editorial:  clamp(56px, 8vw, 112px);
+  --t-h2:         44px;
+  --t-h3:         26px;
+  --t-h3-lg:      32px;
+  --t-card-title: 19px;
+  --t-body-lg:    19px;
+  --t-body:       17px;
+  --t-lede:       18px;
+  --t-small:      14.5px;
+  --t-caption:    13px;
+  --t-kicker:     12px;
+  --t-mono-badge: 11.5px;
+
+  /* Tracking */
+  --tr-hero:    -0.035em;
+  --tr-editorial: -0.04em;
+  --tr-h2:      -0.02em;
+  --tr-h3:      -0.015em;
+  --tr-card:    -0.01em;
+  --tr-kicker:  0.18em;
+  --tr-badge:   0.16em;
+  --tr-chip:    0.08em;
+
+  /* === Spacing (4px base) === */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-8:  32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-14: 56px;
+  --s-16: 64px;
+  --s-20: 80px;
+  --s-24: 96px;
+  --s-30: 120px;
+
+  --container-max: 1240px;
+  --container-pad: 32px;
+  --section-y:     96px;
+
+  /* === Radii === */
+  --r-sm:   4px;
+  --r-md:   8px;
+  --r-lg:   10px;
+  --r-xl:   12px;
+  --r-2xl:  14px;
+  --r-3xl:  16px;
+  --r-4xl:  18px;
+  --r-pill: 999px;
+
+  /* === Shadows === */
+  --sh-card:   0 6px 20px -8px rgba(14, 31, 31, 0.45);
+  --sh-card-h: 0 10px 28px -8px rgba(14, 31, 31, 0.55);
+  --sh-frame:  0 30px 80px -30px rgba(14, 31, 31, 0.4),
+               0 8px  30px -10px rgba(14, 31, 31, 0.18);
+  --sh-canvas: 0 30px 80px -20px rgba(0, 0, 0, 0.6);
+
+  /* === Motion === */
+  --ease-snap: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --d-fast:    120ms;
+  --d-base:    200ms;
+  --d-slow:    320ms;
+  --d-pulse:   1100ms;   /* mbPulse — DESIGN.md §8, only amber awaiting may use this */
+  --d-wiggle:  700ms;    /* mbWiggle — DESIGN.md §8, creature attention rotation */
+}

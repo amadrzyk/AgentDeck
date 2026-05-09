@@ -1,0 +1,1189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>AgentDeck — E-ink Layout Proposal</title>
+<script src="deck-stage.js"></script>
+<style>
+  :root {
+    --paper: #f4f1e8;
+    --paper-2: #ebe7da;
+    --ink: #15140f;
+    --ink-2: #2b2820;
+    --ink-3: #5a564a;
+    --ink-4: #8a8676;
+    --rule: #cfc9b8;
+    --hi: #c8431f;       /* attention / awaiting (warm sienna, prints OK on color e-ink) */
+    --ok: #2f6b3a;       /* connected / processing */
+    --warn: #b6852c;
+    --paperC: #f0ece1;
+    --inkC: #14130e;
+    --font-serif: "Source Serif Pro", "Charter", "Iowan Old Style", Georgia, serif;
+    --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-mono: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  }
+  html, body { margin: 0; padding: 0; background: #1a1a17; }
+  deck-stage { background: #1a1a17; }
+  section {
+    width: 1920px; height: 1080px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    position: relative;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .slide-pad { padding: 72px 96px; box-sizing: border-box; height: 100%; }
+  h1, h2, h3, h4 { font-family: var(--font-serif); font-weight: 600; letter-spacing: -0.01em; margin: 0; color: var(--ink); }
+  h1 { font-size: 96px; line-height: 1.02; letter-spacing: -0.025em; }
+  h2 { font-size: 64px; line-height: 1.05; letter-spacing: -0.02em; }
+  h3 { font-size: 32px; line-height: 1.2; }
+  h4 { font-size: 22px; line-height: 1.25; }
+  p, li { font-size: 22px; line-height: 1.5; color: var(--ink-2); }
+  .mono { font-family: var(--font-mono); font-feature-settings: "ss01"; }
+  .micro { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  .eyebrow { font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); }
+  .rule { height: 1px; background: var(--rule); width: 100%; }
+  .footer-bar {
+    position: absolute; left: 96px; right: 96px; bottom: 36px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-4);
+    border-top: 1px solid var(--rule); padding-top: 14px;
+  }
+  .footer-bar .right { display: flex; gap: 28px; }
+
+  /* === Cover === */
+  .cover { padding: 96px; display: grid; grid-template-rows: auto 1fr auto; height: 100%; box-sizing: border-box; }
+  .cover .top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .cover .badge { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3); }
+  .cover .title-block { align-self: end; max-width: 1500px; }
+  .cover h1 { font-size: 132px; line-height: 0.96; letter-spacing: -0.03em; }
+  .cover .sub { font-family: var(--font-serif); font-style: italic; font-size: 36px; color: var(--ink-3); margin-top: 28px; max-width: 1100px; line-height: 1.3; }
+  .cover .meta { display: flex; gap: 64px; align-items: end; }
+  .cover .meta .col .micro { color: var(--ink-4); }
+  .cover .meta .col .v { font-family: var(--font-mono); font-size: 18px; color: var(--ink-2); margin-top: 4px; }
+
+  /* === diagnosis === */
+  .diag-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; margin-top: 56px; }
+  .diag-card { border: 1px solid var(--rule); padding: 32px; background: var(--paper-2); position: relative; }
+  .diag-card .num { font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.16em; color: var(--ink-3); }
+  .diag-card h3 { margin-top: 12px; font-size: 28px; }
+  .diag-card p { font-size: 19px; margin-top: 14px; color: var(--ink-2); }
+  .diag-card .tag { position: absolute; top: 24px; right: 24px; font-family: var(--font-mono); font-size: 12px; color: var(--hi); letter-spacing: 0.1em; }
+
+  /* === principle row === */
+  .principles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-top: 48px; }
+  .principle { padding: 24px; border-top: 2px solid var(--ink); }
+  .principle .num { font-family: var(--font-mono); font-size: 40px; color: var(--ink); line-height: 1; }
+  .principle h4 { margin-top: 18px; font-size: 24px; }
+  .principle p { font-size: 18px; margin-top: 10px; line-height: 1.45; }
+
+  /* === Zone diagram (architecture) === */
+  .arch-wrap { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 64px; margin-top: 48px; }
+  .arch-diagram {
+    background: #fff; border: 1px solid var(--rule); padding: 28px;
+    font-family: var(--font-mono); font-size: 14px; line-height: 1.7; color: var(--ink-2);
+    white-space: pre; overflow: hidden;
+  }
+  .legend-table { width: 100%; border-collapse: collapse; }
+  .legend-table th, .legend-table td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--rule); font-size: 18px; }
+  .legend-table th { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+  .legend-table td.zone { font-family: var(--font-mono); }
+  .pill { display: inline-block; padding: 2px 10px; border: 1px solid var(--ink-3); border-radius: 999px; font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+  .pill.hi { border-color: var(--hi); color: var(--hi); }
+  .pill.ok { border-color: var(--ok); color: var(--ok); }
+
+  /* === Device frame (e-ink) === */
+  .device-row { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; margin-top: 36px; align-items: start; }
+  .device {
+    width: 100%; aspect-ratio: 4 / 3;
+    background: #1f1d18;
+    border-radius: 18px;
+    padding: 28px;
+    box-sizing: border-box;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.18), inset 0 0 0 1px #2a2722;
+    position: relative;
+  }
+  .device .screen {
+    width: 100%; height: 100%;
+    background: var(--paper);
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px #d6d1c0;
+    overflow: hidden;
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+  .device.color .screen { background: var(--paperC); }
+  .device-label { position: absolute; left: 28px; bottom: 8px; right: 28px; display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; color: #6e6a5e; text-transform: uppercase; }
+
+  /* small mock typography on device screens */
+  .scr-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 16px; border-bottom: 1.5px solid var(--ink);
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em;
+  }
+  .scr-bar .left { display: flex; gap: 14px; align-items: center; }
+  .scr-bar .logo { font-family: var(--font-serif); font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .scr-bar .right { display: flex; gap: 12px; align-items: center; color: var(--ink-3); }
+
+  .scr-body { display: grid; grid-template-columns: 200px 1fr; height: 100%; min-height: 0; }
+  .scr-sessions { border-right: 1.5px solid var(--ink); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden; }
+  .scr-sessions .grp { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.16em; color: var(--ink-3); text-transform: uppercase; }
+  .sess-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px; border-radius: 2px; }
+  .sess-row.focus { background: var(--ink); color: var(--paper); }
+  .sess-row.focus .sess-name, .sess-row.focus .sess-state { color: var(--paper); }
+  .sess-name { font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--ink); }
+  .sess-state { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; color: var(--ink-3); text-transform: uppercase; }
+  .glyph { width: 14px; height: 14px; display: inline-block; }
+
+  .scr-main { display: grid; grid-template-rows: auto auto 1fr auto; min-height: 0; }
+  .focus-card { padding: 14px 18px; border-bottom: 1.5px solid var(--ink); }
+  .focus-card .pname { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-3); text-transform: uppercase; }
+  .focus-card .agent { font-family: var(--font-serif); font-size: 22px; font-weight: 700; margin-top: 4px; line-height: 1.1; }
+  .focus-card .meta { display: flex; gap: 20px; margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+  .focus-card .meta b { color: var(--ink); font-weight: 600; }
+
+  .attention {
+    padding: 14px 18px;
+    border-bottom: 1.5px solid var(--ink);
+    background:
+      repeating-linear-gradient(45deg, transparent 0 6px, rgba(21,20,15,0.05) 6px 7px);
+    border-left: 6px solid var(--ink);
+  }
+  .device.color .attention { border-left-color: var(--hi); background: repeating-linear-gradient(45deg, transparent 0 6px, rgba(200,67,31,0.05) 6px 7px); }
+  .attention .alabel { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+  .attention .q { font-family: var(--font-serif); font-size: 17px; font-weight: 600; margin-top: 4px; line-height: 1.25; }
+  .attention .opts { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .attention .opt { padding: 4px 10px; border: 1.5px solid var(--ink); font-family: var(--font-mono); font-size: 11px; }
+  .attention .opt.k { background: var(--ink); color: var(--paper); }
+
+  .gauges { padding: 14px 18px; border-bottom: 1.5px solid var(--ink); display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 18px; align-items: center; }
+  .gauges .gr-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.16em; color: var(--ink-3); text-transform: uppercase; }
+  .gauges .num { font-family: var(--font-mono); font-size: 22px; font-weight: 700; }
+  .bar { height: 10px; border: 1.5px solid var(--ink); position: relative; margin-top: 4px; background: transparent; }
+  .bar > span { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
+  .device.color .bar > span { background: var(--ok); }
+  .bar.empty > span { background: repeating-linear-gradient(45deg, var(--ink) 0 2px, transparent 2px 5px); }
+  .bar .reset { position: absolute; right: 4px; top: -16px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+
+  .terrarium {
+    position: relative;
+    border-bottom: 1.5px solid var(--ink);
+    background: var(--paper);
+    overflow: hidden;
+  }
+  .device.color .terrarium { background: linear-gradient(180deg, #d8e4ec 0%, #c4d6e0 70%, #b6cad5 100%); }
+  .terrarium .floor { position: absolute; left: 0; right: 0; bottom: 0; height: 30%;
+    background: repeating-linear-gradient(0deg, var(--ink) 0 1px, transparent 1px 4px),
+                repeating-linear-gradient(90deg, transparent 0 6px, rgba(21,20,15,0.04) 6px 7px);
+  }
+  .device.color .terrarium .floor { background: #d4b896; box-shadow: inset 0 1px 0 #b89968; }
+  .terrarium .ridge { position: absolute; left: 0; right: 0; bottom: 30%; height: 1.5px; background: var(--ink); }
+
+  /* dot creatures (drawn via repeating-radial / box-shadows kept simple) */
+  .creature-oct {
+    position: absolute;
+    width: 60px; height: 44px;
+    background:
+      radial-gradient(circle at 30% 35%, var(--paper) 0 2px, transparent 2.5px),
+      radial-gradient(circle at 60% 35%, var(--paper) 0 2px, transparent 2.5px),
+      var(--ink);
+    border-radius: 50% 50% 40% 40% / 60% 60% 40% 40%;
+  }
+  .device.color .creature-oct {
+    background:
+      radial-gradient(circle at 30% 35%, #fff 0 2px, transparent 2.5px),
+      radial-gradient(circle at 60% 35%, #fff 0 2px, transparent 2.5px),
+      #c07058;
+  }
+  .creature-oct::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -10px; height: 12px;
+    background:
+      radial-gradient(circle at 10% 0%, var(--ink) 0 4px, transparent 5px),
+      radial-gradient(circle at 30% 0%, var(--ink) 0 4px, transparent 5px),
+      radial-gradient(circle at 50% 0%, var(--ink) 0 4px, transparent 5px),
+      radial-gradient(circle at 70% 0%, var(--ink) 0 4px, transparent 5px),
+      radial-gradient(circle at 90% 0%, var(--ink) 0 4px, transparent 5px);
+  }
+  .device.color .creature-oct::after {
+    background:
+      radial-gradient(circle at 10% 0%, #c07058 0 4px, transparent 5px),
+      radial-gradient(circle at 30% 0%, #c07058 0 4px, transparent 5px),
+      radial-gradient(circle at 50% 0%, #c07058 0 4px, transparent 5px),
+      radial-gradient(circle at 70% 0%, #c07058 0 4px, transparent 5px),
+      radial-gradient(circle at 90% 0%, #c07058 0 4px, transparent 5px);
+  }
+  .creature-cray {
+    position: absolute;
+    width: 44px; height: 36px;
+    background: var(--ink);
+    border-radius: 50%;
+  }
+  .device.color .creature-cray { background: #cc3333; }
+  .creature-cray::before, .creature-cray::after {
+    content: ""; position: absolute; top: 8px; width: 14px; height: 14px;
+    background: var(--ink); border-radius: 50%;
+  }
+  .device.color .creature-cray::before, .device.color .creature-cray::after { background: #cc3333; }
+  .creature-cray::before { left: -10px; }
+  .creature-cray::after { right: -10px; }
+
+  .label-tag {
+    position: absolute; padding: 2px 6px; border: 1px solid var(--ink); background: var(--paper);
+    font-family: var(--font-mono); font-size: 9px; transform: translate(-50%, -100%);
+  }
+  .device.color .label-tag { background: #efeadd; border-color: var(--ink); }
+  .fish {
+    position: absolute; width: 9px; height: 4px;
+    background: var(--ink); clip-path: polygon(0 50%, 70% 0, 100% 50%, 70% 100%);
+  }
+  .device.color .fish { background: #3366aa; }
+
+  .timeline {
+    padding: 10px 18px;
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.55; color: var(--ink-2);
+    max-height: 90px; overflow: hidden;
+  }
+  .timeline .tlrow { display: grid; grid-template-columns: 38px 12px 1fr; gap: 8px; align-items: baseline; }
+  .timeline .t { color: var(--ink-3); }
+  .timeline .ok { color: var(--ok); }
+  .timeline .er { color: var(--hi); }
+
+  /* = Layout strip schematic (slide for refresh-zone diagram) */
+  .zone-schematic {
+    width: 100%; aspect-ratio: 16/9; background: #fff; border: 1px solid var(--rule);
+    display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 56px 1fr 90px 70px;
+    grid-template-areas:
+      "chrome chrome"
+      "sess body"
+      "sess gauges"
+      "sess timeline";
+    overflow: hidden;
+  }
+  .z {
+    border: 1.5px solid var(--ink-3); margin: 6px; padding: 14px; position: relative;
+    font-family: var(--font-mono); font-size: 12px; color: var(--ink-2);
+  }
+  .z .ztitle { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink); font-weight: 700; }
+  .z .ztype { position: absolute; top: 8px; right: 10px; font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border: 1px solid var(--ink-3); }
+  .z.chrome { border-style: solid; background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0,0,0,0.04) 6px 7px); }
+  .z.live { border-style: dashed; background: rgba(200,67,31,0.05); }
+  .z.attn { border-style: dotted; }
+
+  /* table grid */
+  .matrix { width: 100%; border-collapse: collapse; margin-top: 32px; }
+  .matrix th, .matrix td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--rule); font-size: 17px; vertical-align: top; }
+  .matrix th { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+  .matrix td.k { font-family: var(--font-mono); color: var(--ink); }
+
+  /* code styles */
+  pre.snippet {
+    background: #fff; border: 1px solid var(--rule); padding: 22px 26px;
+    font-family: var(--font-mono); font-size: 14px; line-height: 1.6; color: var(--ink-2);
+    overflow: hidden; margin: 0;
+  }
+  pre.snippet .kw { color: var(--ink); font-weight: 700; }
+  pre.snippet .cm { color: var(--ink-4); font-style: italic; }
+  pre.snippet .st { color: var(--ok); }
+  pre.snippet .at { color: var(--hi); }
+
+  /* two-col helper */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; margin-top: 36px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 36px; margin-top: 36px; }
+  ul.tight { padding-left: 20px; margin: 12px 0 0; }
+  ul.tight li { margin-bottom: 8px; }
+
+  .stamp {
+    display: inline-block; border: 1.5px solid var(--ink); padding: 4px 10px;
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    transform: rotate(-1.5deg);
+  }
+
+  .closing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; margin-top: 56px; }
+  .closing-grid .step .num { font-family: var(--font-mono); font-size: 64px; line-height: 0.9; color: var(--ink); letter-spacing: -0.04em; }
+  .closing-grid .step h4 { margin-top: 16px; font-size: 26px; }
+  .closing-grid .step p { font-size: 18px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<deck-stage>
+
+<!-- ============== 01 — Cover ============== -->
+<section data-screen-label="01 Cover" class="cover">
+  <div class="top">
+    <div class="badge">AgentDeck · Design Proposal · v1</div>
+    <div class="badge">Surface — Android E-ink (B&amp;W + Color Kaleido 3)</div>
+  </div>
+  <div class="title-block">
+    <div class="eyebrow">유지보수 가능한 e-ink 레이아웃 제안</div>
+    <h1>한 모델, <br/>한 화면, <br/>두 종이.</h1>
+    <div class="sub">
+      iOS/Android와의 외형 동기화는 e-ink에서 실패한다. <br/>
+      공통화 대상은 <em>의미 모델</em>이지 <em>픽셀 위치</em>가 아니다.
+    </div>
+  </div>
+  <div class="meta">
+    <div class="col">
+      <div class="micro">Targets</div>
+      <div class="v">Crema S · Onyx · Kobo · Pantone 6 (Kaleido 3)</div>
+    </div>
+    <div class="col">
+      <div class="micro">Scope</div>
+      <div class="v">EinkMonitorScreen · projection · refresh policy</div>
+    </div>
+    <div class="col">
+      <div class="micro">Related</div>
+      <div class="v">docs/android-ui.md · MonitorScreen (tablet)</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== 02 — Why mirroring failed ============== -->
+<section data-screen-label="02 Diagnosis">
+  <div class="slide-pad">
+    <div class="eyebrow">진단</div>
+    <h2>왜 LCD/LED 레이아웃을 e-ink에 그대로 얹으면 깨지는가</h2>
+    <p style="max-width:1500px; margin-top:18px;">
+      iOS/Android tablet의 <span class="mono">MonitorScreen</span>은 <em>오버레이</em>와 <em>색상</em>으로 정보를 압축한다.
+      두 가지 모두 e-ink에서 비싸다. 화면을 통일하려는 시도는 결국 같은 4가지 충돌을 만든다.
+    </p>
+
+    <div class="diag-grid">
+      <div class="diag-card">
+        <div class="num">01</div>
+        <div class="tag">PHYSICS</div>
+        <h3>오버레이는 고스팅을 만든다</h3>
+        <p>
+          반투명 HUD 패널은 LCD에서 자연스럽지만, EPD에서는 alpha 합성이 부분 갱신과 결합되며 잔상을 누적시킨다.
+          GC16 full refresh로 지우는 순간 사용자는 200–500ms의 검은 깜박임을 본다.
+        </p>
+      </div>
+      <div class="diag-card">
+        <div class="num">02</div>
+        <div class="tag">PALETTE</div>
+        <h3>색상은 의미를 전달하지 못한다</h3>
+        <p>
+          B&amp;W 16-grey, Kaleido 3 4096-color는 LCD 채도와 다르다. 빨강=거부, 초록=승인 같은
+          순수 색 의존 코드는 색약 사용자뿐 아니라 e-ink에서도 무너진다. 글리프와 텍스트가 권위를 가져야 한다.
+        </p>
+      </div>
+      <div class="diag-card">
+        <div class="num">03</div>
+        <div class="tag">DENSITY</div>
+        <h3>14sp 미만의 글자는 읽히지 않는다</h3>
+        <p>
+          tablet HUD는 12sp 라벨이 흔하다. e-ink는 dither 한계 + 저대비로 작은 글자가 무너진다.
+          “같은 픽셀 위치”를 강제하면 정보가 가독성에 양보된다.
+        </p>
+      </div>
+      <div class="diag-card">
+        <div class="num">04</div>
+        <div class="tag">REFRESH</div>
+        <h3>실시간 영역과 정적 영역이 섞인다</h3>
+        <p>
+          크리처 애니메이션은 A2(10fps), 게이지는 DU(2s), 세션 패널은 거의 정적이다.
+          이를 한 레이어에서 그리면 가장 빠른 zone의 잔상이 가장 느린 zone으로 번진다.
+        </p>
+      </div>
+      <div class="diag-card">
+        <div class="num">05</div>
+        <div class="tag">MAINTENANCE</div>
+        <h3>두 트리가 하나처럼 보이려고 한다</h3>
+        <p>
+          <span class="mono">MonitorScreen</span>과 <span class="mono">EinkMonitorScreen</span>이 같은 외형을 흉내내려 할수록
+          공유 코드가 줄어든다. e-ink는 자기 형태를 가진 viewer일 때 가장 적은 코드로 정확하다.
+        </p>
+      </div>
+      <div class="diag-card">
+        <div class="num">06</div>
+        <div class="tag">DEVICE FAN-OUT</div>
+        <h3>벤더 EPD API가 다르다</h3>
+        <p>
+          Rockchip <span class="mono">EinkManager</span>, Onyx <span class="mono">BaseDevice</span>,
+          KOReader <span class="mono">RK35xxEPDController</span> — refresh mode 호출 표면이 셋이다.
+          UI가 직접 호출하면 디바이스 분기가 UI 코드로 새어 나온다.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar"><div>Diagnosis</div><div class="right"><span>02 / 09</span></div></div>
+</section>
+
+<!-- ============== 03 — Principles ============== -->
+<section data-screen-label="03 Principles">
+  <div class="slide-pad">
+    <div class="eyebrow">원칙</div>
+    <h2>E-ink는 모방하지 않는다.<br/>읽힌다.</h2>
+    <p style="max-width:1500px; margin-top:14px;">
+      네 가지 원칙을 코드 경계로 강제한다. 이것이 깨지는 코드 변경은 review에서 reject한다.
+    </p>
+
+    <div class="principles">
+      <div class="principle">
+        <div class="num">01</div>
+        <h4>Shared semantics, separate pixels</h4>
+        <p>
+          <span class="mono">DashboardState</span> · <span class="mono">FocusAction</span> ·
+          <span class="mono">AttentionRequest</span>는 공통. 레이아웃은 surface마다 자유.
+        </p>
+      </div>
+      <div class="principle">
+        <div class="num">02</div>
+        <h4>Slots over overlays</h4>
+        <p>
+          반투명 오버레이 금지. 화면은 명시적 zone으로만 분할.
+          각 zone은 자기 refresh policy를 갖는다.
+        </p>
+      </div>
+      <div class="principle">
+        <div class="num">03</div>
+        <h4>Glyph + text first, color last</h4>
+        <p>
+          승인/거부/대기/연결 모두 글리프와 라벨로 1차 표현.
+          색은 color e-ink에서 추가 강조용일 뿐.
+        </p>
+      </div>
+      <div class="principle">
+        <div class="num">04</div>
+        <h4>Vendor EPD via one port</h4>
+        <p>
+          UI는 <span class="mono">EpdRefreshController</span>만 호출.
+          Rockchip/Onyx/Kobo/Color 분기는 driver 모듈 내부에 갇혀 있다.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar"><div>Principles</div><div class="right"><span>03 / 09</span></div></div>
+</section>
+
+<!-- ============== 04 — Architecture (zones + ports) ============== -->
+<section data-screen-label="04 Architecture">
+  <div class="slide-pad">
+    <div class="eyebrow">아키텍처</div>
+    <h2>Refresh-Zone Layered Projection</h2>
+
+    <div class="arch-wrap">
+      <div>
+        <h4 style="margin-bottom:10px;">레이어 구조</h4>
+<div class="arch-diagram">┌────────────────────────────────────────────────────┐
+│  shared / state-model  (공통)                       │
+│   DashboardState · FocusAction · AttentionRequest   │
+│   Timeline · UsageGauge · AgentRow                  │
+└────────────────────────────────────────────────────┘
+              ▲                        ▲
+              │                        │
+┌─────────────┴──────────┐  ┌──────────┴──────────────┐
+│  MonitorScreen (LCD)   │  │  EinkMonitorScreen      │
+│  - free overlays       │  │  - fixed slot grid      │
+│  - 60fps motion        │  │  - per-zone refresh     │
+│  - color = primary     │  │  - glyph = primary      │
+└────────────────────────┘  └────────┬────────────────┘
+                                     │ uses
+                            ┌────────▼────────────┐
+                            │ EpdRefreshController│  port
+                            ├─────────────────────┤
+                            │ RockchipEpdDriver   │
+                            │ OnyxEpdDriver       │
+                            │ KoreaderEpdDriver   │
+                            │ ColorKaleidoDriver  │
+                            └─────────────────────┘</div>
+      </div>
+
+      <div>
+        <h4 style="margin-bottom:10px;">Zone 종류</h4>
+        <table class="legend-table">
+          <thead><tr><th>Zone</th><th>Refresh</th><th>역할</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="zone">CHROME</td>
+              <td><span class="pill">DU · 2 s</span></td>
+              <td>로고, 세션 목록, settings 진입. 거의 안 변함.</td>
+            </tr>
+            <tr>
+              <td class="zone">FOCUS</td>
+              <td><span class="pill">A2 · 200 ms</span></td>
+              <td>현재 선택한 세션의 model · state · project.</td>
+            </tr>
+            <tr>
+              <td class="zone">TERRARIUM</td>
+              <td><span class="pill">A2/anim · 10 fps</span></td>
+              <td>크리처 애니메이션. 상태 전환에서만 GC16 cleanup.</td>
+            </tr>
+            <tr>
+              <td class="zone">GAUGES</td>
+              <td><span class="pill">DU · 2 s</span></td>
+              <td>5h/7d 게이지, OAuth/Ollama 모델 카탈로그.</td>
+            </tr>
+            <tr>
+              <td class="zone">TIMELINE</td>
+              <td><span class="pill">A2 · 300 ms</span></td>
+              <td>이벤트 로그. append-only이므로 부분 갱신 친화적.</td>
+            </tr>
+            <tr>
+              <td class="zone">ATTENTION</td>
+              <td><span class="pill hi">GC16 once</span></td>
+              <td><span class="mono">awaiting_*</span> 진입 시 한 번 full refresh, 답변 옵션 명료화.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top:18px; font-size:18px;">
+          각 zone은 <span class="mono">RefreshHint</span>를 emit하고
+          <span class="mono">EpdRefreshController</span>가 디바이스별로 번역한다.
+          UI 코드는 벤더 분기 0줄.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar"><div>Architecture</div><div class="right"><span>04 / 09</span></div></div>
+</section>
+
+<!-- ============== 05 — Layout Schematic ============== -->
+<section data-screen-label="05 Layout">
+  <div class="slide-pad">
+    <div class="eyebrow">레이아웃</div>
+    <h2>화면은 슬롯이다.<br/>오버레이는 없다.</h2>
+
+    <div style="margin-top:36px;">
+      <div class="zone-schematic" style="height:680px;">
+        <div class="z chrome" style="grid-area: chrome; display:flex; align-items:center; justify-content:space-between;">
+          <div><div class="ztitle">Chrome — Title bar</div><div style="margin-top:4px;">AgentDeck · timestamp · battery · Settings · rotate</div></div>
+          <div class="ztype">DU · static</div>
+        </div>
+        <div class="z chrome" style="grid-area: sess;">
+          <div class="ztitle">Chrome — Session List (28%)</div>
+          <div class="ztype">DU · static</div>
+          <div style="margin-top:14px; color: var(--ink-3);">
+            agent rows (primary + siblings) <br/>
+            tap → focus_session<br/>
+            attention pip (◆) when sibling awaits
+          </div>
+        </div>
+        <div class="z attn" style="grid-area: body; display:flex; flex-direction:column; justify-content:flex-end;">
+          <div class="ztitle">Focus + Terrarium (Body)</div>
+          <div class="ztype">A2 · live</div>
+          <div style="margin-top:8px; color: var(--ink-3);">
+            • Focus card (top, pinned) — model · project · state · attention<br/>
+            • Terrarium frame (bottom) — 크리처는 여기서만 움직인다<br/>
+            • <span class="mono" style="color: var(--hi);">ATTENTION</span> 발생 시 focus card가 이 영역을 22→34%로 확장
+          </div>
+        </div>
+        <div class="z chrome" style="grid-area: gauges;">
+          <div class="ztitle">Gauges + Models</div>
+          <div class="ztype">DU · 2s</div>
+          <div style="margin-top:8px; color: var(--ink-3);">5h · 7d 블록 게이지 · OAuth catalog · Ollama running</div>
+        </div>
+        <div class="z live" style="grid-area: timeline;">
+          <div class="ztitle">Timeline</div>
+          <div class="ztype">A2 · append-only</div>
+          <div style="margin-top:6px; color: var(--ink-3);">이벤트 한 줄씩 push. 8줄 도달 시 위에서 한 줄 drop.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar"><div>Layout schematic</div><div class="right"><span>05 / 09</span></div></div>
+</section>
+
+<!-- ============== 06 — B&W Mock ============== -->
+<section data-screen-label="06 BW mock">
+  <div class="slide-pad">
+    <div class="eyebrow">목업 — B&amp;W</div>
+    <h2>Crema S · Onyx · Kobo</h2>
+    <p style="max-width:1500px; margin-top:14px;">16-grey · landscape 1404×1872 dp 등가 · GC16 + DU + A2 혼합</p>
+
+    <div class="device-row">
+      <!-- BW idle -->
+      <div>
+        <div class="device">
+          <div class="screen">
+            <div class="scr-bar">
+              <div class="left">
+                <span class="logo">AgentDeck</span>
+                <span style="color: var(--ink-3);">14:32</span>
+              </div>
+              <div class="right">
+                <span>● 84%</span>
+                <span>↻</span>
+                <span>⚙</span>
+              </div>
+            </div>
+            <div class="scr-body">
+              <div class="scr-sessions">
+                <div class="grp">Sessions · 4</div>
+                <div class="sess-row focus">
+                  <span class="glyph mono" style="font-weight:700;">✱</span>
+                  <span class="sess-name">claude · web</span>
+                  <span class="sess-state">PROC</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">✱</span>
+                  <span class="sess-name">claude · cli</span>
+                  <span class="sess-state">IDLE</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">◎</span>
+                  <span class="sess-name">codex</span>
+                  <span class="sess-state">IDLE</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">⬢</span>
+                  <span class="sess-name">openclaw</span>
+                  <span class="sess-state">ROUTE</span>
+                </div>
+                <div style="height:12px;"></div>
+                <div class="grp">Topology</div>
+                <div style="font-family: var(--font-mono); font-size:11px; color:var(--ink-2); line-height:1.6;">
+                  ↑ hooks · gateway<br/>
+                  ↓ SD+ · D200H · TC001
+                </div>
+              </div>
+
+              <div class="scr-main">
+                <div class="focus-card">
+                  <div class="pname">PROJECT · agentdeck</div>
+                  <div class="agent">claude-code · web</div>
+                  <div class="meta">
+                    <span><b>opus-4.1</b></span>
+                    <span>● PROCESSING</span>
+                    <span>session 14:18 · 14m</span>
+                  </div>
+                </div>
+
+                <div class="terrarium" style="min-height:175px;">
+                  <div class="floor"></div>
+                  <div class="ridge"></div>
+                  <!-- creatures -->
+                  <div class="creature-oct" style="left:55%; top:45%;"></div>
+                  <div class="label-tag" style="left:64%; top:42%;">claude·web</div>
+                  <div class="creature-cray" style="right:8%; bottom:30px;"></div>
+                  <!-- fish -->
+                  <div class="fish" style="left:18%; top:40%;"></div>
+                  <div class="fish" style="left:24%; top:45%;"></div>
+                  <div class="fish" style="left:30%; top:38%;"></div>
+                  <div class="fish" style="left:22%; top:55%;"></div>
+                  <div class="fish" style="left:14%; top:60%;"></div>
+                  <!-- seaweed lines -->
+                  <div style="position:absolute; left:10%; bottom:0; width:2px; height:50%; background: var(--ink);"></div>
+                  <div style="position:absolute; left:11%; bottom:0; width:2px; height:35%; background: var(--ink);"></div>
+                </div>
+
+                <div class="gauges">
+                  <div>
+                    <div class="gr-label">Limits · 5 h</div>
+                    <div class="num">48<span style="font-size:14px; color:var(--ink-3);">%</span></div>
+                    <div class="bar"><span style="width:48%"></span><div class="reset">↻ 1h 02m</div></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">Limits · 7 d</div>
+                    <div class="num">23<span style="font-size:14px; color:var(--ink-3);">%</span></div>
+                    <div class="bar empty"><span style="width:23%"></span><div class="reset">↻ 4d 10h</div></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">Models</div>
+                    <div style="font-family: var(--font-mono); font-size:11px; line-height:1.5; color:var(--ink-2);">
+                      OAuth: opus-4.1 · sonnet-4 · haiku-4.5<br/>
+                      Ollama: <b>qwen3:30b</b> · bge-m3
+                    </div>
+                  </div>
+                </div>
+
+                <div class="timeline">
+                  <div class="tlrow"><span class="t">14:31</span><span class="ok">▶</span><span>Read <span class="mono">apme/runner.ts</span></span></div>
+                  <div class="tlrow"><span class="t">14:31</span><span>·</span><span>model call <span class="mono">opus-4.1</span></span></div>
+                  <div class="tlrow"><span class="t">14:32</span><span>·</span><span>IDLE → PROCESSING</span></div>
+                  <div class="tlrow"><span class="t">14:32</span><span class="ok">★</span><span>eval result · coding · 0.78</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="device-label" style="position:relative; left:0; right:0; margin-top:10px; padding:0;">
+          <span>State · IDLE/PROCESSING</span><span>Refresh budget · ~1.4 fps avg</span>
+        </div>
+      </div>
+
+      <!-- BW attention -->
+      <div>
+        <div class="device">
+          <div class="screen">
+            <div class="scr-bar">
+              <div class="left">
+                <span class="logo">AgentDeck</span>
+                <span style="color: var(--ink-3);">14:33</span>
+              </div>
+              <div class="right">
+                <span style="font-weight:700; letter-spacing:0.14em;">◆ ATTENTION</span>
+                <span>● 84%</span>
+                <span>⚙</span>
+              </div>
+            </div>
+            <div class="scr-body">
+              <div class="scr-sessions">
+                <div class="grp">Sessions · 4</div>
+                <div class="sess-row">
+                  <span class="glyph mono">✱</span>
+                  <span class="sess-name">claude · web</span>
+                  <span class="sess-state">IDLE</span>
+                </div>
+                <div class="sess-row focus">
+                  <span class="glyph mono" style="font-weight:700;">◆</span>
+                  <span class="sess-name">claude · cli</span>
+                  <span class="sess-state">AWAIT</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">◎</span>
+                  <span class="sess-name">codex</span>
+                  <span class="sess-state">PROC</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">⬢</span>
+                  <span class="sess-name">openclaw</span>
+                  <span class="sess-state">SIT</span>
+                </div>
+              </div>
+
+              <div class="scr-main">
+                <div class="focus-card" style="background: var(--ink); color: var(--paper);">
+                  <div class="pname" style="color:#bdb9a8;">PROJECT · scratch-render</div>
+                  <div class="agent" style="color: var(--paper);">claude-code · cli</div>
+                  <div class="meta" style="color:#bdb9a8;">
+                    <span style="color:var(--paper);"><b>sonnet-4</b></span>
+                    <span style="color:var(--paper);">◆ AWAITING</span>
+                    <span>permission prompt</span>
+                  </div>
+                </div>
+
+                <div class="attention">
+                  <div class="alabel">PERMISSION REQUEST · 3 OPTIONS</div>
+                  <div class="q">Allow <span class="mono">Bash(rm -rf .zig-cache)</span> in this project?</div>
+                  <div class="opts">
+                    <span class="opt k">[Y] Approve once</span>
+                    <span class="opt">[A] Always for this project</span>
+                    <span class="opt">[N] Deny</span>
+                  </div>
+                </div>
+
+                <div class="terrarium" style="min-height:118px;">
+                  <div class="floor"></div>
+                  <div class="ridge"></div>
+                  <div class="creature-oct" style="left:42%; top:30%;"></div>
+                  <div class="label-tag" style="left:52%; top:22%;">claude·cli ◆</div>
+                  <div class="creature-cray" style="right:10%; bottom:28px;"></div>
+                  <div class="fish" style="left:22%; top:40%;"></div>
+                  <div class="fish" style="left:28%; top:46%;"></div>
+                  <div class="fish" style="left:18%; top:55%;"></div>
+                </div>
+
+                <div class="gauges">
+                  <div>
+                    <div class="gr-label">5 h</div>
+                    <div class="num">48%</div>
+                    <div class="bar"><span style="width:48%"></span></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">7 d</div>
+                    <div class="num">23%</div>
+                    <div class="bar empty"><span style="width:23%"></span></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">Models · active 3</div>
+                    <div style="font-family: var(--font-mono); font-size:11px; line-height:1.5; color:var(--ink-2);">
+                      Claude · OpenClaw Gateway · qwen3:30b
+                    </div>
+                  </div>
+                </div>
+
+                <div class="timeline">
+                  <div class="tlrow"><span class="t">14:32</span><span>·</span><span>PROCESSING → AWAITING</span></div>
+                  <div class="tlrow"><span class="t">14:33</span><span class="er">◆</span><span>permission · <span class="mono">Bash(rm -rf …)</span></span></div>
+                  <div class="tlrow"><span class="t">14:33</span><span>·</span><span>focus → claude·cli</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="device-label" style="position:relative; left:0; right:0; margin-top:10px; padding:0;">
+          <span>State · AWAITING (single GC16 on entry)</span><span>Glyph + label · 색 의존 0%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar"><div>Mockup · B&amp;W</div><div class="right"><span>06 / 09</span></div></div>
+</section>
+
+<!-- ============== 07 — Color Mock ============== -->
+<section data-screen-label="07 Color mock">
+  <div class="slide-pad">
+    <div class="eyebrow">목업 — Color e-ink</div>
+    <h2>Pantone 6 · Kaleido 3</h2>
+    <p style="max-width:1500px; margin-top:14px;">
+      4096 색 · A2 animation mode · 같은 레이아웃, 의미 매핑은 색을 <em>강조</em>로만 사용.
+      B&amp;W 화면을 그대로 켰을 때 정보가 손실되지 않는 것이 ground truth.
+    </p>
+
+    <div class="device-row">
+      <div>
+        <div class="device color">
+          <div class="screen">
+            <div class="scr-bar" style="border-color: var(--inkC);">
+              <div class="left">
+                <span class="logo">AgentDeck</span>
+                <span style="color: var(--ink-3);">14:32</span>
+              </div>
+              <div class="right">
+                <span>● 84%</span>
+                <span>↻</span>
+                <span>⚙</span>
+              </div>
+            </div>
+            <div class="scr-body">
+              <div class="scr-sessions">
+                <div class="grp">Sessions · 4</div>
+                <div class="sess-row focus">
+                  <span class="glyph mono" style="font-weight:700;">✱</span>
+                  <span class="sess-name">claude · web</span>
+                  <span class="sess-state">PROC</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">✱</span>
+                  <span class="sess-name">claude · cli</span>
+                  <span class="sess-state">IDLE</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">◎</span>
+                  <span class="sess-name">codex</span>
+                  <span class="sess-state">IDLE</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono" style="color: var(--hi);">⬢</span>
+                  <span class="sess-name">openclaw</span>
+                  <span class="sess-state" style="color: var(--hi);">ROUTE</span>
+                </div>
+              </div>
+
+              <div class="scr-main">
+                <div class="focus-card">
+                  <div class="pname">PROJECT · agentdeck</div>
+                  <div class="agent">claude-code · web</div>
+                  <div class="meta">
+                    <span><b>opus-4.1</b></span>
+                    <span style="color: var(--ok);">● PROCESSING</span>
+                    <span>14m</span>
+                  </div>
+                </div>
+
+                <div class="terrarium" style="min-height:175px;">
+                  <div class="floor"></div>
+                  <div class="creature-oct" style="left:55%; top:45%;"></div>
+                  <div class="label-tag" style="left:64%; top:42%;">claude·web</div>
+                  <div class="creature-cray" style="right:8%; bottom:30px;"></div>
+                  <div class="fish" style="left:18%; top:40%;"></div>
+                  <div class="fish" style="left:24%; top:45%;"></div>
+                  <div class="fish" style="left:30%; top:38%;"></div>
+                  <div class="fish" style="left:22%; top:55%;"></div>
+                  <div class="fish" style="left:14%; top:60%;"></div>
+                  <div style="position:absolute; left:10%; bottom:0; width:3px; height:50%; background: #336633;"></div>
+                  <div style="position:absolute; left:11.5%; bottom:0; width:3px; height:35%; background: #336633;"></div>
+                </div>
+
+                <div class="gauges">
+                  <div>
+                    <div class="gr-label">Limits · 5 h</div>
+                    <div class="num">48<span style="font-size:14px; color:var(--ink-3);">%</span></div>
+                    <div class="bar"><span style="width:48%"></span><div class="reset">↻ 1h 02m</div></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">Limits · 7 d</div>
+                    <div class="num">23<span style="font-size:14px; color:var(--ink-3);">%</span></div>
+                    <div class="bar"><span style="width:23%; background: var(--warn);"></span><div class="reset">↻ 4d 10h</div></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">Models</div>
+                    <div style="font-family: var(--font-mono); font-size:11px; line-height:1.5; color:var(--ink-2);">
+                      OAuth: opus-4.1 · sonnet-4 · haiku-4.5<br/>
+                      Ollama: <b>qwen3:30b</b> · bge-m3
+                    </div>
+                  </div>
+                </div>
+
+                <div class="timeline">
+                  <div class="tlrow"><span class="t">14:31</span><span class="ok">▶</span><span>Read <span class="mono">apme/runner.ts</span></span></div>
+                  <div class="tlrow"><span class="t">14:32</span><span>·</span><span>IDLE → PROCESSING</span></div>
+                  <div class="tlrow"><span class="t">14:32</span><span class="ok">★</span><span>eval · coding · 0.78</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="device-label" style="position:relative; left:0; right:0; margin-top:10px; padding:0;">
+          <span>Color = enhancement only</span><span>Same layout · same glyphs</span>
+        </div>
+      </div>
+
+      <div>
+        <div class="device color">
+          <div class="screen">
+            <div class="scr-bar">
+              <div class="left">
+                <span class="logo">AgentDeck</span>
+                <span style="color: var(--ink-3);">14:33</span>
+              </div>
+              <div class="right">
+                <span style="color: var(--hi); font-weight:700;">◆ ATTENTION</span>
+                <span>● 84%</span>
+                <span>⚙</span>
+              </div>
+            </div>
+            <div class="scr-body">
+              <div class="scr-sessions">
+                <div class="grp">Sessions · 4</div>
+                <div class="sess-row">
+                  <span class="glyph mono">✱</span>
+                  <span class="sess-name">claude · web</span>
+                  <span class="sess-state">IDLE</span>
+                </div>
+                <div class="sess-row focus">
+                  <span class="glyph mono" style="font-weight:700;">◆</span>
+                  <span class="sess-name">claude · cli</span>
+                  <span class="sess-state">AWAIT</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono">◎</span>
+                  <span class="sess-name">codex</span>
+                  <span class="sess-state">PROC</span>
+                </div>
+                <div class="sess-row">
+                  <span class="glyph mono" style="color: var(--hi);">⬢</span>
+                  <span class="sess-name">openclaw</span>
+                  <span class="sess-state">SIT</span>
+                </div>
+              </div>
+
+              <div class="scr-main">
+                <div class="focus-card">
+                  <div class="pname">PROJECT · scratch-render</div>
+                  <div class="agent">claude-code · cli</div>
+                  <div class="meta">
+                    <span><b>sonnet-4</b></span>
+                    <span style="color: var(--hi);">◆ AWAITING</span>
+                    <span>permission</span>
+                  </div>
+                </div>
+
+                <div class="attention">
+                  <div class="alabel" style="color: var(--hi);">PERMISSION REQUEST · 3 OPTIONS</div>
+                  <div class="q">Allow <span class="mono">Bash(rm -rf .zig-cache)</span> in this project?</div>
+                  <div class="opts">
+                    <span class="opt k" style="background: var(--hi); border-color: var(--hi);">[Y] Approve once</span>
+                    <span class="opt">[A] Always</span>
+                    <span class="opt">[N] Deny</span>
+                  </div>
+                </div>
+
+                <div class="terrarium" style="min-height:118px;">
+                  <div class="floor"></div>
+                  <div class="creature-oct" style="left:42%; top:30%;"></div>
+                  <div class="label-tag" style="left:52%; top:22%; color:var(--hi); border-color: var(--hi);">claude·cli ◆</div>
+                  <div class="creature-cray" style="right:10%; bottom:28px;"></div>
+                  <div class="fish" style="left:22%; top:40%;"></div>
+                  <div class="fish" style="left:28%; top:46%;"></div>
+                </div>
+
+                <div class="gauges">
+                  <div>
+                    <div class="gr-label">5 h</div>
+                    <div class="num">48%</div>
+                    <div class="bar"><span style="width:48%"></span></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">7 d</div>
+                    <div class="num">23%</div>
+                    <div class="bar"><span style="width:23%"></span></div>
+                  </div>
+                  <div>
+                    <div class="gr-label">Active</div>
+                    <div style="font-family: var(--font-mono); font-size:11px; line-height:1.5; color:var(--ink-2);">
+                      Claude · OpenClaw · qwen3:30b
+                    </div>
+                  </div>
+                </div>
+
+                <div class="timeline">
+                  <div class="tlrow"><span class="t">14:33</span><span style="color: var(--hi);">◆</span><span>permission · <span class="mono">Bash(rm -rf …)</span></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="device-label" style="position:relative; left:0; right:0; margin-top:10px; padding:0;">
+          <span>Color = enhancement only</span><span>Glyph still works in B&amp;W</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bar"><div>Mockup · Color</div><div class="right"><span>07 / 09</span></div></div>
+</section>
+
+<!-- ============== 08 — Code shape & maintainability ============== -->
+<section data-screen-label="08 Code shape">
+  <div class="slide-pad">
+    <div class="eyebrow">유지보수성</div>
+    <h2>UI는 hint를 쏘고,<br/>드라이버가 번역한다.</h2>
+
+    <div class="two-col">
+      <div>
+        <h4>Before — UI에 벤더 분기가 새어 나옴</h4>
+<pre class="snippet"><span class="cm">// EinkAquariumFrame.kt — 현재 형태</span>
+<span class="kw">if</span> (manufacturer == <span class="st">"rockchip"</span>) {
+  einkManager.setMode(<span class="st">"12"</span>) <span class="cm">// A2</span>
+  einkManager.sendOneFullFrame()
+} <span class="kw">else if</span> (manufacturer == <span class="st">"onyx"</span>) {
+  device.setViewDefaultUpdateMode(<span class="at">A2_MODE</span>)
+} <span class="kw">else if</span> (isColorEink) {
+  <span class="cm">// skip dither, use animation mode</span>
+  ...
+}</pre>
+        <p style="margin-top:18px;">
+          UI 컴포넌트가 디바이스 SPI를 직접 부른다.
+          새 e-ink 기기 추가 = UI 코드 수정.
+        </p>
+      </div>
+
+      <div>
+        <h4>After — Zone이 hint를 emit, controller가 routing</h4>
+<pre class="snippet"><span class="cm">// EinkMonitorScreen.kt</span>
+<span class="kw">EinkZone</span>(id = <span class="at">"terrarium"</span>, hint = <span class="kw">RefreshHint</span>.<span class="kw">Anim</span>(fps = 10)) {
+  <span class="kw">TerrariumProjection</span>(state)
+}
+<span class="kw">EinkZone</span>(id = <span class="at">"attention"</span>, hint = <span class="kw">RefreshHint</span>.<span class="kw">FullOnce</span>) {
+  <span class="kw">AttentionProjection</span>(state.attention)
+}
+
+<span class="cm">// EpdRefreshController.kt — driver port</span>
+<span class="kw">interface</span> EpdRefreshController {
+  <span class="kw">fun</span> apply(zone: ZoneId, hint: RefreshHint)
+}
+<span class="cm">// RockchipEpdDriver · OnyxEpdDriver · ColorKaleidoDriver
+// 새 기기 추가 = driver 한 파일 추가</span></pre>
+      </div>
+    </div>
+
+    <h4 style="margin-top:48px;">공유되는 것 / 분리되는 것</h4>
+    <table class="matrix">
+      <thead>
+        <tr><th>레이어</th><th>LCD/LED와 공유?</th><th>위치</th><th>설명</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="k">DashboardState · FocusAction · AttentionRequest</td>
+          <td><span class="pill ok">SHARED</span></td>
+          <td><span class="mono">shared/state-model</span></td>
+          <td>WS 프로토콜에서 직접 derived. 모든 surface가 같은 store를 읽는다.</td>
+        </tr>
+        <tr>
+          <td class="k">Creature sprite paths · Timeline parser</td>
+          <td><span class="pill ok">SHARED</span></td>
+          <td><span class="mono">shared/render</span></td>
+          <td>SVG path → Compose path / Canvas drawRect fallback. 한 source.</td>
+        </tr>
+        <tr>
+          <td class="k">Layout · zones · refresh hints</td>
+          <td><span class="pill">EINK ONLY</span></td>
+          <td><span class="mono">ui/eink/projection</span></td>
+          <td>tablet/iOS와 모양이 달라야 한다. 흉내내지 않는다.</td>
+        </tr>
+        <tr>
+          <td class="k">EpdRefreshController · vendor drivers</td>
+          <td><span class="pill">EINK ONLY</span></td>
+          <td><span class="mono">ui/eink/epd</span></td>
+          <td>Rockchip · Onyx · Kaleido 분기는 여기서 끝난다. UI는 모른다.</td>
+        </tr>
+        <tr>
+          <td class="k">Color palette · glyph table</td>
+          <td><span class="pill ok">SHARED w/ fallback</span></td>
+          <td><span class="mono">shared/tokens</span></td>
+          <td>같은 의미 키, B&amp;W 매핑 + color e-ink 매핑이 한 테이블에 있음.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="footer-bar"><div>Maintainability</div><div class="right"><span>08 / 09</span></div></div>
+</section>
+
+<!-- ============== 09 — Roadmap ============== -->
+<section data-screen-label="09 Roadmap">
+  <div class="slide-pad">
+    <div class="eyebrow">실행 계획</div>
+    <h2>점진적으로 옮긴다.<br/>한 번에 갈아엎지 않는다.</h2>
+
+    <div class="closing-grid">
+      <div class="step">
+        <div class="num">01</div>
+        <h4>Extract <span class="mono">EpdRefreshController</span></h4>
+        <p>
+          현재 <span class="mono">EinkRenderer</span>·<span class="mono">EinkAnimatedRefreshZone</span> 안에 흩어진
+          벤더 호출을 driver port로 모은다. UI 변경 없음. 위험 낮음.
+        </p>
+        <div class="stamp" style="margin-top:14px;">~1 sprint</div>
+      </div>
+      <div class="step">
+        <div class="num">02</div>
+        <h4>Introduce <span class="mono">EinkZone</span> primitive</h4>
+        <p>
+          공통 wrapper로 zone을 감싼다. 기존 <span class="mono">EinkMonitorScreen</span>의 5 영역을
+          순차적으로 zone으로 마이그레이션. 화면은 그대로.
+        </p>
+        <div class="stamp" style="margin-top:14px;">~1 sprint</div>
+      </div>
+      <div class="step">
+        <div class="num">03</div>
+        <h4>Reflow → fixed slot grid</h4>
+        <p>
+          오버레이를 모두 slot으로 변환. Attention zone을 GC16 once 정책으로 도입.
+          Crema/Pantone QA를 같이 돌려 잔상 회귀 확인.
+        </p>
+        <div class="stamp" style="margin-top:14px;">~1.5 sprint</div>
+      </div>
+      <div class="step">
+        <div class="num">04</div>
+        <h4>Glyph-first state coding</h4>
+        <p>
+          색에만 의존하는 state 표현 제거. Settings에서 “색 강조 끄기” 토글로 회귀 테스트.
+        </p>
+        <div class="stamp" style="margin-top:14px;">~0.5 sprint</div>
+      </div>
+      <div class="step">
+        <div class="num">05</div>
+        <h4>Color enhancement layer</h4>
+        <p>
+          Kaleido 3에서만 활성화되는 token override layer. B&amp;W 화면을 켜면 자동으로 빠진다.
+        </p>
+        <div class="stamp" style="margin-top:14px;">~0.5 sprint</div>
+      </div>
+      <div class="step">
+        <div class="num">06</div>
+        <h4>Driver fan-out</h4>
+        <p>
+          Onyx · Kobo 드라이버 추가. 각 1 PR. UI/projection 변경 없이 새 디바이스 지원.
+        </p>
+        <div class="stamp" style="margin-top:14px;">ongoing</div>
+      </div>
+    </div>
+
+    <div style="margin-top:48px; padding: 28px 32px; border: 1.5px solid var(--ink); background: var(--paper-2); display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <div class="micro">결과적으로</div>
+        <div style="font-family: var(--font-serif); font-size: 30px; font-weight: 600; margin-top: 6px;">
+          UI 한 트리, EPD 분기 0줄. e-ink는 자기 형태로, 의미는 한 모델로.
+        </div>
+      </div>
+      <div class="stamp" style="font-size: 14px;">Proposal · ready for review</div>
+    </div>
+  </div>
+  <div class="footer-bar"><div>Roadmap</div><div class="right"><span>09 / 09</span></div></div>
+</section>
+
+</deck-stage>
+</body>
+</html>

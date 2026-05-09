@@ -1,0 +1,338 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>AgentDeck — Menubar Popup Designs</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: -apple-system, "SF Pro", sans-serif;
+    background:
+      radial-gradient(ellipse 80% 60% at 30% 20%, #3a5a7a 0%, transparent 50%),
+      radial-gradient(ellipse 60% 50% at 70% 80%, #2a4a3a 0%, transparent 50%),
+      linear-gradient(180deg, #1a2030 0%, #0a1018 100%);
+    min-height: 100vh;
+    color: #e8e8e8;
+    overflow-x: auto;
+  }
+  @keyframes swim {
+    0%, 100% { transform: translateY(0) rotate(-2deg); }
+    50% { transform: translateY(-2px) rotate(2deg); }
+  }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-1px); }
+  }
+  @keyframes wiggle {
+    0%, 100% { transform: rotate(-3deg); }
+    50% { transform: rotate(3deg); }
+  }
+  @keyframes glowPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,169,61,0.3); }
+    50% { box-shadow: 0 0 16px 2px rgba(255,169,61,0.35); }
+  }
+  @keyframes attnPulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.04); }
+  }
+  .stage {
+    display: flex;
+    gap: 36px;
+    padding: 60px 40px 80px;
+    align-items: flex-start;
+    justify-content: center;
+    min-width: max-content;
+  }
+  .menubar-strip {
+    position: sticky; top: 0; left: 0; right: 0;
+    height: 28px;
+    background: rgba(30,30,35,0.7);
+    backdrop-filter: blur(30px);
+    border-bottom: 0.5px solid rgba(255,255,255,0.1);
+    display: flex; align-items: center;
+    padding: 0 14px;
+    font-size: 13px;
+    color: #e8e8e8;
+    z-index: 100;
+  }
+  .menubar-strip .apple { font-size: 15px; margin-right: 14px; }
+  .menubar-strip .app { font-weight: 600; margin-right: 14px; }
+  .menubar-strip .spacer { flex: 1; }
+  .menubar-strip .trays { display: flex; gap: 12px; font-size: 14px; color: #c8c8c8; align-items: center; }
+  .menubar-strip .trays .active {
+    color: #FFA93D;
+    animation: attnPulse 1.2s infinite;
+  }
+  .arrow {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 20px; height: 12px;
+    overflow: hidden;
+  }
+  .arrow::before {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    background: inherit;
+    transform: rotate(45deg);
+    left: 3px; top: 4px;
+  }
+  .opt-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+  }
+  .opt-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.3px;
+  }
+  .opt-sub {
+    font-size: 11px;
+    color: #9a9aa2;
+    max-width: 360px;
+    text-align: center;
+    margin-top: -6px;
+  }
+  .popup-wrap {
+    position: relative;
+    margin-top: 4px;
+  }
+  .popup-wrap::before {
+    content: '';
+    position: absolute;
+    top: -6px; left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 12px; height: 12px;
+    background: var(--chrome, #0a1520);
+    border-top: 0.5px solid rgba(255,255,255,0.1);
+    border-left: 0.5px solid rgba(255,255,255,0.1);
+    z-index: 2;
+  }
+  /* tweaks panel */
+  .tweaks {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    background: rgba(20,22,28,0.92);
+    backdrop-filter: blur(20px);
+    border: 0.5px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 14px;
+    width: 220px;
+    font-size: 11px;
+    color: #e8e8e8;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+    z-index: 1000;
+    display: none;
+  }
+  .tweaks.show { display: block; }
+  .tweaks h3 {
+    margin: 0 0 10px;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    color: #9a9aa2;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .tweak-row {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-bottom: 10px;
+  }
+  .tweak-row label {
+    font-size: 10px; color: #9a9aa2;
+  }
+  .seg {
+    display: flex;
+    background: rgba(0,0,0,0.3);
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .seg button {
+    flex: 1;
+    background: transparent;
+    color: #c8c8c8;
+    border: none;
+    padding: 5px 4px;
+    font-size: 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .seg button.active {
+    background: rgba(255,255,255,0.12);
+    color: white;
+  }
+</style>
+</head>
+<body>
+
+<div class="menubar-strip">
+  <span class="apple"></span>
+  <span class="app">AgentDeck</span>
+  <span style="color:#9a9aa2">File  Edit  View  Help</span>
+  <span class="spacer"></span>
+  <span class="trays">
+    <span>▣</span>
+    <span>🔋</span>
+    <span>📶</span>
+    <span id="status-icon">◎</span>
+    <span>🔊</span>
+    <span>🔍</span>
+    <span>⌃</span>
+    <span id="clock">10:42</span>
+  </span>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<div class="tweaks show" id="tweaks">
+  <h3>Tweaks</h3>
+  <div class="tweak-row">
+    <label>Scenario</label>
+    <div class="seg" data-key="scenario">
+      <button data-val="normal" class="active">Normal</button>
+      <button data-val="attention">Attention</button>
+      <button data-val="empty">Empty</button>
+    </div>
+  </div>
+  <div class="tweak-row">
+    <label>Show options</label>
+    <div class="seg" data-key="show">
+      <button data-val="all" class="active">All</button>
+      <button data-val="A">A</button>
+      <button data-val="B">B</button>
+      <button data-val="C">C</button>
+      <button data-val="D">D</button>
+    </div>
+  </div>
+  <div style="font-size:10px; color:#6a6a72; margin-top:8px; line-height:1.4;">
+    A · Aquarium Tower<br/>
+    B · Signal Console<br/>
+    C · Living Dock<br/>
+    D · Unified Graph Dock ★
+  </div>
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="../../design/tokens.js"></script>
+<script src="data.js?v=3"></script>
+<script type="text/babel" src="creatures.jsx?v=3"></script>
+<script type="text/babel" src="option-a.jsx?v=3"></script>
+<script type="text/babel" src="option-b.jsx?v=3"></script>
+<script type="text/babel" src="option-c.jsx?v=3"></script>
+<script type="text/babel" src="option-d.jsx?v=3"></script>
+
+<script type="text/babel" data-presets="react">
+/*EDITMODE-BEGIN*/
+const TWEAK_DEFAULTS = {
+  "scenario": "normal",
+  "show": "all"
+};
+/*EDITMODE-END*/
+
+// allow URL override + localStorage persistence
+const params = new URLSearchParams(location.search);
+const state = {
+  scenario: params.get('scenario') || localStorage.getItem('scenario') || TWEAK_DEFAULTS.scenario,
+  show: params.get('show') || localStorage.getItem('show') || TWEAK_DEFAULTS.show,
+};
+
+function Stage() {
+  const [scenario, setScenario] = React.useState(state.scenario);
+  const [show, setShow] = React.useState(state.show);
+
+  React.useEffect(() => {
+    localStorage.setItem('scenario', scenario);
+    localStorage.setItem('show', show);
+
+    // update menubar status icon based on scenario
+    const icon = document.getElementById('status-icon');
+    if (scenario === 'attention') {
+      icon.textContent = '⚠';
+      icon.className = 'active';
+    } else if (scenario === 'empty') {
+      icon.textContent = '◌';
+      icon.className = '';
+    } else {
+      icon.textContent = '◉';
+      icon.className = '';
+    }
+
+    // wire tweaks UI
+    document.querySelectorAll('.seg').forEach(seg => {
+      const key = seg.dataset.key;
+      seg.querySelectorAll('button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.val === (key === 'scenario' ? scenario : show));
+        btn.onclick = () => {
+          if (key === 'scenario') setScenario(btn.dataset.val);
+          else setShow(btn.dataset.val);
+          // also notify host for persistence
+          const edits = {};
+          edits[key] = btn.dataset.val;
+          try { window.parent.postMessage({type: '__edit_mode_set_keys', edits}, '*'); } catch {}
+        };
+      });
+    });
+  }, [scenario, show]);
+
+  // clock
+  React.useEffect(() => {
+    const tick = () => {
+      const d = new Date();
+      const h = d.getHours();
+      const m = String(d.getMinutes()).padStart(2,'0');
+      document.getElementById('clock').textContent = `${h}:${m}`;
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const options = [];
+  if (show === 'all' || show === 'A') options.push({ id: 'A', title: 'A · Aquarium Tower', sub: 'Living tank metaphor — sessions swim in colored zones; bridge→models as a flow diagram; devices as a radial topology.', Comp: window.OptionA, chrome: '#0a1520' });
+  if (show === 'all' || show === 'B') options.push({ id: 'B', title: 'B · Signal Console', sub: 'HUD/terminal aesthetic — sessions as signal rows; services stack; devices mesh graph. Keyboard-first.', Comp: window.OptionB, chrome: '#0c0d10' });
+  if (show === 'all' || show === 'C') options.push({ id: 'C', title: 'C · Living Dock', sub: 'Light home-screen feel — attention theater on top with big targets; dock of creature chips; calm rest of the panel.', Comp: window.OptionC, chrome: '#f6f3ee' });
+  if (show === 'all' || show === 'D') options.push({ id: 'D', title: 'D · Unified Graph Dock ★', sub: 'Attention theater + interactive session jump (iTerm / VSCode / Cursor / Dashboard / Finder) + single unified topology: Models ← Bridge → Sessions, Devices as a ring.', Comp: window.OptionD, chrome: '#f6f3ee' });
+
+  return (
+    <>
+      {options.map(({ id, title, sub, Comp, chrome }) => (
+        <div className="opt-wrap" key={id} data-screen-label={title}>
+          <div className="opt-title">{title}</div>
+          <div className="opt-sub">{sub}</div>
+          <div className="popup-wrap" style={{ ['--chrome']: chrome }}>
+            <Comp scenario={scenario} />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('stage')).render(<Stage/>);
+
+// Edit-mode integration
+window.addEventListener('message', (e) => {
+  const msg = e.data || {};
+  if (msg.type === '__activate_edit_mode') {
+    document.getElementById('tweaks').classList.add('show');
+  } else if (msg.type === '__deactivate_edit_mode') {
+    document.getElementById('tweaks').classList.remove('show');
+  }
+});
+try { window.parent.postMessage({type: '__edit_mode_available'}, '*'); } catch {}
+</script>
+</body>
+</html>

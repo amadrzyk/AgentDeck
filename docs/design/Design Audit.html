@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AgentDeck — Design Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../design/tokens.css" />
+<link rel="stylesheet" href="../../design/components.css" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--tide-50); color: var(--ink-900); font-family: var(--font-sans); }
+  .shell { max-width: 1320px; margin: 0 auto; padding: 56px 64px 96px; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; padding-bottom: 28px; border-bottom: 1px solid rgba(14,31,31,0.1); margin-bottom: 48px; }
+  .head h1 { font-size: 48px; line-height: 1; letter-spacing: -0.03em; font-weight: 600; }
+  .head h1 em { color: var(--kelp-700); font-style: italic; font-weight: 500; }
+  .head .meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-500); letter-spacing: 0.06em; text-align: right; line-height: 1.8; }
+  .head .meta b { color: var(--ink-900); font-weight: 700; }
+  .lede { font-size: 16px; color: var(--ink-700); max-width: 64ch; line-height: 1.55; margin-top: 14px; }
+
+  .sec { padding: 40px 0 48px; border-bottom: 1px solid rgba(14,31,31,0.06); }
+  .sec h2 { font-size: 28px; letter-spacing: -0.02em; font-weight: 600; margin-bottom: 6px; }
+  .sec .num { font-family: var(--font-mono); font-size: 11.5px; color: var(--coral-700); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 4px; }
+  .sec .sub { font-size: 14.5px; color: var(--ink-700); max-width: 70ch; line-height: 1.55; margin-bottom: 28px; }
+
+  /* Score row */
+  .score-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 32px; }
+  .score { background: var(--tide-50); border: 1px solid rgba(14,31,31,0.08); border-radius: 14px; padding: 22px 24px; }
+  .score .lbl { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-500); letter-spacing: 0.14em; text-transform: uppercase; }
+  .score .val { font-size: 38px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .score.good .val { color: var(--kelp-700); }
+  .score.warn .val { color: var(--amber-500); }
+  .score.bad  .val { color: var(--coral-500); }
+  .score .note { font-size: 12px; color: var(--ink-500); margin-top: 6px; }
+
+  /* Matrix table */
+  table.matrix { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.matrix th, table.matrix td { padding: 10px 12px; text-align: left; border-bottom: 1px solid rgba(14,31,31,0.08); }
+  table.matrix th { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); white-space: nowrap; }
+  table.matrix td.cmp { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-900); white-space: nowrap; }
+  table.matrix td.use { font-size: 12.5px; color: var(--ink-700); }
+  .y { color: var(--kelp-700); font-weight: 700; }
+  .n { color: var(--coral-500); font-weight: 700; }
+  .x { color: var(--ink-300); }
+  .row-bad   { background: rgba(192, 87, 58, 0.04); }
+  .row-warn  { background: rgba(200, 146, 58, 0.05); }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+  .badge.dead    { background: rgba(192, 87, 58, 0.12); color: var(--coral-700); }
+  .badge.lonely  { background: rgba(200, 146, 58, 0.16); color: #8a6418; }
+  .badge.healthy { background: rgba(47, 138, 124, 0.14); color: var(--kelp-700); }
+
+  /* Lint section */
+  .lint-rules { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 28px; }
+  .rule { background: var(--tide-100); border: 1px solid rgba(14,31,31,0.08); border-radius: 12px; padding: 16px 18px; display: flex; gap: 14px; align-items: flex-start; }
+  .rule .id { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--coral-700); letter-spacing: 0.1em; min-width: 30px; }
+  .rule .desc { font-size: 13px; line-height: 1.5; color: var(--ink-700); }
+  .rule .desc b { color: var(--ink-900); font-weight: 600; display: block; margin-bottom: 2px; }
+
+  .cmd { font-family: var(--font-mono); font-size: 14px; background: var(--ink-900); color: var(--tide-50); padding: 14px 18px; border-radius: 10px; display: flex; align-items: center; gap: 12px; max-width: max-content; }
+  .cmd::before { content: "$"; color: var(--kelp-300); }
+
+  /* Parity grid */
+  .parity-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; font-size: 13px; }
+  .parity-toolbar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink-700); font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .parity-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .parity-cell { background: var(--tide-100); border: 1px solid rgba(14,31,31,0.08); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .parity-cell .label { padding: 10px 14px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-700); letter-spacing: 0.06em; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(14,31,31,0.06); }
+  .parity-cell .label a { color: var(--kelp-700); text-decoration: none; }
+  .parity-cell .label a:hover { text-decoration: underline; }
+  /* Iframes render at full design width (1280×800) and scale down to fit the cell. */
+  .parity-cell .frame-wrap { position: relative; aspect-ratio: 1280 / 800; background: var(--tide-50); overflow: hidden; }
+  .parity-cell iframe {
+    position: absolute; top: 0; left: 0;
+    width: 1280px; height: 800px;
+    border: 0;
+    transform: scale(var(--scale, 0.3));
+    transform-origin: 0 0;
+    pointer-events: none;
+  }
+  .parity-cell.show-grid .frame-wrap::after {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(192,87,58,0.18) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(192,87,58,0.18) 1px, transparent 1px);
+    background-size: 8px 8px;
+    pointer-events: none;
+  }
+
+  /* Findings list */
+  .findings { display: flex; flex-direction: column; gap: 8px; }
+  .finding { background: var(--tide-50); border: 1px solid rgba(14,31,31,0.08); border-left: 3px solid var(--coral-500); border-radius: 8px; padding: 12px 16px; font-size: 13px; line-height: 1.55; color: var(--ink-700); }
+  .finding.warn { border-left-color: var(--amber-500); }
+  .finding.ok   { border-left-color: var(--kelp-500); }
+  .finding b { color: var(--ink-900); font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; }
+  .finding .where { font-family: var(--font-mono); font-size: 11px; color: var(--ink-500); margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="head">
+    <div>
+      <div style="font-family: var(--font-mono); font-size: 11px; color: var(--ink-500); letter-spacing: 0.16em; margin-bottom: 12px;">AGENTDECK · DESIGN AUDIT · v0.1</div>
+      <h1>Are we <em>consistent</em>?</h1>
+      <p class="lede">Three layers of checks: an automated lint, a coverage matrix, and a side-by-side visual parity. Run the bash lint locally for the freshest numbers; this page is a living snapshot.</p>
+    </div>
+    <div class="meta">
+      <div><b>SOURCE</b> DESIGN.md v0.1</div>
+      <div><b>RUNNER</b> design/lint.sh</div>
+      <div><b>SNAPSHOT</b> 2026-05-09</div>
+    </div>
+  </header>
+
+  <!-- 01 — How to run -->
+  <section class="sec">
+    <div class="num">01 · HOW TO RUN</div>
+    <h2>Lint locally.</h2>
+    <p class="sub">The bash script grep's the codebase for 8 rules derived directly from DESIGN.md §10 ("Don'ts") and prints file·line citations. Wire it into pre-commit or CI; exit code = violation count.</p>
+    <div class="cmd">bash design/lint.sh</div>
+    <div style="height: 8px;"></div>
+    <div class="cmd">bash design/lint.sh --json &gt; audit.json</div>
+  </section>
+
+  <!-- 02 — Rules -->
+  <section class="sec">
+    <div class="num">02 · LINT RULES</div>
+    <h2>Eight automatic checks.</h2>
+    <p class="sub">Each rule maps to a clause in DESIGN.md. Token-defining files (<code style="font-family: var(--font-mono);">design/tokens.css</code>, <code style="font-family: var(--font-mono);">site.css</code>, <code style="font-family: var(--font-mono);">data.js</code>, <code style="font-family: var(--font-mono);">creatures.jsx</code>) are exempt — they are the source of truth.</p>
+    <div class="lint-rules">
+      <div class="rule"><div class="id">R1</div><div class="desc"><b>No pure black/white</b>Forbid <code style="font-family: var(--font-mono);">#fff</code> / <code style="font-family: var(--font-mono);">#000</code>. Use <code style="font-family: var(--font-mono);">--tide-50</code> / <code style="font-family: var(--font-mono);">--ink-900</code>.</div></div>
+      <div class="rule"><div class="id">R2</div><div class="desc"><b>No hardcoded hex</b>All colors via tokens. Hex outside token files is a leak.</div></div>
+      <div class="rule"><div class="id">R3</div><div class="desc"><b>No forbidden typefaces</b>Inter, Roboto, Arial, Fraunces and Helvetica Neue are out. Plex + JetBrains only.</div></div>
+      <div class="rule"><div class="id">R4</div><div class="desc"><b>Only amber pulses</b>kelp / coral may not animate. They are static signals.</div></div>
+      <div class="rule"><div class="id">R5</div><div class="desc"><b>Warm shadows only</b>No pure-grey <code style="font-family: var(--font-mono);">rgba(0,0,0,…)</code> shadows. Use <code style="font-family: var(--font-mono);">--sh-*</code>.</div></div>
+      <div class="rule"><div class="id">R6</div><div class="desc"><b>No emoji in UI</b>Use the icon set or creature marks. Emoji is for chat, not chrome.</div></div>
+      <div class="rule"><div class="id">R7</div><div class="desc"><b>Radius scale</b><code style="font-family: var(--font-mono);">border-radius</code> ∈ {0, 4, 8, 10, 12, 14, 16, 18, 999}. Anything else is a leak.</div></div>
+      <div class="rule"><div class="id">R8</div><div class="desc"><b>Palette separation</b>Marketing surfaces (<code style="font-family: var(--font-mono);">option-*-site</code>, <code style="font-family: var(--font-mono);">index.html</code>) must not use product UI <code style="font-family: var(--font-mono);">--ui-*</code> tokens.</div></div>
+    </div>
+  </section>
+
+  <!-- 03 — Coverage matrix -->
+  <section class="sec">
+    <div class="num">03 · COVERAGE MATRIX</div>
+    <h2>Definition ⊂ Implementation ⊂ Display ⊂ Use.</h2>
+    <p class="sub">Every component should travel down the chain: defined in DESIGN.md → implemented in components.css → shown in Design System.html → used by at least one page. A break in the chain = dead token, lonely token, or undocumented pattern.</p>
+
+    <div class="score-row">
+      <div class="score good">  <div class="lbl">Healthy</div><div class="val" id="m-healthy">—</div><div class="note">defined → used somewhere</div></div>
+      <div class="score warn">  <div class="lbl">Lonely</div> <div class="val" id="m-lonely">—</div><div class="note">defined, never used</div></div>
+      <div class="score bad">   <div class="lbl">Dead</div>   <div class="val" id="m-dead">—</div>  <div class="note">used but undocumented</div></div>
+      <div class="score">       <div class="lbl">Total</div>  <div class="val" id="m-total">—</div> <div class="note">tracked components</div></div>
+    </div>
+
+    <table class="matrix" id="matrix">
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th style="width: 52px;">DESIGN.md</th>
+          <th style="width: 56px;">CSS</th>
+          <th style="width: 56px;">Display</th>
+          <th>Used in</th>
+          <th style="width: 90px;">Status</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- 04 — Visual parity -->
+  <section class="sec">
+    <div class="num">04 · VISUAL PARITY</div>
+    <h2>The pages, side by side.</h2>
+    <p class="sub">All HTML deliverables at the same scale. Toggle the 8px overlay to spot off-grid spacing; click the title to open a page full size.</p>
+    <div class="parity-toolbar">
+      <label><input type="checkbox" id="grid-toggle" /> 8px grid overlay</label>
+      <label><input type="checkbox" id="reload-toggle" /> Reload all</label>
+    </div>
+    <div class="parity-grid" id="parity"></div>
+  </section>
+
+  <!-- 05 — Findings -->
+  <section class="sec" style="border-bottom: 0;">
+    <div class="num">05 · MANUAL FINDINGS</div>
+    <h2>Things lint can't see.</h2>
+    <p class="sub">Hand-curated observations the script can't catch — voice, hierarchy, and unused capabilities. Update this list whenever a finding is resolved or a new one appears.</p>
+    <div class="findings" id="findings"></div>
+  </section>
+
+  <footer style="padding: 56px 0 0; font-family: var(--font-mono); font-size: 11px; color: var(--ink-500); letter-spacing: 0.06em; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+    <span>AGENTDECK · DESIGN AUDIT · v0.1</span>
+    <span>see DESIGN.md and design/lint.sh</span>
+    <span>regenerate via <code>bash design/lint.sh --json</code></span>
+  </footer>
+</div>
+
+<script>
+// ── Coverage matrix data ─────────────────────────────────────────────
+// Hand-curated. Reflects current state of the repo on 2026-05-09.
+const MATRIX = [
+  // Buttons
+  { c: '.ad-btn--primary',   d:1, i:1, s:1, used: ['option-a-site','option-b-site','option-c-site','option-d-site','index.html'] },
+  { c: '.ad-btn--ghost',     d:1, i:1, s:1, used: ['option-a-site','option-b-site'] },
+  { c: '.ad-btn--coral',     d:1, i:1, s:1, used: [] },
+  { c: '.ad-btn-badge',      d:1, i:1, s:1, used: ['option-a-site'] },
+  // Tier badges
+  { c: '.ad-tier--store',           d:1, i:1, s:1, used: ['option-a-site','option-b-site','index.html'] },
+  { c: '.ad-tier--store-on-dark',   d:1, i:1, s:1, used: ['option-b-site'] },
+  { c: '.ad-tier--dev',             d:1, i:1, s:1, used: ['option-b-site'] },
+  { c: '.ad-tier--cli',             d:1, i:1, s:1, used: [] },
+  // Kickers
+  { c: '.ad-kicker',         d:1, i:1, s:1, used: ['option-a-site','option-b-site','option-c-site','option-d-site'] },
+  { c: '.ad-kicker--coral',  d:1, i:1, s:1, used: [] },
+  { c: '.ad-kicker--kelp-light', d:1, i:1, s:1, used: ['option-b-site'] },
+  // Status
+  { c: '.ad-dot--idle',       d:1, i:1, s:1, used: ['Menubar Popup','option-a-site'] },
+  { c: '.ad-dot--processing', d:1, i:1, s:1, used: ['Menubar Popup','option-a-site'] },
+  { c: '.ad-dot--awaiting',   d:1, i:1, s:1, used: ['Menubar Popup'] },
+  { c: '.ad-dot--error',      d:1, i:1, s:1, used: [] },
+  // Surfaces
+  { c: '.ad-card',           d:1, i:1, s:1, used: ['option-a-site','option-c-site'] },
+  { c: '.ad-card--ink',      d:1, i:1, s:1, used: ['option-b-site'] },
+  { c: '.ad-card--dev',      d:1, i:1, s:1, used: ['option-b-site'] },
+  // Chrome
+  { c: '.ad-chip',           d:1, i:1, s:1, used: ['option-a-site','option-b-site','option-d-site'] },
+  { c: '.ad-lang',           d:1, i:1, s:1, used: ['index.html'] },
+  { c: '.ad-device',         d:1, i:1, s:1, used: ['option-a-site','option-b-site'] },
+  { c: '.ad-code',           d:1, i:1, s:1, used: ['option-b-site'] },
+  // Notices — defined but unused
+  { c: '.ad-notice--ok',       d:1, i:1, s:1, used: [] },
+  { c: '.ad-notice--awaiting', d:1, i:1, s:1, used: [] },
+  { c: '.ad-notice--error',    d:1, i:1, s:1, used: [] },
+  // Patterns
+  { c: '.ad-placeholder',    d:1, i:1, s:1, used: [] },
+  { c: '.ad-hatch',          d:1, i:1, s:0, used: [] },
+  // Undocumented but used (legacy)
+  { c: '.hero (legacy site.css)',   d:0, i:1, s:0, used: ['option-a-site','option-b-site','option-c-site','option-d-site'] },
+  { c: '.pillars (legacy)',         d:0, i:1, s:0, used: ['option-a-site'] },
+];
+
+const tbody = document.querySelector('#matrix tbody');
+let healthy = 0, lonely = 0, dead = 0;
+for (const row of MATRIX) {
+  const isUsed = row.used.length > 0;
+  const isDocumented = row.d && row.s;
+  let status, klass, rowKlass = '';
+  if (isUsed && isDocumented) { status = 'healthy'; healthy++; }
+  else if (!isUsed && isDocumented) { status = 'lonely'; lonely++; rowKlass = 'row-warn'; }
+  else if (isUsed && !isDocumented) { status = 'dead'; dead++; rowKlass = 'row-bad'; }
+  else { status = 'lonely'; lonely++; rowKlass = 'row-warn'; }
+
+  const tr = document.createElement('tr');
+  tr.className = rowKlass;
+  tr.innerHTML = `
+    <td class="cmp">${row.c}</td>
+    <td><span class="${row.d ? 'y' : 'n'}">${row.d ? '●' : '○'}</span></td>
+    <td><span class="${row.i ? 'y' : 'n'}">${row.i ? '●' : '○'}</span></td>
+    <td><span class="${row.s ? 'y' : 'n'}">${row.s ? '●' : '○'}</span></td>
+    <td class="use">${row.used.length ? row.used.join(', ') : '<span class="x">— none —</span>'}</td>
+    <td><span class="badge ${status}">${status}</span></td>
+  `;
+  tbody.appendChild(tr);
+}
+document.getElementById('m-healthy').textContent = healthy;
+document.getElementById('m-lonely').textContent = lonely;
+document.getElementById('m-dead').textContent = dead;
+document.getElementById('m-total').textContent = MATRIX.length;
+
+// ── Parity grid ──────────────────────────────────────────────────────
+const PAGES = [
+  './Design System.html',
+  '../design-mockups/Menubar Popup.html',
+  '../design-mockups/E-ink Dashboard.html',
+  '../design-mockups/E-ink Code Reflection.html',
+  '../design-mockups/E-ink Design Proposal.html',
+];
+const parity = document.getElementById('parity');
+for (const p of PAGES) {
+  const cell = document.createElement('div');
+  cell.className = 'parity-cell';
+  cell.innerHTML = `
+    <div class="label">
+      <span>${p}</span>
+      <a href="${encodeURI(p)}" target="_blank">open ↗</a>
+    </div>
+    <div class="frame-wrap"><iframe src="${encodeURI(p)}" loading="lazy" sandbox="allow-same-origin allow-scripts"></iframe></div>
+  `;
+  parity.appendChild(cell);
+}
+// Compute scale per cell so the 1280px iframe fits the cell's actual width.
+function rescale() {
+  document.querySelectorAll('.parity-cell .frame-wrap').forEach(w => {
+    const s = w.getBoundingClientRect().width / 1280;
+    w.querySelector('iframe').style.setProperty('--scale', s);
+  });
+}
+rescale();
+window.addEventListener('resize', rescale);
+// Re-run after iframes load (font/layout shifts don't change geometry, but resize observer is safest).
+new ResizeObserver(rescale).observe(document.getElementById('parity'));
+
+document.getElementById('grid-toggle').addEventListener('change', e => {
+  document.querySelectorAll('.parity-cell').forEach(c => c.classList.toggle('show-grid', e.target.checked));
+});
+document.getElementById('reload-toggle').addEventListener('change', e => {
+  if (!e.target.checked) return;
+  document.querySelectorAll('.parity-cell iframe').forEach(f => { const s = f.src; f.src = ''; f.src = s; });
+  setTimeout(() => { e.target.checked = false; }, 600);
+});
+
+// ── Manual findings ──────────────────────────────────────────────────
+const FINDINGS = [
+  { sev: 'warn', t: '.ad-notice family is defined but unused',
+    w: 'design/components.css → Design System.html only',
+    body: 'Three notice variants (ok/awaiting/error) ship but no production page renders them. Either wire into the menubar popup or remove from the system to avoid bit-rot.' },
+  { sev: 'bad', t: 'Legacy site.css and design/components.css overlap',
+    w: 'site.css ↔ design/components.css',
+    body: 'Hero, pillars, compare cols are still in site.css with their own button/card/kicker rules. Until each landing option migrates onto .ad-* classes, the same component lives in two places — drift is inevitable.' },
+  { sev: 'warn', t: '.ad-tier--cli has no consumer',
+    w: 'design/components.css L94',
+    body: 'Defined in case the install path needs a callout, but no page uses it. Decide: remove, or add to Option B/C as the CLI alternative.' },
+  { sev: 'bad', t: 'Menubar Popup.html predates the token system',
+    w: 'Menubar Popup.html L1-200',
+    body: 'Uses its own raw-hex palette (radial-gradient #3a5a7a, etc) and SF Pro stack. R2/R3 violations expected. Migrate to --ui-popup-* tokens we just added.' },
+  { sev: 'warn', t: 'E-ink screens use a parallel BW token set',
+    w: 'eink-screens.jsx L10-15',
+    body: 'tokensBW {paper, ink, ink2, …} duplicates --tide / --ink. Justified for 1-bit panels, but should be renamed --eink-* and aliased to the main scale where possible.' },
+  { sev: 'ok', t: 'All four agent marks are loaded from upstream SVGs',
+    w: 'creatures.jsx + design/brand/',
+    body: 'Real brand assets, not redrawn. data.js owns the brand colors. This is the intended state per DESIGN.md §6.1.' },
+];
+const fnEl = document.getElementById('findings');
+for (const f of FINDINGS) {
+  const d = document.createElement('div');
+  d.className = `finding ${f.sev}`;
+  d.innerHTML = `<b>${f.t}</b><div style="margin-top: 6px;">${f.body}</div><div class="where">${f.w}</div>`;
+  fnEl.appendChild(d);
+}
+</script>
+</body>
+</html>

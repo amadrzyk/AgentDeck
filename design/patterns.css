@@ -1,0 +1,78 @@
+/* AgentDeck — Surface patterns
+ * Hatch fills, placeholder rules, dividers. Depend on tokens.css.
+ */
+
+/* Diagonal hatch — used on placeholders and hardware-callout backgrounds. */
+.ad-hatch {
+  background:
+    linear-gradient(135deg,
+      transparent 25%,
+      rgba(14, 31, 31, 0.04) 25%,
+      rgba(14, 31, 31, 0.04) 50%,
+      transparent 50%,
+      transparent 75%,
+      rgba(14, 31, 31, 0.04) 75%) 0 0 / 12px 12px,
+    var(--tide-100);
+}
+
+.ad-hatch-strong {
+  background:
+    linear-gradient(135deg,
+      transparent 25%,
+      rgba(14, 31, 31, 0.08) 25%,
+      rgba(14, 31, 31, 0.08) 50%,
+      transparent 50%,
+      transparent 75%,
+      rgba(14, 31, 31, 0.08) 75%) 0 0 / 14px 14px,
+    var(--tide-100);
+}
+
+/* Placeholder — full asset stand-in.
+ * Use: <div class="ad-placeholder" data-label="// menubar popup"></div>
+ */
+.ad-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-500);
+  letter-spacing: 0.04em;
+  border-radius: var(--r-3xl);
+  border: 1px solid rgba(14, 31, 31, 0.08);
+  min-height: 200px;
+  background:
+    linear-gradient(135deg,
+      transparent 25%,
+      rgba(14, 31, 31, 0.04) 25%,
+      rgba(14, 31, 31, 0.04) 50%,
+      transparent 50%,
+      transparent 75%,
+      rgba(14, 31, 31, 0.04) 75%) 0 0 / 12px 12px,
+    var(--tide-100);
+}
+.ad-placeholder::before {
+  content: attr(data-label);
+}
+
+/* Hairline dividers */
+.ad-rule       { height: 1px; background: rgba(14, 31, 31, 0.08); border: 0; margin: var(--s-6) 0; }
+.ad-rule-dark  { height: 1px; background: rgba(255, 255, 255, 0.08); border: 0; margin: var(--s-6) 0; }
+
+/* Section paint variants */
+.ad-surface-sand   { background: var(--tide-50); color: var(--ink-900); }
+.ad-surface-cream  { background: var(--tide-100); color: var(--ink-900); }
+.ad-surface-ink    { background: var(--ink-900); color: var(--tide-50); }
+.ad-surface-ink h2,
+.ad-surface-ink h3 { color: var(--tide-50); }
+.ad-surface-ink .ad-kicker { color: var(--kelp-300); }
+.ad-surface-ink .ad-lede   { color: var(--ink-300); }
+
+/* Focus ring — calm but visible */
+.ad-focus:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--kelp-500);
+  outline-offset: 3px;
+  border-radius: 4px;
+}

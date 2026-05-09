@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AgentDeck — Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Sans+JP:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../design/tokens.css" />
+<link rel="stylesheet" href="../../design/patterns.css" />
+<link rel="stylesheet" href="../../design/components.css" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--tide-50); color: var(--ink-900); font-family: var(--font-sans); }
+
+  .ds-shell { padding: 56px 64px 96px; max-width: 1320px; margin: 0 auto; }
+
+  .ds-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 56px; padding-bottom: 32px; border-bottom: 1px solid rgba(14,31,31,0.1); }
+  .ds-head h1 { font-size: 56px; line-height: 1; letter-spacing: -0.03em; font-weight: 600; margin-bottom: 12px; }
+  .ds-head h1 em { color: var(--kelp-700); font-style: italic; font-weight: 500; }
+  .ds-head .ds-meta { font-family: var(--font-mono); font-size: 12px; color: var(--ink-500); letter-spacing: 0.06em; }
+  .ds-head .ds-tagline { font-size: 17px; color: var(--ink-700); max-width: 56ch; line-height: 1.55; margin-top: 14px; }
+  .ds-toc { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; color: var(--ink-500); text-align: right; line-height: 2; min-width: 200px; }
+  .ds-toc a { display: block; color: var(--ink-700); }
+  .ds-toc a:hover { color: var(--kelp-700); }
+
+  .ds-section { padding: 64px 0; border-bottom: 1px solid rgba(14,31,31,0.06); }
+  .ds-section .ds-num { font-family: var(--font-mono); font-size: 12px; color: var(--coral-700); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 6px; }
+  .ds-section h2 { font-size: 38px; letter-spacing: -0.02em; font-weight: 600; margin-bottom: 8px; }
+  .ds-section .ds-sub { font-size: 15.5px; color: var(--ink-700); max-width: 70ch; line-height: 1.55; margin-bottom: 36px; }
+
+  /* Color swatches */
+  .swatch-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .swatch { border-radius: 12px; overflow: hidden; border: 1px solid rgba(14,31,31,0.08); background: var(--tide-50); }
+  .swatch-color { height: 92px; }
+  .swatch-meta { padding: 12px 14px 14px; }
+  .swatch-meta .name { font-size: 13.5px; font-weight: 600; }
+  .swatch-meta .hex  { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-500); margin-top: 2px; letter-spacing: 0.04em; }
+  .swatch-meta .use  { font-size: 11.5px; color: var(--ink-500); margin-top: 6px; line-height: 1.45; }
+
+  .swatch-group-title { font-family: var(--font-mono); font-size: 11px; color: var(--ink-500); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 12px; margin-top: 28px; }
+  .swatch-group-title:first-child { margin-top: 0; }
+
+  /* Type spec */
+  .type-row { display: grid; grid-template-columns: 200px 1fr; gap: 32px; padding: 24px 0; border-top: 1px solid rgba(14,31,31,0.08); align-items: baseline; }
+  .type-row:first-child { border-top: 0; padding-top: 0; }
+  .type-row .meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-500); letter-spacing: 0.06em; line-height: 1.7; }
+  .type-row .meta b { color: var(--ink-900); font-weight: 700; display: block; margin-bottom: 4px; }
+
+  /* Spacing */
+  .scale-row { display: flex; gap: 4px; align-items: flex-end; padding: 16px 0; flex-wrap: wrap; }
+  .scale-cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .scale-bar { background: var(--ink-900); border-radius: 2px; }
+  .scale-cell .label { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-500); letter-spacing: 0.04em; }
+
+  /* Radius */
+  .radius-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; }
+  .radius-cell { aspect-ratio: 1 / 1; background: var(--tide-100); border: 1px solid rgba(14,31,31,0.08); display: flex; align-items: flex-end; justify-content: center; padding: 8px; }
+  .radius-cell .label { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-500); }
+
+  /* Shadow */
+  .shadow-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; padding: 16px 8px 32px; background: var(--tide-100); border-radius: 16px; }
+  .shadow-cell { background: var(--tide-50); border-radius: 12px; aspect-ratio: 1 / 1; display: flex; align-items: flex-end; justify-content: center; padding: 14px; }
+  .shadow-cell .label { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-500); }
+
+  /* Component grid */
+  .comp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .comp-cell { background: var(--tide-50); border: 1px solid rgba(14,31,31,0.08); border-radius: 12px; padding: 28px; min-height: 200px; display: flex; flex-direction: column; gap: 18px; position: relative; }
+  .comp-cell .comp-label { position: absolute; top: 12px; right: 14px; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-300); letter-spacing: 0.08em; text-transform: uppercase; }
+  .comp-cell.dark { background: var(--ink-900); border-color: var(--ink-800); color: var(--tide-50); }
+  .comp-cell.dark .comp-label { color: var(--ink-300); }
+  .comp-cell.cream { background: var(--tide-100); }
+
+  .comp-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+  /* Status table */
+  .status-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .status-table th, .status-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid rgba(14,31,31,0.08); }
+  .status-table th { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-500); }
+
+  /* Icon grid */
+  .icon-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+  .icon-cell { aspect-ratio: 1 / 1; background: var(--tide-50); border: 1px solid rgba(14,31,31,0.08); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 8px; color: var(--ink-900); }
+  .icon-cell .name { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-500); letter-spacing: 0.04em; }
+
+  /* Brand marks */
+  .brand-hero { display: grid; grid-template-columns: 280px 1fr; gap: 24px; margin-bottom: 28px; align-items: stretch; }
+  .brand-hero .icon-card { background: var(--tide-100); border: 1px solid rgba(14,31,31,0.08); border-radius: 18px; padding: 28px; display: flex; align-items: center; justify-content: center; }
+  .brand-hero .icon-card img { width: 100%; max-width: 200px; height: auto; display: block; filter: drop-shadow(0 14px 30px rgba(14,31,31,0.18)); }
+  .brand-hero .meta { display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 12px 8px; }
+  .brand-hero .meta h3 { font-size: 26px; letter-spacing: -0.015em; font-weight: 600; }
+  .brand-hero .meta .tag { font-family: var(--font-mono); font-size: 11px; color: var(--coral-700); letter-spacing: 0.16em; text-transform: uppercase; }
+  .brand-hero .meta p { font-size: 14.5px; color: var(--ink-700); line-height: 1.55; max-width: 50ch; }
+  .brand-hero .meta .scale-row { display: flex; gap: 18px; align-items: center; padding-top: 10px; border-top: 1px solid rgba(14,31,31,0.08); }
+  .brand-hero .meta .scale-row img { width: var(--w); height: var(--w); }
+
+  .agent-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .agent-cell { background: var(--tide-50); border: 1px solid rgba(14,31,31,0.08); border-radius: 14px; padding: 22px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .agent-cell .row1 { display: flex; align-items: center; gap: 12px; }
+  .agent-cell .mark { width: 40px; height: 40px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .agent-cell .mark svg { width: 22px; height: 22px; color: var(--tide-50); }
+  .agent-cell .name { font-size: 15.5px; font-weight: 600; }
+  .agent-cell .agent-id { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-500); letter-spacing: 0.04em; margin-top: 2px; }
+  .agent-cell .swatch { display: flex; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid rgba(14,31,31,0.06); font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-500); letter-spacing: 0.04em; }
+  .agent-cell .swatch .chip { width: 14px; height: 14px; border-radius: 4px; }
+  .agent-cell .sizes { display: flex; gap: 16px; align-items: center; padding-top: 12px; border-top: 1px solid rgba(14,31,31,0.06); color: var(--ink-900); }
+
+  /* Don't list */
+  .donts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; font-size: 14px; line-height: 1.5; }
+  .dont { padding: 14px 16px; border-radius: 10px; background: rgba(192, 87, 58, 0.06); border-left: 3px solid var(--coral-500); color: var(--ink-700); }
+  .dont b { color: var(--coral-700); display: block; font-size: 12px; font-family: var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+
+  /* Hardware grid */
+  .hw-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .hw-cell { background: var(--tide-50); border: 1px solid rgba(14,31,31,0.08); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-height: 140px; }
+  .hw-cell .icon { color: var(--ink-700); }
+  .hw-cell .name { font-size: 14px; font-weight: 600; }
+  .hw-cell .res  { font-family: var(--font-mono); font-size: 11px; color: var(--ink-500); letter-spacing: 0.04em; }
+  .hw-cell .note { font-size: 12.5px; color: var(--ink-700); line-height: 1.5; margin-top: auto; }
+
+  .lang-rows { display: grid; gap: 14px; padding: 8px 0; }
+  .lang-row { display: grid; grid-template-columns: 60px 1fr; align-items: baseline; gap: 16px; padding: 12px 0; border-top: 1px solid rgba(14,31,31,0.08); }
+  .lang-row:first-child { border-top: 0; }
+  .lang-row .tag { font-family: var(--font-mono); font-size: 11px; color: var(--ink-500); letter-spacing: 0.12em; }
+  .lang-row .text { font-size: 22px; font-weight: 500; letter-spacing: -0.01em; }
+</style>
+</head>
+<body>
+
+<div class="ds-shell">
+
+  <header class="ds-head" data-screen-label="00 Cover">
+    <div>
+      <div class="ds-meta">AGENTDECK · DESIGN SYSTEM · v0.1 · 2026.05</div>
+      <h1>Aquarium <em>tide</em>.</h1>
+      <p class="ds-tagline">A glanceable command surface for AI coding agents — warm sand on deep ink, kelp greens for the calm signal, coral for the developer's edge.</p>
+    </div>
+    <nav class="ds-toc">
+      <a href="#colors">01 — Colors</a>
+      <a href="#type">02 — Type</a>
+      <a href="#i18n">03 — Multilingual</a>
+      <a href="#spacing">04 — Spacing</a>
+      <a href="#radii">05 — Radii</a>
+      <a href="#shadows">06 — Shadows</a>
+      <a href="#status">07 — Status</a>
+      <a href="#components">08 — Components</a>
+      <a href="#icons">09 — Icons</a>
+      <a href="#logos">10 — Logos</a>
+      <a href="#hardware">11 — Hardware</a>
+      <a href="#donts">12 — Don'ts</a>
+    </nav>
+  </header>
+
+  <!-- 01 Colors -->
+  <section class="ds-section" id="colors" data-screen-label="01 Colors">
+    <div class="ds-num">01 · COLOR</div>
+    <h2>The palette is warm-sided.</h2>
+    <p class="ds-sub">Whites lean into sand, blacks lean into deep aquarium green. Pure neutrals are forbidden. Kelp signals "App Store / running / OK"; coral signals the developer tier; amber is the only color that pulses, and only when the agent is waiting on you.</p>
+
+    <div class="swatch-group-title">Tide — sand / paper</div>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="swatch-color" style="background: var(--tide-50)"></div><div class="swatch-meta"><div class="name">tide-50</div><div class="hex">#f5f3ec</div><div class="use">App background, light surfaces.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--tide-100)"></div><div class="swatch-meta"><div class="name">tide-100</div><div class="hex">#ebe6d6</div><div class="use">Muted card, hairline section.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--tide-200)"></div><div class="swatch-meta"><div class="name">tide-200</div><div class="hex">#d8cfb6</div><div class="use">Disabled / placeholder fill.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--tide-300)"></div><div class="swatch-meta"><div class="name">tide-300</div><div class="hex">#a8b09a</div><div class="use">Tide on dark inversions.</div></div></div>
+    </div>
+
+    <div class="swatch-group-title">Ink — deep aquarium</div>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="swatch-color" style="background: var(--ink-900)"></div><div class="swatch-meta"><div class="name" style="color: var(--ink-900)">ink-900</div><div class="hex">#0e1f1f</div><div class="use">Primary text, dark hero, primary button.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--ink-800)"></div><div class="swatch-meta"><div class="name">ink-800</div><div class="hex">#15302f</div><div class="use">Dark surface variant.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--ink-700)"></div><div class="swatch-meta"><div class="name">ink-700</div><div class="hex">#1f4544</div><div class="use">Body copy on light, secondary text.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--ink-500)"></div><div class="swatch-meta"><div class="name">ink-500</div><div class="hex">#426664</div><div class="use">Tertiary text, captions.</div></div></div>
+    </div>
+
+    <div class="swatch-group-title">Kelp · Coral · Amber — signals</div>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="swatch-color" style="background: var(--kelp-700)"></div><div class="swatch-meta"><div class="name">kelp-700</div><div class="hex">#1f6157</div><div class="use">Kicker label, link hover.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--kelp-500)"></div><div class="swatch-meta"><div class="name">kelp-500</div><div class="hex">#2f8a7c</div><div class="use">Processing status, App Store badge.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--coral-500)"></div><div class="swatch-meta"><div class="name">coral-500</div><div class="hex">#c0573a</div><div class="use">Developer tier badge, dev card border.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: var(--amber-500)"></div><div class="swatch-meta"><div class="name">amber-500</div><div class="hex">#c8923a</div><div class="use">Awaiting / needs-attention only.</div></div></div>
+    </div>
+
+    <h3 style="margin-top: 56px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em;">Two surfaces, two palettes</h3>
+    <p class="ds-sub" style="margin-bottom: 24px;">The tokens above are for marketing / editorial surfaces. Inside the product itself — menubar, e-ink, terminal, hardware — we run a brighter signal palette so status reads at 16px on glossy OS chrome. Marketing must <em>never</em> use product brights.</p>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="swatch-color" style="background: #52D988"></div><div class="swatch-meta"><div class="name">ui-ok</div><div class="hex">#52D988</div><div class="use">Running / connected dot. Saturated for 6px legibility.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: #FFA93D"></div><div class="swatch-meta"><div class="name">ui-attn</div><div class="hex">#FFA93D</div><div class="use">Awaiting pulse on dark popup chrome.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: #FF6B6B"></div><div class="swatch-meta"><div class="name">ui-error</div><div class="hex">#FF6B6B</div><div class="use">Failed / disconnected on near-black.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: #3ED6E8"></div><div class="swatch-meta"><div class="name">ui-cyan</div><div class="hex">#3ED6E8</div><div class="use">Hub, link, focused chrome — product only.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: #0a1a2a"></div><div class="swatch-meta"><div class="name">ui-popup-bg-dark</div><div class="hex" style="color: #f5f3ec;">#0a1a2a</div><div class="use">Dark popup base.</div></div></div>
+      <div class="swatch"><div class="swatch-color" style="background: #0c0d10"></div><div class="swatch-meta"><div class="name">ui-tty-bg</div><div class="hex" style="color: #f5f3ec;">#0c0d10</div><div class="use">Terminal / CLI surface.</div></div></div>
+    </div>
+  </section>
+
+  <!-- 02 Type -->
+  <section class="ds-section" id="type" data-screen-label="02 Type">
+    <div class="ds-num">02 · TYPE</div>
+    <h2>Two faces, one rhythm.</h2>
+    <p class="ds-sub">IBM Plex Sans for everything human — including Korean and Japanese, via the Plex multi-script family. JetBrains Mono for everything the machine emits, plus all kickers, tier badges, timestamps and commands. No third face.</p>
+
+    <div class="type-row">
+      <div class="meta"><b>Hero display</b>96px · 600 · -0.035em<br/>Plex Sans</div>
+      <div style="font-size: 72px; line-height: 0.94; font-weight: 600; letter-spacing: -0.035em;">Run agents, <em style="color: var(--kelp-700); font-style: italic; font-weight: 500;">calmly</em>.</div>
+    </div>
+    <div class="type-row">
+      <div class="meta"><b>H2 / Section</b>44px · 600 · -0.02em<br/>Plex Sans</div>
+      <div style="font-size: 44px; line-height: 1.08; font-weight: 600; letter-spacing: -0.02em;">Two tiers, one surface.</div>
+    </div>
+    <div class="type-row">
+      <div class="meta"><b>H3 / Card</b>26px · 600 · -0.015em<br/>Plex Sans</div>
+      <div style="font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.015em;">Glanceable status without a tab switch.</div>
+    </div>
+    <div class="type-row">
+      <div class="meta"><b>Body</b>17px · 400 · 1.6<br/>Plex Sans</div>
+      <div style="font-size: 17px; line-height: 1.6; max-width: 56ch;">AgentDeck routes Claude Code, Codex CLI, OpenClaw and OpenCode through a single deck. The agents do the work; you keep your attention.</div>
+    </div>
+    <div class="type-row">
+      <div class="meta"><b>Small / list</b>14.5px · 400 · 1.55<br/>Plex Sans</div>
+      <div style="font-size: 14.5px; color: var(--ink-700); max-width: 56ch;">Each row in the comparison checklist runs at this size with a hairline rule between. Tight but never cramped.</div>
+    </div>
+    <div class="type-row">
+      <div class="meta"><b>Kicker</b>12px · 600 · 0.18em UPPER<br/>JetBrains Mono</div>
+      <div class="ad-kicker">Open Source · Independent</div>
+    </div>
+    <div class="type-row">
+      <div class="meta"><b>Mono badge</b>11.5px · 700 · 0.16em<br/>JetBrains Mono</div>
+      <div class="comp-row">
+        <span class="ad-tier ad-tier--store">App Store</span>
+        <span class="ad-tier ad-tier--dev">Developer</span>
+        <span class="ad-tier ad-tier--cli">CLI</span>
+      </div>
+    </div>
+    <div class="type-row">
+      <div class="meta"><b>Code line</b>15px · mono<br/>$ on kelp-300</div>
+      <div><span class="ad-code">npx @agentdeck/setup</span></div>
+    </div>
+  </section>
+
+  <!-- 03 Multilingual -->
+  <section class="ds-section" id="i18n" data-screen-label="03 Multilingual">
+    <div class="ds-num">03 · MULTILINGUAL</div>
+    <h2>Asia-first stack.</h2>
+    <p class="ds-sub">KO, EN and JA share one type system via the IBM Plex Sans family + KR + JP scripts. Korean copy uses ~해요 체 (relaxed but precise). Japanese uses です/ます. Mono kickers translate, tier badges do not.</p>
+    <div class="lang-rows">
+      <div class="lang-row"><div class="tag">KO</div><div class="text">에이전트를 차분하게 실행하세요. <span style="color: var(--ink-500); font-size: 14px; font-family: var(--font-mono);">— hero subtitle</span></div></div>
+      <div class="lang-row"><div class="tag">EN</div><div class="text">Run agents, calmly. <span style="color: var(--ink-500); font-size: 14px; font-family: var(--font-mono);">— hero subtitle</span></div></div>
+      <div class="lang-row"><div class="tag">JA</div><div class="text">エージェントを、静かに動かす。 <span style="color: var(--ink-500); font-size: 14px; font-family: var(--font-mono);">— hero subtitle</span></div></div>
+    </div>
+  </section>
+
+  <!-- 04 Spacing -->
+  <section class="ds-section" id="spacing" data-screen-label="04 Spacing">
+    <div class="ds-num">04 · SPACING</div>
+    <h2>4px base, 14 stops.</h2>
+    <p class="ds-sub">Section vertical padding is 96px desktop, 64px mobile. Container max-width is 1240px with 32px gutters.</p>
+    <div class="scale-row">
+      <div class="scale-cell"><div class="scale-bar" style="width: 4px;  height: 4px"></div><div class="label">4</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 8px;  height: 8px"></div><div class="label">8</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 12px; height: 12px"></div><div class="label">12</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 16px; height: 16px"></div><div class="label">16</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 20px; height: 20px"></div><div class="label">20</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 24px; height: 24px"></div><div class="label">24</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 32px; height: 32px"></div><div class="label">32</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 40px; height: 40px"></div><div class="label">40</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 48px; height: 48px"></div><div class="label">48</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 56px; height: 56px"></div><div class="label">56</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 64px; height: 64px"></div><div class="label">64</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 80px; height: 80px"></div><div class="label">80</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 96px; height: 96px"></div><div class="label">96</div></div>
+      <div class="scale-cell"><div class="scale-bar" style="width: 120px;height: 120px"></div><div class="label">120</div></div>
+    </div>
+  </section>
+
+  <!-- 05 Radii -->
+  <section class="ds-section" id="radii" data-screen-label="05 Radii">
+    <div class="ds-num">05 · RADII</div>
+    <h2>Soft, never cute.</h2>
+    <p class="ds-sub">Mono badges hold a 4px radius for crispness; cards open up to 16–18px. The hero pill and lang switch use full pills.</p>
+    <div class="radius-grid">
+      <div class="radius-cell" style="border-radius: 4px;"><span class="label">sm · 4</span></div>
+      <div class="radius-cell" style="border-radius: 8px;"><span class="label">md · 8</span></div>
+      <div class="radius-cell" style="border-radius: 10px;"><span class="label">lg · 10</span></div>
+      <div class="radius-cell" style="border-radius: 12px;"><span class="label">xl · 12</span></div>
+      <div class="radius-cell" style="border-radius: 14px;"><span class="label">2xl · 14</span></div>
+      <div class="radius-cell" style="border-radius: 16px;"><span class="label">3xl · 16</span></div>
+      <div class="radius-cell" style="border-radius: 999px;"><span class="label">pill</span></div>
+    </div>
+  </section>
+
+  <!-- 06 Shadows -->
+  <section class="ds-section" id="shadows" data-screen-label="06 Shadows">
+    <div class="ds-num">06 · SHADOWS</div>
+    <h2>Warm, soft, subtle.</h2>
+    <p class="ds-sub">All shadows tilt warm — they're built on the ink-900 hue, not pure neutral grey, so they sit naturally against the sand backgrounds.</p>
+    <div class="shadow-grid">
+      <div class="shadow-cell" style="box-shadow: var(--sh-card);"><span class="label">sh-card</span></div>
+      <div class="shadow-cell" style="box-shadow: var(--sh-card-h);"><span class="label">sh-card-hover</span></div>
+      <div class="shadow-cell" style="box-shadow: var(--sh-frame);"><span class="label">sh-frame</span></div>
+      <div class="shadow-cell" style="box-shadow: var(--sh-canvas);"><span class="label">sh-canvas</span></div>
+    </div>
+  </section>
+
+  <!-- 07 Status -->
+  <section class="ds-section" id="status" data-screen-label="07 Status">
+    <div class="ds-num">07 · STATUS SEMANTICS</div>
+    <h2>One thing pulses, and only one.</h2>
+    <p class="ds-sub">Idle is silent. Processing is steady. Awaiting pulses amber. Error is solid coral. Anything outside this matrix is decoration and should be reconsidered.</p>
+    <table class="status-table">
+      <thead><tr><th>State</th><th>Dot</th><th>Color</th><th>Animation</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>idle</td><td><span class="ad-dot ad-dot--idle"></span></td><td><code>--ink-300</code></td><td>none</td><td>Session exists, nothing happening.</td></tr>
+        <tr><td>processing</td><td><span class="ad-dot ad-dot--processing"></span></td><td><code>--kelp-500</code></td><td>none — steady</td><td>Agent is actively working.</td></tr>
+        <tr><td>awaiting</td><td><span class="ad-dot ad-dot--awaiting"></span></td><td><code>--amber-500</code></td><td>pulse 1.1s</td><td>Agent needs YES/NO from you.</td></tr>
+        <tr><td>error</td><td><span class="ad-dot ad-dot--error"></span></td><td><code>--coral-500</code></td><td>none</td><td>Failed run, attention required.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 08 Components -->
+  <section class="ds-section" id="components" data-screen-label="08 Components">
+    <div class="ds-num">08 · COMPONENTS</div>
+    <h2>The working set.</h2>
+    <p class="ds-sub">Everything below is a class in <code style="font-family: var(--font-mono); color: var(--coral-700);">design/components.css</code>. Variants extend a base via BEM-ish modifiers (<code style="font-family: var(--font-mono);">--primary</code>, <code style="font-family: var(--font-mono);">--ghost</code>).</p>
+
+    <div class="comp-grid">
+      <!-- Buttons -->
+      <div class="comp-cell">
+        <span class="comp-label">.ad-btn</span>
+        <div class="comp-row">
+          <button class="ad-btn ad-btn--primary">Get on App Store <span class="ad-btn-badge">$8</span></button>
+          <button class="ad-btn ad-btn--ghost">Read docs</button>
+        </div>
+        <div class="comp-row">
+          <button class="ad-btn ad-btn--coral">Run npx setup</button>
+        </div>
+      </div>
+
+      <!-- Tier badges -->
+      <div class="comp-cell">
+        <span class="comp-label">.ad-tier</span>
+        <div class="comp-row">
+          <span class="ad-tier ad-tier--store">App Store</span>
+          <span class="ad-tier ad-tier--dev">Developer</span>
+          <span class="ad-tier ad-tier--cli">CLI</span>
+        </div>
+      </div>
+
+      <!-- Tier badges on dark -->
+      <div class="comp-cell dark">
+        <span class="comp-label">.ad-tier on ink</span>
+        <div class="comp-row">
+          <span class="ad-tier ad-tier--store-on-dark">App Store</span>
+          <span class="ad-tier ad-tier--dev">Developer</span>
+        </div>
+      </div>
+
+      <!-- Hero chip -->
+      <div class="comp-cell">
+        <span class="comp-label">.ad-chip</span>
+        <span class="ad-chip">Open · independent · 2026</span>
+      </div>
+
+      <!-- Status dots -->
+      <div class="comp-cell">
+        <span class="comp-label">.ad-dot</span>
+        <div class="comp-row">
+          <span style="display: inline-flex; gap: 8px; align-items: center; font-size: 13px;"><span class="ad-dot ad-dot--idle"></span> idle</span>
+          <span style="display: inline-flex; gap: 8px; align-items: center; font-size: 13px;"><span class="ad-dot ad-dot--processing"></span> processing</span>
+          <span style="display: inline-flex; gap: 8px; align-items: center; font-size: 13px;"><span class="ad-dot ad-dot--awaiting"></span> awaiting</span>
+          <span style="display: inline-flex; gap: 8px; align-items: center; font-size: 13px;"><span class="ad-dot ad-dot--error"></span> error</span>
+        </div>
+      </div>
+
+      <!-- Lang switch -->
+      <div class="comp-cell">
+        <span class="comp-label">.ad-lang</span>
+        <div class="ad-lang">
+          <button class="on">KO</button><button>EN</button><button>JA</button>
+        </div>
+      </div>
+
+      <!-- Notice / inline -->
+      <div class="comp-cell" style="grid-column: span 2; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+        <span class="comp-label">.ad-notice</span>
+        <div class="ad-notice ad-notice--ok"><span class="ad-dot ad-dot--processing" style="margin-top: 4px;"></span><div><b>codex · gpt-5.4</b> is editing <code style="font-family: var(--font-mono);">main.zig</code>.</div></div>
+        <div class="ad-notice ad-notice--awaiting"><span class="ad-dot ad-dot--awaiting" style="margin-top: 4px;"></span><div><b>claude-code</b> is asking permission to delete 3 files.</div></div>
+        <div class="ad-notice ad-notice--error"><span class="ad-dot ad-dot--error" style="margin-top: 4px;"></span><div><b>opencode</b> failed: rate limit until 12:42.</div></div>
+      </div>
+
+      <!-- Code -->
+      <div class="comp-cell cream">
+        <span class="comp-label">.ad-code</span>
+        <span class="ad-code">npx @agentdeck/setup</span>
+        <span class="ad-code">agentdeck route claude-code → tablet</span>
+      </div>
+
+      <!-- Placeholder -->
+      <div class="comp-cell" style="padding: 0; min-height: 220px;">
+        <span class="comp-label" style="z-index: 2;">.ad-placeholder</span>
+        <div class="ad-placeholder" style="height: 100%; border: 0; border-radius: 12px;" data-label="// hardware shot — D200H closeup"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 Icons -->
+  <section class="ds-section" id="icons" data-screen-label="09 Icons">
+    <div class="ds-num">09 · ICONS</div>
+    <h2>Drawn for the system.</h2>
+    <p class="ds-sub">All 24px viewbox, 1.6px stroke, currentColor. Live in <code style="font-family: var(--font-mono); color: var(--coral-700);">design/icons.jsx</code>. Build new icons in this system; never grab from a generic icon font.</p>
+    <div id="icon-mount"></div>
+  </section>
+
+  <!-- 10 Logos -->
+  <section class="ds-section" id="logos" data-screen-label="10 Logos">
+    <div class="ds-num">10 · BRAND MARKS</div>
+    <h2>One product, four agents.</h2>
+    <p class="ds-sub">The product mark is the AgentDeck aquarium icon — a full-color illustration that ships with the App Store build and lives in the Dock. The agent marks are the real brand SVGs of each upstream tool (Claude Code, Codex, OpenClaw, OpenCode), used wherever a session is identified. We do <strong>not</strong> redraw or stylize them; they keep their own brand color from <code style="font-family: var(--font-mono); color: var(--coral-700);">data.js → AGENTS</code>.</p>
+
+    <div class="brand-hero">
+      <div class="icon-card">
+        <img src="../../design/brand/agentdeck-icon.png" alt="AgentDeck app icon" />
+      </div>
+      <div class="meta">
+        <span class="tag">Product mark · App Store icon</span>
+        <h3>AgentDeck — the aquarium.</h3>
+        <p>Full-color illustration. Used at 1024² for the App Store, 512² / 256² / 128² in the Dock and bundle, and as the splash on every hardware surface during pairing. Ships in the bundle as <code style="font-family: var(--font-mono);">AppIcon.icns</code>; PNG export lives at <code style="font-family: var(--font-mono);">design/brand/agentdeck-icon.png</code>.</p>
+        <div class="scale-row">
+          <img src="../../design/brand/agentdeck-icon.png" alt="" style="--w: 96px;" />
+          <img src="../../design/brand/agentdeck-icon.png" alt="" style="--w: 64px;" />
+          <img src="../../design/brand/agentdeck-icon.png" alt="" style="--w: 40px;" />
+          <img src="../../design/brand/agentdeck-icon.png" alt="" style="--w: 24px;" />
+          <span style="font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-500); letter-spacing: 0.06em;">96 · 64 · 40 · 24</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-family: var(--font-mono); font-size: 11px; color: var(--ink-500); letter-spacing: 0.16em; text-transform: uppercase; margin: 28px 0 12px;">Agent marks — used at session level, in menubar V3/V4, on hardware tiles</div>
+    <div id="logo-mount"></div>
+    <p style="font-size: 13px; color: var(--ink-500); margin-top: 14px; line-height: 1.55; max-width: 70ch;">Source SVGs in <code style="font-family: var(--font-mono);">design/brand/*.svg</code>; tinted at runtime via <code style="font-family: var(--font-mono);">currentColor</code> in <code style="font-family: var(--font-mono);">creatures.jsx</code>. Brand colors come from <code style="font-family: var(--font-mono);">data.js</code> and are the only saturated reds/blues allowed in the system.</p>
+  </section>
+
+  <!-- 11 Hardware -->
+  <section class="ds-section" id="hardware" data-screen-label="11 Hardware">
+    <div class="ds-num">11 · HARDWARE SURFACES</div>
+    <h2>Build for the panel.</h2>
+    <p class="ds-sub">AgentDeck runs on real surfaces with real pixel grids. Treat each as a constraint to celebrate, not work around.</p>
+    <div id="hw-mount"></div>
+  </section>
+
+  <!-- 12 Don'ts -->
+  <section class="ds-section" id="donts" data-screen-label="12 Don'ts" style="border-bottom: 0;">
+    <div class="ds-num">12 · DON'TS</div>
+    <h2>Keep it honest.</h2>
+    <p class="ds-sub">A short list of things that look like good ideas but break the system.</p>
+    <div class="donts">
+      <div class="dont"><b>No pure neutrals</b>Don't use <code>#fff</code> or <code>#000</code>. Use <code>--tide-50</code> and <code>--ink-900</code>.</div>
+      <div class="dont"><b>No third typeface</b>Plex Sans + JetBrains Mono. Display fonts for headers are forbidden.</div>
+      <div class="dont"><b>No animated kelp/coral</b>Only amber pulses. If you're tempted to animate kelp, stop.</div>
+      <div class="dont"><b>No drawn hardware</b>Real photography or the placeholder pattern. Never a hand-drawn SVG of a device.</div>
+      <div class="dont"><b>No emoji in product UI</b>Use the icon set or creature marks. Emoji is for chat, not chrome.</div>
+      <div class="dont"><b>No background gradients</b>One exception: the radial glow under the hero visual.</div>
+      <div class="dont"><b>No centered long copy</b>The lede stays left-aligned, max 60ch.</div>
+      <div class="dont"><b>No drop shadows on text</b>Type carries its own weight. Shadows are for cards.</div>
+    </div>
+  </section>
+
+  <footer style="padding: 56px 0 24px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-500); letter-spacing: 0.06em; display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;">
+    <span>AGENTDECK · DESIGN SYSTEM · v0.1</span>
+    <span>see DESIGN.md for the long version</span>
+    <span>© 2026 Serendipity Bound</span>
+  </footer>
+
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="../../design/tokens.js"></script>
+<script src="data.js"></script>
+<script type="text/babel" src="creatures.jsx"></script>
+<script type="text/babel" src="../../design/icons.jsx"></script>
+
+<script type="text/babel">
+  function mountIcons() {
+    const I = window.AgentDeckIcons;
+    if (!I) return setTimeout(mountIcons, 50);
+    const groups = [
+      { title: "Status", keys: ["IconRunning","IconAwaiting","IconIdle","IconError"] },
+      { title: "Surfaces", keys: ["IconMenubar","IconTablet","IconPhone","IconLED","IconEink","IconRound","IconChip"] },
+      { title: "Actions", keys: ["IconPlay","IconPause","IconRestart","IconCheck","IconArrowR","IconExternal","IconCommand","IconCopy"] },
+      { title: "Concept", keys: ["IconAgent","IconStack","IconRouter","IconShield","IconLock","IconKey","IconBell","IconSparkle"] },
+      { title: "Dev",     keys: ["IconTerminal","IconBranch","IconBox","IconLayers"] },
+    ];
+    function App() {
+      return (
+        <div>
+          {groups.map(g => (
+            <div key={g.title} style={{ marginBottom: 28 }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-500)", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 12 }}>{g.title}</div>
+              <div className="icon-grid">
+                {g.keys.map(k => {
+                  const C = I[k];
+                  return (
+                    <div className="icon-cell" key={k}>
+                      <C size={26} />
+                      <span className="name">{k.replace("Icon","")}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("icon-mount")).render(<App/>);
+  }
+  mountIcons();
+
+  function mountLogos() {
+    const C = window.Creature;
+    const AD = window.AD;
+    if (!C || !AD) return setTimeout(mountLogos, 50);
+    const agents = [
+      { id: 'claude-code', creature: 'claudecode', label: 'Claude Code', source: 'Anthropic · Antigravity mark' },
+      { id: 'codex-cli',   creature: 'codex',      label: 'Codex',       source: 'OpenAI · Codex mark' },
+      { id: 'openclaw',    creature: 'openclaw',   label: 'OpenClaw',    source: 'OpenClaw · upstream mark' },
+      { id: 'opencode',    creature: 'opencode',   label: 'OpenCode',    source: 'OpenCode · upstream mark' },
+    ];
+    function App() {
+      return (
+        <div className="agent-grid">
+          {agents.map(a => {
+            const meta = AD.AGENTS[a.id] || {};
+            const color = meta.color || '#0e1f1f';
+            return (
+              <div className="agent-cell" key={a.id}>
+                <div className="row1">
+                  <div className="mark" style={{ background: color }}>
+                    <C kind={a.creature} size={22} color="#f5f3ec" />
+                  </div>
+                  <div>
+                    <div className="name">{a.label}</div>
+                    <div className="agent-id">{a.id}</div>
+                  </div>
+                </div>
+                <div className="sizes">
+                  <C kind={a.creature} size={32} color={color} />
+                  <C kind={a.creature} size={20} color={color} />
+                  <C kind={a.creature} size={14} color={color} />
+                </div>
+                <div className="swatch">
+                  <span className="chip" style={{ background: color }}></span>
+                  <span>{color.toUpperCase()}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--ink-300)' }}>{a.source}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("logo-mount")).render(<App/>);
+  }
+  mountLogos();
+
+  function mountHardware() {
+    const I = window.AgentDeckIcons;
+    if (!I) return setTimeout(mountHardware, 50);
+    const surfaces = [
+      { icon: I.IconMenubar, name: "macOS menubar", res: "22pt height", note: "Native, calm. Composite dots default; creature for awaiting." },
+      { icon: I.IconRound,   name: "Popup",         res: "360 × 520",   note: "Vibrant blur, dark mode default. Aquarium-deep with kelp." },
+      { icon: I.IconTablet,  name: "iPad full UI",  res: "2160 × 1620", note: "Touch, 44pt min targets. Sand background, full color." },
+      { icon: I.IconTablet,  name: "Lenovo Tab",    res: "1920 × 1200", note: "Always-on, slight burn-in risk. Ink ground, calm motion." },
+      { icon: I.IconEink,    name: "E-ink panels",  res: "280 × 240",   note: "1-bit / 16-bit indexed. High-contrast, hatch fills, mono." },
+      { icon: I.IconLED,     name: "TC001 LED",     res: "32 × 8",      note: "RGB matrix. Single-glyph status, mono palette." },
+      { icon: I.IconRound,   name: "ESP32 round",   res: "466 × 466",   note: "Round mask, low brightness. Single creature centered." },
+      { icon: I.IconPhone,   name: "iPhone widget", res: "Lock screen", note: "Tap-to-confirm only. No live data on lock screen." },
+    ];
+    function App() {
+      return (
+        <div className="hw-grid">
+          {surfaces.map(s => (
+            <div className="hw-cell" key={s.name}>
+              <span className="icon"><s.icon size={22} /></span>
+              <span className="name">{s.name}</span>
+              <span className="res">{s.res}</span>
+              <span className="note">{s.note}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("hw-mount")).render(<App/>);
+  }
+  mountHardware();
+</script>
+
+</body>
+</html>

@@ -154,6 +154,28 @@ ESP32 WiFi provisioning + disconnect recovery details: see [docs/esp32.md](docs/
 - **Version compatibility**: `agentdeck claude` checks Claude Code version via npm + GitHub on startup; never blocks startup
 - **External peer async I/O**: 모든 RPC/WS/HTTP `await` 에 timeout 강제 — peer silence (silent drop, dead socket, network glitch) 를 first-class signal 로 처리해야 함 (synthetic error code emit + UI status emit + retry/fallback escalation). race condition 가드는 secondary; timeout 이 먼저. Reference 구현: `apple/AgentDeck/Daemon/Gateway/OpenClawAdapter.swift` 의 `connectRPCResponseTimeoutNanoseconds` + `completeRPCTimeout` + `handleConnectTimeout` 패턴
 
+## Design System
+
+Aquarium-tide design system. Spec: [DESIGN.md](DESIGN.md). Source of truth for color/type/spacing tokens: [design/tokens.css](design/tokens.css). Visual reference: [docs/design/Design System.html](docs/design/Design%20System.html). Coverage matrix + lint rules: [docs/design/Design Audit.html](docs/design/Design%20Audit.html).
+
+**Token bindings** (all four mirror `design/tokens.css`; CSS stays canonical — update all four mirrors in the same commit when CSS tokens change):
+- Browser JS — `design/tokens.js` (IIFE that exposes `window.DT.{Tide,Ink,Kelp,Coral,Amber,Status,UI,Brand}`). Used by `docs/design/data.js` and Design System.html mockups
+- TS — `shared/src/design-tokens.ts` (re-exported via `@agentdeck/shared`). Use for plugin renderers, bridge, hooks
+- Swift — `apple/AgentDeck/UI/Common/DesignTokens.swift` (`DesignTokens.Tide.s50` etc.). Existing `StateColors` stays as legacy
+- Kotlin — `android/app/src/main/kotlin/dev/agentdeck/ui/theme/DesignTokens.kt` (`DesignTokens.Tide.s50` etc.). Existing `AgentDeckColors` stays as legacy
+- Sync verification: `python3 design/verify-tokens-sync.py` — diffs the four mirrors against tokens.css and exits non-zero on drift
+
+**Rules** (DESIGN.md §10 — enforced by `bash design/lint.sh`):
+1. **No raw hex.** Use tokens (`var(--ink-900)`, `DesignTokens.Ink.s900`, etc.). Tokens are the only place hex literals live
+2. **No `#fff` / `#000`.** Whites lean toward `--tide-50` sand, blacks toward `--ink-900` aquarium green
+3. **Two faces only.** IBM Plex Sans (+ KR/JP) and JetBrains Mono. Never Inter / Roboto / Arial / Fraunces
+4. **Status colors are semantic.** `--status-idle` / `--status-processing` / `--status-awaiting` / `--status-error`. Only **amber awaiting** animates; never animate kelp or coral
+5. **Marketing vs product UI palette split.** Marketing surfaces (landing, docs, print) use the warm tokens. Product UI (menubar / e-ink / hardware / TTY) may also use the brighter `--ui-*` set. Marketing must NEVER touch `--ui-*`
+6. **Brand marks are upstream — do not redraw.** `design/brand/{claudecode,codex,openclaw,opencode}.svg` are the canonical agent marks. Brand colors (#C07058 / #6166E0 / #FF4D4D / #3a3a3a) are the only saturated reds/blues allowed
+7. **Real assets > drawn ones.** Hardware shots and brand marks come from `assets/` and `design/brand/`. Never illustrate hardware with hand-drawn SVG; ship the diagonal-hatch placeholder pattern (`.ad-hatch` / `.ad-placeholder`) when real assets aren't ready
+
+**Migration**: existing UI uses pre-design-system palettes (`StateColors.Hex.*`, `AgentDeckColors.*`). New code reaches for `DesignTokens.*`; migration is incremental, not a sweep. Run `bash design/lint.sh` for the violation count baseline
+
 ## App Store build invariants
 
 The macOS app ships through the App Store and must stay **self-contained** under App Review Guidelines 2.5.2 (no bundled interpreters) and 4.2.3 (no routing users to outside installs). The guardrails below are enforced in code, CI, and docs — preserve them on every change.
@@ -170,6 +192,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 
 | Doc | Topic |
 |---|---|
+| [DESIGN.md](DESIGN.md) | Design system spec — aquarium-tide tokens, type, components, marketing↔product palette split, hardware surfaces |
 | [docs/why-apme.md](docs/why-apme.md) | **WHY** APME — 감 기반 라우팅 문제, 카테고리별 평가 전략, composite score, vibe labeling 우선 원칙 |
 | [docs/apme.md](docs/apme.md) | APME eval module — schema, collector, deterministic+LLM judge, rubric tuner, daemon API, settings |
 | [docs/apme-pipeline.md](docs/apme-pipeline.md) | APME 8-layer pipeline — ingestion (hook/timeline/PTY), collector→store, classifier, runner, tuner, HTTP/WS, device rendering |
