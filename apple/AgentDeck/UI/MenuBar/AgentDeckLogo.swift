@@ -1,10 +1,15 @@
-// AgentDeckLogo.swift — Brand mark for AgentDeck
-// Metaphor: a stacked deck of cards — "deck of agents" — with a single pip on
-// the top card. Implemented with `RoundedRectangle` + `Circle` views rather
-// than `Canvas` because Canvas-backed views do NOT render inside
-// `MenuBarExtra` labels (they measure as zero-size, which is how the
-// menubar icon went invisible). Stacked Shape views survive the same
-// context, and render identically at 14pt and 32pt.
+// AgentDeckLogo.swift — Small-size product symbol for AgentDeck
+//
+// The full app icon is the aquarium dome over a hardware deck. At menu-bar
+// sizes the illustration collapses, so this view keeps the same silhouette:
+// glass dome, waterline, and button deck base. It intentionally replaces the
+// older abstract stacked-card mark, which looked unrelated to the app icon.
+//
+// Implemented with basic Shape views rather than `Canvas` because
+// Canvas-backed views do NOT render inside `MenuBarExtra` labels (they
+// measure as zero-size, which is how the menubar icon went invisible).
+// Shape views survive the same context, and render identically at 14pt and
+// 32pt.
 //
 // Available on both iOS and macOS so the dashboard HUD (shared between
 // the two platforms) can use the same mark.
@@ -17,27 +22,93 @@ struct AgentDeckLogo: View {
 
     var body: some View {
         // Unit-space layout (0…24) so every piece scales from a single
-        // `size` input — matches `explore/logos.jsx::LogoDeck` geometry.
+        // `size` input and remains crisp at 16–20pt.
         let s = size / 24.0
+        let stroke = max(1.0, 1.55 * s)
         ZStack(alignment: .topLeading) {
             Color.clear
-            deckCard(x: 4 * s, y: 8 * s, s: s, opacity: 0.35)
-            deckCard(x: 6 * s, y: 5 * s, s: s, opacity: 0.60)
-            deckCard(x: 8 * s, y: 2 * s, s: s, opacity: 1.00)
+
+            domePath(s: s)
+                .stroke(
+                    color,
+                    style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round)
+                )
+
+            waterlinePath(s: s)
+                .stroke(
+                    color.opacity(0.58),
+                    style: StrokeStyle(lineWidth: max(0.75, 1.15 * s), lineCap: .round, lineJoin: .round)
+                )
+
+            highlightPath(s: s)
+                .stroke(
+                    color.opacity(0.34),
+                    style: StrokeStyle(lineWidth: max(0.6, 0.9 * s), lineCap: .round, lineJoin: .round)
+                )
+
+            RoundedRectangle(cornerRadius: 2.2 * s)
+                .stroke(
+                    color.opacity(0.88),
+                    style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round)
+                )
+                .frame(width: 17.2 * s, height: 7.8 * s)
+                .offset(x: 3.4 * s, y: 12.2 * s)
+
+            deckKey(x: 6.5 * s, y: 15.4 * s, s: s, opacity: 0.70)
+            deckKey(x: 10.4 * s, y: 15.4 * s, s: s, opacity: 0.92)
+            deckKey(x: 14.3 * s, y: 15.4 * s, s: s, opacity: 0.70)
+
             Circle()
-                .fill(color)
-                .frame(width: 3.2 * s, height: 3.2 * s)
-                .position(x: 14 * s, y: 9 * s)
+                .fill(color.opacity(0.62))
+                .frame(width: 1.9 * s, height: 1.9 * s)
+                .position(x: 9.6 * s, y: 9.0 * s)
+            Circle()
+                .fill(color.opacity(0.42))
+                .frame(width: 1.2 * s, height: 1.2 * s)
+                .position(x: 14.8 * s, y: 8.2 * s)
         }
         .frame(width: size, height: size)
         .accessibilityLabel("AgentDeck")
     }
 
-    private func deckCard(x: CGFloat, y: CGFloat, s: CGFloat, opacity: Double) -> some View {
+    private func deckKey(x: CGFloat, y: CGFloat, s: CGFloat, opacity: Double) -> some View {
         RoundedRectangle(cornerRadius: 1.5 * s)
-            .stroke(color.opacity(opacity), lineWidth: max(1.0, 1.6 * s))
-            .frame(width: 12 * s, height: 14 * s)
+            .fill(color.opacity(opacity))
+            .frame(width: 3.1 * s, height: 2.0 * s)
             .offset(x: x, y: y)
+    }
+
+    private func domePath(s: CGFloat) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: 4.7 * s, y: 12.8 * s))
+            path.addCurve(
+                to: CGPoint(x: 19.3 * s, y: 12.8 * s),
+                control1: CGPoint(x: 5.3 * s, y: 4.9 * s),
+                control2: CGPoint(x: 18.7 * s, y: 4.9 * s)
+            )
+        }
+    }
+
+    private func waterlinePath(s: CGFloat) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: 6.1 * s, y: 11.2 * s))
+            path.addCurve(
+                to: CGPoint(x: 17.9 * s, y: 11.2 * s),
+                control1: CGPoint(x: 8.8 * s, y: 12.5 * s),
+                control2: CGPoint(x: 15.2 * s, y: 12.5 * s)
+            )
+        }
+    }
+
+    private func highlightPath(s: CGFloat) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: 8.0 * s, y: 7.7 * s))
+            path.addCurve(
+                to: CGPoint(x: 15.8 * s, y: 6.1 * s),
+                control1: CGPoint(x: 10.0 * s, y: 5.7 * s),
+                control2: CGPoint(x: 13.2 * s, y: 5.4 * s)
+            )
+        }
     }
 }
 

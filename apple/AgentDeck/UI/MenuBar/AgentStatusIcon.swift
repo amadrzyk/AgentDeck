@@ -1,5 +1,4 @@
-// AgentStatusIcon.swift — Menu bar label: AgentDeck logo + fixed status badge
-// Design from `explore/menubar-icons.jsx::MBComposite`.
+// AgentStatusIcon.swift — Menu bar label: AgentDeck symbol + fixed status badge
 //
 // Rendering gotcha: `MenuBarExtra { … } label: { … }` does NOT render
 // arbitrary SwiftUI content reliably. Canvas-based views measure as zero
@@ -33,7 +32,7 @@ struct AgentStatusIcon: View {
                 // Placeholder during the first render — SF Symbol is guaranteed
                 // to display, which keeps the menubar slot visible even if
                 // ImageRenderer hasn't fired yet.
-                Image(systemName: "square.stack.3d.up")
+                Image(systemName: "water.waves")
                     .frame(
                         width: IconComposite.renderWidth(for: style),
                         height: IconComposite.renderHeight
@@ -77,8 +76,8 @@ struct AgentStatusIcon: View {
             pulseDim: pulseTick
         )
         let view = composite.environment(\.colorScheme, colorScheme)
-        // `ImageRenderer` was introduced in macOS 13. AgentDeck already
-        // targets macOS 14+, so we can use it unconditionally.
+        // AgentDeck targets macOS 15+, so `ImageRenderer` (macOS 13+) is
+        // unconditionally available.
         let renderer = ImageRenderer(content: view)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0
         if let cg = renderer.cgImage {
@@ -187,19 +186,19 @@ private struct AgentStatusIconActiveStatusProxy {
     init(_ status: AgentStatusIcon.ActiveStatus) {
         switch status {
         case .disconnected:
-            color = Color(nsColor: .systemRed)
+            color = DesignTokens.UI.error
             pulses = false
             logoOpacity = 0.5
         case .idle:
-            color = Color(nsColor: .systemGreen)
+            color = DesignTokens.UI.ok
             pulses = false
             logoOpacity = 1.0
         case .processing:
-            color = Color(nsColor: .systemCyan)
+            color = DesignTokens.UI.cyan
             pulses = false
             logoOpacity = 1.0
         case .awaiting:
-            color = Color(nsColor: .systemOrange)
+            color = DesignTokens.UI.attn
             pulses = true
             logoOpacity = 1.0
         }

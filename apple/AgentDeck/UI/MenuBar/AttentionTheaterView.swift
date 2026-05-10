@@ -279,15 +279,15 @@ struct CalmHeaderView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(LinearGradient(
                     colors: [
-                        Color(red: 0.039, green: 0.416, blue: 0.541),
-                        Color(red: 0.039, green: 0.227, blue: 0.353),
+                        DesignTokens.UI.cyan.opacity(0.22),
+                        DesignTokens.Ink.s800,
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ))
                 .frame(width: 28, height: 28)
                 .overlay(
-                    AgentDeckLogo(size: 18, color: Color(red: 0.604, green: 0.847, blue: 0.941))
+                    AgentDeckLogo(size: 18, color: DesignTokens.UI.cyan)
                 )
 
             VStack(alignment: .leading, spacing: 0) {
@@ -303,7 +303,7 @@ struct CalmHeaderView: View {
 
             HStack(spacing: 4) {
                 Circle()
-                    .fill(bridgeConnected ? TerrariumHUD.ledGreen : TerrariumHUD.ledRed)
+                    .fill(bridgeConnected ? DesignTokens.UI.ok : DesignTokens.UI.error)
                     .frame(width: 6, height: 6)
                 if daemonPort > 0 {
                     Text(verbatim: ":\(portString(daemonPort))")
@@ -316,7 +316,7 @@ struct CalmHeaderView: View {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.white.opacity(0.08))
             )
-            .foregroundColor(bridgeConnected ? TerrariumHUD.ledGreen : TerrariumHUD.ledRed)
+            .foregroundColor(bridgeConnected ? DesignTokens.UI.ok : DesignTokens.UI.error)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

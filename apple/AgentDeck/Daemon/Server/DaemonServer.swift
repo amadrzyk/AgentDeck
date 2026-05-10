@@ -170,6 +170,13 @@ final class DaemonServer {
     private var gatewayConnecting = false
     private var cachedGatewayHasError = false
     private var cachedGatewayConnected = false
+    /// Wall-clock moment the OpenClaw gateway transitioned to "connected".
+    /// Used as the virtual `openclaw-gateway` session's `startedAt` so the
+    /// menubar's relative-time chip reads as elapsed-since-connect rather
+    /// than the previous 1970-epoch placeholder (which rendered as a
+    /// nonsense "20582d"). Cleared on disconnect so the chip disappears
+    /// instead of freezing on the prior connect timestamp.
+    private var gatewayConnectedAt: Date?
     /// Consecutive probe failures before committing to "unavailable".
     /// Requires 2 consecutive misses (≈10s) before triggering disconnect
     /// so transient glitches don't flash "Not configured" in the UI.
@@ -2632,6 +2639,7 @@ final class DaemonServer {
                 Task { @MainActor in
                     if connected {
                         self?.cachedGatewayConnected = true
+                        self?.gatewayConnectedAt = Date()
                         self?.cachedGatewayAuthStatus = "connected"
                         self?.cachedGatewayAuthRequestId = nil
                         self?.cachedGatewayAuthMessage = nil
@@ -2648,6 +2656,7 @@ final class DaemonServer {
                         self?.handleStateChanged()
                     } else {
                         self?.cachedGatewayConnected = false
+                        self?.gatewayConnectedAt = nil
                         if self?.cachedGatewayAvailable == true, self?.cachedGatewayAuthStatus == "connected" {
                             // WebSocket dropped but Gateway TCP port is still open —
                             // adapter will reconnect internally with backoff. Show
@@ -2707,6 +2716,7 @@ final class DaemonServer {
         Task { await adapter.stop() }
         gatewayAdapter = nil
         cachedGatewayConnected = false
+        gatewayConnectedAt = nil
         cachedGatewayAuthStatus = cachedGatewayAvailable ? "gateway_reachable" : "gateway_not_found"
         cachedGatewayAuthRequestId = nil
         cachedGatewayAuthMessage = nil
@@ -3188,8 +3198,13 @@ final class DaemonServer {
                     "id": "openclaw-gateway", "port": 18789,
                     "projectName": "OpenClaw", "agentType": "openclaw",
                     "alive": true, "state": gatewaySessionState,
-                    "startedAt": "1970-01-01T00:00:00.000Z",
                 ]
+                // Emit `startedAt` only when we have a real connect timestamp.
+                // Previously this slot held a 1970-epoch placeholder, which the
+                // menubar's relative-time chip rendered as "20582d".
+                if let connectedAt = gatewayConnectedAt {
+                    gatewaySession["startedAt"] = ISO8601DateFormatter().string(from: connectedAt)
+                }
                 if let tool = gatewayCurrentTool { gatewaySession["currentTool"] = tool }
                 if let modelName = gatewayModelName { gatewaySession["modelName"] = modelName }
                 sessions.append(gatewaySession)

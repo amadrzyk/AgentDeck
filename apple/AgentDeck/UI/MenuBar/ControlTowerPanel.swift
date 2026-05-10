@@ -25,12 +25,18 @@ struct ControlTowerPanel: View {
     )
     @State private var streamDeckDetectionLastRun: Date? = nil
 
+    /// Whether the Dashboard window is currently visible. Drives the
+    /// pill's filled/outline visual state so the menubar reads as the
+    /// canonical visibility switch. Updated by the 5s timer + immediate
+    /// NotificationCenter observers below.
+    @State private var dashboardVisible: Bool = false
+
     var body: some View {
         VStack(spacing: 0) {
             // Header: Attention Theater when any session awaits input,
             // otherwise a quiet "all calm" strip with the AgentDeck mark.
             if let awaiting = featuredAwaitingSession {
-                let isFocused = awaiting.id == stateHolder.state.sessionId
+                let isFocused = awaiting.id == effectiveFocusedSessionId
                 AttentionTheaterView(
                     session: awaiting,
                     question: questionFor(awaiting),
@@ -59,7 +65,12 @@ struct ControlTowerPanel: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
+                // Tell the ScrollView its ideal height equals the content
+                // height so it shrinks to fit when devices are sparse, and
+                // only engages scrolling once the outer maxHeight cap kicks in.
+                .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxHeight: scrollContentMaxHeight)
 
             VStack(spacing: 0) {
                 if showDaemonOfflineBanner {
@@ -79,7 +90,7 @@ struct ControlTowerPanel: View {
 
             footerSection
         }
-        .frame(width: 380, height: 620)
+        .frame(width: 380)
         // Dark ocean theme matching Dashboard / Monitor HUD.
         // `deepSea` → `midWater` gives the popup a subtle gradient so the
         // top edge reads as shallower water and the bottom reads as the
@@ -92,17 +103,50 @@ struct ControlTowerPanel: View {
             )
         )
         .foregroundColor(TerrariumHUD.text)
-        .onAppear { refreshStreamDeckDetectionIfStale() }
+        .onAppear {
+            refreshStreamDeckDetectionIfStale()
+            dashboardVisible = evaluateDashboardVisibility()
+        }
         .onReceive(
             Timer.publish(every: 5, on: .main, in: .common).autoconnect()
-        ) { _ in refreshStreamDeckDetectionIfStale() }
+        ) { _ in
+            refreshStreamDeckDetectionIfStale()
+            dashboardVisible = evaluateDashboardVisibility()
+        }
+        // NSWindow notifications give us immediate response to user gestures
+        // (⌘W, traffic-light close, miniaturize) without waiting for the 5s
+        // timer tick. willClose fires while the window is still listed as
+        // visible, so re-evaluate on the next runloop iteration.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            dashboardVisible = evaluateDashboardVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+            DispatchQueue.main.async { dashboardVisible = evaluateDashboardVisibility() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification)) { _ in
+            dashboardVisible = evaluateDashboardVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification)) { _ in
+            dashboardVisible = evaluateDashboardVisibility()
+        }
+    }
+
+    /// True when a window with the dashboard scene id is on screen and not
+    /// minimized. Cheap enough to call on every tick — `NSApp.windows` is a
+    /// single Array lookup, no IPC.
+    private func evaluateDashboardVisibility() -> Bool {
+        NSApp.windows.contains {
+            $0.identifier?.rawValue == "dashboard"
+                && $0.isVisible
+                && !$0.isMiniaturized
+        }
     }
 
     /// The session the attention theater should feature. Prefers the
     /// currently-focused session if it's awaiting; otherwise picks the
     /// first awaiting session in sort order.
     private var featuredAwaitingSession: SessionInfo? {
-        if let focusedId = stateHolder.state.sessionId,
+        if let focusedId = effectiveFocusedSessionId,
            let focused = sortedSessions.first(where: { $0.id == focusedId }),
            sessionState(focused).isAwaiting {
             return focused
@@ -114,10 +158,14 @@ struct ControlTowerPanel: View {
     /// prompt for the focused session (the bridge only streams one at a
     /// time), so non-focused sessions show a generic "needs input" tag.
     private func questionFor(_ session: SessionInfo) -> String? {
-        if session.id == stateHolder.state.sessionId {
+        if session.id == effectiveFocusedSessionId {
             return stateHolder.state.question
         }
         return nil
+    }
+
+    private var effectiveFocusedSessionId: String? {
+        stateHolder.state.focusedSessionId ?? stateHolder.state.sessionId
     }
 
     private func respondToAwaiting(_ optionIndex: Int, session: SessionInfo) {
@@ -140,6 +188,22 @@ struct ControlTowerPanel: View {
         streamDeckDetectionLastRun = Date()
     }
 
+    // MARK: - Layout sizing
+
+    /// Cap on the inner ScrollView height so the popover never overruns
+    /// the screen when the user has many devices wired up. We size to ~85%
+    /// of the visible screen area so the menu bar and Dock still stay out
+    /// of the panel's footprint. Below this cap, the ScrollView reports
+    /// its content's natural height (via `fixedSize(vertical: true)`), so
+    /// the panel shrinks to fit when devices are sparse.
+    private var scrollContentMaxHeight: CGFloat {
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
+        // Reserve ~140pt for header + pill bar + footer + padding so the
+        // surrounding chrome is never clipped at extreme content heights.
+        let chromeReserve: CGFloat = 140
+        return max(360, screenHeight * 0.85 - chromeReserve)
+    }
+
     // MARK: - Session Classification
 
     private var sortedSessions: [SessionInfo] {
@@ -149,7 +213,9 @@ struct ControlTowerPanel: View {
                 let lr = sessionRank(lhs)
                 let rr = sessionRank(rhs)
                 if lr != rr { return lr < rr }
-                return (lhs.projectName ?? "") < (rhs.projectName ?? "")
+                let projectCompare = DashboardDataRules.naturalLabelCompare(lhs.projectName ?? "", rhs.projectName ?? "")
+                if projectCompare != .orderedSame { return projectCompare == .orderedAscending }
+                return DashboardDataRules.naturalLabelCompare(lhs.id, rhs.id) == .orderedAscending
             }
     }
 
@@ -200,17 +266,14 @@ struct ControlTowerPanel: View {
 
             if sortedSessions.isEmpty {
                 VStack(spacing: 6) {
-                    Text("No sessions running")
+                    Text("No active sessions")
                         .font(.system(size: 11))
                         .foregroundColor(TerrariumHUD.subtext)
-                    Button {
-                        openLaunchSession()
-                    } label: {
-                        Label("Launch session", systemImage: "play.fill")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    Text("Sessions appear here automatically once the bridge picks one up.")
+                        .font(.system(size: 10))
+                        .foregroundColor(TerrariumHUD.subtext.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -543,13 +606,29 @@ struct ControlTowerPanel: View {
 
     private var pillActionsBar: some View {
         HStack(spacing: 6) {
-            pillButton(label: "Launch", primary: true) { openLaunchSession() }
-            pillButton(label: "Dashboard") { openDashboard() }
+            dashboardTogglePill
             pillButton(label: "Evaluation") { openApmeDashboard() }
                 .disabled(daemonService.port == 0)
                 .daemonOfflineAffordance(isOffline: daemonService.port == 0)
             Spacer()
             settingsPillButton
+        }
+    }
+
+    /// Dashboard pill with active/inactive visual state. The pill reflects
+    /// whether the Dashboard window is currently visible: filled (primary)
+    /// when open, outlined when hidden. Click toggles between open and
+    /// close so the menubar acts as the canonical visibility switch.
+    private var dashboardTogglePill: some View {
+        pillButton(
+            label: dashboardVisible ? "Dashboard ●" : "Dashboard",
+            primary: dashboardVisible
+        ) {
+            if dashboardVisible {
+                closeDashboard()
+            } else {
+                openDashboard()
+            }
         }
     }
 
@@ -741,7 +820,7 @@ struct ControlTowerPanel: View {
 
     /// Get current tool name for a session (only available for primary session)
     private func currentToolFor(_ session: SessionInfo) -> String? {
-        if session.id == stateHolder.state.sessionId {
+        if session.id == effectiveFocusedSessionId {
             return stateHolder.state.currentTool
         }
         return nil
@@ -756,12 +835,19 @@ struct ControlTowerPanel: View {
         // if one exists, otherwise creates it. Avoids fragile title string matching.
         openWindow(id: "dashboard")
         NSApplication.shared.activate(ignoringOtherApps: true)
+        // Update local toggle state immediately — the NotificationCenter
+        // observer would otherwise lag by one runloop tick.
+        dashboardVisible = true
     }
 
-    private func openLaunchSession() {
-        openWindow(id: "launch-session")
-        // Activate app so window gets focus (menu bar apps default to .accessory)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+    /// Close the Dashboard window. We close rather than orderOut so SwiftUI
+    /// reclaims the scene cleanly; the next openDashboard() call will
+    /// recreate it via the standard scene flow.
+    private func closeDashboard() {
+        NSApp.windows.first {
+            $0.identifier?.rawValue == "dashboard"
+        }?.close()
+        dashboardVisible = false
     }
 
     /// Open the in-app APME dashboard window (WKWebView pointing at the
