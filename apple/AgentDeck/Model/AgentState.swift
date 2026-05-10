@@ -72,7 +72,13 @@ enum PromptType: String, Codable, Sendable {
 struct DashboardState: Sendable {
     // Connection
     var bridgeConnected = false
+    /// Session that produced the latest state/update payload. This is used
+    /// for attribution and may change automatically as hooks arrive.
     var sessionId: String?
+    /// Session explicitly focused by the user via a session row, creature tap,
+    /// menubar row, or hardware session switch. Visual selection should use
+    /// this field, not `sessionId`, so activity does not look like selection.
+    var focusedSessionId: String?
 
     // Agent state
     var state: AgentConnectionState = .disconnected

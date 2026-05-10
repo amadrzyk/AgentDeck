@@ -256,12 +256,8 @@ private fun buildEinkAwaitingSessions(state: DashboardState): List<SessionInfo> 
 
     sessions += state.siblingSessions
         .filter { mapSessionState(it).isAwaitingInput() }
-        .sortedWith(
-            compareBy<SessionInfo> { agentTypeRank(it.agentType) }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.projectName ?: "" }
-        )
 
-    return sessions
+    return sessions.sortedWith(::compareSessionsForDisplay)
 }
 
 private fun AgentState.isAwaitingInput(): Boolean = when (this) {

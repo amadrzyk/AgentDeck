@@ -25,8 +25,11 @@ import { createAdapter, ClaudeCodeAdapter, CodexCliAdapter, OpenCodeAdapter } fr
 import { MonitorAdapter } from './adapters/monitor.js';
 import { UtilityProxy } from './utility-proxy.js';
 import { BridgeLogStream } from './log-stream.js';
-import { extractTopicHint, summarizeResponse } from './timeline-summarizer.js';
-import { cleanDetailText, cleanRawText } from '@agentdeck/shared';
+import { summarizeResponse } from './timeline-summarizer.js';
+import {
+  cleanDetailText, cleanRawText,
+  extractTopicHintWithKind, promptSnippetFallback,
+} from '@agentdeck/shared';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import { TerminalStatus } from './terminal-status.js';
 import { readFileSync, existsSync } from 'fs';
@@ -231,7 +234,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
   // ===== APME (Agent Performance Monitoring & Evaluation) =====
   // Optional: degrades to no-op if better-sqlite3 isn't installed.
-  const apme = await initApme();
+  // emitTimeline forwards task_start/task_end so the dashboard sees the task
+  // hierarchy header rows that group turns by APME boundary signal.
+  const apme = await initApme(undefined, {
+    emitTimeline: (entry) => core.bridgeTimeline.addEntry(entry),
+  });
   if (apme) {
     core.setApme(apme, process.cwd());
     log('APME enabled — runs will be logged to ~/.agentdeck/apme.sqlite');
@@ -1380,9 +1387,30 @@ function wireClaudeCodeTimeline(
       });
     }
 
-    const topicHint = responseText ? extractTopicHint(responseText) : null;
-    const promptTopic = ccLastPromptText ? extractTopicHint(ccLastPromptText) : null;
-    const completedLabel = topicHint || promptTopic || 'Completed';
+    // Pick a summary label.
+    //   - 'topic' kind from response \u2192 real heuristic content
+    //   - 'topic' kind from prompt \u2192 still meaningful, mark as heuristic
+    //   - 'fallback' kind (politeness-only) or prompt snippet \u2192 mark as 'none'
+    //     (clients use this to decide whether the detail pane is worth showing)
+    //   - literal "Completed" only when prompt is also empty
+    const respHint = responseText ? extractTopicHintWithKind(responseText) : { hint: null, kind: null as 'topic' | 'fallback' | null };
+    const promptHint = ccLastPromptText ? extractTopicHintWithKind(ccLastPromptText) : { hint: null, kind: null as 'topic' | 'fallback' | null };
+    let completedLabel: string;
+    let summaryKind: 'heuristic' | 'none';
+    if (respHint.kind === 'topic' && respHint.hint) {
+      completedLabel = respHint.hint;
+      summaryKind = 'heuristic';
+    } else if (promptHint.kind === 'topic' && promptHint.hint) {
+      completedLabel = promptHint.hint;
+      summaryKind = 'heuristic';
+    } else if (respHint.hint || promptHint.hint) {
+      completedLabel = (respHint.hint || promptHint.hint)!;
+      summaryKind = 'none';
+    } else {
+      const fallback = promptSnippetFallback(ccLastPromptText, 60);
+      completedLabel = fallback ?? 'Completed';
+      summaryKind = 'none';
+    }
     let summary = duration != null ? `${completedLabel} \u00B7 ${duration}s` : completedLabel;
     if (toolSummary) summary += ` \u00B7 ${toolSummary}`;
     const chatEndDetail = responseText
@@ -1399,6 +1427,7 @@ function wireClaudeCodeTimeline(
       agentType: 'claude-code',
       ...(startedAt ? { startedAt } : {}),
       endedAt: chatEndTs,
+      summaryKind,
     });
 
     // Async LLM summarization — fire-and-forget, upsert chat_end when ready
@@ -1419,9 +1448,17 @@ function wireClaudeCodeTimeline(
             agentType: 'claude-code',
             ...(startedAt ? { startedAt } : {}),
             endedAt: chatEndTs,
+            summaryKind: 'llm',
           });
         }
-      }).catch(() => { /* summarization failed — keep heuristic */ });
+      }).catch((err) => {
+        // Defensive — `summarizeResponse` swallows MLX/Ollama errors and
+        // returns null, so this rejection path is reached only when the
+        // .then() handler itself throws (e.g. upsertEntry bug). Backend-
+        // offline reporting is surfaced inside summarizeResponse on the
+        // failed-provider transition.
+        logError(`[timeline] post-summary upsert threw: ${String(err)}`);
+      });
     }
   };
 

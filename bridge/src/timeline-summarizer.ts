@@ -6,7 +6,7 @@
  * Non-blocking — caller should fire-and-forget, update entry when ready.
  */
 
-import { debug } from './logger.js';
+import { debug, log } from './logger.js';
 import { SUMMARY_SYSTEM_PROMPT, cleanLLMOutput, mlxChatUrl, resolveMlxModel } from '@agentdeck/shared';
 import { fetchMlxModels } from './mlx-probe.js';
 export { extractTopicHint } from '@agentdeck/shared';
@@ -53,18 +53,26 @@ export async function summarizeResponse(text: string): Promise<string | null> {
     ? text.slice(0, MAX_INPUT_CHARS) + '...'
     : text;
 
+  let mlxJustFailed = false;
+  let ollamaJustFailed = false;
+
   // Try MLX qwen first (retry after RETRY_INTERVAL_MS)
   if (mlxAvailable !== false || (Date.now() - mlxFailedAt > RETRY_INTERVAL_MS)) {
     try {
       const result = await callMLX(input);
       if (result) {
+        if (mlxAvailable === false) {
+          // MLX recovered — note the transition.
+          debug('summarizer', 'MLX recovered');
+        }
         mlxAvailable = true;
         return result;
       }
-    } catch {
+    } catch (err) {
+      mlxJustFailed = mlxAvailable !== false; // first time we observe failure
       mlxAvailable = false;
       mlxFailedAt = Date.now();
-      debug('summarizer', 'MLX not available, trying Ollama');
+      debug('summarizer', `MLX not available: ${String(err)}`);
     }
   }
 
@@ -73,14 +81,36 @@ export async function summarizeResponse(text: string): Promise<string | null> {
     try {
       const result = await callOllama(input);
       if (result) {
+        if (ollamaAvailable === false) {
+          debug('summarizer', 'Ollama recovered');
+        }
         ollamaAvailable = true;
         return result;
       }
-    } catch {
+    } catch (err) {
+      ollamaJustFailed = ollamaAvailable !== false;
       ollamaAvailable = false;
       ollamaFailedAt = Date.now();
-      debug('summarizer', 'Ollama not available, using heuristic');
+      debug('summarizer', `Ollama not available: ${String(err)}`);
     }
+  }
+
+  // Surface backend-down state to the user — but ONLY on the transition
+  // (first time we observe both providers failing) and via `log`, NOT
+  // `logError`. The summarizer is *optional* — when the user hasn't
+  // installed MLX/Ollama, the heuristic row is the intended UX. Routing
+  // through `log` means PTY mode (`agentdeck claude`) suppresses it
+  // entirely (the message would otherwise bleed into Claude's terminal
+  // session and read as a critical error). Daemon/CLI surfaces still see
+  // it in stderr as a regular `[agentdeck]` info line.
+  if ((mlxJustFailed && ollamaJustFailed)
+      || (mlxJustFailed && ollamaAvailable === false)
+      || (ollamaJustFailed && mlxAvailable === false)) {
+    log(
+      '[timeline] LLM summary backend offline (MLX:8800 / Ollama:11434).',
+      'Timeline rows will use heuristic summaries.',
+      'Install MLX (`mlx_vlm.server`) or Ollama to get LLM-summarized chat_end rows.',
+    );
   }
 
   return null;

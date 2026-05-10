@@ -275,7 +275,7 @@ extension DashboardState {
         // Resolve a focused codex thread id to its representative so the
         // halo lights up the visible cloud sprite even when the focus relay
         // points at a folded thread id.
-        var resolvedFocusId: String? = sessionId
+        var resolvedFocusId: String? = focusedSessionId
         for (slotIdx, key) in cloudGroupOrder.enumerated() {
             guard let members = cloudGroups[key], !members.isEmpty else { continue }
             // Aggregate state = highest-priority member.
@@ -298,7 +298,7 @@ extension DashboardState {
                 scale: slot.scale,
                 groupSize: members.count
             ))
-            if let focused = sessionId, members.contains(where: { $0.id == focused }) {
+            if let focused = focusedSessionId, members.contains(where: { $0.id == focused }) {
                 resolvedFocusId = representative.id
             }
         }

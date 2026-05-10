@@ -52,42 +52,26 @@ struct DeviceBezel<Content: View>: View {
 
 // MARK: - Creature placeholder
 
-/// Agent creature rendered in the agent brand colour inside a soft disc. When
-/// the asset catalog ships a "CreatureXxx" image we use it; otherwise we
-/// fall back to the agent's initial in a circle. Matches the SessionListPanel /
-/// ControlTowerPanel pattern.
+/// Agent creature rendered in the agent brand colour inside a soft disc.
+/// Uses the shared path renderer so previews do not drift from the dashboard
+/// and menu bar surfaces.
 struct PreviewCreature: View {
     let agent: PixooPreviewAgent
     let state: PixooPreviewState
     var size: CGFloat = 64
 
     private var tint: Color { StateColors.brand(agent: agent.rawValue) }
-    private var assetName: String? {
-        switch agent {
-        case .claudeCode: return "CreatureClaudeCode"
-        case .codex:      return "CreatureCodex"
-        case .opencode:   return "CreatureOpenCode"
-        case .openclaw:   return "CreatureOpenClaw"
-        }
-    }
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(tint.opacity(0.15))
-            if let name = assetName {
-                Image(name)
-                    .resizable()
-                    .renderingMode(.template)
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(tint)
-                    .padding(size * 0.12)
-            } else {
-                Text(agent.displayName.prefix(1))
-                    .font(.system(size: size * 0.45, weight: .bold))
-                    .foregroundStyle(tint)
-            }
+            AgentBrandIcon(
+                agentType: agent.rawValue,
+                tint: tint,
+                size: size,
+                contentInset: size * 0.12
+            )
         }
         .frame(width: size, height: size)
         .opacity(state == .disconnected ? 0.35 : 1.0)
@@ -106,24 +90,13 @@ struct PreviewCreatureGlyph: View {
 
     private var tint: Color { tintOverride ?? StateColors.brand(agent: agent.rawValue) }
 
-    private var assetName: String {
-        switch agent {
-        case .claudeCode: return "CreatureClaudeCode"
-        case .codex:      return "CreatureCodex"
-        case .opencode:   return "CreatureOpenCode"
-        case .openclaw:   return "CreatureOpenClaw"
-        }
-    }
-
     var body: some View {
-        Image(assetName)
-            .resizable()
-            .renderingMode(.template)
-            .interpolation(.high)
-            .aspectRatio(contentMode: .fit)
-            .foregroundStyle(tint)
-            .padding(size * 0.04)
-            .frame(width: size, height: size)
+        AgentBrandIcon(
+            agentType: agent.rawValue,
+            tint: tint,
+            size: size,
+            contentInset: size * 0.04
+        )
             .opacity(state == .disconnected ? 0.3 : 1.0)
             .accessibilityLabel("\(agent.displayName) \(state.displayName)")
     }

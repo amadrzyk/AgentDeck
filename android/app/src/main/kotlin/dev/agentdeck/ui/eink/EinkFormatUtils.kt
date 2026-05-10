@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import dev.agentdeck.net.AgentState
+import dev.agentdeck.net.SessionInfo
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.terrarium.renderer.einkColorEnabled
 
@@ -80,6 +81,58 @@ fun agentTypeRank(agentType: String?): Int = when (agentType) {
     "codex-cli" -> 2
     "opencode" -> 3
     else -> 4
+}
+
+private val naturalChunks = Regex("\\d+|\\D+")
+
+fun naturalLabelCompare(left: String?, right: String?): Int {
+    val lhs = left.orEmpty()
+    val rhs = right.orEmpty()
+    val leftChunks = naturalChunks.findAll(lhs).map { it.value }.toList()
+    val rightChunks = naturalChunks.findAll(rhs).map { it.value }.toList()
+    val count = minOf(leftChunks.size, rightChunks.size)
+
+    for (index in 0 until count) {
+        val a = leftChunks[index]
+        val b = rightChunks[index]
+        val bothNumbers = a.all(Char::isDigit) && b.all(Char::isDigit)
+        val diff = if (bothNumbers) {
+            compareNumericChunks(a, b)
+        } else {
+            String.CASE_INSENSITIVE_ORDER.compare(a, b)
+        }
+        if (diff != 0) return diff
+    }
+
+    if (leftChunks.size != rightChunks.size) return leftChunks.size - rightChunks.size
+    return String.CASE_INSENSITIVE_ORDER.compare(lhs, rhs)
+}
+
+private fun compareNumericChunks(left: String, right: String): Int {
+    val lhs = left.trimStart('0').ifEmpty { "0" }
+    val rhs = right.trimStart('0').ifEmpty { "0" }
+    if (lhs.length != rhs.length) return lhs.length - rhs.length
+    val valueDiff = lhs.compareTo(rhs)
+    if (valueDiff != 0) return valueDiff
+    return left.length - right.length
+}
+
+fun compareSessionsForDisplay(left: SessionInfo, right: SessionInfo): Int {
+    val typeDiff = agentTypeRank(left.agentType) - agentTypeRank(right.agentType)
+    if (typeDiff != 0) return typeDiff
+
+    val nameDiff = naturalLabelCompare(left.projectName, right.projectName)
+    if (nameDiff != 0) return nameDiff
+
+    val leftStarted = left.startedAt
+    val rightStarted = right.startedAt
+    if (leftStarted != null && rightStarted != null && leftStarted != rightStarted) {
+        return leftStarted.compareTo(rightStarted)
+    }
+    if (leftStarted != null) return -1
+    if (rightStarted != null) return 1
+
+    return naturalLabelCompare(left.id, right.id)
 }
 
 fun agentIcon(agentType: String?): String = when (agentType) {

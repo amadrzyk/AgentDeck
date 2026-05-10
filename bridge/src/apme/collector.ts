@@ -65,8 +65,25 @@ export type TaskBoundarySignal = 'todo_complete' | 'clear' | 'session_end' | 'ma
 export type OnTaskClosed = (args: {
   taskId: string;
   runId: string;
+  sessionId: string;
+  agentType: AgentType | null;
+  projectName: string | null;
+  startedAt: number;
+  endedAt: number;
   boundarySignal: TaskBoundarySignal;
   taskCategory: string | null;
+}) => void;
+
+/** Callback fired after a task is opened. Used by the timeline emitter to
+ *  insert a `task_start` row so the dashboard sees task hierarchy. */
+export type OnTaskOpened = (args: {
+  taskId: string;
+  runId: string;
+  sessionId: string;
+  agentType: AgentType | null;
+  projectName: string | null;
+  taskIndex: number;
+  startedAt: number;
 }) => void;
 
 export class ApmeCollector {
@@ -79,6 +96,10 @@ export class ApmeCollector {
   /** Optional listener fired after `closeTask` persists the row. The runner
    *  wires this to enqueue a task-level judge call. */
   public onTaskClosed: OnTaskClosed | null = null;
+
+  /** Optional listener fired after `openTaskIfNone` inserts a fresh task row.
+   *  The dashboard timeline emitter wires this to push a `task_start` entry. */
+  public onTaskOpened: OnTaskOpened | null = null;
 
   constructor(
     private readonly store: ApmeStore,
@@ -276,6 +297,24 @@ export class ApmeCollector {
     } catch (err) {
       debug('APME', `insertTask failed: ${String(err)}`);
     }
+
+    if (this.onTaskOpened) {
+      const run = this.store.getRun(runId);
+      try {
+        this.onTaskOpened({
+          taskId: task.id,
+          runId,
+          sessionId,
+          agentType: (run?.agentType ?? null) as AgentType | null,
+          projectName: run?.projectName ?? null,
+          taskIndex: task.index,
+          startedAt: task.startedAt,
+        });
+      } catch (err) {
+        debug('APME', `onTaskOpened listener threw: ${String(err)}`);
+      }
+    }
+
     return task;
   }
 
@@ -320,12 +359,17 @@ export class ApmeCollector {
 
     debug('APME', `closeTask ${task.id.slice(0, 8)} signal=${boundarySignal} turns=${task.firstTurnIndex}..${task.lastTurnIndex}`);
 
-    // Notify listeners (runner enqueueTask is wired via apme/index.ts).
+    // Notify listeners (runner enqueueTask + timeline emitter wired via apme/index.ts).
     if (this.onTaskClosed) {
       try {
         this.onTaskClosed({
           taskId: task.id,
           runId: task.runId,
+          sessionId,
+          agentType: (run?.agentType ?? null) as AgentType | null,
+          projectName: run?.projectName ?? null,
+          startedAt: task.startedAt,
+          endedAt: Date.now(),
           boundarySignal,
           taskCategory,
         });

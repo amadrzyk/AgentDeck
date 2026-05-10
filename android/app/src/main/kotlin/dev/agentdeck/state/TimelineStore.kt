@@ -18,6 +18,13 @@ data class TimelineEntry(
     val startedAt: Long? = null,
     val endedAt: Long? = null,
     val status: String? = null,
+    /** APME task id. Set on task_start/task_end and on every turn entry inside the task scope. */
+    val taskId: String? = null,
+    /** Only on task_end. todo_complete | clear | session_end | manual. */
+    val boundarySignal: String? = null,
+    /** "llm" | "heuristic" | "none". Lets clients suppress the detail pane
+     *  when the heuristic gave up and the body is just the raw response. */
+    val summaryKind: String? = null,
 )
 
 data class GroupedEntry(
@@ -53,6 +60,8 @@ fun groupConsecutive(entries: List<TimelineEntry>): List<GroupedEntry> {
 private fun canGroup(group: GroupedEntry, entry: TimelineEntry): Boolean {
     val prev = group.entry
     if (prev.type != entry.type) return false
+    // Task hierarchy markers never group — each task is a unique unit of work.
+    if (entry.type == "task_start" || entry.type == "task_end") return false
     val window = when (entry.type) {
         "tool_request" -> 10_000L
         "chat_end" -> 60_000L
@@ -99,7 +108,13 @@ class TimelineStore private constructor() {
         }
     }
 
-    /** Update existing entry with same ts+type (1s tolerance), or add new */
+    /** Update existing entry with same ts+type (1s tolerance), or add new.
+     *
+     *  taskId / boundarySignal / summaryKind are progressive: a heuristic
+     *  chat_end can later be upserted with summaryKind='llm' + the LLM
+     *  summary. Without propagating these, the dashboard keeps showing the
+     *  pre-LLM kind and (for 'none' rows) the detail pane stays suppressed
+     *  even after the LLM rescues it. */
     fun upsertEntry(entry: TimelineEntry) {
         val list = _entries.value.toMutableList()
         val idx = list.indexOfLast { it.type == entry.type && kotlin.math.abs(it.timestamp - entry.timestamp) < 1000L }
@@ -114,6 +129,9 @@ class TimelineStore private constructor() {
                 startedAt = entry.startedAt ?: list[idx].startedAt,
                 endedAt = entry.endedAt ?: list[idx].endedAt,
                 status = entry.status ?: list[idx].status,
+                taskId = entry.taskId ?: list[idx].taskId,
+                boundarySignal = entry.boundarySignal ?: list[idx].boundarySignal,
+                summaryKind = entry.summaryKind ?: list[idx].summaryKind,
             )
             _entries.value = list
         } else {

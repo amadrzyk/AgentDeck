@@ -241,7 +241,7 @@ actor WebSocketServer {
         // Send 101 Switching Protocols
         let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
 
-        nwConn.send(content: Data(response.utf8), completion: .contentProcessed({ [weak self] error in
+        nwConn.send(content: Data(response.utf8), isComplete: false, completion: .contentProcessed({ [weak self] error in
             guard error == nil else {
                 nwConn.cancel()
                 return
@@ -404,7 +404,7 @@ final class WebSocketConnection: Hashable, Sendable {
                         return
                     case 0x9: // ping → pong
                         let pongFrame = Self.buildFrame(opcode: 0xA, payload: payload)
-                        self.connection.send(content: pongFrame, completion: .contentProcessed({ _ in }))
+                        self.connection.send(content: pongFrame, isComplete: false, completion: .contentProcessed({ _ in }))
                     default:
                         break // pong, continuation, etc.
                     }

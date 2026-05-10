@@ -656,6 +656,9 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         if let pm = e.permissionMode { state.permissionMode = PermissionMode(rawValue: pm) ?? state.permissionMode }
         state.agentType = e.agentType ?? state.agentType
         if let sid = e.sessionId { state.sessionId = sid }
+        if let focusedSessionId = e.focusedSessionId {
+            state.focusedSessionId = focusedSessionId.isEmpty ? nil : focusedSessionId
+        }
         state.agentCapabilities = e.agentCapabilities ?? state.agentCapabilities
         state.currentTool = e.currentTool ?? state.currentTool
         state.toolInput = e.toolInput ?? state.toolInput
@@ -677,7 +680,24 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.workerSessionCount = e.workerSessionCount ?? state.workerSessionCount
         if let os = e.ollamaStatus { state.ollamaStatus = os }
         state.mlxModels = e.mlxModels ?? state.mlxModels
-        state.subscriptions = e.subscriptions ?? state.subscriptions
+        if let subscriptions = e.subscriptions {
+            state.subscriptions = subscriptions
+        }
+        let sawCodexAuthField = e.codexAuthMode != nil
+            || e.codexWebAuthConnected != nil
+            || e.codexPlanType != nil
+            || e.codexAccountId != nil
+            || e.codexSubscriptionActiveUntil != nil
+            || e.codexLastRefreshAt != nil
+        state.codexAuthMode = e.codexAuthMode ?? state.codexAuthMode
+        state.codexWebAuthConnected = e.codexWebAuthConnected ?? state.codexWebAuthConnected
+        state.codexPlanType = e.codexPlanType ?? state.codexPlanType
+        state.codexAccountId = e.codexAccountId ?? state.codexAccountId
+        state.codexSubscriptionActiveUntil = e.codexSubscriptionActiveUntil ?? state.codexSubscriptionActiveUntil
+        state.codexLastRefreshAt = e.codexLastRefreshAt ?? state.codexLastRefreshAt
+        if e.subscriptions == nil {
+            reconcileCodexSubscriptionFallback(clearWhenUnavailable: sawCodexAuthField)
+        }
         state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
         state.gatewayAvailable = e.gatewayAvailable ?? state.gatewayAvailable
         state.gatewayConnected = e.gatewayConnected ?? state.gatewayConnected
@@ -769,6 +789,12 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.oauthConnected = e.oauthConnected ?? state.oauthConnected
         if let os = e.ollamaStatus { state.ollamaStatus = os }
         state.usageStale = e.usageStale ?? state.usageStale
+        let sawCodexAuthField = e.codexAuthMode != nil
+            || e.codexWebAuthConnected != nil
+            || e.codexPlanType != nil
+            || e.codexAccountId != nil
+            || e.codexSubscriptionActiveUntil != nil
+            || e.codexLastRefreshAt != nil
         state.codexAuthMode = e.codexAuthMode ?? state.codexAuthMode
         state.codexWebAuthConnected = e.codexWebAuthConnected ?? state.codexWebAuthConnected
         state.codexPlanType = e.codexPlanType ?? state.codexPlanType
@@ -778,7 +804,11 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.modelCatalog = e.modelCatalog ?? state.modelCatalog
         state.mlxModels = e.mlxModels ?? state.mlxModels
         state.mlxModelCatalog = e.mlxModelCatalog ?? state.mlxModelCatalog
-        state.subscriptions = e.subscriptions ?? state.subscriptions
+        if let subscriptions = e.subscriptions {
+            state.subscriptions = subscriptions
+        } else {
+            reconcileCodexSubscriptionFallback(clearWhenUnavailable: sawCodexAuthField)
+        }
         state.antigravityStatus = e.antigravityStatus ?? state.antigravityStatus
 
         state.adminApiKeyPresent = e.adminApiKeyPresent ?? state.adminApiKeyPresent
@@ -795,6 +825,50 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.adminApiStale = e.adminApiStale ?? state.adminApiStale
     }
 
+    private func reconcileCodexSubscriptionFallback(clearWhenUnavailable: Bool) {
+        let nonChatGptSubscriptions = state.subscriptions.filter {
+            !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("chatgpt")
+        }
+        guard let name = Self.chatGptSubscriptionName(
+            planType: state.codexPlanType,
+            authMode: state.codexAuthMode,
+            webAuthConnected: state.codexWebAuthConnected,
+            until: state.codexSubscriptionActiveUntil
+        ) else {
+            if clearWhenUnavailable {
+                state.subscriptions = nonChatGptSubscriptions
+            }
+            return
+        }
+
+        var subscriptions = nonChatGptSubscriptions
+        subscriptions.insert(SubscriptionInfo(name: name, until: state.codexSubscriptionActiveUntil), at: 0)
+        state.subscriptions = subscriptions
+    }
+
+    private static func chatGptSubscriptionName(
+        planType: String?,
+        authMode: String?,
+        webAuthConnected: Bool?,
+        until: String?
+    ) -> String? {
+        if let plan = planType?.trimmingCharacters(in: .whitespacesAndNewlines), !plan.isEmpty {
+            switch plan.lowercased() {
+            case "plus": return "ChatGPT Plus"
+            case "pro": return "ChatGPT Pro"
+            case "team": return "ChatGPT Team"
+            case "enterprise": return "ChatGPT Enterprise"
+            default: return "ChatGPT \(plan)"
+            }
+        }
+        let normalizedMode = authMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hasUntil = until.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
+        if webAuthConnected == true || normalizedMode == "chatgpt" || hasUntil {
+            return "ChatGPT"
+        }
+        return nil
+    }
+
     // MARK: - Connection
 
     private func handleConnection(_ e: ConnectionEvent) {
@@ -802,6 +876,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         case "connected":
             state.bridgeConnected = true
             state.sessionId = e.sessionId
+            state.focusedSessionId = nil
             isAutoConnecting = false
             waterfallStage = .idle
 
@@ -823,6 +898,7 @@ final class AgentStateHolder: ObservableObject, @unchecked Sendable {
         state.bridgeConnected = false
         state.state = .disconnected
         state.sessionId = nil
+        state.focusedSessionId = nil
         state.hostDisplayOn = true
         #if os(iOS)
         displaySync.restoreOnDisconnect()

@@ -291,11 +291,19 @@ final class DaemonServer {
     /// are normal, but they still need a hard cap for missing end events.
     private static let codexToolObservationStaleTTL: TimeInterval = 240
 
+    /// Singleton row used when Codex OTLP spans have a trace id but no durable
+    /// thread id. Keep this in sync with CodexTelemetryModule's fallback id.
+    private static let codexAnonymousOtelSessionId = "codex:otel-active"
+
     /// Session id of the most recent hook event that carried one. Used to
     /// stamp state_update broadcasts so dashboard clients can attribute
     /// timeline entries + primary-creature state to the right session
     /// when multiple claude sessions are running concurrently.
     private var currentHookSessionId: String?
+    /// Session explicitly focused by the user. Kept separate from
+    /// `currentHookSessionId` so a new hook from another session does not
+    /// move the dashboard's visual selection halo.
+    private var userFocusedSessionId: String?
     private var cachedModelCatalog: [[String: Any]] = []
     private var cachedOllamaStatus: [String: Any]?
     /// Cached serial module snapshot — `buildModuleHealthSync` can't
@@ -343,6 +351,12 @@ final class DaemonServer {
     private var cachedPairingUrl: String?
     private var lastStateEvent: [String: Any]?
     private var cachedApiUsage: ApiUsageData?
+    /// Codex ChatGPT auth metadata relayed by an unsandboxed sibling bridge.
+    /// The App Store daemon cannot read `~/.codex/auth.json` directly, but a
+    /// user-started terminal bridge can read it and include the non-secret
+    /// plan/expiry fields in `usage_update`. Cache those fields so subsequent
+    /// daemon-owned state/usage broadcasts keep the subscription row alive.
+    private var relayedCodexAuthStatus: CodexAuthStatus?
     private var lastApiFetchTime: Date = .distantPast
     private static let usageStaleTTL: TimeInterval = 600  // 10 minutes
     private var apiUsageStale = false
@@ -611,7 +625,10 @@ final class DaemonServer {
                     // Inject focused session's ID so clients can dedup the promoted
                     // session from the siblings list (prevents duplicate creatures).
                     let focusedId = await self.focusRelay.focusedSessionId
-                    if let fid = focusedId { event["sessionId"] = fid }
+                    if let fid = focusedId {
+                        event["sessionId"] = fid
+                        event["focusedSessionId"] = self.userFocusedSessionId == fid ? fid : ""
+                    }
 
                     // Always override mlxModels with daemon's filtered cache — sibling bridges may
                     // run older/unfiltered code that leaks nanoLLaVA into the list, causing flicker.
@@ -632,6 +649,7 @@ final class DaemonServer {
             Task { @MainActor in
                 guard let self else { return }
                 let usage = box.value
+                self.updateRelayedCodexAuthStatus(from: usage)
                 // Sync rate-limit values (already adjusted by bridge's adjustUsagePercent)
                 if self.cachedApiUsage != nil {
                     if let fh = usage["fiveHourPercent"] as? Double {
@@ -1666,6 +1684,7 @@ final class DaemonServer {
             default: break
             }
             if type != "switch_agent" && type != "query_usage" && type != "focus_session"
+                && type != "clear_session_focus"
                 && type != "mode_toggle" && type != "session_switch" && type != "usage_toggle" { return }
         }
 
@@ -1675,6 +1694,9 @@ final class DaemonServer {
                 focusSession(sessionId)
             }
             return
+        case "clear_session_focus":
+            clearSessionFocus()
+            return
         case "session_command":
             guard let sessionId = cmd["sessionId"] as? String,
                   let innerCommand = cmd["command"] as? [String: Any] else { return }
@@ -1683,6 +1705,8 @@ final class DaemonServer {
                 DaemonLogger.shared.debug("Daemon", "session_command: session \(sessionId) not found")
                 return
             }
+            userFocusedSessionId = sessionId
+            broadcastStateUpdate()
             let cmdBox = SendableDict(innerCommand)
             let focusLocally = isLocalObservedSession(targetSession)
             Task {
@@ -1725,6 +1749,7 @@ final class DaemonServer {
                 await MainActor.run { self.broadcastUsage() }
             }
         case "switch_agent":
+            userFocusedSessionId = nil
             Task { await focusRelay.unfocus() }
             handleSwitchAgent(cmd["agent"] as? String ?? "")
         case "mode_toggle":
@@ -1746,6 +1771,10 @@ final class DaemonServer {
                 let currentIdx = sessions.firstIndex(where: { $0.id == currentId }) ?? -1
                 let nextIdx = (currentIdx + 1) % sessions.count
                 let nextSession = sessions[nextIdx]
+                await MainActor.run {
+                    self.userFocusedSessionId = nextSession.id
+                    self.broadcastStateUpdate()
+                }
                 if nextSession.port == selfPort || nextSession.pid == 0 {
                     await self.focusRelay.focusLocal(sessionId: nextSession.id)
                 } else {
@@ -1765,16 +1794,33 @@ final class DaemonServer {
 
     @MainActor
     private func focusSession(_ sessionId: String) {
+        if sessionId == "openclaw-gateway", cachedGatewayConnected || cachedGatewayHasError {
+            userFocusedSessionId = sessionId
+            Task { await focusRelay.unfocus() }
+            broadcastStateUpdate()
+            return
+        }
+
         guard let session = cachedSessions.first(where: { $0.id == sessionId }) else {
             DaemonLogger.shared.debug("Daemon", "focus_session ignored stale session \(sessionId)")
             return
         }
+
+        userFocusedSessionId = sessionId
+        broadcastStateUpdate()
 
         if isLocalObservedSession(session) {
             Task { await focusRelay.focusLocal(sessionId: sessionId) }
         } else {
             Task { await focusRelay.focus(sessionId: sessionId) }
         }
+    }
+
+    @MainActor
+    private func clearSessionFocus() {
+        userFocusedSessionId = nil
+        Task { await focusRelay.unfocus() }
+        broadcastStateUpdate()
     }
 
     private func isLocalObservedSession(_ session: DaemonSessionEntry) -> Bool {
@@ -2171,9 +2217,13 @@ final class DaemonServer {
             lastHookAtByPushedSession.removeValue(forKey: sid)
             lastTerminalCodexEventBySession.removeValue(forKey: sid)
             codexProcessingTouchedAtBySession.removeValue(forKey: sid)
+            codexChatStartTsBySession.removeValue(forKey: sid)
+            codexLastPromptTopicBySession.removeValue(forKey: sid)
+            codexCurrentToolBySession.removeValue(forKey: sid)
             claudeChatStartTsBySession.removeValue(forKey: sid)
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
             if currentHookSessionId == sid { currentHookSessionId = nil }
+            if userFocusedSessionId == sid { userFocusedSessionId = nil }
             if isPostTerminal {
                 DaemonLogger.shared.debug("Hook", "Evicted finished codex session \(sid) (post-terminal \(Int(Self.codexPostTerminalTTL))s)")
             } else if let entry = expiredEntry,
@@ -2187,6 +2237,7 @@ final class DaemonServer {
             }
         }
         broadcastSessionsList()
+        broadcastStateUpdate()
     }
 
     /// Translate a batch of Codex OTLP/HTTP spans into per-session state
@@ -2230,35 +2281,80 @@ final class DaemonServer {
             return
         }
 
-        var didCreate = false
+        var didTouchSessionsList = false
+        func codexProjectName(from cwd: String?, sessionId: String) -> String {
+            if let cwd, let projectName = Self.nonEmptyString(ProjectNameResolver.resolve(cwd: cwd)) {
+                return projectName
+            }
+            if sessionId == Self.codexAnonymousOtelSessionId,
+               let inferred = inferredCodexProjectNameFromVisibleSessions() {
+                return inferred
+            }
+            return ""
+        }
+
+        func ensureCodexSession(_ sid: String, projectName: String = "") {
+            let resolvedProjectName = Self.nonEmptyString(projectName) ?? ""
+            if let existing = pushedSessionsById[sid] {
+                if existing.projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !resolvedProjectName.isEmpty {
+                    var updated = DaemonSessionEntry(
+                        id: existing.id,
+                        port: existing.port,
+                        pid: existing.pid,
+                        projectName: resolvedProjectName,
+                        agentType: "codex-cli",
+                        tmuxSession: existing.tmuxSession,
+                        tty: existing.tty,
+                        parentTty: existing.parentTty,
+                        startedAt: existing.startedAt
+                    )
+                    updated.state = existing.state
+                    updated.modelName = existing.modelName
+                    updated.effortLevel = existing.effortLevel
+                    updated.currentTool = existing.currentTool
+                    updated.options = existing.options
+                    updated.navigable = existing.navigable
+                    pushedSessionsById[sid] = updated
+                    upsertIntoCachedSessions(updated)
+                    trackCodexProcessingState(sessionId: sid, entry: updated)
+                    didTouchSessionsList = true
+                    DaemonLogger.shared.debug("CodexOTel", "Updated \(sid) project=\(resolvedProjectName)")
+                }
+                return
+            }
+            var entry = DaemonSessionEntry(
+                id: sid,
+                port: Int(port),
+                pid: 0,
+                projectName: resolvedProjectName,
+                agentType: "codex-cli",
+                tmuxSession: nil,
+                tty: nil,
+                parentTty: nil,
+                startedAt: ISO8601DateFormatter().string(from: Date())
+            )
+            entry.state = "processing"
+            pushedSessionsById[sid] = entry
+            upsertIntoCachedSessions(entry)
+            trackCodexProcessingState(sessionId: sid, entry: entry)
+            didTouchSessionsList = true
+            DaemonLogger.shared.debug("CodexOTel", "Opened \(sid) project=\(resolvedProjectName.isEmpty ? "(none)" : resolvedProjectName)")
+        }
+
         for event in events {
             switch event {
             case .turnStart(let threadId, _, let cwd):
                 let sid = "codex:\(threadId)"
+                let projectName = codexProjectName(from: cwd, sessionId: sid)
                 if pushedSessionsById[sid] == nil {
-                    let projectName = cwd.map(ProjectNameResolver.resolve(cwd:)) ?? ""
-                    var entry = DaemonSessionEntry(
-                        id: sid,
-                        port: Int(port),
-                        pid: 0,
-                        projectName: projectName,
-                        agentType: "codex-cli",
-                        tmuxSession: nil,
-                        tty: nil,
-                        parentTty: nil,
-                        startedAt: ISO8601DateFormatter().string(from: Date())
-                    )
-                    entry.state = "processing"
-                    pushedSessionsById[sid] = entry
-                    upsertIntoCachedSessions(entry)
-                    trackCodexProcessingState(sessionId: sid, entry: entry)
-                    didCreate = true
-                    DaemonLogger.shared.debug("CodexOTel", "Opened \(sid) project=\(projectName.isEmpty ? "(none)" : projectName)")
+                    ensureCodexSession(sid, projectName: projectName)
                 } else {
+                    ensureCodexSession(sid, projectName: projectName)
                     updateSessionHookState(sessionId: sid, state: "processing")
                 }
+                if !projectName.isEmpty { stateMachine.projectName = projectName }
                 _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
-                appendCodexChatStart(json: ["prompt": "Codex turn started"], sessionId: sid)
                 lastHookAtByPushedSession[sid] = Date()
                 lastTerminalCodexEventBySession.removeValue(forKey: sid)
 
@@ -2268,8 +2364,9 @@ final class DaemonServer {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late toolCall for finished session \(sid)")
                     continue
                 }
-                appendCodexToolEvent(json: ["tool_name": tool], sessionId: sid, completed: false)
-                updateSessionHookState(sessionId: sid, state: "processing", currentTool: tool)
+                ensureCodexSession(sid, projectName: codexProjectName(from: nil, sessionId: sid))
+                let usefulTool = Self.usefulCodexToolName(tool)
+                updateSessionHookState(sessionId: sid, state: "processing", currentTool: usefulTool)
                 lastHookAtByPushedSession[sid] = Date()
 
             case .toolResult(let threadId, _):
@@ -2278,7 +2375,6 @@ final class DaemonServer {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late toolResult for finished session \(sid)")
                     continue
                 }
-                appendCodexToolEvent(json: [:], sessionId: sid, completed: true)
                 updateSessionHookState(sessionId: sid, state: "processing", clearTool: true)
                 lastHookAtByPushedSession[sid] = Date()
 
@@ -2293,20 +2389,21 @@ final class DaemonServer {
 
             case .activity(let threadId, _, let name):
                 let sid = "codex:\(threadId)"
-                guard pushedSessionsById[sid] != nil else { continue }
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late activity \(name) for finished session \(sid)")
                     continue
                 }
+                ensureCodexSession(sid, projectName: codexProjectName(from: nil, sessionId: sid))
                 updateSessionHookState(sessionId: sid, state: "processing")
                 lastHookAtByPushedSession[sid] = Date()
             }
         }
 
-        if didCreate {
+        if didTouchSessionsList {
             // Newly-synthesized session needs a sessions-list broadcast;
             // updateSessionHookState already pushes the list when it touches
-            // an existing entry, but the create path above bypassed that.
+            // an existing entry, but the create/project-update path above
+            // can bypass that.
             broadcastSessionsList()
         }
         broadcastStateUpdate()
@@ -2367,6 +2464,38 @@ final class DaemonServer {
 
     private static func isCodexSession(sessionId: String, entry: DaemonSessionEntry) -> Bool {
         sessionId.hasPrefix("codex:") || entry.agentType == "codex-cli"
+    }
+
+    private static func usefulCodexToolName(_ raw: String?) -> String? {
+        guard let trimmed = nonEmptyString(raw) else { return nil }
+        let lowered = trimmed.lowercased()
+        guard lowered != "tool" && lowered != "unknown" else { return nil }
+        return trimmed
+    }
+
+    @MainActor
+    private func inferredCodexProjectNameFromVisibleSessions() -> String? {
+        let candidates = pushedSessionsById.values.compactMap { entry -> String? in
+            guard entry.agentType != "codex-cli" else { return nil }
+            guard let projectName = Self.nonEmptyString(entry.projectName) else { return nil }
+            switch projectName.lowercased() {
+            case "daemon", "openclaw":
+                return nil
+            default:
+                return projectName
+            }
+        }
+        let unique = Array(Set(candidates))
+        if unique.count == 1 { return unique[0] }
+
+        guard let rawStateProject = stateMachine.projectName,
+              let stateProject = Self.nonEmptyString(rawStateProject) else { return nil }
+        switch stateProject.lowercased() {
+        case "daemon", "openclaw":
+            return nil
+        default:
+            return stateProject
+        }
     }
 
     /// Apply a per-session state/tool update coming from a hook event and
@@ -3082,6 +3211,7 @@ final class DaemonServer {
         for sibling in sessions {
             DaemonLogger.shared.sampledDebug("Daemon", key: "usage-relay:tier1-port-\(sibling.port)", every: 10, "Usage Tier 1: HTTP relay from port \(sibling.port)")
             if let usage = await fetchUsageViaHTTP(port: sibling.port) {
+                updateRelayedCodexAuthStatus(from: usage)
                 // Parse relayed dict back into ApiUsageData for caching
                 cachedApiUsage = parseRelayedUsage(usage)
                 if let fetchedAt = cachedApiUsage?.fetchedAt {
@@ -3187,6 +3317,66 @@ final class DaemonServer {
             fetchedAt: dict["fetchedAt"] as? Double,
             stale: dict["usageStale"] as? Bool ?? false
         )
+    }
+
+    @MainActor
+    private func updateRelayedCodexAuthStatus(from event: [String: Any]) {
+        let hasCodexAuthField = [
+            "codexAuthMode",
+            "codexWebAuthConnected",
+            "codexPlanType",
+            "codexAccountId",
+            "codexSubscriptionActiveUntil",
+            "codexLastRefreshAt",
+        ].contains { event[$0] != nil }
+        guard hasCodexAuthField else { return }
+
+        let webAuthConnected = event["codexWebAuthConnected"] as? Bool ?? false
+        let current = CodexAuthStatus(
+            authMode: Self.nonEmptyString(event["codexAuthMode"]),
+            webAuthConnected: webAuthConnected,
+            accessTokenPresent: webAuthConnected,
+            planType: Self.nonEmptyString(event["codexPlanType"]),
+            accountId: Self.nonEmptyString(event["codexAccountId"]),
+            subscriptionActiveUntil: Self.nonEmptyString(event["codexSubscriptionActiveUntil"]),
+            lastRefreshAt: Self.nonEmptyString(event["codexLastRefreshAt"])
+        )
+
+        relayedCodexAuthStatus = UsageAPIClient.stabilizeCodexAuthStatus(
+            previous: relayedCodexAuthStatus,
+            current: current
+        )
+    }
+
+    @MainActor
+    private func codexAuthStatusSnapshot() -> CodexAuthStatus? {
+        Self.mergeCodexAuthStatus(
+            primary: usageAPI.codexAuthStatus,
+            fallback: relayedCodexAuthStatus
+        )
+    }
+
+    private static func mergeCodexAuthStatus(
+        primary: CodexAuthStatus?,
+        fallback: CodexAuthStatus?
+    ) -> CodexAuthStatus? {
+        guard let primary else { return fallback }
+        guard let fallback else { return primary }
+        return CodexAuthStatus(
+            authMode: primary.authMode ?? fallback.authMode,
+            webAuthConnected: primary.webAuthConnected || fallback.webAuthConnected,
+            accessTokenPresent: primary.accessTokenPresent || fallback.accessTokenPresent,
+            planType: primary.planType ?? fallback.planType,
+            accountId: primary.accountId ?? fallback.accountId,
+            subscriptionActiveUntil: primary.subscriptionActiveUntil ?? fallback.subscriptionActiveUntil,
+            lastRefreshAt: primary.lastRefreshAt ?? fallback.lastRefreshAt
+        )
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let raw = value as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: - Broadcasting
@@ -3304,6 +3494,7 @@ final class DaemonServer {
         // hook so timeline / primary-creature attribution picks the right
         // session when several are running concurrently.
         if let sid = currentHookSessionId { e["sessionId"] = sid }
+        e["focusedSessionId"] = userFocusedSessionId ?? ""
         if let m = stateMachine.modelName { e["modelName"] = m }
         if let ef = stateMachine.effortLevel { e["effortLevel"] = ef }
         e["billingType"] = stateMachine.billingType
@@ -3335,6 +3526,9 @@ final class DaemonServer {
         e["moduleHealth"] = buildModuleHealthSync()
         // Subscription rows belong on every state_update — the SwiftUI rail
         // reads `state.subscriptions` from this event, not from usage_update.
+        if let codex = codexAuthStatusSnapshot() {
+            Self.writeCodexAuthStatus(codex, into: &e)
+        }
         let subscriptions = buildSubscriptions()
         if !subscriptions.isEmpty { e["subscriptions"] = subscriptions }
         return e
@@ -3439,13 +3633,8 @@ final class DaemonServer {
         mergeEngineSnapshot(into: &e)
         let ts = usageAPI.tokenStatus
         if ts != .unknown { e["tokenStatus"] = ts.rawValue }
-        if let codex = usageAPI.codexAuthStatus {
-            if let mode = codex.authMode { e["codexAuthMode"] = mode }
-            if codex.webAuthConnected { e["codexWebAuthConnected"] = true }
-            if let plan = codex.planType { e["codexPlanType"] = plan }
-            if let accountId = codex.accountId { e["codexAccountId"] = accountId }
-            if let until = codex.subscriptionActiveUntil { e["codexSubscriptionActiveUntil"] = until }
-            if let refresh = codex.lastRefreshAt { e["codexLastRefreshAt"] = refresh }
+        if let codex = codexAuthStatusSnapshot() {
+            Self.writeCodexAuthStatus(codex, into: &e)
         }
         if let antigravity = cachedAntigravityStatus {
             e["antigravityStatus"] = antigravityPayload(antigravity)
@@ -3489,19 +3678,39 @@ final class DaemonServer {
     @MainActor
     private func buildSubscriptions() -> [[String: Any]] {
         var subscriptions: [[String: Any]] = []
-        if let codex = usageAPI.codexAuthStatus {
+        if let codex = codexAuthStatusSnapshot() {
             // keep usage metadata fields in usage_update only
-            if let plan = codex.planType {
-                subscriptions.append([
-                    "name": Self.chatGptPlanDisplay(plan),
-                    "until": codex.subscriptionActiveUntil as Any,
-                ])
+            if let name = Self.chatGptSubscriptionName(codex) {
+                var item: [String: Any] = ["name": name]
+                if let until = codex.subscriptionActiveUntil {
+                    item["until"] = until
+                }
+                subscriptions.append(item)
             }
         }
         if cachedApiUsage?.inferredBillingType == "subscription" || stateMachine.billingType == "subscription" {
             subscriptions.append(["name": "Claude"])
         }
         return subscriptions
+    }
+
+    private static func writeCodexAuthStatus(_ codex: CodexAuthStatus, into event: inout [String: Any]) {
+        if let mode = codex.authMode { event["codexAuthMode"] = mode }
+        event["codexWebAuthConnected"] = codex.webAuthConnected
+        if let plan = codex.planType { event["codexPlanType"] = plan }
+        if let accountId = codex.accountId { event["codexAccountId"] = accountId }
+        if let until = codex.subscriptionActiveUntil { event["codexSubscriptionActiveUntil"] = until }
+        if let refresh = codex.lastRefreshAt { event["codexLastRefreshAt"] = refresh }
+    }
+
+    private static func chatGptSubscriptionName(_ codex: CodexAuthStatus) -> String? {
+        if let plan = codex.planType {
+            return chatGptPlanDisplay(plan)
+        }
+        if codex.webAuthConnected || codex.authMode == "chatgpt" || codex.subscriptionActiveUntil != nil {
+            return "ChatGPT"
+        }
+        return nil
     }
 
     /// Returns 0 if the usage window has already reset.
@@ -4172,8 +4381,8 @@ final class DaemonServer {
     private func appendCodexChatStart(json: [String: Any], sessionId: String?) {
         guard let sessionId else { return }
         let prompt = claudeCodePromptText(from: json)
+        guard !prompt.isEmpty, prompt != "Codex turn started" else { return }
         if let existingTs = codexChatStartTsBySession[sessionId] {
-            guard !prompt.isEmpty, prompt != "Codex turn started" else { return }
             var update = DaemonTimelineEntry(
                 ts: existingTs,
                 type: "chat_start",
@@ -4199,15 +4408,8 @@ final class DaemonServer {
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
 
         let ts = Date().timeIntervalSince1970 * 1000
-        let raw: String
-        let detail: String?
-        if prompt.isEmpty || prompt == "Codex turn started" {
-            raw = "Codex turn started"
-            detail = nil
-        } else {
-            raw = String(prompt.prefix(200))
-            detail = prompt.count > 100 ? String(prompt.prefix(1000)) : nil
-        }
+        let raw = String(prompt.prefix(200))
+        let detail = prompt.count > 100 ? String(prompt.prefix(1000)) : nil
         var entry = DaemonTimelineEntry(
             ts: ts,
             type: "chat_start",
@@ -4233,10 +4435,14 @@ final class DaemonServer {
     @MainActor
     private func appendCodexToolEvent(json: [String: Any], sessionId: String?, completed: Bool) {
         guard let sessionId else { return }
-        let tool = (json["tool_name"] as? String)
-            ?? (json["tool"] as? String)
-            ?? codexCurrentToolBySession[sessionId]
-            ?? "tool"
+        guard let tool = Self.usefulCodexToolName(json["tool_name"] as? String)
+            ?? Self.usefulCodexToolName(json["tool"] as? String)
+            ?? Self.usefulCodexToolName(codexCurrentToolBySession[sessionId]) else {
+            if completed {
+                codexCurrentToolBySession.removeValue(forKey: sessionId)
+            }
+            return
+        }
         if completed {
             codexCurrentToolBySession.removeValue(forKey: sessionId)
         } else {
@@ -4276,6 +4482,12 @@ final class DaemonServer {
             ?? (json["output"] as? String)
             ?? (json["result"] as? String)
             ?? ""
+        guard startTs != nil || !assistantText.isEmpty else {
+            codexChatStartTsBySession.removeValue(forKey: sessionId)
+            codexLastPromptTopicBySession.removeValue(forKey: sessionId)
+            codexCurrentToolBySession.removeValue(forKey: sessionId)
+            return
+        }
         let projectName = pushedSessionsById[sessionId]?.projectName
         if !assistantText.isEmpty {
             var respEntry = DaemonTimelineEntry(

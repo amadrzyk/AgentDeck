@@ -14,27 +14,43 @@ export const SUMMARY_SYSTEM_PROMPT = `You are a timeline summarizer. Given an AI
 /**
  * Extract a topic hint from the first few tokens of a response.
  * Used for immediate chat_start enrichment before LLM summarization.
+ *
+ * Korean handling: politeness-only responses ("네, 확인했습니다.") used to be
+ * stripped to empty and return null, leaving the timeline showing bare
+ * "Completed". Now the strip falls back to the pre-strip candidate so the
+ * row shows something meaningful.
  */
 export function extractTopicHint(text: string): string | null {
-  if (!text || text.length < 5) return null;
+  return extractTopicHintWithKind(text).hint;
+}
 
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+export type TopicHintKind = 'topic' | 'fallback' | null;
+
+/**
+ * Same as `extractTopicHint` but tells the caller whether the result was a
+ * substantive topic (kind='topic') or just a politeness-fallback /
+ * first-sentence fallback (kind='fallback'). Lets emitters set
+ * `summaryKind: 'heuristic'` only when there's real content, vs `'none'`
+ * when we're scraping the bottom of the barrel.
+ */
+export function extractTopicHintWithKind(
+  text: string,
+): { hint: string | null; kind: TopicHintKind } {
+  if (!text || text.length < 5) return { hint: null, kind: null };
+
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
   // Find first non-markdown, non-code-fence, non-empty line
   let candidate: string | null = null;
   let inCodeFence = false;
   for (const line of lines) {
-    // Track code fence boundaries
     if (/^```/.test(line)) {
       inCodeFence = !inCodeFence;
       continue;
     }
     if (inCodeFence) continue;
-
-    // Skip headings-only
     if (/^#{1,6}\s*$/.test(line)) continue;
 
-    // Strip markdown decorators for evaluation
     const stripped = cleanRawText(line)
       .replace(/^[-*]\s+/, '')
       .replace(/^>\s+/, '')
@@ -46,18 +62,47 @@ export function extractTopicHint(text: string): string | null {
     }
   }
 
-  if (!candidate) return null;
+  if (!candidate) return { hint: null, kind: null };
 
   const snippet = candidate.length > 80 ? candidate.slice(0, 77) + '...' : candidate;
 
-  // Remove common Korean prefixes (chained — "네, 확인했습니다." → "")
-  let cleaned = snippet;
-  // Strip leading "네," / "네." first, then polite phrases
-  cleaned = cleaned.replace(/^네[,.]?\s*/i, '');
-  cleaned = cleaned.replace(/^(완료했습니다\.\s*|알겠습니다\.\s*|확인했습니다\.\s*)/i, '');
-  cleaned = cleaned.trim();
+  // Try stripping leading Korean polite closers — "네, …" / "확인했습니다."
+  let cleaned = snippet
+    .replace(/^네[,.]?\s*/i, '')
+    .replace(/^(완료했습니다\.\s*|알겠습니다\.\s*|확인했습니다\.\s*)/i, '')
+    .trim();
 
-  return cleaned || null;
+  if (cleaned.length >= 3) {
+    return { hint: cleaned, kind: 'topic' };
+  }
+
+  // Strip left only the EXTRA content beside the polite closer. If polite
+  // closer was the entire candidate, fall back to the candidate itself —
+  // "네, 확인했습니다." beats showing just "Completed".
+  if (snippet.length >= 3) {
+    return { hint: snippet, kind: 'fallback' };
+  }
+
+  return { hint: null, kind: null };
+}
+
+/**
+ * Last-resort fallback when the response yielded no usable hint and the
+ * caller has the prompt text — produce a snippet of the prompt instead of
+ * literal "Completed". Returns the first sentence (up to `maxLen` chars,
+ * ending at `.` `!` `?` or newline) or null when prompt is too short.
+ */
+export function promptSnippetFallback(prompt: string | null | undefined, maxLen = 60): string | null {
+  if (!prompt) return null;
+  const trimmed = prompt.trim();
+  if (trimmed.length < 3) return null;
+  // Cut at the first sentence terminator, otherwise at a hard line break.
+  const stop = trimmed.search(/[.!?。、]|\n/);
+  let snippet = stop > 0 ? trimmed.slice(0, stop) : trimmed;
+  snippet = snippet.trim();
+  if (snippet.length === 0) snippet = trimmed;
+  if (snippet.length > maxLen) snippet = snippet.slice(0, maxLen - 1).trim() + '…';
+  return snippet;
 }
 
 /** Clean LLM output — strip thinking, quotes, markdown artifacts */

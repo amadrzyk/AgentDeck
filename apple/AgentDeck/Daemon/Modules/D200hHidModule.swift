@@ -26,7 +26,7 @@ private let ICON_SIZE = 196
 
 private let POLL_INTERVAL: UInt64 = 500_000_000   // 500ms device detection
 private let KEEPALIVE_INTERVAL: TimeInterval = 15  // 15s keep-alive (D200H reverts to default after ~30s)
-private let D200H_RENDERER_REV = "creature-session-icons-v28"
+private let D200H_RENDERER_REV = "creature-session-icons-v29"
 
 // HID Commands
 private let CMD_SET_BUTTONS: UInt16    = 0x0001
@@ -2966,10 +2966,10 @@ private func drawCodexCloudCreature(_ ctx: CGContext, rect: CGRect) {
 
 private func drawOpenClawCreatureEyes(_ ctx: CGContext, rect: CGRect) {
     let viewBox = CGRect(x: 0, y: 0, width: 24, height: 24)
-    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 9.05, y: 7.63), radius: 0.82, color: rgb(5, 8, 16))
-    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 15.38, y: 7.63), radius: 0.82, color: rgb(5, 8, 16))
-    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 8.82, y: 7.34), radius: 0.20, color: rgb(191, 252, 244))
-    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 15.15, y: 7.34), radius: 0.20, color: rgb(191, 252, 244))
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 8.835, y: 7.843), radius: 1.266, color: rgb(5, 8, 16))
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 15.165, y: 7.843), radius: 1.266, color: rgb(5, 8, 16))
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 9.046, y: 7.632), radius: 0.527, color: rgb(0, 229, 204))
+    fillSvgCircle(ctx, rect: rect, viewBox: viewBox, center: CGPoint(x: 15.376, y: 7.632), radius: 0.527, color: rgb(0, 229, 204))
 }
 
 private func drawOpenCodeCreature(_ ctx: CGContext, rect: CGRect) {

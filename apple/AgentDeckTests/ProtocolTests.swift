@@ -5,6 +5,26 @@ import XCTest
 
 final class ProtocolTests: XCTestCase {
 
+    // MARK: - Session Display Formatting
+
+    func testDisplayShortModelNameCompactsProviderQualifiedIds() {
+        XCTAssertEqual(
+            displayShortModelName("openrouter/anthropic/claude-sonnet-4-5-20250929"),
+            "sonnet-4-5"
+        )
+        XCTAssertEqual(
+            displayShortModelName("openai/gpt-5.1-codex-max"),
+            "5.1-codex-max"
+        )
+    }
+
+    func testDisplayShortModelNameCanFitNarrowHudRows() {
+        let label = displayShortModelName("deepseek/deepseek-r1-distill-llama-70b", maxLength: 18)
+        XCTAssertLessThanOrEqual(label.count, 18)
+        XCTAssertTrue(label.hasPrefix("deepseek-r"))
+        XCTAssertTrue(label.hasSuffix("70b"))
+    }
+
     // MARK: - State Update Decoding
 
     func testDecodeStateUpdate() throws {
@@ -68,6 +88,30 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNotNil(e.agentCapabilities)
         XCTAssertEqual(e.agentCapabilities?.hasTerminal, true)
         XCTAssertEqual(e.agentCapabilities?.displayName, "Claude Code")
+    }
+
+    func testDecodeStateUpdateWithCodexAuthMetadata() throws {
+        let json = """
+        {
+            "type": "state_update",
+            "state": "idle",
+            "codexAuthMode": "chatgpt",
+            "codexWebAuthConnected": true,
+            "codexPlanType": "plus",
+            "codexSubscriptionActiveUntil": "2026-05-01T00:00:00Z"
+        }
+        """
+
+        let event = BridgeEventParser.parse(json)
+        guard case .stateUpdate(let e) = event else {
+            XCTFail("Expected stateUpdate")
+            return
+        }
+
+        XCTAssertEqual(e.codexAuthMode, "chatgpt")
+        XCTAssertEqual(e.codexWebAuthConnected, true)
+        XCTAssertEqual(e.codexPlanType, "plus")
+        XCTAssertEqual(e.codexSubscriptionActiveUntil, "2026-05-01T00:00:00Z")
     }
 
     // MARK: - Usage Update

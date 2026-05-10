@@ -80,7 +80,10 @@ final class TerrariumRenderer {
         focusPulse += dt * 1.6
         let hasVisibleFocus: Bool = {
             guard let id = focusedSessionId else { return false }
-            return octopuses[id] != nil || clouds[id] != nil || opencodeCreatures[id] != nil
+            return octopuses[id] != nil ||
+                clouds[id] != nil ||
+                opencodeCreatures[id] != nil ||
+                (isCrayfishFocusId(id) && crayfish.visible)
         }()
         let presenceTarget: Float = hasVisibleFocus ? 1.0 : 0.0
         focusPresence += (presenceTarget - focusPresence) * min(1.0, dt * 6.0)
@@ -260,6 +263,9 @@ final class TerrariumRenderer {
             pos = (cl.currentX, cl.currentY, cl.scale)
         } else if let oc = opencodeCreatures[id] {
             pos = (oc.currentX, oc.currentY, oc.scale)
+        } else if isCrayfishFocusId(id), crayfish.visible {
+            let cp = crayfish.currentPosition()
+            pos = (cp.x, cp.y, 1.1)
         } else {
             pos = nil
         }
@@ -302,6 +308,10 @@ final class TerrariumRenderer {
             with: .color(TerrariumColors.tetraNeon.opacity(ringAlpha)),
             lineWidth: 1.5
         )
+    }
+
+    private func isCrayfishFocusId(_ id: String) -> Bool {
+        id == "openclaw-gateway" || id == "crayfish"
     }
 
     // MARK: - Background (3-color gradient, environment-adaptive)

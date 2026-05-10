@@ -226,6 +226,210 @@ describe('deduplicateEntry pipeline', () => {
   });
 });
 
+// ─── Storage-time attribution (history replay regression) ─────────
+//
+// History replay (`timeline_history`) reads from BridgeTimelineStore.entries.
+// If attribution only happens at broadcast time, those entries are stored
+// without taskId/runId/sessionId/projectName, and reconnecting clients see
+// orphaned rows. Fix: BridgeTimelineStore.setAttributor — runs the
+// attributor inline at addEntry/upsertEntry time so storage and broadcast
+// are byte-identical.
+
+describe('BridgeTimelineStore.setAttributor — history replay attribution', () => {
+  it('addEntry passes the entry through the attributor before storage', () => {
+    const store = new BridgeTimelineStore();
+    store.setAttributor((e) => ({
+      ...e,
+      sessionId: e.sessionId ?? 'sess-X',
+      taskId: e.taskId ?? 'task-X',
+      runId: e.runId ?? 'run-X',
+      projectName: e.projectName ?? 'AgentDeck',
+    }));
+
+    store.addEntry({ ts: 1, type: 'chat_start', raw: 'first prompt' });
+
+    const stored = store.getHistory()[0];
+    expect(stored.sessionId).toBe('sess-X');
+    expect(stored.taskId).toBe('task-X');
+    expect(stored.runId).toBe('run-X');
+    expect(stored.projectName).toBe('AgentDeck');
+  });
+
+  it('caller-set fields take precedence over attributor (idempotent)', () => {
+    const store = new BridgeTimelineStore();
+    store.setAttributor((e) => ({ ...e, sessionId: e.sessionId ?? 'fallback', taskId: e.taskId ?? 'fallback-task' }));
+
+    store.addEntry({
+      ts: 1, type: 'chat_start', raw: 'x',
+      sessionId: 'caller-sid', taskId: 'caller-task',
+    });
+
+    const stored = store.getHistory()[0];
+    expect(stored.sessionId).toBe('caller-sid');
+    expect(stored.taskId).toBe('caller-task');
+  });
+
+  it('listener (broadcast) receives the same attributed entry', () => {
+    const store = new BridgeTimelineStore();
+    store.setAttributor((e) => ({ ...e, taskId: e.taskId ?? 'task-Y' }));
+    let observed: { taskId?: string } | null = null;
+    store.onEntry((entry) => { observed = { taskId: entry.taskId }; });
+
+    store.addEntry({ ts: 1, type: 'chat_start', raw: 'x' });
+
+    expect(observed).not.toBeNull();
+    expect(observed!.taskId).toBe('task-Y');
+  });
+
+  it('upsertEntry propagates summaryKind to existing entry (LLM enrichment regression)', () => {
+    // First emit: heuristic gave up → summaryKind: 'none' → detail pane is suppressed.
+    // Async LLM lands later and upserts with summaryKind: 'llm' + a real summary.
+    // Without the fix, upsertEntry's spread didn't include summaryKind, so the
+    // dashboard kept seeing 'none' forever and never re-enabled the detail pane.
+    const store = new BridgeTimelineStore();
+    store.addEntry({
+      ts: 1_000, type: 'chat_end',
+      raw: 'Completed · 4s',
+      detail: 'response body',
+      summaryKind: 'none',
+    });
+    expect(store.getHistory()[0].summaryKind).toBe('none');
+
+    store.upsertEntry({
+      ts: 1_000, type: 'chat_end',
+      raw: 'Refactored timeline store · 4s',
+      summaryKind: 'llm',
+    });
+
+    const after = store.getHistory()[0];
+    expect(after.summaryKind).toBe('llm');
+    expect(after.raw).toBe('Refactored timeline store · 4s');
+  });
+
+  it('upsertEntry routes through the attributor too', () => {
+    const store = new BridgeTimelineStore();
+    store.setAttributor((e) => ({ ...e, taskId: e.taskId ?? 'task-Z', sessionId: e.sessionId ?? 'sess-Z' }));
+
+    // Insert via upsert → no existing match → falls through to addEntryRaw
+    store.upsertEntry({ ts: 1, type: 'chat_end', raw: 'done' });
+    expect(store.getHistory()[0].taskId).toBe('task-Z');
+
+    // Update via upsert → matches by ts+type within tolerance → in-place update
+    store.upsertEntry({ ts: 1, type: 'chat_end', raw: 'done updated' });
+    expect(store.getHistory().length).toBe(1);
+    expect(store.getHistory()[0].raw).toBe('done updated');
+    expect(store.getHistory()[0].taskId).toBe('task-Z');
+  });
+
+  it('late upsert preserves the original entry attribution after task rotation (regression)', () => {
+    // Scenario: chat_end is added during task-A. Task-A closes and task-B
+    // opens. Async LLM summarizer lands the upsert after the rotation. The
+    // upsert call site does NOT carry a taskId. The store must keep the
+    // entry attributed to task-A (its creation-time task), not silently
+    // re-attribute to the now-active task-B.
+    const store = new BridgeTimelineStore();
+    let activeTaskId = 'task-A';
+    store.setAttributor((e) => ({
+      ...e,
+      sessionId: e.sessionId ?? 'sess-1',
+      taskId: e.taskId ?? activeTaskId,
+      runId: e.runId ?? 'run-1',
+    }));
+
+    // Live emit during task-A
+    store.addEntry({ ts: 1_000, type: 'chat_end', raw: 'p1 · 3s' });
+    expect(store.getHistory()[0].taskId).toBe('task-A');
+
+    // Task rotates: task-A closes, task-B opens
+    activeTaskId = 'task-B';
+
+    // Async LLM summary lands later, upserting the *same* chat_end entry
+    // (matches by ts+type within tolerance). Caller did not set taskId.
+    store.upsertEntry({
+      ts: 1_000, type: 'chat_end',
+      raw: 'Refactored timeline store · 3s',
+    });
+
+    // Critical assertion: existing entry still belongs to task-A.
+    expect(store.getHistory().length).toBe(1);
+    expect(store.getHistory()[0].taskId).toBe('task-A');
+    expect(store.getHistory()[0].raw).toBe('Refactored timeline store · 3s');
+  });
+
+  it('merge path (repetitive dedup) does not re-attribute after task rotation', () => {
+    // Same hazard, different code path. addEntry → 'merge' fires for
+    // repetitive duplicate chat_starts within the 1h dedup window. If the
+    // task rotated between the two calls, the merge must keep the original
+    // attribution — re-attributing would jump the row into the wrong task.
+    const store = new BridgeTimelineStore();
+    let activeTaskId = 'task-A';
+    store.setAttributor((e) => ({
+      ...e,
+      taskId: e.taskId ?? activeTaskId,
+      sessionId: e.sessionId ?? 'sess-1',
+    }));
+
+    store.addEntry({ ts: 1_000, type: 'chat_start', raw: 'Same prompt' });
+    expect(store.getHistory()[0].taskId).toBe('task-A');
+
+    activeTaskId = 'task-B';
+
+    // Same raw, within dedup window → merge path
+    store.addEntry({ ts: 2_000, type: 'chat_start', raw: 'Same prompt' });
+
+    expect(store.getHistory().length).toBe(1);
+    expect(store.getHistory()[0].taskId).toBe('task-A');
+  });
+
+  it('upsert with no existing match falls through to attributor (insert path)', () => {
+    // The "stale task" guard only applies to the *update* branch. A brand-
+    // new upsert (nothing to match against) is logically a new entry and
+    // should pick up the *current* active task via the attributor.
+    const store = new BridgeTimelineStore();
+    store.setAttributor((e) => ({ ...e, taskId: e.taskId ?? 'task-NEW' }));
+
+    store.upsertEntry({ ts: 1, type: 'eval_result', raw: 'fresh' });
+
+    expect(store.getHistory()[0].taskId).toBe('task-NEW');
+  });
+
+  it('caller-set taskId on upsert overrides existing entry attribution', () => {
+    // Edge case: caller explicitly re-attributes on update. Respect that.
+    const store = new BridgeTimelineStore();
+    store.setAttributor((e) => ({ ...e, taskId: e.taskId ?? 'task-A' }));
+    store.addEntry({ ts: 1, type: 'chat_end', raw: 'x' });
+    expect(store.getHistory()[0].taskId).toBe('task-A');
+
+    store.upsertEntry({ ts: 1, type: 'chat_end', raw: 'x v2', taskId: 'task-OVERRIDE' });
+    expect(store.getHistory()[0].taskId).toBe('task-OVERRIDE');
+  });
+
+  it('history replay returns entries with taskId/runId set (regression)', () => {
+    // The whole point: getHistory() — what `timeline_history` ships — must
+    // carry attribution. Earlier code attributed only at broadcast time, so
+    // history replay returned bare entries.
+    const store = new BridgeTimelineStore();
+    store.setAttributor((e) => ({
+      ...e,
+      sessionId: e.sessionId ?? 'sess-A',
+      taskId: e.taskId ?? 'task-A',
+      runId: e.runId ?? 'run-A',
+    }));
+
+    store.addEntry({ ts: 1, type: 'chat_start', raw: 'p1' });
+    store.addEntry({ ts: 2, type: 'tool_request', raw: 'Edit' });
+    store.addEntry({ ts: 3, type: 'chat_end', raw: 'p1 · 2s' });
+
+    const replay = store.getHistory();
+    expect(replay.length).toBe(3);
+    for (const e of replay) {
+      expect(e.taskId).toBe('task-A');
+      expect(e.runId).toBe('run-A');
+      expect(e.sessionId).toBe('sess-A');
+    }
+  });
+});
+
 // ─── Stop hook + PTY fallback race regression ──────────────────────
 
 describe('Stop hook + PTY fallback double-emit (regression)', () => {

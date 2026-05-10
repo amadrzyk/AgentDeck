@@ -171,6 +171,65 @@ describe('ApmeCollector task boundaries', () => {
     expect(seen[0].boundarySignal).toBe('todo_complete');
   });
 
+  it('onTaskOpened fires with sessionId + agentType + projectName + taskIndex', () => {
+    const collector = new ApmeCollector(store);
+    const opens: Array<{
+      taskId: string; runId: string; sessionId: string;
+      agentType: string | null; projectName: string | null; taskIndex: number;
+    }> = [];
+    collector.onTaskOpened = (args) => {
+      opens.push({
+        taskId: args.taskId,
+        runId: args.runId,
+        sessionId: args.sessionId,
+        agentType: args.agentType,
+        projectName: args.projectName,
+        taskIndex: args.taskIndex,
+      });
+    };
+    const { runId, sessionId } = openRun(collector);
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'first' });
+
+    expect(opens.length).toBe(1);
+    expect(opens[0].runId).toBe(runId);
+    expect(opens[0].sessionId).toBe(sessionId);
+    expect(opens[0].agentType).toBe('claude-code');
+    expect(opens[0].projectName).toBe('demo');
+    expect(opens[0].taskIndex).toBe(0);
+  });
+
+  it('onTaskClosed payload includes session, agent, project, and timing', () => {
+    const collector = new ApmeCollector(store);
+    const closes: Array<{
+      sessionId: string;
+      agentType: string | null;
+      projectName: string | null;
+      startedAt: number;
+      endedAt: number;
+    }> = [];
+    collector.onTaskClosed = (args) => {
+      closes.push({
+        sessionId: args.sessionId,
+        agentType: args.agentType,
+        projectName: args.projectName,
+        startedAt: args.startedAt,
+        endedAt: args.endedAt,
+      });
+    };
+    const { sessionId } = openRun(collector);
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'x' });
+    collector.ingestHook(sessionId, 'PostToolUse', {
+      tool_name: 'TodoWrite',
+      tool_input: { todos: [{ content: 'a', status: 'completed' }] },
+    });
+
+    expect(closes.length).toBe(1);
+    expect(closes[0].sessionId).toBe(sessionId);
+    expect(closes[0].agentType).toBe('claude-code');
+    expect(closes[0].projectName).toBe('demo');
+    expect(closes[0].endedAt).toBeGreaterThanOrEqual(closes[0].startedAt);
+  });
+
   it('empty task (no turns between two boundaries) is dropped', () => {
     const collector = new ApmeCollector(store);
     const { runId, sessionId } = openRun(collector);

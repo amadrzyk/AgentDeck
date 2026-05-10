@@ -32,7 +32,7 @@ import type { BridgeCore } from '../../bridge-core.js';
 import type { ApmeModule } from '../index.js';
 import type { PtyRingBuffer } from '../../pty-ringbuffer.js';
 import { cleanRawText, cleanDetailText } from '@agentdeck/shared';
-import { extractTopicHint } from '../../timeline-summarizer.js';
+import { extractTopicHintWithKind, promptSnippetFallback } from '@agentdeck/shared';
 import { timelineEntryToSpans } from './timeline.js';
 import { classifyAndEnqueueTurn } from '../classify-turn.js';
 
@@ -408,8 +408,26 @@ export class CodexTurnManager {
     // late chat_end fallback would target this turn.
     this.apme.collector.closeTurnForSession(this.sessionId);
     const duration = Math.round((endedAt - startedAt) / 1000);
-    const topicHint = response ? extractTopicHint(response) : null;
-    const label = topicHint || 'Codex turn completed';
+    // Same kind-classification as wireClaudeCodeTimeline / openclaw adapter.
+    // 'topic' → real heuristic; fallback / generic label → 'none' so client
+    // suppresses the (likely-redundant) detail pane.
+    const respHint = response ? extractTopicHintWithKind(response) : { hint: null, kind: null };
+    const promptHint = this.lastPromptText ? extractTopicHintWithKind(this.lastPromptText) : { hint: null, kind: null };
+    let label: string;
+    let summaryKind: 'heuristic' | 'none';
+    if (respHint.kind === 'topic' && respHint.hint) {
+      label = respHint.hint;
+      summaryKind = 'heuristic';
+    } else if (promptHint.kind === 'topic' && promptHint.hint) {
+      label = promptHint.hint;
+      summaryKind = 'heuristic';
+    } else if (respHint.hint || promptHint.hint) {
+      label = (respHint.hint || promptHint.hint)!;
+      summaryKind = 'none';
+    } else {
+      label = promptSnippetFallback(this.lastPromptText, 60) ?? 'Codex turn completed';
+      summaryKind = 'none';
+    }
     // chat_end is timeline-only (display marker for duration + topic).
     // The `turn_response` mapping with `fallback_to_last_closed` would
     // otherwise attach this response to the previously closed turn —
@@ -422,6 +440,7 @@ export class CodexTurnManager {
       agentType: 'codex-cli',
       startedAt,
       endedAt,
+      summaryKind,
     });
   }
 

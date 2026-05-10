@@ -1,5 +1,11 @@
 package dev.agentdeck.ui.monitor
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
@@ -25,7 +31,12 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -35,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.os.Build
+import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.net.OllamaStatus
 import dev.agentdeck.net.SubscriptionInfo
@@ -117,25 +129,13 @@ private fun HubZone(
     state: DashboardState,
     scale: MonitorLayoutScale,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        HubSpineSegment(scale.topologySectionSpacing)
-        HubRow(state = state, scale = scale)
-        HubSpineSegment(scale.topologySectionSpacing)
-    }
-}
-
-@Composable
-private fun HubSpineSegment(height: androidx.compose.ui.unit.Dp) {
     Box(
         modifier = Modifier
-            .width(1.dp)
-            .height(height)
-            .background(TerrariumColors.TetraNeon.copy(alpha = 0.35f)),
-    )
+            .fillMaxWidth()
+            .padding(vertical = scale.topologySectionSpacing),
+    ) {
+        HubRow(state = state, scale = scale)
+    }
 }
 
 @Composable
@@ -143,15 +143,40 @@ private fun HubRow(
     state: DashboardState,
     scale: MonitorLayoutScale,
 ) {
+    val visual = hubVisualMode(state)
+    val pulse by rememberInfiniteTransition(label = "hubPulse").animateFloat(
+        initialValue = 0.22f,
+        targetValue = 0.62f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "hubGlow",
+    )
+    val glowAlpha = if (visual == HubVisualMode.AWAITING) pulse else visual.glowAlpha
+    val shape = RoundedCornerShape(7.dp)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(TerrariumColors.HUDBg)
+            .drawBehind {
+                val bleed = 1.5.dp.toPx()
+                val corner = 9.dp.toPx()
+                drawRoundRect(
+                    color = visual.accent.copy(alpha = glowAlpha * 0.32f),
+                    topLeft = Offset(-bleed, -bleed),
+                    size = Size(size.width + bleed * 2f, size.height + bleed * 2f),
+                    cornerRadius = CornerRadius(corner, corner),
+                    style = Stroke(width = 7.dp.toPx()),
+                )
+            }
+            .background(TerrariumColors.MidWater.copy(alpha = visual.fillAlpha), shape)
+            .border(1.dp, visual.accent.copy(alpha = visual.borderAlpha), shape)
             .padding(horizontal = 6.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        AgentDeckMark(size = 16.dp, color = TerrariumColors.TetraNeon)
+        AgentDeckMark(size = 16.dp, color = visual.accent)
         Text(
             text = "AgentDeck",
             color = TerrariumColors.HUDText,
@@ -165,13 +190,39 @@ private fun HubRow(
             fontSize = scale.fontSub,
             fontFamily = FontFamily.Monospace,
         )
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(0.5.dp)
-                .background(TerrariumColors.TetraNeon.copy(alpha = 0.25f)),
-        )
+        Spacer(modifier = Modifier.weight(1f))
     }
+}
+
+private enum class HubVisualMode(
+    val accent: Color,
+    val fillAlpha: Float,
+    val borderAlpha: Float,
+    val glowAlpha: Float,
+) {
+    OFFLINE(TerrariumColors.HUDSubtext.copy(alpha = 0.55f), 0.36f, 0.16f, 0.0f),
+    LIVE(TerrariumColors.TetraNeon, 0.68f, 0.42f, 0.20f),
+    ACTIVE(TerrariumColors.TetraNeon, 0.76f, 0.64f, 0.34f),
+    AWAITING(TerrariumColors.LEDAmber, 0.78f, 0.78f, 0.62f),
+}
+
+private fun hubVisualMode(state: DashboardState): HubVisualMode {
+    if (!state.bridgeConnected) return HubVisualMode.OFFLINE
+    val siblingStates = state.siblingSessions.mapNotNull { it.state }
+    val hasAwaiting = state.agentState.isAwaitingInput() ||
+        siblingStates.any { it == "awaiting_permission" || it == "awaiting_option" || it == "awaiting_diff" }
+    if (hasAwaiting) return HubVisualMode.AWAITING
+    val hasProcessing = state.agentState == AgentState.PROCESSING ||
+        siblingStates.any { it == "processing" }
+    if (hasProcessing) return HubVisualMode.ACTIVE
+    return HubVisualMode.LIVE
+}
+
+private fun AgentState.isAwaitingInput(): Boolean = when (this) {
+    AgentState.AWAITING_PERMISSION,
+    AgentState.AWAITING_OPTION,
+    AgentState.AWAITING_DIFF -> true
+    else -> false
 }
 
 private fun daemonPortText(state: DashboardState): String =

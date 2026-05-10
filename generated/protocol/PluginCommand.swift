@@ -297,6 +297,7 @@ enum ADMode: String, Codable, Equatable {
 enum ADType: String, Codable, Equatable {
     case apmeRecommend = "apme_recommend"
     case apmeVibe = "apme_vibe"
+    case clearSessionFocus = "clear_session_focus"
     case clientRegister = "client_register"
     case diag = "diag"
     case escape = "escape"

@@ -19,6 +19,7 @@ import type {
   UtilityCommand,
   SwitchAgentCommand,
   FocusSessionCommand,
+  ClearSessionFocusCommand,
   SessionCommand,
   ClientRegisterCommand,
   ApmeVibeFeedbackCommand,
@@ -64,6 +65,9 @@ export const agentCommand = {
   },
   focusSession(sessionId: string): FocusSessionCommand {
     return { type: "focus_session", sessionId };
+  },
+  clearSessionFocus(): ClearSessionFocusCommand {
+    return { type: "clear_session_focus" };
   },
   sessionCommand(sessionId: string, command: { type: string; [key: string]: unknown; }): SessionCommand {
     return { type: "session_command", sessionId, command };

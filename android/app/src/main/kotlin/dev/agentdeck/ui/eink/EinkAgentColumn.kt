@@ -63,8 +63,27 @@ fun EinkAgentPanel(
         val modelName: String?,
         val effortLevel: String?,
         val agentState: AgentState,
+        val startedAt: String?,
         val sessionId: String?,
     )
+
+    fun compareEntries(left: AgentEntry, right: AgentEntry): Int {
+        val typeDiff = agentTypeRank(left.agentType) - agentTypeRank(right.agentType)
+        if (typeDiff != 0) return typeDiff
+
+        val nameDiff = naturalLabelCompare(left.projectName, right.projectName)
+        if (nameDiff != 0) return nameDiff
+
+        val leftStarted = left.startedAt
+        val rightStarted = right.startedAt
+        if (leftStarted != null && rightStarted != null && leftStarted != rightStarted) {
+            return leftStarted.compareTo(rightStarted)
+        }
+        if (leftStarted != null) return -1
+        if (rightStarted != null) return 1
+
+        return naturalLabelCompare(left.sessionId, right.sessionId)
+    }
 
     val entries = mutableListOf<AgentEntry>()
 
@@ -85,17 +104,16 @@ fun EinkAgentPanel(
             modelName = state.modelName,
             effortLevel = state.effortLevel,
             agentState = state.agentState,
+            startedAt = null,
             sessionId = state.sessionId,
         )
     }
 
-    // Siblings (skip self and daemon), stable sort: agentType → projectName
+    // Siblings (skip self and daemon), stable sort: agentType → numeric-aware
+    // projectName → startedAt → id.
     state.siblingSessions
         .filter { it.id != state.sessionId && it.agentType != "daemon" }
-        .sortedWith(
-            compareBy<dev.agentdeck.net.SessionInfo> { agentTypeRank(it.agentType) }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.projectName ?: "" }
-        )
+        .sortedWith(::compareSessionsForDisplay)
         .forEach { session ->
             entries += AgentEntry(
                 projectName = session.projectName ?: "Agent",
@@ -103,9 +121,11 @@ fun EinkAgentPanel(
                 modelName = session.modelName,
                 effortLevel = null,
                 agentState = mapSessionState(session),
+                startedAt = session.startedAt,
                 sessionId = session.id,
             )
         }
+    val displayEntries = entries.sortedWith(::compareEntries)
 
     // Count occurrences per (projectName, agentType) for #N suffix —
     // different agent types (🦞 vs 🐙) with the same project name don't need numbering
@@ -124,7 +144,7 @@ fun EinkAgentPanel(
         AgentDeckLogo(isEink = true, modifier = Modifier.fillMaxWidth())
         Spacer(modifier = Modifier.height(6.dp))
 
-        entries.forEach { entry ->
+        displayEntries.forEach { entry ->
             val key = NameKey(entry.projectName, entry.agentType)
             val needsSuffix = (nameCounts[key] ?: 1) > 1
             val suffix = if (needsSuffix) {

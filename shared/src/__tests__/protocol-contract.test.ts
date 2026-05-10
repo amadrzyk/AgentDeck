@@ -388,6 +388,11 @@ describe('Protocol Contract — PluginCommand shapes', () => {
       'media_play_pause', 'media_next', 'media_prev'];
     expect(validActions).toContain((cmd as { action: string }).action);
   });
+
+  it('clear_session_focus is fieldless', () => {
+    const cmd: PluginCommand = { type: 'clear_session_focus' };
+    expect(Object.keys(cmd)).toEqual(['type']);
+  });
 });
 
 describe('Protocol Contract — BridgeEvent discriminated union', () => {

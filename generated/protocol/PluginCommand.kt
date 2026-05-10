@@ -181,6 +181,7 @@ enum class Mode(val value: String) {
 enum class Type(val value: String) {
     ApmeRecommend("apme_recommend"),
     ApmeVibe("apme_vibe"),
+    ClearSessionFocus("clear_session_focus"),
     ClientRegister("client_register"),
     Diag("diag"),
     Escape("escape"),
@@ -199,24 +200,25 @@ enum class Type(val value: String) {
 
     companion object {
         public fun fromValue(value: String): Type = when (value) {
-            "apme_recommend"  -> ApmeRecommend
-            "apme_vibe"       -> ApmeVibe
-            "client_register" -> ClientRegister
-            "diag"            -> Diag
-            "escape"          -> Escape
-            "focus_session"   -> FocusSession
-            "interrupt"       -> Interrupt
-            "navigate_option" -> NavigateOption
-            "query_usage"     -> QueryUsage
-            "respond"         -> Respond
-            "select_option"   -> SelectOption
-            "send_prompt"     -> SendPrompt
-            "session_command" -> SessionCommand
-            "switch_agent"    -> SwitchAgent
-            "switch_mode"     -> SwitchMode
-            "utility"         -> Utility
-            "voice"           -> Voice
-            else              -> throw IllegalArgumentException()
+            "apme_recommend"      -> ApmeRecommend
+            "apme_vibe"           -> ApmeVibe
+            "clear_session_focus" -> ClearSessionFocus
+            "client_register"     -> ClientRegister
+            "diag"                -> Diag
+            "escape"              -> Escape
+            "focus_session"       -> FocusSession
+            "interrupt"           -> Interrupt
+            "navigate_option"     -> NavigateOption
+            "query_usage"         -> QueryUsage
+            "respond"             -> Respond
+            "select_option"       -> SelectOption
+            "send_prompt"         -> SendPrompt
+            "session_command"     -> SessionCommand
+            "switch_agent"        -> SwitchAgent
+            "switch_mode"         -> SwitchMode
+            "utility"             -> Utility
+            "voice"               -> Voice
+            else                  -> throw IllegalArgumentException()
         }
     }
 }

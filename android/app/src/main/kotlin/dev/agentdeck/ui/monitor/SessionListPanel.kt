@@ -27,9 +27,10 @@ import dev.agentdeck.ui.component.AgentDeckLogo
 import dev.agentdeck.ui.component.BrandIcon
 import dev.agentdeck.ui.component.stateColor
 import dev.agentdeck.ui.eink.agentTypeRank
+import dev.agentdeck.ui.eink.compareSessionsForDisplay
 import dev.agentdeck.ui.eink.compactStateMarker
 import dev.agentdeck.ui.eink.mapSessionState
-import dev.agentdeck.ui.eink.stateRank
+import dev.agentdeck.ui.eink.naturalLabelCompare
 
 /**
  * Left HUD panel — AgentDeck logo + unified session list (primary + siblings).
@@ -57,9 +58,28 @@ fun SessionListPanel(
         val modelName: String?,
         val effortLevel: String?,
         val agentState: AgentState,
+        val startedAt: String?,
         val isPrimary: Boolean,
         val sessionId: String?,
     )
+
+    fun compareEntries(left: SessionEntry, right: SessionEntry): Int {
+        val typeDiff = agentTypeRank(left.agentType) - agentTypeRank(right.agentType)
+        if (typeDiff != 0) return typeDiff
+
+        val nameDiff = naturalLabelCompare(left.projectName, right.projectName)
+        if (nameDiff != 0) return nameDiff
+
+        val leftStarted = left.startedAt
+        val rightStarted = right.startedAt
+        if (leftStarted != null && rightStarted != null && leftStarted != rightStarted) {
+            return leftStarted.compareTo(rightStarted)
+        }
+        if (leftStarted != null) return -1
+        if (rightStarted != null) return 1
+
+        return naturalLabelCompare(left.sessionId, right.sessionId)
+    }
 
     val entries = mutableListOf<SessionEntry>()
 
@@ -78,19 +98,17 @@ fun SessionListPanel(
             modelName = modelName,
             effortLevel = effortLevel,
             agentState = agentState,
+            startedAt = null,
             isPrimary = true,
             sessionId = sessionId,
         )
     }
 
-    // Siblings (skip self and daemon), stable sort: agentType → projectName
-    // (case-insensitive — must match Apple/shared sortSessions exactly)
+    // Siblings (skip self and daemon), stable sort: agentType → numeric-aware
+    // projectName → startedAt → id. Must match Apple/shared sortSessions.
     siblingSessions
         .filter { it.id != sessionId && it.agentType != "daemon" }
-        .sortedWith(
-            compareBy<SessionInfo> { agentTypeRank(it.agentType) }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.projectName ?: "" }
-        )
+        .sortedWith(::compareSessionsForDisplay)
         .forEach { session ->
             entries += SessionEntry(
                 projectName = session.projectName ?: "Agent",
@@ -98,10 +116,12 @@ fun SessionListPanel(
                 modelName = session.modelName,
                 effortLevel = null,
                 agentState = mapSessionState(session),
+                startedAt = session.startedAt,
                 isPrimary = false,
                 sessionId = session.id,
             )
         }
+    val displayEntries = entries.sortedWith(::compareEntries)
 
     // Count occurrences per (projectName, agentType) for #N suffix —
     // different agent types (🦞 vs 🐙) with the same project name don't need numbering
@@ -136,7 +156,7 @@ fun SessionListPanel(
         Spacer(modifier = Modifier.height(2.dp))
 
         // Session entries
-        entries.forEach { entry ->
+        displayEntries.forEach { entry ->
             val stateMarker = compactStateMarker(entry.agentState)
             val modelEffort = when {
                 entry.modelName != null && entry.effortLevel != null

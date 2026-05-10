@@ -20,6 +20,7 @@ private val klaxon = Klaxon()
     .convert(EncoderType::class,         { EncoderType.fromValue(it.string!!) },         { "\"${it.value}\"" })
     .convert(VoiceState::class,          { VoiceState.fromValue(it.string!!) },          { "\"${it.value}\"" })
     .convert(EntryStatus::class,         { EntryStatus.fromValue(it.string!!) },         { "\"${it.value}\"" })
+    .convert(SummaryKind::class,         { SummaryKind.fromValue(it.string!!) },         { "\"${it.value}\"" })
     .convert(TimelineEntryType::class,   { TimelineEntryType.fromValue(it.string!!) },   { "\"${it.value}\"" })
     .convert(GatewayAuthStatus::class,   { GatewayAuthStatus.fromValue(it.string!!) },   { "\"${it.value}\"" })
     .convert(PermissionMode::class,      { PermissionMode.fromValue(it.string!!) },      { "\"${it.value}\"" })
@@ -53,6 +54,12 @@ data class BridgeEvent (
     val currentTool: String? = null,
     val cursorIndex: Double? = null,
     val effortLevel: String? = null,
+
+    /**
+     * Session explicitly focused by the user; visual selection should use this.
+     */
+    @Json(name = "focusedSessionId")
+    val focusedSessionID: String? = null,
 
     /**
      * Human-readable OpenClaw auth/pairing diagnostic
@@ -122,7 +129,7 @@ data class BridgeEvent (
     val remoteURL: String? = null,
 
     /**
-     * Session ID of the focused session (injected by daemon focus relay)
+     * Session ID associated with this state payload; may move with hook activity.
      */
     @Json(name = "sessionId")
     val sessionID: String? = null,
@@ -410,10 +417,43 @@ data class TimelineEntry (
     val approvalID: String? = null,
 
     val automated: Boolean? = null,
+
+    /**
+     * Only on task_end. Why the task closed.
+     */
+    val boundarySignal: String? = null,
+
     val detail: String? = null,
+    val endedAt: Double? = null,
+    val projectName: String? = null,
     val raw: String,
     val repeatCount: Double? = null,
+
+    @Json(name = "runId")
+    val runID: String? = null,
+
+    @Json(name = "sessionId")
+    val sessionID: String? = null,
+
+    val startedAt: Double? = null,
     val status: EntryStatus? = null,
+
+    /**
+     * How the row's `raw` summary was produced. Lets clients decide whether the detail pane is
+     * worth showing — when `'none'`, detail is just the unfiltered response that the heuristic
+     * couldn't summarize, and showing it duplicates content rather than adding value.   -
+     * `'llm'`     : LLM-summarized (clean, short, distinct from detail)   - `'heuristic'`:
+     * topic-hint extracted from response or prompt   - `'none'`    : last-resort fallback
+     * (literal "Completed", bare tool name, etc.)
+     */
+    val summaryKind: SummaryKind? = null,
+
+    /**
+     * APME task id. Set on task_start/task_end and on every turn entry inside the task scope.
+     */
+    @Json(name = "taskId")
+    val taskID: String? = null,
+
     val ts: Double,
     val type: TimelineEntryType
 )
@@ -434,6 +474,29 @@ enum class EntryStatus(val value: String) {
 }
 
 /**
+ * How the row's `raw` summary was produced. Lets clients decide whether the detail pane is
+ * worth showing — when `'none'`, detail is just the unfiltered response that the heuristic
+ * couldn't summarize, and showing it duplicates content rather than adding value.   -
+ * `'llm'`     : LLM-summarized (clean, short, distinct from detail)   - `'heuristic'`:
+ * topic-hint extracted from response or prompt   - `'none'`    : last-resort fallback
+ * (literal "Completed", bare tool name, etc.)
+ */
+enum class SummaryKind(val value: String) {
+    Heuristic("heuristic"),
+    Llm("llm"),
+    None("none");
+
+    companion object {
+        public fun fromValue(value: String): SummaryKind = when (value) {
+            "heuristic" -> Heuristic
+            "llm"       -> Llm
+            "none"      -> None
+            else        -> throw IllegalArgumentException()
+        }
+    }
+}
+
+/**
  * Shared timeline types and log parser for OpenClaw mode. Used by both bridge
  * (BridgeLogStream) and plugin (LogStream).
  */
@@ -447,6 +510,8 @@ enum class TimelineEntryType(val value: String) {
     ModelCall("model_call"),
     ModelResponse("model_response"),
     Scheduled("scheduled"),
+    TaskEnd("task_end"),
+    TaskStart("task_start"),
     ToolExec("tool_exec"),
     ToolRequest("tool_request"),
     ToolResolved("tool_resolved"),
@@ -463,6 +528,8 @@ enum class TimelineEntryType(val value: String) {
             "model_call"     -> ModelCall
             "model_response" -> ModelResponse
             "scheduled"      -> Scheduled
+            "task_end"       -> TaskEnd
+            "task_start"     -> TaskStart
             "tool_exec"      -> ToolExec
             "tool_request"   -> ToolRequest
             "tool_resolved"  -> ToolResolved

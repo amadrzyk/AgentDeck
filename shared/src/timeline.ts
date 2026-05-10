@@ -7,7 +7,15 @@ export type TimelineEntryType =
   | 'tool_request' | 'tool_resolved' | 'chat_start' | 'chat_end'
   | 'chat_response' | 'error' | 'scheduled' | 'user_action'
   | 'model_call' | 'model_response' | 'memory_recall' | 'tool_exec'
-  | 'eval_result';
+  | 'eval_result'
+  // Task hierarchy — emitted by APME collector when a task opens/closes.
+  // A task spans one or more turns and represents an evaluable unit of work.
+  | 'task_start' | 'task_end';
+
+// TaskBoundarySignal is defined in eval-schema.ts (single source of truth);
+// imported below for use on TimelineEntry.boundarySignal.
+import type { TaskBoundarySignal } from './eval-schema.js';
+export type { TaskBoundarySignal } from './eval-schema.js';
 
 export interface TimelineEntry {
   ts: number;
@@ -24,6 +32,20 @@ export interface TimelineEntry {
   endedAt?: number;
   repeatCount?: number;
   automated?: boolean;
+  /** APME task id. Set on task_start/task_end and on every turn entry inside the task scope. */
+  taskId?: string;
+  /** Only on task_end. Why the task closed. */
+  boundarySignal?: TaskBoundarySignal;
+  /**
+   * How the row's `raw` summary was produced. Lets clients decide whether
+   * the detail pane is worth showing — when `'none'`, detail is just the
+   * unfiltered response that the heuristic couldn't summarize, and showing
+   * it duplicates content rather than adding value.
+   *   - `'llm'`     : LLM-summarized (clean, short, distinct from detail)
+   *   - `'heuristic'`: topic-hint extracted from response or prompt
+   *   - `'none'`    : last-resort fallback (literal "Completed", bare tool name, etc.)
+   */
+  summaryKind?: 'llm' | 'heuristic' | 'none';
 }
 
 /**
@@ -287,6 +309,12 @@ export function deduplicateEntry(
   // 1. Clean text artifacts
   if (entry.raw) entry = { ...entry, raw: cleanNopMarkers(cleanRawText(entry.raw)) };
   if (entry.detail) entry = { ...entry, detail: cleanNopMarkers(entry.detail) };
+
+  // Task hierarchy entries bypass dedup — they're hierarchy markers keyed by
+  // taskId, not content. Two adjacent task_starts are legitimately distinct.
+  if (entry.type === 'task_start' || entry.type === 'task_end') {
+    return { action: 'add', entry };
+  }
 
   // 2. Exact dedup: skip if same type + raw within 8 seconds
   for (let i = entries.length - 1; i >= 0; i--) {

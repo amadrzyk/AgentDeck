@@ -115,8 +115,10 @@ export interface StateUpdateEvent {
   state: State;
   permissionMode: PermissionMode;
   agentType?: AgentType;
-  /** Session ID of the focused session (injected by daemon focus relay) */
+  /** Session ID associated with this state payload; may move with hook activity. */
   sessionId?: string;
+  /** Session explicitly focused by the user; visual selection should use this. */
+  focusedSessionId?: string;
   agentCapabilities?: AgentCapabilities;
   currentTool?: string;
   toolInput?: string;
@@ -505,6 +507,10 @@ export interface FocusSessionCommand {
   sessionId: string;
 }
 
+export interface ClearSessionFocusCommand {
+  type: 'clear_session_focus';
+}
+
 /** APME vibe check — user approves or rejects a completed run's output quality. */
 export interface ApmeVibeFeedbackCommand {
   type: 'apme_vibe';
@@ -574,6 +580,7 @@ export type PluginCommand =
   | UtilityCommand
   | SwitchAgentCommand
   | FocusSessionCommand
+  | ClearSessionFocusCommand
   | SessionCommand
   | ClientRegisterCommand
   | ApmeVibeFeedbackCommand

@@ -5,8 +5,9 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { createPublicKey, createPrivateKey, sign as cryptoSign, randomUUID } from 'crypto';
 import WebSocket from 'ws';
-import { debug } from '../logger.js';
-import { summarizeResponse, extractTopicHint } from '../timeline-summarizer.js';
+import { debug, logError } from '../logger.js';
+import { summarizeResponse } from '../timeline-summarizer.js';
+import { extractTopicHint, extractTopicHintWithKind, promptSnippetFallback } from '@agentdeck/shared';
 import {
   cleanDetailText,
   cleanRawText,
@@ -730,8 +731,27 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               ? (cleanedResponse.length > 1000 ? cleanedResponse.slice(0, 997) + '...' : cleanedResponse)
               : undefined;
 
-            // Emit chat_end with heuristic summary, then async LLM enrichment
-            const heuristicLabel = (responseContent && extractTopicHint(responseContent)) || 'Completed';
+            // Emit chat_end with heuristic summary, then async LLM enrichment.
+            // Same kind-classification rule as wireClaudeCodeTimeline: 'topic'
+            // hint \u2192 heuristic, fallback / "Completed" \u2192 'none' so clients
+            // can suppress the (likely-redundant) detail pane.
+            const respHint = responseContent ? extractTopicHintWithKind(responseContent) : { hint: null, kind: null };
+            const promptHint = this.lastPrompt ? extractTopicHintWithKind(this.lastPrompt) : { hint: null, kind: null };
+            let heuristicLabel: string;
+            let summaryKind: 'heuristic' | 'none';
+            if (respHint.kind === 'topic' && respHint.hint) {
+              heuristicLabel = respHint.hint;
+              summaryKind = 'heuristic';
+            } else if (promptHint.kind === 'topic' && promptHint.hint) {
+              heuristicLabel = promptHint.hint;
+              summaryKind = 'heuristic';
+            } else if (respHint.hint || promptHint.hint) {
+              heuristicLabel = (respHint.hint || promptHint.hint)!;
+              summaryKind = 'none';
+            } else {
+              heuristicLabel = promptSnippetFallback(this.lastPrompt, 60) ?? 'Completed';
+              summaryKind = 'none';
+            }
             const parts = [heuristicLabel];
             if (duration > 0) parts.push(`${duration}s`);
             if (toolSummary) parts.push(toolSummary);
@@ -742,6 +762,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
               ...(this.chatIsAutomated ? { automated: true } : {}),
               startedAt: this.chatStartTime,
               endedAt: chatEndTs,
+              summaryKind,
             });
 
             // Async LLM summarization — fire-and-forget, upsert chat_end when ready
@@ -764,9 +785,15 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
                     ...(savedAutomated ? { automated: true } : {}),
                     startedAt: savedStartedAt,
                     endedAt: chatEndTs,
+                    summaryKind: 'llm',
                   });
                 }
-              }).catch(() => { /* summarization failed — keep heuristic */ });
+              }).catch((err) => {
+                // `summarizeResponse` itself swallows MLX/Ollama errors;
+                // this catches only post-summary upsert/closure throws.
+                // Backend-offline messaging is surfaced inside summarizeResponse.
+                logError(`[adapter:openclaw] post-summary upsert threw: ${String(err)}`);
+              });
             }
 
             this.chatStarted = false;

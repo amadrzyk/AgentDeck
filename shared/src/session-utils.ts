@@ -54,6 +54,10 @@ export function agentTypeRank(agentType: string | undefined): number {
   }
 }
 
+export function naturalLabelCompare(a: string | undefined, b: string | undefined): number {
+  return (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' });
+}
+
 // ===== Sorting =====
 
 /**
@@ -72,11 +76,11 @@ export function sortSessions<T extends { state?: string; projectName?: string; a
     const typeRank = agentTypeRank(a.agentType) - agentTypeRank(b.agentType);
     if (typeRank !== 0) return typeRank;
 
-    // 2. Project name alphabetically (case-insensitive — must match Swift
-    // DashboardDataRules.sortSessionPayloads' localizedCaseInsensitiveCompare
-    // and Android EinkAgentColumn / SessionListPanel sort, otherwise mixed-case
-    // project names render in different order on Stream Deck vs. Apple/Android.)
-    const nameCompare = (a.projectName || '').localeCompare(b.projectName || '', undefined, { sensitivity: 'base' });
+    // 2. Project name alphabetically with numeric chunks (Agent 2 before
+    // Agent 10). Must match Swift DashboardDataRules.naturalLabelCompare
+    // and Android naturalLabelCompare, otherwise numbered sessions render
+    // in different order on Stream Deck vs. Apple/Android.
+    const nameCompare = naturalLabelCompare(a.projectName, b.projectName);
     if (nameCompare !== 0) return nameCompare;
 
     // 3. Start time ascending (oldest first = stable position)
@@ -86,7 +90,7 @@ export function sortSessions<T extends { state?: string; projectName?: string; a
     }
 
     // 4. Session ID as final tiebreaker
-    return (a.id || '').localeCompare(b.id || '');
+    return naturalLabelCompare(a.id, b.id);
   });
 }
 

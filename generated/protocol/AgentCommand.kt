@@ -154,6 +154,16 @@ sealed class AgentCommand {
         }
     }
 
+    object ClearSessionFocus : AgentCommand() {
+        override val typeTag: String = "clear_session_focus"
+        override fun toJson(): String {
+            val buf = StringBuilder()
+            buf.append("{\"type\":\"clear_session_focus\"")
+            buf.append("}")
+            return buf.toString()
+        }
+    }
+
     data class SessionCommand(val sessionId: String, val command: Map<String, Any?>) : AgentCommand() {
         override val typeTag: String = "session_command"
         override fun toJson(): String {

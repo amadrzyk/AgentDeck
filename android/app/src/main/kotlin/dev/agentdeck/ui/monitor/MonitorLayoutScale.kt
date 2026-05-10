@@ -1,5 +1,6 @@
 package dev.agentdeck.ui.monitor
 
+import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.platform.LocalConfiguration
@@ -7,6 +8,28 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * Timeline layout dispatch:
+ *   - Compact: phone-class device in portrait. Single-column with
+ *     tap-to-expand inline detail. No right-side detail pane (the 35% pane
+ *     would be ~120dp on a 340dp phone screen — too narrow to be useful).
+ *   - Regular: tablet (any orientation), phone landscape, or anything else.
+ *     The 65/35 HStack with right-side detail pane stays.
+ *
+ * Mirrors `TimelineLayoutMode` in
+ * apple/AgentDeck/UI/Monitor/TimelineStripView.swift.
+ */
+enum class TimelineLayoutMode { Compact, Regular }
+
+@Composable
+@ReadOnlyComposable
+fun rememberTimelineLayoutMode(): TimelineLayoutMode {
+    val config = LocalConfiguration.current
+    val isPhone = config.smallestScreenWidthDp < 600
+    val isPortrait = config.orientation == Configuration.ORIENTATION_PORTRAIT
+    return if (isPhone && isPortrait) TimelineLayoutMode.Compact else TimelineLayoutMode.Regular
+}
 
 /**
  * Density + typography scale the Monitor HUD uses to adapt between phone
@@ -33,7 +56,9 @@ data class MonitorLayoutScale(
     val fontHeader: TextUnit,
 ) {
     companion object {
-        /** Phone density — matches the numbers the HUD shipped with before the scale layer. */
+        /** Phone density — fonts shrunk by one step from the tablet baseline
+         *  because phone HUD areas (~340 dp wide) are too cramped at the
+         *  tablet defaults. Sub goes 10→9 sp, body 12→11 sp, header 11→10 sp. */
         val phone = MonitorLayoutScale(
             isTablet = false,
             sessionPanelMaxWidth = 220.dp,
@@ -44,9 +69,9 @@ data class MonitorLayoutScale(
             topologyRowSpacing = 2.dp,
             topologySectionSpacing = 5.dp,
             providerRowSpacing = 5.dp,
-            fontBody = 12.sp,
-            fontSub = 10.sp,
-            fontHeader = 11.sp,
+            fontBody = 11.sp,
+            fontSub = 9.sp,
+            fontHeader = 10.sp,
         )
 
         /** Tablet density — macOS HUD proportions, not enlarged tablet cards. */

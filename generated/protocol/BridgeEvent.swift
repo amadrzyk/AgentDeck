@@ -26,6 +26,8 @@ struct ADBridgeEvent: Codable, Equatable {
     var currentTool: String?
     var cursorIndex: Double?
     var effortLevel: String?
+    /// Session explicitly focused by the user; visual selection should use this.
+    var focusedSessionId: String?
     /// Human-readable OpenClaw auth/pairing diagnostic
     var gatewayAuthMessage: String?
     /// OpenClaw device pairing request id, when Gateway requires approval
@@ -55,7 +57,7 @@ struct ADBridgeEvent: Codable, Equatable {
     var promptType: ADPromptType?
     var question: String?
     var remoteUrl: String?
-    /// Session ID of the focused session (injected by daemon focus relay)
+    /// Session ID associated with this state payload; may move with hook activity.
     var sessionId: String?
     var sessionStatus: ADOcSessionStatus?
     var state: ADState?
@@ -129,6 +131,7 @@ struct ADBridgeEvent: Codable, Equatable {
         case currentTool = "currentTool"
         case cursorIndex = "cursorIndex"
         case effortLevel = "effortLevel"
+        case focusedSessionId = "focusedSessionId"
         case gatewayAuthMessage = "gatewayAuthMessage"
         case gatewayAuthRequestId = "gatewayAuthRequestId"
         case gatewayAuthStatus = "gatewayAuthStatus"
@@ -234,6 +237,7 @@ extension ADBridgeEvent {
         currentTool: String?? = nil,
         cursorIndex: Double?? = nil,
         effortLevel: String?? = nil,
+        focusedSessionId: String?? = nil,
         gatewayAuthMessage: String?? = nil,
         gatewayAuthRequestId: String?? = nil,
         gatewayAuthStatus: ADGatewayAuthStatus?? = nil,
@@ -319,6 +323,7 @@ extension ADBridgeEvent {
             currentTool: currentTool ?? self.currentTool,
             cursorIndex: cursorIndex ?? self.cursorIndex,
             effortLevel: effortLevel ?? self.effortLevel,
+            focusedSessionId: focusedSessionId ?? self.focusedSessionId,
             gatewayAuthMessage: gatewayAuthMessage ?? self.gatewayAuthMessage,
             gatewayAuthRequestId: gatewayAuthRequestId ?? self.gatewayAuthRequestId,
             gatewayAuthStatus: gatewayAuthStatus ?? self.gatewayAuthStatus,
@@ -866,10 +871,26 @@ struct ADTimelineEntry: Codable, Equatable {
     var agentType: String?
     var approvalId: String?
     var automated: Bool?
+    /// Only on task_end. Why the task closed.
+    var boundarySignal: String?
     var detail: String?
+    var endedAt: Double?
+    var projectName: String?
     var raw: String
     var repeatCount: Double?
+    var runId: String?
+    var sessionId: String?
+    var startedAt: Double?
     var status: ADEntryStatus?
+    /// How the row's `raw` summary was produced. Lets clients decide whether the detail pane is
+    /// worth showing — when `'none'`, detail is just the unfiltered response that the heuristic
+    /// couldn't summarize, and showing it duplicates content rather than adding value.   -
+    /// `'llm'`     : LLM-summarized (clean, short, distinct from detail)   - `'heuristic'`:
+    /// topic-hint extracted from response or prompt   - `'none'`    : last-resort fallback
+    /// (literal "Completed", bare tool name, etc.)
+    var summaryKind: ADSummaryKind?
+    /// APME task id. Set on task_start/task_end and on every turn entry inside the task scope.
+    var taskId: String?
     var ts: Double
     var type: ADTimelineEntryType
 
@@ -877,10 +898,18 @@ struct ADTimelineEntry: Codable, Equatable {
         case agentType = "agentType"
         case approvalId = "approvalId"
         case automated = "automated"
+        case boundarySignal = "boundarySignal"
         case detail = "detail"
+        case endedAt = "endedAt"
+        case projectName = "projectName"
         case raw = "raw"
         case repeatCount = "repeatCount"
+        case runId = "runId"
+        case sessionId = "sessionId"
+        case startedAt = "startedAt"
         case status = "status"
+        case summaryKind = "summaryKind"
+        case taskId = "taskId"
         case ts = "ts"
         case type = "type"
     }
@@ -908,10 +937,18 @@ extension ADTimelineEntry {
         agentType: String?? = nil,
         approvalId: String?? = nil,
         automated: Bool?? = nil,
+        boundarySignal: String?? = nil,
         detail: String?? = nil,
+        endedAt: Double?? = nil,
+        projectName: String?? = nil,
         raw: String? = nil,
         repeatCount: Double?? = nil,
+        runId: String?? = nil,
+        sessionId: String?? = nil,
+        startedAt: Double?? = nil,
         status: ADEntryStatus?? = nil,
+        summaryKind: ADSummaryKind?? = nil,
+        taskId: String?? = nil,
         ts: Double? = nil,
         type: ADTimelineEntryType? = nil
     ) -> ADTimelineEntry {
@@ -919,10 +956,18 @@ extension ADTimelineEntry {
             agentType: agentType ?? self.agentType,
             approvalId: approvalId ?? self.approvalId,
             automated: automated ?? self.automated,
+            boundarySignal: boundarySignal ?? self.boundarySignal,
             detail: detail ?? self.detail,
+            endedAt: endedAt ?? self.endedAt,
+            projectName: projectName ?? self.projectName,
             raw: raw ?? self.raw,
             repeatCount: repeatCount ?? self.repeatCount,
+            runId: runId ?? self.runId,
+            sessionId: sessionId ?? self.sessionId,
+            startedAt: startedAt ?? self.startedAt,
             status: status ?? self.status,
+            summaryKind: summaryKind ?? self.summaryKind,
+            taskId: taskId ?? self.taskId,
             ts: ts ?? self.ts,
             type: type ?? self.type
         )
@@ -943,6 +988,18 @@ enum ADEntryStatus: String, Codable, Equatable {
     case pending = "pending"
 }
 
+/// How the row's `raw` summary was produced. Lets clients decide whether the detail pane is
+/// worth showing — when `'none'`, detail is just the unfiltered response that the heuristic
+/// couldn't summarize, and showing it duplicates content rather than adding value.   -
+/// `'llm'`     : LLM-summarized (clean, short, distinct from detail)   - `'heuristic'`:
+/// topic-hint extracted from response or prompt   - `'none'`    : last-resort fallback
+/// (literal "Completed", bare tool name, etc.)
+enum ADSummaryKind: String, Codable, Equatable {
+    case heuristic = "heuristic"
+    case llm = "llm"
+    case none = "none"
+}
+
 /// Shared timeline types and log parser for OpenClaw mode. Used by both bridge
 /// (BridgeLogStream) and plugin (LogStream).
 enum ADTimelineEntryType: String, Codable, Equatable {
@@ -955,6 +1012,8 @@ enum ADTimelineEntryType: String, Codable, Equatable {
     case modelCall = "model_call"
     case modelResponse = "model_response"
     case scheduled = "scheduled"
+    case taskEnd = "task_end"
+    case taskStart = "task_start"
     case toolExec = "tool_exec"
     case toolRequest = "tool_request"
     case toolResolved = "tool_resolved"

@@ -154,18 +154,40 @@ export class BridgeCore {
   // ===== Timeline wiring =====
 
   wireTimeline(logStream?: BridgeLogStream): void {
+    // Attribute every entry to this session at *storage time* so history
+    // replay (`timeline_history`) carries the same task/run/session metadata
+    // as live `timeline_event` broadcasts. taskId/runId pull from live APME
+    // state — turn rows inherit the active task header without each emitter
+    // having to thread the task id through.
+    //
+    // Idempotent: caller-set fields take precedence. This means relayed
+    // entries (e.g. timeline_event from session bridges into the daemon)
+    // keep their original sessionId/taskId; only entries emitted on this
+    // BridgeCore's own session get filled in.
+    this.bridgeTimeline.setAttributor((entry) => {
+      const apme = this.apme;
+      const sessionId = entry.sessionId ?? this.sessionId;
+      const taskId = entry.taskId ?? (apme ? apme.collector.getActiveTaskId(this.sessionId) ?? undefined : undefined);
+      const runId = entry.runId ?? (apme ? apme.collector.getRunId(this.sessionId) ?? undefined : undefined);
+      return {
+        ...entry,
+        projectName: entry.projectName ?? this.projectName,
+        sessionId,
+        ...(taskId ? { taskId } : {}),
+        ...(runId ? { runId } : {}),
+      };
+    });
+
     if (logStream) {
       logStream.on('entry', (entry) => {
         this.bridgeTimeline.addEntry(entry);
       });
     }
     this.bridgeTimeline.onEntry((entry, upsert) => {
-      const attributedEntry = {
-        ...entry,
-        projectName: entry.projectName ?? this.projectName,
-        sessionId: entry.sessionId ?? this.sessionId,
-      };
-      const evt: BridgeEvent = { type: 'timeline_event', entry: attributedEntry, ...(upsert ? { upsert: true } : {}) };
+      // Entry is already attributed by the storage-time attributor above;
+      // forward as-is. Doing the attribution here too would be redundant
+      // (idempotent but wasteful) and risks divergence if the rule changes.
+      const evt: BridgeEvent = { type: 'timeline_event', entry, ...(upsert ? { upsert: true } : {}) };
       this.broadcast(evt);
     });
   }
@@ -581,7 +603,11 @@ export class BridgeCore {
       displayOn: this.displayMonitor.isDisplayOn(),
     } as BridgeEvent);
 
-    // Timeline history
+    // Timeline history — entries were already attributed at storage time by
+    // the attributor installed in `wireTimeline`, so they ship with taskId /
+    // runId / sessionId / projectName intact. The `??` fallbacks below
+    // protect entries that landed before `wireTimeline` ran (e.g. very early
+    // boot logStream events) so we never broadcast bare entries.
     const history = this.bridgeTimeline.getHistory().map((entry) => ({
       ...entry,
       projectName: entry.projectName ?? this.projectName,

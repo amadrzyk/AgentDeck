@@ -2,6 +2,334 @@
 
 ---
 
+## 2026-05-10 — lobe-icons 브랜드 마크 다운스트림 렌더러 정리 (stop-hook iteration)
+
+### 문제
+
+`design/brand/` SSOT 와 `docs/design{,-mockups}/creatures.jsx` 는 lobe-icons
+4개 마크(claudecode/codex/openclaw/opencode) 로 정리됐지만, 다운스트림
+hardcoded path renderer 들이 옛 sourcing 그대로:
+- Apple `CreatureClaudeCode.imageset/claudecode.svg` → lobe `claude.svg`
+  (Anthropic swirl, generic Claude mark, Claude Code 전용 아님)
+- Apple `CreatureOpenCode.imageset/opencode.svg` → 240×300 viewBox + baked
+  color (`#CFCECD`/`#211E1E`) 자체 변형
+- Android `BrandIcon.kt` `CLAUDE_PATH` = swirl, `OPENCODE_PATH` = 240×300
+  → 24×24 스케일 path
+- Apple `SessionBrand.AgentBrandIcon` `claudePath`/`openCodePath` 동일 stale
+- `SessionListPanel.swift` 에 promoted 후 잔존한 dead `BrandIcon` struct
+  (57 lines, swirl + 240×300 path 보유)
+
+같은 4 브랜드를 표현하는 5개 표면(asset catalog / Compose Canvas / SwiftUI
+Path / JSX inline embed × 2 mirror) 이 SSOT 변경 후에도 다르게 렌더되는
+드리프트. Codex stop-hook 이 "updated SVG assets leave hardcoded brand
+renderers stale" 로 잡았다.
+
+### 해결
+
+- Apple imageset 2개 → lobe-icons (`claudecode.svg` Claude Code-specific
+  grid, `opencode.svg` 24×24 currentColor nested-square)
+- Android `BrandIcon.kt` `CLAUDE_PATH`/`OPENCODE_PATH` → lobe 24×24 paths
+- Apple `SessionBrand.AgentBrandIcon` `claudePath`/`openCodePath` → lobe 24×24
+- `docs/design{,-mockups}/creatures.jsx` opencode entry 240×300 → 24×24 +
+  주석 정리 (prior 세션이 일부 정리, 잔여 mirror 동기화)
+- `SessionListPanel.swift` dead `BrandIcon` struct 제거
+- `shared/svg-renderers/agent-logos.ts` `ROBOT_CREATURE_PATH` 는 이미 lobe;
+  `CLAUDE_LOGO_PATH` (Anthropic swirl) 는 plugin/test 별도 reference 로
+  stale 아님 — 그대로 유지
+
+### 핵심 설계 결정
+
+- **lobe-icons antigravity ↔ claudecode 분리.** 2026-04-19 의 Antigravity
+  사고는 lobe-icons claudecode.svg 의 grid 패턴이 Anthropic swirl 과
+  혼동된 것. 현재 lobe-icons 는 `antigravity.svg` = swirl/peak shape 로
+  분리되어 있어 grid = Claude Code 가 정확. `<title>` 검증 게이트는 여전히
+  필수 (Anthropic swirl 을 Claude Code 자리에 잘못 넣는 inverse error
+  여전히 가능)
+- **다중 표면 동기화 체크리스트.** 같은 SVG 가 inline embed 되는 5곳:
+  (1) `apple/.../Assets.xcassets/Creature*.imageset/*.svg`,
+  (2) `android/.../ui/component/BrandIcon.kt` path 상수,
+  (3) `apple/.../UI/Common/SessionBrand.swift` `AgentBrandIcon` path 상수,
+  (4) `docs/design{,-mockups}/creatures.jsx`,
+  (5) `shared/src/svg-renderers/agent-logos.ts`. SVG 자산 변경 시 모두
+  동기화 필요. 메모리 `brand-renderer-surfaces.md` 참고
+- **Stylized vs canonical 구분.** `agent-logos.ts` 의 `openCodeCreatureIcon`
+  은 nested rectangle primitive 로 그리는 SD button tile 렌더러로, 의도된
+  warm-grey palette. brand mark pixel-accurate reproduction 아니므로 lobe
+  SVG 변경에 동기화 불요. Terrarium creature renderers (CloudCreature,
+  OpenCodeCreature, CrayfishCreature 등) 도 anim 캐릭터 표현체로 별도
+- **Dead code 정리 동반.** Promoted-and-orphaned `BrandIcon` struct 같은
+  zombie path 상수는 stale source 로 남기 쉬워 같이 제거. 식별 기준:
+  struct 외부에서 생성자 호출 0건 + 기능적 후계자 존재
+
+### 커밋 분리 메모
+
+워킹 트리에 prior 세션의 거대한 미커밋 작업(timeline/daemon/Codex OTel 등
+71 files +3642 lines)이 누적되어 있어, 이번 세션의 lobe-icons 변경 중
+강결합 부분(`SessionBrand.swift` lobe path = prior 가 추가한
+`AgentBrandIcon` 코드 안의 변경, `SessionListPanel.swift` dead struct 삭제
+= prior +123 line 변경과 같은 파일)은 분리 staging 비현실적. 깨끗한 3개
+파일(`Apple imageset claudecode.svg`/`opencode.svg` + `Android BrandIcon.kt`)
+만 `e2f1377c` 로 커밋. 나머지 lobe-icons 변경은 prior 미커밋 묶음과 함께
+다음 일괄 처리 시점에 합류 예정.
+
+---
+
+## 2026-05-10 — 프로젝트 전체 최소 OS = macOS 15+ 통일
+
+### 결정
+
+직전 commit 에서 App Store SwiftUI 앱만 deploy target 을 14 → 15 로
+올렸지만, README badge / Requirements 표 / `docs/appstore-feature-matrix.md`
+의 Min OS 행 / Stream Deck 플러그인 manifest 등은 여전히 "macOS 14+
+Sonoma" 를 광고하고 있어 사용자가 보는 OS 라인이 두 갈래로 갈라져
+있었다. 사용자 결정으로 프로젝트 전체 (CLI + App Store + Stream
+Deck 플러그인 distribution) 최소 지원 OS 를 macOS **15.0+** 으로
+일괄 통일.
+
+### 변경 표면
+
+- `README.md`: macOS 14 badge → 15, Requirements 표의 CLI/App Store
+  split 행을 단일 `Platform: macOS 15+ (Sequoia)` 한 행으로 합침,
+  Prerequisites 표의 macOS 14+ → 15+.
+- `docs/appstore-feature-matrix.md`: Min OS 행의 CLI 칸 14 → 15.
+- `plugin/bound.serendipity.agentdeck.sdPlugin/manifest.json`:
+  `OS[0].MinimumVersion` 14.0 → 15.0. `Nodejs.Version: "20"` 은 SDK
+  슬롯이라 별개로 유지.
+- Swift 주석 두 곳 (`AgentStatusIcon.swift`, `AquariumSurface.swift`)
+  의 "macOS 14+" 표현 정리.
+
+코드 동작 변경 없음. `apple/project.yml` / pbxproj / CI runner /
+Swift availability 게이트는 이미 직전 작업에서 macOS 15 로 정렬됨.
+
+### 영향
+
+- macOS 14 (Sonoma) 사용자는 다음 release 부터 AgentDeck CLI 와
+  Stream Deck 플러그인 모두 신규 install 대상에서 제외된다 (App
+  Store 빌드는 이미 직전 release 부터).
+- 이전 entry 에서 적은 "feature matrix 가 잘못된 CLI runtime 을
+  기록 (Node 18 / macOS 13)" Codex stop-time finding 도 본 통일로
+  자동 해소.
+
+### 검증
+
+- `grep -rn "macOS 14\|Sonoma" README.md docs/ apple/AgentDeck plugin/`
+  → DEVELOPMENT_LOG history 외 잔존 0 건.
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme
+  AgentDeck_macOS -destination "platform=macOS,arch=arm64" build`
+  통과 (BUILD SUCCEEDED).
+- `python3 -c "import json; json.load(open('plugin/bound.serendipity.agentdeck.sdPlugin/manifest.json'))"`
+  통과.
+
+---
+
+## 2026-05-10 — Codex OTel HUD / project label / timeline noise 정리
+
+### 문제
+
+Codex App / app-server OTLP batch 가 durable `thread.id` 없이 trace-backed
+span 만 보내는 경로에서 Dashboard 는 `codex:otel-active` 익명 세션을 만들었다.
+이 세션은 cwd 도 비어 있어 좌측 HUD 프로젝트명이 빈 문자열로 보였고, 같은
+OTel batch 의 내부 `tool_call` / `tool_result` span 이 그대로 TIMELINE 에
+`tool`, `tool completed` 같은 저품질 로그로 노출됐다. 또한 좌측 HUD 행은
+asset catalog SVG template 렌더링을 16pt 슬롯에 직접 써 Codex compact glyph
+가 깨져 보일 수 있었다.
+
+### 해결
+
+- 좌측 HUD agent glyph 를 asset renderer 대신 `AgentBrandIcon` path renderer
+  로 통일하고, Codex path 를 canonical `design/brand/codex.svg` 와 맞췄다.
+- Codex OTel cwd alias 를 `process.cwd`, `terminal.cwd`, `workspace.root`,
+  `project.root` 등으로 확장했다.
+- 익명 `codex:otel-active` 세션은 cwd 가 없을 때 현재 visible session 들의
+  non-Codex 프로젝트명이 하나로 수렴하면 그 이름을 fallback 으로 채운다.
+  그래도 알 수 없으면 HUD 표시는 `Codex` 로 fallback 해서 빈 라벨을 피한다.
+- OTel tool spans 는 타임라인에 쓰지 않고 세션 state/currentTool 갱신에만
+  사용한다. Codex timeline 은 실제 prompt/response payload 가 있는 lifecycle
+  hook 에서만 기록한다.
+- `tool` / `unknown` 처럼 의미 없는 Codex tool name 은 hook path 에서도
+  timeline entry 로 만들지 않는다.
+
+### 검증
+
+- `git diff --check -- apple/AgentDeck/UI/Common/SessionBrand.swift
+  apple/AgentDeck/UI/Monitor/SessionListPanel.swift
+  apple/AgentDeck/Daemon/Modules/CodexTelemetryModule.swift
+  apple/AgentDeck/Daemon/Server/DaemonServer.swift
+  apple/AgentDeckTests/CodexOtelParserTests.swift`
+  통과.
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS
+  -destination 'platform=macOS'
+  -only-testing:AgentDeckTests_macOS/CodexOtelParserTests
+  -only-testing:AgentDeckTests_macOS/ProtocolTests test
+  EXCLUDED_SOURCE_FILE_NAMES=LaunchSessionDialog.swift CODE_SIGNING_ALLOWED=NO
+  -derivedDataPath /tmp/AgentDeckCodexHudTimelineFix`
+  통과 — 52 tests, 0 failures.
+
+---
+
+## 2026-05-10 — Menubar 패널 정리 + macOS deploy target 15.0
+
+### 문제
+
+메뉴바 ControlTowerPanel 에 누적된 6 가지 사용자 체감 결함:
+
+1. OpenClaw 행에 uptime 이 `20582d` 로 표기 — 가상 `openclaw-gateway`
+   세션이 `startedAt` 을 `1970-01-01` placeholder 로 인젝트해서
+   `displayRelativeTime` 이 epoch 차이를 일 단위로 계산.
+2. TOPOLOGY hub 의 `AgentDeck` 과 `:9120` 이 두 줄로 쌓여 popover
+   세로공간 낭비.
+3. 패널이 `.frame(height: 620)` 로 고정돼 디바이스 수와 무관하게 동일
+   높이 + 내부 ScrollView 가 항상 활성.
+4. Launch Session 진입점 (pill, empty-state 버튼, MonitorEmptyGuide
+   카피, Window scene, dialog 파일) 이 dead path 로 잔존.
+5. Dashboard 가 단순 `openWindow(id:)` 만 호출 — 메뉴바에서 닫을 수
+   없고 시각적 활성/비활성 표시 없음.
+6. Evaluation/Settings 가 macOS window-restoration 으로 재실행 시
+   다시 떠 사용자 의도와 어긋남.
+
+### 해결
+
+- **OpenClaw uptime**: `DaemonServer` 에 `gatewayConnectedAt: Date?`
+  필드 추가, connect 시점 기록 + 모든 disconnect 경로에서 nil 클리어.
+  `buildSessionsListEvent` 가 nil 이면 `startedAt` 를 dict 에 넣지
+  않아 시간 chip 이 그냥 안 보이도록 함.
+- **TOPOLOGY 한 줄**: `MenuBarTopologyList.hubNode` 의 inner
+  `VStack(spacing: 0)` → 단일 `HStack(.firstTextBaseline)`. 포트 폰트
+  9.5→11pt 로 가독성 보강.
+- **DOWNSTREAM 동적 사이즈**: ControlTowerPanel `height: 620` 제거,
+  inner VStack 에 `.fixedSize(vertical: true)`, ScrollView 외부에
+  `.frame(maxHeight: scrollContentMaxHeight)` (= visibleFrame * 0.85
+  - 140pt chrome). 디바이스가 적으면 패널이 줄고, 30+ 인 극단에서만
+  내부 스크롤이 등장.
+- **Launch 제거**: ControlTowerPanel 의 pill·empty-state 버튼·helper
+  4 곳 + AgentDeckApp 의 `Window("Launch Session")` scene + MonitorEmptyGuide
+  의 Launch 버튼/카피 + `LaunchSessionDialog.swift` 파일 + APP_REVIEW_NOTES
+  / AquariumSurface 주석까지 일괄 정리. companion-install prompt 위반
+  소지를 차단하기 위해 빈 sessions 카피도 "Sessions appear here
+  automatically once the bridge picks one up." 식의 neutral 문구로 통일.
+- **Dashboard 토글**: `@State dashboardVisible` + 5s timer +
+  NSWindow Notification 4종 (didBecomeKey/willClose/didMiniaturize/
+  didDeminiaturize) 옵서버. pill 이 활성 시 `Dashboard ●` (primary
+  fill) / 비활성 시 `Dashboard` (outline). 클릭으로 open/close 토글.
+- **Evaluation/Settings 자동 복구 차단**: 두 `Window` scene 에
+  `.defaultLaunchBehavior(.suppressed)` 적용. 이 modifier 가 macOS 15+
+  전용이라 deploy target 을 14 → 15 로 상향. 동시에 AquariumSurface
+  의 `if #available(macOS 15.0, *)` 게이트 1 곳 정리.
+
+### macOS 15.0 deploy target 변경의 영향
+
+- **사용자 영향**: macOS Sonoma (14.x) 에 머무는 사용자는 다음 빌드
+  부터 App Store 업데이트를 받지 못한다. CI 는 이미 `macos-15` runner
+  사용 중이라 빌드 인프라는 그대로.
+- **iOS deploy target (17.0) 은 변경 없음** — iOS companion 영향 없음.
+- **App Store Connect 의 minimum OS 표기**도 다음 release 업로드 시
+  자연 반영. 메타데이터·release notes 는 본 차수 업로드 직전에
+  "Requires macOS Sequoia 15 이상" 명시 필요.
+- **하향 호환 경로**: `defaultLaunchBehavior(.suppressed)` 만 떼면
+  14 호환은 회복 가능. 다만 6번 이슈는 AppDelegate
+  `applicationDidFinishLaunching` 의 windows orderOut fallback 이 또
+  필요해진다.
+
+### 검증
+
+- `xcodegen` 으로 project.yml → pbxproj 재생성, `MACOSX_DEPLOYMENT_TARGET = 15.0`
+  두 build config 모두 반영 확인.
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS
+  -configuration Debug -destination "platform=macOS,arch=arm64" build`
+  통과 (BUILD SUCCEEDED, 경고 없음, App Store Helper Guard 통과).
+- `grep -rn "launch-session|openLaunchSession|LaunchSessionDialog" apple/` → 0 건.
+- Codex adversarial review (verdict: needs-attention) — 두 high finding
+  (timeline dedup, focus_session validation) 은 본 PR 영역 밖 선행
+  변경 결함으로 분리. macOS 14 drop 은 본 entry 로 의도 + 영향 명시.
+
+---
+
+## 2026-05-10 — Codex 구독 만료일 relay 보강
+
+### 문제
+
+App Store 샌드박스 macOS daemon 은 프로젝트 invariant 상 `~/.codex/auth.json`
+을 직접 읽지 않는다. 그래서 Codex Observation/OTel 로 세션은 보이더라도
+ChatGPT plan / `chatgpt_subscription_active_until` 은 비어, Dashboard 의
+Subscriptions footer 에 Codex 만료일이 나타나지 않았다.
+
+### 해결
+
+- 터미널/Node bridge 가 `usage_update` 로 보낸 Codex auth metadata 를
+  Swift daemon 이 캐시하고, 이후 daemon 소유 `state_update` / `usage_update`
+  에 다시 싣도록 했다.
+- `subscriptions` 배열이 없는 이벤트라도 `codexPlanType` /
+  `codexSubscriptionActiveUntil` 이 있으면 Swift state layer 가 ChatGPT
+  subscription row 를 합성한다.
+- `state_update` 도 Codex auth metadata 를 디코드하도록 protocol model 을
+  확장했다.
+
+### 검증
+
+- `xcodebuild -project apple/AgentDeck.xcodeproj -scheme AgentDeck_macOS
+  -destination 'platform=macOS' -only-testing:AgentDeckTests_macOS/ProtocolTests
+  -only-testing:AgentDeckTests_macOS/CodexOtelParserTests test
+  EXCLUDED_SOURCE_FILE_NAMES=LaunchSessionDialog.swift CODE_SIGNING_ALLOWED=NO
+  -derivedDataPath /tmp/AgentDeckCodexSubscriptionRelayTests`
+  통과 — 50 tests, 0 failures.
+
+## 2026-05-10 — Menu bar AgentDeck symbol alignment
+
+### 문제
+
+macOS 메뉴바 라벨과 드롭다운 팝업의 AgentDeck 허브 아이콘이 추상적인
+stacked-card mark 를 사용했다. App Store / Dock / pairing splash 의 실제
+제품 상징인 aquarium dome + hardware deck 아이콘과 실루엣이 달라,
+같은 앱 안에서도 메뉴바 표면만 별도 브랜드처럼 보였다.
+
+### 해결
+
+- `AgentDeckLogo` 를 app icon 의 작은 크기용 심볼로 재정의했다. 전체
+  bitmap illustration 을 16–20pt 로 축소하지 않고, dome outline /
+  waterline / deck base / button glints 만 SwiftUI Shape 로 그린다.
+- 메뉴바 상태 배지와 calm header 연결 상태 색을 `DesignTokens.UI.*`
+  product palette 로 이동했다.
+- `DESIGN.md` §6 에 small-size product symbol 규칙을 추가하고, 메뉴바
+  아이콘 규칙을 현재 구현과 맞췄다. 추상 card-stack / hub / router
+  mark 는 production AgentDeck mark 로 쓰지 않는다.
+
+### 검증
+
+- `xcodebuild -scheme AgentDeck_macOS -destination 'platform=macOS' build
+  EXCLUDED_SOURCE_FILE_NAMES=LaunchSessionDialog.swift` BUILD SUCCEEDED.
+  현재 워크트리의 별도 변경에서 `LaunchSessionDialog.swift` 가 삭제됐지만
+  `AgentDeck.xcodeproj` 의 stale reference 가 남아 있어, 일반 빌드는 그
+  참조에서 먼저 중단된다.
+- `python3 design/verify-tokens-sync.py` All mirrors in sync.
+- `git diff --check -- apple/AgentDeck/UI/MenuBar/AgentDeckLogo.swift
+  apple/AgentDeck/UI/MenuBar/AgentStatusIcon.swift
+  apple/AgentDeck/UI/MenuBar/AttentionTheaterView.swift DESIGN.md
+  DEVELOPMENT_LOG.md` 통과.
+
+---
+
+## 2026-05-09 — Focused session timeline filter + OpenClaw focus
+
+### 문제
+
+Dashboard 에서 특정 세션을 focus 해도 하단 `TIMELINE` 은 전체 세션 이벤트를
+계속 섞어서 보여줬다. 동시에 OpenClaw crayfish 는 hit-test 결과가
+`crayfish` sentinel 로 돌아오고 `MonitorScreen` 이 이를 무시해서, 좌측
+HUD row 와 달리 terrarium 에서는 선택할 수 없었다.
+
+### 해결
+
+- `TimelineStripView` 가 `DashboardState.focusedSessionId` 를 읽어 해당
+  세션의 timeline entry 만 필터링하도록 했다. 우선 `sessionId` 를 쓰고,
+  legacy entry 는 `projectName + agentType` fallback 으로 매칭한다.
+- OpenClaw virtual Gateway session (`openclaw-gateway`) 은 daemon-local
+  session 으로 취급한다. crayfish tap 이 이 id 로 focus 하고, Swift/Node
+  daemon 모두 relay WS 연결 없이 `focusedSessionId` 를 broadcast 한다.
+- Terrarium focus halo 가 `openclaw-gateway` focus 를 crayfish 위치에
+  그리도록 확장했다.
+
+---
+
 ## 2026-05-09 — Dashboard 세션 행 UX: Jump grid 제거 + focus halo
 
 ### 문제

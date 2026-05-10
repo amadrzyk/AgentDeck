@@ -108,10 +108,10 @@ function openClawCreatureIcon(size: number, opacity: number, cx: number, cy: num
     `<g fill="url(#${gradId})" fill-rule="evenodd" clip-rule="evenodd">`,
     ...OPENCLAW_BODY_PATHS.map((p) => `<path d="${p}"/>`),
     `</g>`,
-    `<circle cx="9.05" cy="7.63" r="0.82" fill="#050810"/>`,
-    `<circle cx="15.38" cy="7.63" r="0.82" fill="#050810"/>`,
-    `<circle cx="8.82" cy="7.34" r="0.20" fill="#BFFCF4" opacity="0.9"/>`,
-    `<circle cx="15.15" cy="7.34" r="0.20" fill="#BFFCF4" opacity="0.9"/>`,
+    `<circle cx="8.835" cy="7.843" r="1.266" fill="#050810"/>`,
+    `<circle cx="15.165" cy="7.843" r="1.266" fill="#050810"/>`,
+    `<circle cx="9.046" cy="7.632" r="0.527" fill="#00E5CC" opacity="0.9"/>`,
+    `<circle cx="15.376" cy="7.632" r="0.527" fill="#00E5CC" opacity="0.9"/>`,
     `</g>`,
   ].join('');
 }

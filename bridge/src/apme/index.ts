@@ -22,6 +22,7 @@ import { ApmeRunner } from './runner.js';
 import { ApmeTuner } from './tuner.js';
 import { ApmeHwSampler } from './hw-sampler.js';
 import { ApmeRecommender } from './recommend.js';
+import type { TimelineEntry } from '@agentdeck/shared';
 
 export interface ApmeModule {
   store: ApmeStore;
@@ -32,12 +33,22 @@ export interface ApmeModule {
   recommender: ApmeRecommender;
 }
 
+export interface InitApmeOptions {
+  /** Where to forward task hierarchy entries so they show up in the dashboard
+   *  timeline. Optional — when absent, task tracking still works for eval but
+   *  the dashboard sees only turn-level rows. */
+  emitTimeline?: (entry: TimelineEntry) => void;
+}
+
 let singleton: ApmeModule | null = null;
 
 /** Initialize the APME subsystem. Returns null if the SQLite store can't open.
  *  When null, the failure reason is logged at ERROR level — silent disable was
  *  the dominant cause of multi-day data outages observed in user telemetry. */
-export async function initApme(dbPath?: string): Promise<ApmeModule | null> {
+export async function initApme(
+  dbPath?: string,
+  opts: InitApmeOptions = {},
+): Promise<ApmeModule | null> {
   if (singleton) return singleton;
   const store = new ApmeStore(dbPath);
   const ok = await store.init();
@@ -52,18 +63,64 @@ export async function initApme(dbPath?: string): Promise<ApmeModule | null> {
   const recommender = new ApmeRecommender(store);
   singleton = { store, collector, runner, tuner, hwSampler, recommender };
 
+  const emitTimeline = opts.emitTimeline;
+
   // Wire task-level judge: whenever the collector closes a task (TodoWrite
   // all-completed / /clear / session_end), enqueue a task_rollup judge call.
   // Kept here — not in the collector constructor — so the collector has no
   // hard dependency on the runner.
-  collector.onTaskClosed = ({ taskId, runId, boundarySignal, taskCategory }) => {
+  collector.onTaskClosed = ({
+    taskId, runId, sessionId, agentType, projectName,
+    startedAt, endedAt, boundarySignal, taskCategory,
+  }) => {
     runner.enqueueTask({
       runId,
       taskId,
       category: taskCategory ?? undefined,
       boundarySignal,
     });
+
+    if (emitTimeline) {
+      const durationSec = Math.max(0, Math.round((endedAt - startedAt) / 1000));
+      const signalLabel = boundarySignal === 'todo_complete' ? 'TODO done'
+        : boundarySignal === 'clear' ? '/clear'
+        : boundarySignal === 'session_end' ? 'Session end'
+        : 'Task end';
+      emitTimeline({
+        ts: endedAt,
+        type: 'task_end',
+        raw: `${signalLabel} · ${durationSec}s`,
+        agentType: agentType ?? undefined,
+        projectName: projectName ?? undefined,
+        sessionId,
+        runId,
+        taskId,
+        boundarySignal,
+        startedAt,
+        endedAt,
+      });
+    }
   };
+
+  // Wire task-start emission. The runner has no opinion on opens — only the
+  // dashboard does — so we keep this strictly local to the timeline path.
+  if (emitTimeline) {
+    collector.onTaskOpened = ({
+      taskId, runId, sessionId, agentType, projectName, taskIndex, startedAt,
+    }) => {
+      emitTimeline({
+        ts: startedAt,
+        type: 'task_start',
+        raw: `Task ${taskIndex + 1}`,
+        agentType: agentType ?? undefined,
+        projectName: projectName ?? undefined,
+        sessionId,
+        runId,
+        taskId,
+        startedAt,
+      });
+    };
+  }
 
   // Write dashboard HTML for Swift daemon to pick up.
   try {

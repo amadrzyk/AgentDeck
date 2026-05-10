@@ -239,6 +239,7 @@ data class SessionInfo(
     val state: String? = null,
     val modelName: String? = null,
     val effortLevel: String? = null,
+    val startedAt: String? = null,
 )
 
 @Serializable
@@ -346,6 +347,9 @@ data class BridgeTimelineEntry(
     val startedAt: Long? = null,
     @Serializable(with = FlexibleLongSerializer::class)
     val endedAt: Long? = null,
+    val taskId: String? = null,
+    val boundarySignal: String? = null,
+    val summaryKind: String? = null,
 )
 
 fun BridgeTimelineEntry.toTimelineEntry() = dev.agentdeck.state.TimelineEntry(
@@ -360,6 +364,9 @@ fun BridgeTimelineEntry.toTimelineEntry() = dev.agentdeck.state.TimelineEntry(
     startedAt = startedAt,
     endedAt = endedAt,
     status = status,
+    taskId = taskId,
+    boundarySignal = boundarySignal,
+    summaryKind = summaryKind,
 )
 
 sealed class BridgeEvent {

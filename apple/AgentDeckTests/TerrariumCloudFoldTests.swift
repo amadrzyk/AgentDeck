@@ -161,6 +161,44 @@ final class TerrariumCloudFoldTests: XCTestCase {
         XCTAssertEqual(terrarium.cloudCreatures[0].state, .pulsing)
     }
 
+    /// `sessionId` is hook/activity attribution, not user selection. The
+    /// terrarium halo must stay off until `focusedSessionId` is set by an
+    /// explicit focus action.
+    func testActivitySessionIdDoesNotCreateFocusHalo() {
+        var state = DashboardState()
+        state.state = .processing
+        state.bridgeConnected = true
+        state.agentType = "codex-cli"
+        state.sessionId = "codex:active"
+        state.projectName = "AgentDeck"
+        state.siblingSessions = [
+            session(id: "codex:active", project: "AgentDeck", state: "processing")
+        ]
+
+        let terrarium = state.toTerrariumState()
+
+        XCTAssertNil(terrarium.focusedSessionId)
+    }
+
+    /// When the user focuses one member of a folded Codex group, the halo
+    /// should resolve to the visible representative sprite instead of the
+    /// hidden thread id.
+    func testExplicitFocusedCodexThreadMapsToFoldedRepresentative() {
+        var state = DashboardState()
+        state.state = .idle
+        state.bridgeConnected = true
+        state.focusedSessionId = "codex:thread-1"
+        state.siblingSessions = [
+            session(id: "codex:thread-1", project: "AgentDeck", state: "idle", startedAt: "2026-04-30T00:00:01Z"),
+            session(id: "codex:thread-2", project: "AgentDeck", state: "processing", startedAt: "2026-04-30T00:00:02Z"),
+        ]
+
+        let terrarium = state.toTerrariumState()
+
+        XCTAssertEqual(terrarium.cloudCreatures.first?.id, "codex:thread-2")
+        XCTAssertEqual(terrarium.focusedSessionId, "codex:thread-2")
+    }
+
     /// Resurrection predicate trade-off: `codex_session_start` and
     /// `codex_user_prompt_submit` MUST resurrect (the latter handles
     /// interactive multi-turn sessions whose entry was reaped by the

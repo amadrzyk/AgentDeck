@@ -24,6 +24,7 @@ enum CodexSpanEvent: Sendable, Equatable {
 }
 
 enum CodexTelemetryModule {
+    private static let anonymousOtelThreadId = "otel-active"
 
     /// Parse an OTLP/HTTP `ExportTraceServiceRequest` into the ordered
     /// events. Spans are visited in the order they appear in the body; we
@@ -78,10 +79,13 @@ enum CodexTelemetryModule {
             uniquingKeysWith: { _, new in new }
         )
 
-        guard let threadId = threadIdAttr(attrs), !threadId.isEmpty else {
+        guard let threadId = threadIdAttr(attrs) ?? anonymousThreadIdIfTraceBacked(span),
+              !threadId.isEmpty else {
             return nil
         }
-        let turnId = stringAttr(attrs, keys: ["codex.turn_id", "turn.id", "turn_id"]) ?? ""
+        let turnId = stringAttr(attrs, keys: ["codex.turn_id", "turn.id", "turn_id"])
+            ?? traceIdAttr(span)
+            ?? ""
 
         // Normalize underscore/slash variants (`codex.tool_call`,
         // `turn/start`) into dotted form so current Codex builds and older
@@ -91,11 +95,28 @@ enum CodexTelemetryModule {
             .replacingOccurrences(of: "/", with: ".")
 
         switch normalized {
-        case "codex.turn", "codex.turn.start", "turn.start", "op.dispatch.user.input.with.turn.context":
-            let cwd = stringAttr(attrs, keys: ["cwd", "codex.cwd"])
+        case "codex.turn", "codex.turn.start", "turn.start", "op.dispatch.user.turn", "op.dispatch.user.input.with.turn.context":
+            let cwd = stringAttr(attrs, keys: [
+                "cwd",
+                "codex.cwd",
+                "working.directory",
+                "working_directory",
+                "working.dir",
+                "workdir",
+                "workspace.path",
+                "workspace.root",
+                "workspace_root",
+                "project.path",
+                "project.root",
+                "project_root",
+                "repo.path",
+                "repository.path",
+                "terminal.cwd",
+                "process.cwd",
+            ])
             return .turnStart(threadId: threadId, turnId: turnId, cwd: cwd)
-        case "codex.tool.call", "tool.call", "turn.tool.call", "build.tool.call", "handle.tool.call", "handle.tool.call.with.source", "exec.command":
-            let tool = stringAttr(attrs, keys: ["tool.name", "tool", "codex.tool"]) ?? inferredToolName(from: normalized)
+        case "codex.tool.call", "tool.call", "turn.tool.call", "build.tool.call", "handle.tool.call", "handle.tool.call.with.source", "exec.command", "mcp.tools.call":
+            let tool = stringAttr(attrs, keys: ["tool.name", "tool", "codex.tool", "mcp.tool.name", "mcp.tool"]) ?? inferredToolName(from: normalized)
             return .toolCall(threadId: threadId, turnId: turnId, tool: tool)
         case "codex.tool.result", "tool.result", "tool.call.duration.ms", "dispatch.tool.call.with.code.mode.result", "handle.output.item.done":
             return .toolResult(threadId: threadId, turnId: turnId)
@@ -134,6 +155,26 @@ enum CodexTelemetryModule {
 
         if let sessionId = firstDurableAttr(attrs, keys: ["session_id", "session.id"]) {
             return stripCodexPrefix(sessionId)
+        }
+        return nil
+    }
+
+    /// Some current Codex App / app-server OTLP batches include useful
+    /// progress spans (`turn/start`, `receiving`, `build_tool_call`) but omit
+    /// durable `thread.id` attributes from those individual spans. Dropping
+    /// them makes the dashboard lose the Codex creature while Codex is clearly
+    /// active. Use one anonymous, trace-backed session key as a fallback; real
+    /// thread ids still win above, and a singleton fallback avoids one sprite
+    /// per internal trace.
+    private static func anonymousThreadIdIfTraceBacked(_ span: [String: Any]) -> String? {
+        traceIdAttr(span) == nil ? nil : anonymousOtelThreadId
+    }
+
+    private static func traceIdAttr(_ span: [String: Any]) -> String? {
+        for key in ["traceId", "traceID", "trace_id"] {
+            if let s = span[key] as? String, !s.isEmpty {
+                return s
+            }
         }
         return nil
     }

@@ -33,6 +33,7 @@ struct MonitorScreen: View {
     private var terrariumProjectionKey: String {
         let primary = [
             stateHolder.state.sessionId ?? "",
+            stateHolder.state.focusedSessionId ?? "",
             stateHolder.state.agentType ?? "",
             stateHolder.state.projectName ?? "",
             stateHolder.state.modelName ?? "",
@@ -101,7 +102,6 @@ struct MonitorScreen: View {
 
                 if shouldShowEmptyGuide {
                     MonitorEmptyGuideOverlay(
-                        onLaunchSession: emptyGuideLaunchAction,
                         onPreviewDevices: emptyGuidePreviewAction,
                         onDismiss: { preferences.hasSeenMonitorEmptyGuide = true }
                     )
@@ -170,7 +170,7 @@ struct MonitorScreen: View {
             let awaiting = attentionSessions
             let queued = max(0, awaiting.count - 1)
             let landscape = geo.size.width > geo.size.height
-            let isFeaturedFocused = featured.id == stateHolder.state.sessionId
+            let isFeaturedFocused = featured.id == effectiveFocusedSessionId
             VStack {
                 AttentionTheaterHUD(
                     session: featured,
@@ -232,23 +232,28 @@ struct MonitorScreen: View {
 
     /// Sessions currently waiting for user input, sorted by `sessionRank`.
     private var attentionSessions: [SessionInfo] {
-        stateHolder.state.siblingSessions
-            .filter { $0.alive }
-            .filter {
+        DashboardDataRules.sortSessions(
+            stateHolder.state.siblingSessions
+                .filter { $0.alive }
+                .filter {
                 let s = AgentConnectionState(rawValue: $0.state ?? "idle") ?? .idle
                 return s.isAwaiting
             }
-            .sorted { ($0.projectName ?? "") < ($1.projectName ?? "") }
+        )
     }
 
     /// Which awaiting session to feature: prefer the currently-focused one
     /// (so the user's active context wins), then fall back to sort order.
     private var featuredAwaitingSession: SessionInfo? {
-        if let focusedId = stateHolder.state.sessionId,
+        if let focusedId = effectiveFocusedSessionId,
            let focused = attentionSessions.first(where: { $0.id == focusedId }) {
             return focused
         }
         return attentionSessions.first
+    }
+
+    private var effectiveFocusedSessionId: String? {
+        stateHolder.state.focusedSessionId ?? stateHolder.state.sessionId
     }
 
     /// Question text for the featured session. Only the focused session has
@@ -256,7 +261,7 @@ struct MonitorScreen: View {
     /// awaiting sessions we return nil and the card just shows the
     /// "needs attention" label without a specific question.
     private func questionFor(_ session: SessionInfo) -> String? {
-        if session.id == stateHolder.state.sessionId {
+        if session.id == effectiveFocusedSessionId {
             return stateHolder.state.question
         }
         return nil
@@ -366,16 +371,29 @@ struct MonitorScreen: View {
     }
 
     private func handleCreatureTap(_ sessionId: String) {
-        guard sessionId != "crayfish" else { return }
-        stateHolder.sendCommand(.focusSession(sessionId: sessionId))
+        guard let focusSessionId = focusSessionId(forCreatureHit: sessionId) else { return }
+        if stateHolder.state.focusedSessionId == focusSessionId {
+            stateHolder.sendCommand(.clearSessionFocus)
+        } else {
+            stateHolder.sendCommand(.focusSession(sessionId: focusSessionId))
+        }
     }
 
-    private var emptyGuideLaunchAction: (() -> Void)? {
-        #if os(macOS)
-        return { openWindow(id: "launch-session") }
-        #else
+    private func focusSessionId(forCreatureHit sessionId: String) -> String? {
+        if sessionId == "crayfish" {
+            return openClawGatewaySessionId
+        }
+        return sessionId
+    }
+
+    private var openClawGatewaySessionId: String? {
+        if let session = stateHolder.state.siblingSessions.first(where: { $0.agentType == "openclaw" }) {
+            return session.id
+        }
+        if stateHolder.state.gatewayConnected || stateHolder.state.gatewayHasError {
+            return "openclaw-gateway"
+        }
         return nil
-        #endif
     }
 
     private var emptyGuidePreviewAction: (() -> Void)? {
@@ -515,7 +533,6 @@ private struct KeyboardShortcutsModifier: ViewModifier {
 /// `AppPreferences.hasSeenMonitorEmptyGuide` so returning users aren't
 /// re-nudged.
 private struct MonitorEmptyGuideOverlay: View {
-    var onLaunchSession: (() -> Void)?
     var onPreviewDevices: (() -> Void)?
     let onDismiss: () -> Void
 
@@ -534,32 +551,16 @@ private struct MonitorEmptyGuideOverlay: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if onLaunchSession != nil || onPreviewDevices != nil {
-                HStack(spacing: 10) {
-                    if let onLaunchSession {
-                        Button {
-                            onLaunchSession()
-                        } label: {
-                            Label("Launch Session", systemImage: "play.fill")
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
-                    }
-
-                    if let onPreviewDevices {
-                        Button {
-                            onPreviewDevices()
-                        } label: {
-                            Label("Preview Devices", systemImage: "rectangle.on.rectangle")
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                    }
+            if let onPreviewDevices {
+                Button {
+                    onPreviewDevices()
+                } label: {
+                    Label("Preview Devices", systemImage: "rectangle.on.rectangle")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
             }
 
             Button {
@@ -586,14 +587,6 @@ private struct MonitorEmptyGuideOverlay: View {
     }
 
     private var bodyText: Text {
-        if onLaunchSession != nil {
-            return Text("Click ")
-                + Text("Launch Session").bold()
-                + Text(" in the menubar to start Claude Code here with full monitoring. Or click ")
-                + Text("Preview Devices").bold()
-                + Text(" to see what AgentDeck renders on hardware before you hook anything up.")
-        } else {
-            return Text("Start Claude Code on your Mac. This dashboard picks up every session automatically — you'll see creatures appear as soon as the bridge connects.")
-        }
+        Text("Sessions appear automatically once the bridge picks one up — each one shows up here as a creature in the terrarium.")
     }
 }

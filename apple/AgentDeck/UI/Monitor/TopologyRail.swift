@@ -36,6 +36,7 @@ struct TopologyRail: View {
     @EnvironmentObject private var daemonService: DaemonService
     @EnvironmentObject private var preferences: AppPreferences
     #endif
+    @State private var hubPulse = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -66,38 +67,100 @@ struct TopologyRail: View {
         .padding(.bottom, 4)
     }
 
-    /// Hub zone: continuous neon spine threading through a section-header-style
-    /// hub row. Replaces the old `▼` glyphs + boxed hub card. The 1pt spine is
-    /// drawn as a `.background` of the padded hub row so it inherits the row's
-    /// height instead of expanding flex inside a VStack — the row's opaque
-    /// `TerrariumHUD.bg` then masks the spine middle, so the wire visually
-    /// enters from above and exits below.
     private var hubZone: some View {
         hubRow
             .padding(.vertical, 6)
-            .background(
-                Rectangle()
-                    .fill(TerrariumHUD.tetraNeon.opacity(0.35))
-                    .frame(width: 1)
-            )
     }
 
     private var hubRow: some View {
-        HStack(spacing: 6) {
-            AgentDeckLogo(size: 16, color: TerrariumHUD.tetraNeon)
+        let visual = hubVisualState
+        let glowOpacity = visual == .awaiting ? (hubPulse ? 0.58 : 0.18) : visual.glowOpacity
+        return HStack(spacing: 6) {
+            AgentDeckLogo(size: 16, color: visual.accent)
             Text("AgentDeck")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(TerrariumHUD.text)
             Text(":\(daemonPortText)")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(TerrariumHUD.subtext)
-            Rectangle()
-                .fill(TerrariumHUD.tetraNeon.opacity(0.25))
-                .frame(height: 0.5)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(TerrariumHUD.bg)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(TerrariumColors.midWater.opacity(visual.fillOpacity))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(visual.accent.opacity(visual.borderOpacity), lineWidth: 1)
+        )
+        .shadow(color: visual.accent.opacity(glowOpacity), radius: visual.shadowRadius)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                hubPulse = true
+            }
+        }
+    }
+
+    private enum HubVisualState {
+        case offline, live, active, awaiting
+
+        var accent: Color {
+            switch self {
+            case .offline: return TerrariumHUD.subtext.opacity(0.55)
+            case .live, .active: return TerrariumHUD.tetraNeon
+            case .awaiting: return TerrariumHUD.ledAmber
+            }
+        }
+
+        var fillOpacity: Double {
+            switch self {
+            case .offline: return 0.36
+            case .live: return 0.68
+            case .active, .awaiting: return 0.78
+            }
+        }
+
+        var borderOpacity: Double {
+            switch self {
+            case .offline: return 0.16
+            case .live: return 0.42
+            case .active: return 0.64
+            case .awaiting: return 0.78
+            }
+        }
+
+        var glowOpacity: Double {
+            switch self {
+            case .offline: return 0.0
+            case .live: return 0.20
+            case .active: return 0.34
+            case .awaiting: return 0.58
+            }
+        }
+
+        var shadowRadius: CGFloat {
+            switch self {
+            case .offline: return 0
+            case .live: return 5
+            case .active: return 7
+            case .awaiting: return 9
+            }
+        }
+    }
+
+    private var hubVisualState: HubVisualState {
+        guard stateHolder.state.bridgeConnected else { return .offline }
+        if stateHolder.state.state.isAwaiting ||
+            stateHolder.state.siblingSessions.contains(where: { AgentConnectionState(rawValue: $0.state ?? "")?.isAwaiting == true }) {
+            return .awaiting
+        }
+        if stateHolder.state.state == .processing ||
+            stateHolder.state.siblingSessions.contains(where: { $0.state == "processing" }) {
+            return .active
+        }
+        return .live
     }
 
     /// Hub port surfaces in descending order of trust: explicit daemonService

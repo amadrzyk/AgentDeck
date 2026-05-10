@@ -105,6 +105,44 @@ class TimelineStoreTest {
         assertEquals("session-1", store.entries.value[0].sessionId)
     }
 
+    @Test
+    fun `upsertEntry propagates summaryKind progression heuristic to llm`() {
+        // The async LLM upsert flips summaryKind from 'heuristic' / 'none' to
+        // 'llm'. Without propagation the dashboard keeps the old kind and the
+        // detail pane (suppressed for 'none') stays hidden after rescue.
+        store.addEntry(
+            TimelineEntry(
+                timestamp = 1000, type = "chat_end",
+                summary = "Completed · 4s",
+                detail = "response body",
+                summaryKind = "none",
+            )
+        )
+        assertEquals("none", store.entries.value[0].summaryKind)
+
+        store.upsertEntry(
+            TimelineEntry(
+                timestamp = 1000, type = "chat_end",
+                summary = "Refactored timeline store · 4s",
+                summaryKind = "llm",
+            )
+        )
+        assertEquals("llm", store.entries.value[0].summaryKind)
+        assertEquals("Refactored timeline store · 4s", store.entries.value[0].summary)
+    }
+
+    @Test
+    fun `upsertEntry preserves existing summaryKind when new entry omits it`() {
+        store.addEntry(
+            TimelineEntry(
+                timestamp = 1000, type = "chat_end",
+                summary = "Done", summaryKind = "heuristic",
+            )
+        )
+        store.upsertEntry(entry(1000, "chat_end", "Done v2")) // no summaryKind set
+        assertEquals("heuristic", store.entries.value[0].summaryKind)
+    }
+
     // --- updateLastOfType ---
 
     @Test

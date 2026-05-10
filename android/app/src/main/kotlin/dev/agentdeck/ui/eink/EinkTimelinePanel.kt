@@ -1,5 +1,6 @@
 package dev.agentdeck.ui.eink
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,19 +28,39 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.agentdeck.state.GroupedEntry
 import dev.agentdeck.state.TimelineEntry
 import dev.agentdeck.state.groupConsecutive
 import dev.agentdeck.state.timelineDisplayGroups
-import dev.agentdeck.ui.component.BrandIcon
+import dev.agentdeck.ui.timeline.timelineIconKey
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * E-ink timeline list.
+ *
+ * E-ink-specific rules (versus tablet):
+ *   - No color: only black text on white. Tints rendered as opacity collapse
+ *     to grey on most panels, which then ghosts after partial refresh.
+ *   - No animations: 400 ms B&W frame budget; the only motion allowed is the
+ *     "▼ NEW" affordance the user explicitly opts into.
+ *   - Bold ASCII bracket markers (`[OK]`, `[T ]`) instead of Unicode glyphs:
+ *     bracket characters have high black coverage, so they survive 1-bit
+ *     dither without thinning to invisibility.
+ *   - Task headers render as **inverse video** full-width strips — the only
+ *     visual hierarchy break in the list, which makes the "evaluation unit"
+ *     legible at a glance even on slow refresh.
+ */
 @Composable
 fun EinkTimelinePanel(
     entries: List<TimelineEntry>,
@@ -54,13 +75,11 @@ fun EinkTimelinePanel(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    // Track entry count for new-item detection
     var lastSeenCount by remember { mutableIntStateOf(displayGroups.size) }
     val hasNewItems by remember(displayGroups.size) {
         derivedStateOf { displayGroups.size > lastSeenCount }
     }
 
-    // Check if scrolled near bottom
     val isNearBottom by remember {
         derivedStateOf {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -68,7 +87,6 @@ fun EinkTimelinePanel(
         }
     }
 
-    // Auto-scroll only if already at bottom
     LaunchedEffect(displayGroups.size) {
         if (isNearBottom && displayGroups.isNotEmpty()) {
             listState.scrollToItem(displayGroups.size - 1)
@@ -89,19 +107,22 @@ fun EinkTimelinePanel(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                items(displayGroups, key = { "${it.entry.timestamp}-${it.entry.type}-${it.entry.summary}-${it.count}" }) { group ->
-                    EinkTimelineItem(group)
-                    HorizontalDivider(
-                        thickness = 1.dp,
-                        color = Color.Black,
-                    )
+                items(
+                    displayGroups,
+                    key = { "${it.entry.timestamp}-${it.entry.type}-${it.entry.summary}-${it.count}" },
+                ) { group ->
+                    when (group.entry.type) {
+                        "task_start" -> EinkTaskStartHeader(group)
+                        "task_end" -> EinkTaskEndBar(group)
+                        else -> EinkTimelineItem(group)
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.Black)
                 }
             }
 
-            // New items indicator at bottom
             if (hasNewItems && !isNearBottom) {
                 Text(
-                    text = "\u25BC NEW",
+                    text = "▼ NEW",
                     style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
@@ -124,78 +145,183 @@ private fun EinkTimelineItem(group: GroupedEntry) {
     val entry = group.entry
     val source = sourceLabel(entry)
     val countSuffix = if (group.count > 1) " (×${group.count})" else ""
+    val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+    val iconKey = timelineIconKey(entry.type, entry.status)
+
+    // Indent turn rows that belong to a task — visual cue mirroring the
+    // tablet/Apple layout. Two leading spaces, monospaced, so the indent is
+    // a constant pixel width on bitmap fonts.
+    val indent = if (entry.taskId != null) "  " else ""
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        // Timestamp
+        // Timestamp — 12 sp regular monospace.
         Text(
             text = formatTime(entry.timestamp),
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Color.Black,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            style = tight,
         )
 
-        Box(
-            modifier = Modifier
-                .width(18.dp)
-                .height(18.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            BrandIcon(agentType = entry.agentType, isEink = true, size = 15.dp)
-        }
-
-        // Type prefix
+        // Status marker — bracket ASCII, high black coverage.
         Text(
-            text = typePrefix(entry.type),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
+            text = indent + iconKey.einkGlyph,
+            color = Color.Black,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            style = tight,
         )
 
-        // Summary + detail
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             if (source.isNotEmpty()) {
                 Text(
                     text = source,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color.Black,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    style = tight,
                 )
             }
             Text(
                 text = entry.summary + countSuffix,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Color.Black,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Normal,
+                style = tight,
             )
-            if (entry.detail != null) {
+            entry.detail?.takeIf { it.isNotBlank() }?.let { detail ->
                 Text(
-                    text = entry.detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    text = detail.replace("\n", " ").trim(),
+                    color = Color.Black,
+                    fontSize = 12.sp,
+                    fontStyle = FontStyle.Italic,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = tight,
                 )
             }
         }
     }
 }
 
-private fun typePrefix(type: String): String = when {
-    type.contains("tool") -> "Tool"
-    type.contains("model") -> "Model"
-    type.contains("chat") -> "Chat"
-    type.contains("error") -> "Error"
-    type.contains("approval") || type.contains("permission") -> "Perm"
-    type.contains("memory") -> "Memory"
-    type.contains("scheduled") -> "Sched"
-    type.contains("user") -> "User"
-    type.contains("eval") -> "Eval"
-    else -> "\u00B7"
+/**
+ * task_start row — full-width inverse video (black bg / white text). The
+ * single visual hierarchy break that the user can reliably parse on a slow
+ * partial-refresh panel.
+ */
+@Composable
+private fun EinkTaskStartHeader(group: GroupedEntry) {
+    val entry = group.entry
+    val source = sourceLabel(entry).takeIf { it.isNotEmpty() }
+    val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = formatTime(entry.timestamp),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            style = tight,
+        )
+        Text(
+            text = "[==] TASK",
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.ExtraBold,
+            fontFamily = FontFamily.Monospace,
+            style = tight,
+        )
+        if (source != null) {
+            Text(
+                text = source,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = tight,
+            )
+        }
+        Text(
+            text = entry.summary,
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = tight,
+        )
+    }
+}
+
+/**
+ * task_end row — short capped strip with bottom black bar. Closes the visual
+ * envelope started by task_start without consuming as much vertical space.
+ */
+@Composable
+private fun EinkTaskEndBar(group: GroupedEntry) {
+    val entry = group.entry
+    val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = formatTime(entry.timestamp),
+                color = Color.Black,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                style = tight,
+            )
+            Text(
+                text = "[==] TASK END",
+                color = Color.Black,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontFamily = FontFamily.Monospace,
+                style = tight,
+            )
+            Text(
+                text = entry.summary,
+                color = Color.Black,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = tight,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color.Black),
+        )
+    }
 }
 
 private fun sourceLabel(entry: TimelineEntry): String {
@@ -210,14 +336,13 @@ private fun sourceLabel(entry: TimelineEntry): String {
         else -> "Agent"
     }
     return when {
-        project != null && agent.isNotEmpty() -> "$project · $agent"
-        project != null -> project
-        else -> agent
+        project != null && agent.isNotEmpty() -> "[$project] $agent"
+        project != null -> "[$project]"
+        agent.isNotEmpty() -> "[$agent]"
+        else -> ""
     }
 }
 
 private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
-private fun formatTime(timestamp: Long): String {
-    return timeFormat.format(Date(timestamp))
-}
+private fun formatTime(timestamp: Long): String = timeFormat.format(Date(timestamp))

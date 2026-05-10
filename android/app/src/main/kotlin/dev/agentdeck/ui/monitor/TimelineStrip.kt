@@ -1,7 +1,17 @@
 package dev.agentdeck.ui.monitor
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,133 +53,240 @@ import dev.agentdeck.state.timelineDisplayGroups
 import dev.agentdeck.state.timelineLifecycleBounds
 import dev.agentdeck.terrarium.TerrariumColors
 import dev.agentdeck.ui.component.BrandIcon
+import dev.agentdeck.ui.timeline.TimelineIconKey
+import dev.agentdeck.ui.timeline.TimelineMarkdownView
+import dev.agentdeck.ui.timeline.stripMarkdownForSummary
+import dev.agentdeck.ui.timeline.timelineDetailIsRedundant
+import dev.agentdeck.ui.timeline.timelineIconKey
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * Bottom HUD strip — two-pane "Logbook" layout.
- * Left (65%): compact log scroll. Right (35%): detail panel for focused entry.
+ * Bottom HUD strip — adapts between two layouts:
+ *   - **Regular** (tablet, phone landscape): 65/35 row with right-side detail pane.
+ *   - **Compact** (phone portrait): single-column with tap-to-expand inline detail.
+ * Picked via `rememberTimelineLayoutMode()` (orientation + smallestScreenWidthDp).
  */
 @Composable
 fun TimelineStrip(
     entries: List<TimelineEntry>,
     modifier: Modifier = Modifier,
+    scale: MonitorLayoutScale = rememberMonitorLayoutScale(),
 ) {
+    val layoutMode = rememberTimelineLayoutMode()
     val listState = rememberLazyListState()
-    val displayEntries = remember(entries) {
-        entries
-            .takeLast(80)
-    }
+    val displayEntries = remember(entries) { entries.takeLast(80) }
     val grouped = remember(displayEntries) {
         timelineDisplayGroups(groupConsecutive(displayEntries)).takeLast(50)
     }
 
-    // Focus tracking: -1 = auto-follow latest
     var focusedIndex by remember { mutableIntStateOf(-1) }
+    var expandedIndex by remember { mutableIntStateOf(-1) }
 
-    // Resolve which entry to show in detail pane
     val focusedGroup: GroupedEntry? = when {
         grouped.isEmpty() -> null
         focusedIndex < 0 || focusedIndex >= grouped.size -> grouped.lastOrNull()
         else -> grouped[focusedIndex]
     }
 
-    // Auto-scroll to bottom on new entries when in auto-follow mode
     LaunchedEffect(grouped.size) {
         if (grouped.isNotEmpty() && focusedIndex < 0) {
             listState.animateScrollToItem(grouped.lastIndex)
         }
     }
+    // When the device rotates between Compact and Regular, reset expand state
+    // so we don't carry an inline expansion into a layout that doesn't render it.
+    LaunchedEffect(layoutMode) { expandedIndex = -1 }
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth(),
-    ) {
-        // Main content: two-pane row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-        ) {
-            // Left pane: compact log scroll (65%)
-            Column(
-                modifier = Modifier
-                    .weight(0.65f)
-                    .fillMaxHeight()
-                    .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+    Column(modifier = modifier.fillMaxWidth()) {
+        when (layoutMode) {
+            TimelineLayoutMode.Regular -> Row(
+                modifier = Modifier.fillMaxWidth().weight(1f),
             ) {
-                Text(
-                    text = "TIMELINE",
-                    color = TerrariumColors.HUDSubtext,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(bottom = 2.dp),
-                )
-
-                if (grouped.isEmpty()) {
-                    Text(
-                        text = "No events yet",
-                        color = TerrariumColors.HUDSubtext,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(0.dp),
+                Column(
+                    modifier = Modifier
+                        .weight(0.65f)
+                        .fillMaxHeight()
+                        .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+                ) {
+                    TimelineHeader(scale = scale)
+                    // weight(1f, fill = false) bounds the LazyColumn's height
+                    // to the column's remaining space — required because a
+                    // scrollable composable measured with infinite max height
+                    // either eagerly renders every item or throws at runtime.
+                    TimelineList(
+                        listState = listState,
+                        grouped = grouped,
+                        focusedIndex = focusedIndex,
+                        expandedIndex = -1,
+                        allowExpand = false,
+                        displayEntries = displayEntries,
+                        scale = scale,
+                        onClick = { idx -> focusedIndex = idx },
                         modifier = Modifier.weight(1f, fill = false),
-                    ) {
-                        itemsIndexed(grouped) { index, group ->
-                            val isSelected = index == focusedIndex ||
-                                (focusedIndex < 0 && index == grouped.lastIndex)
-                            CompactLogRow(
-                                group = group,
-                                isSelected = isSelected,
-                                onClick = { focusedIndex = index },
-                            )
-                        }
-                    }
+                    )
                 }
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(1.dp)
+                        .padding(vertical = 8.dp)
+                        .background(TerrariumColors.HUDSubtext.copy(alpha = 0.3f)),
+                )
+                DetailPane(
+                    focusedGroup = focusedGroup,
+                    entries = displayEntries,
+                    scale = scale,
+                    modifier = Modifier
+                        .weight(0.35f)
+                        .fillMaxHeight()
+                        .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                )
             }
-
-            // Vertical divider
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(1.dp)
-                    .padding(vertical = 8.dp)
-                    .background(TerrariumColors.HUDSubtext.copy(alpha = 0.3f)),
-            )
-
-            // Right pane: detail panel (35%)
-            DetailPane(
-                focusedGroup = focusedGroup,
-                entries = displayEntries,
-                modifier = Modifier
-                    .weight(0.35f)
-                    .fillMaxHeight()
-                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-            )
+            TimelineLayoutMode.Compact -> Column(
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 4.dp, vertical = 4.dp),
+            ) {
+                TimelineHeader(scale = scale)
+                // weight(1f, fill = false): bound LazyColumn height to the
+                // remaining vertical space in the compact column.
+                TimelineList(
+                    listState = listState,
+                    grouped = grouped,
+                    focusedIndex = focusedIndex,
+                    expandedIndex = expandedIndex,
+                    allowExpand = true,
+                    displayEntries = displayEntries,
+                    scale = scale,
+                    onClick = { idx ->
+                        expandedIndex = if (expandedIndex == idx) -1 else idx
+                        focusedIndex = idx
+                    },
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
         }
-
     }
 }
 
 /**
- * Compact single-line log row: `HH:mm icon summary [×N]`
+ * Continuous rotation angle for the in-flight ("running") status icon.
+ * Returns 0 when inactive so non-running rows pay zero animation cost.
+ * 1.8 s linear cycle — slow enough to read, fast enough to feel alive.
+ * Mirrors Apple's `symbolEffect(.rotate, options: .repeating)`.
+ */
+@Composable
+private fun rememberRunningRotation(active: Boolean): Float {
+    if (!active) return 0f
+    val transition = rememberInfiniteTransition(label = "timelineRunning")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "angle",
+    )
+    return angle
+}
+
+@Composable
+private fun TimelineHeader(scale: MonitorLayoutScale) {
+    Text(
+        text = "TIMELINE",
+        color = TerrariumColors.HUDSubtext,
+        fontSize = scale.fontSub,
+        fontWeight = FontWeight.Bold,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier.padding(bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun TimelineList(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    grouped: List<GroupedEntry>,
+    focusedIndex: Int,
+    expandedIndex: Int,
+    allowExpand: Boolean,
+    displayEntries: List<TimelineEntry>,
+    scale: MonitorLayoutScale,
+    onClick: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (grouped.isEmpty()) {
+        Text(
+            text = "No events yet",
+            color = TerrariumColors.HUDSubtext,
+            fontSize = scale.fontSub,
+            fontFamily = FontFamily.Monospace,
+            modifier = modifier,
+        )
+    } else {
+        LazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+            modifier = modifier,
+        ) {
+            itemsIndexed(grouped) { index, group ->
+                val isSelected = index == focusedIndex ||
+                    (focusedIndex < 0 && index == grouped.lastIndex)
+                Column {
+                    CompactLogRow(
+                        group = group,
+                        isSelected = isSelected,
+                        allowMultiline = allowExpand,
+                        scale = scale,
+                        onClick = { onClick(index) },
+                    )
+                    if (allowExpand && expandedIndex == index) {
+                        InlineDetailPane(group = group, entries = displayEntries, scale = scale)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Compact single-line log row dispatcher: a task hierarchy entry renders as
+ * a full-width header strip; everything else is a normal turn row.
  */
 @Composable
 private fun CompactLogRow(
     group: GroupedEntry,
     isSelected: Boolean,
+    allowMultiline: Boolean,
+    scale: MonitorLayoutScale,
+    onClick: () -> Unit,
+) {
+    val entry = group.entry
+    if (entry.type == "task_start" || entry.type == "task_end") {
+        TaskHeaderRow(group = group, isSelected = isSelected, scale = scale, onClick = onClick)
+    } else {
+        TurnRow(
+            group = group,
+            isSelected = isSelected,
+            allowMultiline = allowMultiline,
+            scale = scale,
+            onClick = onClick,
+        )
+    }
+}
+
+@Composable
+private fun TurnRow(
+    group: GroupedEntry,
+    isSelected: Boolean,
+    allowMultiline: Boolean,
+    scale: MonitorLayoutScale,
     onClick: () -> Unit,
 ) {
     val entry = group.entry
     val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     val timeStr = timeFormat.format(Date(entry.timestamp))
-    val icon = typeIcon(entry.type, entry.status)
+    val iconKey = timelineIconKey(entry.type, entry.status)
     val iconColor = typeColor(entry.type)
     val countSuffix = if (group.count > 1) " ×${group.count}" else ""
     val isChatEnd = entry.type == "chat_end"
@@ -182,35 +300,49 @@ private fun CompactLogRow(
             .background(
                 if (isSelected) Color(0x20FFFFFF) else Color.Transparent,
             )
+            // Selection indicator drawn via drawBehind so toggling it doesn't
+            // shift row content right (was an inline first-child Box). The
+            // bar lands at x = -6.dp, sitting in the parent LazyColumn's
+            // horizontal padding without competing for row width.
+            .drawBehind {
+                if (isSelected) {
+                    val w = 2.dp.toPx()
+                    val h = 14.dp.toPx()
+                    val xLeft = -6.dp.toPx()
+                    val yMid = (size.height - h) / 2f
+                    drawRect(
+                        color = iconColor,
+                        topLeft = Offset(xLeft, yMid),
+                        size = Size(w, h),
+                    )
+                }
+            }
             .clickable(onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 1.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Selected indicator bar
-        if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .width(2.dp)
-                    .height(14.dp)
-                    .background(iconColor),
-            )
-        }
+        // Indent under task headers so turns visually belong to the task above.
+        if (entry.taskId != null) Spacer(modifier = Modifier.width(8.dp))
 
         Text(
             text = timeStr,
             color = TerrariumColors.HUDSubtext.copy(alpha = if (isChatEnd) 0.4f else 0.5f),
-            fontSize = 10.sp,
+            fontSize = scale.fontSub,
             fontFamily = FontFamily.Monospace,
             style = tight,
         )
-        Text(
-            text = icon,
-            color = iconColor.copy(alpha = if (isChatEnd) 0.6f else 1f),
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            style = tight,
+        // Animate the leading icon when iconKey == Running. Non-running rows
+        // get angle=0 from the helper and skip the infinite transition entirely.
+        val rowAngle = rememberRunningRotation(active = iconKey == TimelineIconKey.Running)
+        Icon(
+            imageVector = iconKey.materialIcon,
+            contentDescription = iconKey.name,
+            tint = iconColor.copy(alpha = if (isChatEnd) 0.6f else 1f),
+            modifier = Modifier
+                .width(12.dp)
+                .height(12.dp)
+                .rotate(rowAngle),
         )
         Box(
             modifier = Modifier
@@ -228,7 +360,7 @@ private fun CompactLogRow(
             Text(
                 text = sessionLabel,
                 color = TerrariumColors.HUDSubtext.copy(alpha = if (isChatEnd) 0.55f else 0.75f),
-                fontSize = 10.sp,
+                fontSize = scale.fontSub,
                 fontWeight = FontWeight.Medium,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
@@ -238,13 +370,105 @@ private fun CompactLogRow(
             )
         }
         Text(
-            text = entry.summary + countSuffix,
+            // Strip lightweight markdown so `**bold**` / `## heading` don't
+            // leak into the row as literal characters. The detail pane (or
+            // compact inline-expand) still renders the markdown properly.
+            text = stripMarkdownForSummary(entry.summary) + countSuffix,
             color = if (isChatEnd) TerrariumColors.HUDText.copy(alpha = 0.6f) else TerrariumColors.HUDText,
-            fontSize = 10.sp,
+            fontSize = scale.fontSub,
+            fontFamily = FontFamily.Monospace,
+            maxLines = if (allowMultiline) 2 else 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+            style = tight,
+        )
+    }
+}
+
+@Composable
+private fun TaskHeaderRow(
+    group: GroupedEntry,
+    isSelected: Boolean,
+    scale: MonitorLayoutScale,
+    onClick: () -> Unit,
+) {
+    val entry = group.entry
+    val isEnd = entry.type == "task_end"
+    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val timeStr = timeFormat.format(Date(entry.timestamp))
+    val accent = TerrariumColors.TetraNeon
+    val sessionLabel = rowPrefixLabel(entry)
+    val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(3.dp))
+            .background(accent.copy(alpha = if (isSelected) 0.18f else 0.08f))
+            // Selection indicator drawn outside the row's content area so
+            // toggling it doesn't shift text right (was an inline first-child
+            // Box). Sits at x = -6.dp inside the parent LazyColumn padding.
+            .drawBehind {
+                if (isSelected) {
+                    val w = 2.dp.toPx()
+                    val h = 18.dp.toPx()
+                    val xLeft = -6.dp.toPx()
+                    val yMid = (size.height - h) / 2f
+                    drawRect(
+                        color = accent,
+                        topLeft = Offset(xLeft, yMid),
+                        size = Size(w, h),
+                    )
+                }
+            }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = TimelineIconKey.Task.materialIcon,
+            contentDescription = "Task",
+            tint = accent,
+            modifier = Modifier.width(14.dp).height(14.dp),
+        )
+        Text(
+            text = if (isEnd) "TASK END" else "TASK",
+            color = accent,
+            fontSize = scale.fontSub,
+            fontWeight = FontWeight.ExtraBold,
+            fontFamily = FontFamily.Monospace,
+            style = tight,
+        )
+        if (sessionLabel.isNotEmpty()) {
+            Text(
+                text = sessionLabel,
+                color = TerrariumColors.HUDSubtext.copy(alpha = 0.85f),
+                fontSize = scale.fontSub,
+                fontWeight = FontWeight.Medium,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 96.dp),
+                style = tight,
+            )
+        }
+        Text(
+            text = entry.summary,
+            color = TerrariumColors.HUDText,
+            fontSize = scale.fontSub,
+            fontWeight = FontWeight.SemiBold,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
+            style = tight,
+        )
+        Text(
+            text = timeStr,
+            color = TerrariumColors.HUDSubtext.copy(alpha = 0.6f),
+            fontSize = (scale.fontSub.value - 1f).sp,
+            fontFamily = FontFamily.Monospace,
             style = tight,
         )
     }
@@ -257,8 +481,10 @@ private fun CompactLogRow(
 private fun DetailPane(
     focusedGroup: GroupedEntry?,
     entries: List<TimelineEntry>,
+    scale: MonitorLayoutScale,
     modifier: Modifier = Modifier,
 ) {
+    val labelSp = (scale.fontSub.value - 1f).sp  // 9 sp on tablet, 8 sp on phone
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(4.dp))
@@ -272,7 +498,7 @@ private fun DetailPane(
                 Text(
                     text = "No events",
                     color = TerrariumColors.HUDSubtext.copy(alpha = 0.5f),
-                    fontSize = 10.sp,
+                    fontSize = scale.fontSub,
                     fontFamily = FontFamily.Monospace,
                 )
             }
@@ -280,7 +506,7 @@ private fun DetailPane(
             val entry = focusedGroup.entry
             val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
             val timeStr = timeFormat.format(Date(entry.timestamp))
-            val icon = typeIcon(entry.type, entry.status)
+            val iconKey = timelineIconKey(entry.type, entry.status)
             val iconColor = typeColor(entry.type)
             val sourceLabel = sourceLabel(entry)
             val countSuffix = if (focusedGroup.count > 1) " (×${focusedGroup.count})" else ""
@@ -294,23 +520,34 @@ private fun DetailPane(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Type badge chip
-                Text(
-                    text = " $icon ${formatType(entry.type)} ",
-                    color = Color.White,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
+                Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(3.dp))
                         .background(iconColor.copy(alpha = 0.7f))
                         .padding(horizontal = 4.dp, vertical = 1.dp),
-                )
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val badgeAngle = rememberRunningRotation(active = iconKey == TimelineIconKey.Running)
+                    Icon(
+                        imageVector = iconKey.materialIcon,
+                        contentDescription = iconKey.name,
+                        tint = Color.White,
+                        modifier = Modifier.width(10.dp).height(10.dp).rotate(badgeAngle),
+                    )
+                    Text(
+                        text = formatType(entry.type),
+                        color = Color.White,
+                        fontSize = labelSp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = timeStr,
                     color = TerrariumColors.HUDSubtext,
-                    fontSize = 9.sp,
+                    fontSize = labelSp,
                     fontFamily = FontFamily.Monospace,
                 )
             }
@@ -320,7 +557,7 @@ private fun DetailPane(
                 Text(
                     text = sourceLabel + countSuffix,
                     color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
-                    fontSize = 9.sp,
+                    fontSize = labelSp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
@@ -340,7 +577,7 @@ private fun DetailPane(
                             Text(
                                 text = row.first,
                                 color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
-                                fontSize = 8.sp,
+                                fontSize = (labelSp.value - 1f).sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.width(34.dp),
@@ -348,7 +585,7 @@ private fun DetailPane(
                             Text(
                                 text = row.second,
                                 color = TerrariumColors.HUDSubtext.copy(alpha = 0.82f),
-                                fontSize = 8.sp,
+                                fontSize = (labelSp.value - 1f).sp,
                                 fontFamily = FontFamily.Monospace,
                             )
                         }
@@ -358,18 +595,25 @@ private fun DetailPane(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Summary
+            // Summary — strip markdown so `**bold**` / `## heading` don't
+            // appear as literal characters next to the markdown-rendered detail.
             Text(
-                text = entry.summary,
+                text = stripMarkdownForSummary(entry.summary),
                 color = TerrariumColors.HUDText,
-                fontSize = 11.sp,
+                fontSize = scale.fontHeader,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
 
-            // Detail text (word-wrapped, scrollable area)
-            if (!entry.detail.isNullOrEmpty() && entry.detail != entry.summary) {
+            // Detail text — markdown-aware. Suppressed when:
+            //   (a) summaryKind == "none" (heuristic last-resort: detail
+            //       is just the raw response, showing it duplicates noisily)
+            //   (b) timelineDetailIsRedundant matches detail against summary
+            val detailText = entry.detail
+            if (!detailText.isNullOrEmpty()
+                && entry.summaryKind != "none"
+                && !timelineDetailIsRedundant(detailText, entry.summary)) {
                 Spacer(modifier = Modifier.height(4.dp))
                 LazyColumn(
                     modifier = Modifier
@@ -378,13 +622,7 @@ private fun DetailPane(
                         .padding(horizontal = 8.dp),
                 ) {
                     item {
-                        Text(
-                            text = entry.detail,
-                            color = TerrariumColors.HUDSubtext.copy(alpha = 0.8f),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            softWrap = true,
-                        )
+                        TimelineMarkdownView(text = detailText)
                     }
                 }
             }
@@ -394,29 +632,67 @@ private fun DetailPane(
     }
 }
 
-private fun typeIcon(type: String, status: String? = null): String = when (type) {
-    "tool_request" -> when (status) {
-        "approved" -> "✓"
-        "denied" -> "✗"
-        else -> "⚠"
+/**
+ * Compact-mode inline detail block. Renders below the tapped row in
+ * single-column layout. Mirrors the right-side `DetailPane` content shape
+ * but laid out vertically without the type badge / timestamp header.
+ */
+@Composable
+private fun InlineDetailPane(
+    group: GroupedEntry,
+    entries: List<TimelineEntry>,
+    scale: MonitorLayoutScale,
+) {
+    val entry = group.entry
+    val tight = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+    val lifecycleRows = lifecycleDetailRows(entry, entries)
+    val labelSp = (scale.fontSub.value - 1f).sp
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 18.dp, end = 6.dp, top = 2.dp, bottom = 4.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0x1AFFFFFF))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (lifecycleRows.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                lifecycleRows.forEach { row ->
+                    Text(
+                        text = "${row.first} ${row.second}",
+                        color = TerrariumColors.HUDSubtext.copy(alpha = 0.7f),
+                        fontSize = labelSp,
+                        fontFamily = FontFamily.Monospace,
+                        style = tight,
+                    )
+                }
+            }
+        }
+        val detailText = entry.detail
+        if (!detailText.isNullOrEmpty()
+            && entry.summaryKind != "none"
+            && !timelineDetailIsRedundant(detailText, entry.summary)) {
+            TimelineMarkdownView(text = detailText)
+        } else {
+            Text(
+                text = "Tap to collapse · summary only",
+                color = TerrariumColors.HUDSubtext.copy(alpha = 0.5f),
+                fontSize = labelSp,
+                fontFamily = FontFamily.Monospace,
+                style = tight,
+            )
+        }
     }
-    "tool_resolved" -> "✓"
-    "tool_exec" -> "▸"
-    "model_call" -> "◆"
-    "model_response" -> "◇"
-    "chat_start" -> "▶"
-    "chat_end" -> "■"
-    "chat_response" -> "◇"
-    "memory_recall" -> "⦻"
-    "error" -> "✗"
-    "scheduled" -> "⏰"
-    "user_action" -> "☞"
-    "state_change" -> "△"
-    "eval_result" -> "★"
-    else -> "·"
 }
 
+// typeIcon was a legacy Unicode-glyph helper. Replaced by TimelineIconKey
+// (dev.agentdeck.ui.timeline.TimelineIcons) which maps to Material Icons
+// for tablet and ASCII brackets for e-ink.
+
 private fun typeColor(type: String) = when (type) {
+    "task_start", "task_end" -> TerrariumColors.TetraNeon
     "tool_request", "tool_resolved", "tool_exec" -> TerrariumColors.LEDGreen
     "model_call", "model_response" -> TerrariumColors.TetraNeon
     "chat_response" -> TerrariumColors.TetraNeon
@@ -491,5 +767,7 @@ private fun formatType(type: String): String = when (type) {
     "user_action" -> "USER"
     "state_change" -> "STATE"
     "eval_result" -> "EVAL"
+    "task_start" -> "TASK"
+    "task_end" -> "TASK ✓"
     else -> type.uppercase().take(5)
 }

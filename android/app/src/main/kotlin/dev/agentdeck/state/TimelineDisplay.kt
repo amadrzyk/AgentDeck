@@ -12,6 +12,8 @@ fun timelineDisplayGroups(groups: List<GroupedEntry>): List<GroupedEntry> =
     groups.filter { group ->
         val entry = group.entry
         when (entry.type) {
+            // Task hierarchy markers are never elided — primary navigation handle.
+            "task_start", "task_end" -> true
             "chat_start" -> !hasLaterCompletion(entry, groups)
             "chat_end" -> !hasPairedChatResponse(entry, groups)
             else -> true
@@ -22,20 +24,28 @@ fun isTimelineCompletionEntry(entry: TimelineEntry): Boolean =
     entry.type == "chat_response" || entry.type == "chat_end" || entry.type == "model_response"
 
 fun sameTimelineContext(a: TimelineEntry, b: TimelineEntry): Boolean {
+    // 1) taskId — strongest grouping key; same task is same context.
+    val aTask = a.taskId?.takeIf { it.isNotBlank() }
+    val bTask = b.taskId?.takeIf { it.isNotBlank() }
+    if (aTask != null && bTask != null) return aTask == bTask
+
+    // 2) runId — adapter-emitted generation id.
     val aRunId = a.runId?.takeIf { it.isNotBlank() }
     val bRunId = b.runId?.takeIf { it.isNotBlank() }
     if (aRunId != null && bRunId != null) return aRunId == bRunId
 
+    // 3) sessionId — once either side has one, both must match. The earlier
+    // (projectName, agentType) fallback collapsed two real sessions in the
+    // same project into one timeline row.
     val aSessionId = a.sessionId?.takeIf { it.isNotBlank() }
     val bSessionId = b.sessionId?.takeIf { it.isNotBlank() }
-    if (aSessionId != null && bSessionId != null) return aSessionId == bSessionId
+    if (aSessionId != null || bSessionId != null) {
+        return aSessionId != null && bSessionId != null && aSessionId == bSessionId
+    }
 
+    // 4) Both sessionless — fallback for legacy entries.
     if (a.projectName.hasText() && a.projectName == b.projectName && a.agentType == b.agentType) return true
-
-    return aRunId == null && bRunId == null &&
-        aSessionId == null && bSessionId == null &&
-        !a.projectName.hasText() && !b.projectName.hasText() &&
-        a.agentType == b.agentType
+    return !a.projectName.hasText() && !b.projectName.hasText() && a.agentType == b.agentType
 }
 
 fun pairedTimelineStart(entry: TimelineEntry, entries: List<TimelineEntry>): TimelineEntry? =

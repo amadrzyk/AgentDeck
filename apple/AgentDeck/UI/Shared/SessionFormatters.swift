@@ -24,16 +24,36 @@ func displayAgentLabel(_ type: String?) -> String {
 }
 
 /// Shorten a model id to a compact user-facing name.
-/// e.g., "claude-opus-4-6-20261001" → "opus-4-6", "gpt-4.1" → "4.1".
-func displayShortModelName(_ name: String) -> String {
-    var s = name
+/// e.g., "openrouter/anthropic/claude-opus-4-6-20261001" -> "opus-4-6",
+/// "openai/gpt-5.1-codex-max" -> "5.1-codex-max".
+func displayShortModelName(_ name: String, maxLength: Int? = nil) -> String {
+    var s = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    for prefix in ["openrouter:", "api:"] {
+        if s.hasPrefix(prefix) { s = String(s.dropFirst(prefix.count)) }
+    }
+    if let last = s.split(separator: "/").last {
+        s = String(last)
+    }
     for prefix in ["claude-", "gpt-", "o1-", "o3-"] {
         if s.hasPrefix(prefix) { s = String(s.dropFirst(prefix.count)) }
     }
     if let range = s.range(of: #"-\d{8}$"#, options: .regularExpression) {
         s = String(s[s.startIndex..<range.lowerBound])
     }
+    if let maxLength {
+        s = displayTruncatedMiddle(s, maxLength: maxLength)
+    }
     return s
+}
+
+private func displayTruncatedMiddle(_ text: String, maxLength: Int) -> String {
+    guard maxLength > 1, text.count > maxLength else { return text }
+    let marker = "…"
+    let visible = maxLength - marker.count
+    guard visible > 1 else { return String(text.prefix(maxLength)) }
+    let headCount = max(1, Int((Double(visible) * 0.62).rounded()))
+    let tailCount = visible - headCount
+    return String(text.prefix(headCount)) + marker + String(text.suffix(tailCount))
 }
 
 /// Convert an ISO 8601 timestamp into a compact relative-time string

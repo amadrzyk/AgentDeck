@@ -58,6 +58,19 @@
       ],
       "type": "object"
     },
+    "ClearSessionFocusCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "clear_session_focus",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
     "ClientRegisterCommand": {
       "additionalProperties": false,
       "description": "Self-announcement from a rich UI client (Elgato Stream Deck plugin, a future Android companion app, etc.) so the daemon can surface the hardware under its rightful Downstream row instead of treating every WS connection as an anonymous dashboard viewer. Sent once per connect, immediately after the WebSocket opens. Daemon wipes the cached entry when the WS connection closes.",
@@ -236,6 +249,9 @@
         },
         {
           "$ref": "#/definitions/FocusSessionCommand"
+        },
+        {
+          "$ref": "#/definitions/ClearSessionFocusCommand"
         },
         {
           "$ref": "#/definitions/SessionCommand"

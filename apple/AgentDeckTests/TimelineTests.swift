@@ -56,6 +56,95 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(e.entries[2].type, .chatEnd)
     }
 
+    // MARK: - Task hierarchy + lenient unknown-type decode (Phase 1)
+
+    func testDecodeTaskStartEntry() throws {
+        let json = """
+        {
+          "ts": 1710200000000,
+          "type": "task_start",
+          "raw": "Task 1",
+          "taskId": "task-abc",
+          "sessionId": "sess-1",
+          "runId": "run-1",
+          "startedAt": 1710200000000
+        }
+        """.data(using: .utf8)!
+        let entry = try JSONDecoder().decode(TimelineEntry.self, from: json)
+        XCTAssertEqual(entry.type, .taskStart)
+        XCTAssertEqual(entry.taskId, "task-abc")
+        XCTAssertEqual(entry.sessionId, "sess-1")
+    }
+
+    func testDecodeTaskEndWithBoundarySignal() throws {
+        let json = """
+        {
+          "ts": 1710200060000,
+          "type": "task_end",
+          "raw": "TODO done · 60s",
+          "taskId": "task-abc",
+          "boundarySignal": "todo_complete",
+          "startedAt": 1710200000000,
+          "endedAt": 1710200060000
+        }
+        """.data(using: .utf8)!
+        let entry = try JSONDecoder().decode(TimelineEntry.self, from: json)
+        XCTAssertEqual(entry.type, .taskEnd)
+        XCTAssertEqual(entry.boundarySignal, .todoComplete)
+    }
+
+    func testUnknownTimelineEntryTypeDecodesToUnknown() throws {
+        // A future protocol could add a new entry type. The lenient enum must
+        // decode it into `.unknown(raw)` so old clients don't crash on the
+        // first entry of the new type.
+        let json = """
+        { "ts": 1, "type": "future_thing", "raw": "x" }
+        """.data(using: .utf8)!
+        let entry = try JSONDecoder().decode(TimelineEntry.self, from: json)
+        switch entry.type {
+        case .unknown(let raw):
+            XCTAssertEqual(raw, "future_thing")
+        default:
+            XCTFail("expected .unknown, got \(entry.type)")
+        }
+    }
+
+    func testTimelineEntryRoundTripsTaskId() throws {
+        let original = TimelineEntry(
+            ts: 1, type: .toolRequest, raw: "edit",
+            taskId: "task-123"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(TimelineEntry.self, from: data)
+        XCTAssertEqual(decoded.taskId, "task-123")
+    }
+
+    func testTimelineEntryRoundTripsSummaryKind() throws {
+        let original = TimelineEntry(
+            ts: 1, type: .chatEnd, raw: "Refactor · 4s",
+            summaryKind: "heuristic"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(TimelineEntry.self, from: data)
+        XCTAssertEqual(decoded.summaryKind, "heuristic")
+    }
+
+    // MARK: - groupConsecutive — task entries never group
+
+    func testTaskEntriesNeverGroup() {
+        let entries = [
+            TimelineEntry(ts: 1000, type: .taskStart, raw: "Task 1", taskId: "a"),
+            TimelineEntry(ts: 2000, type: .taskStart, raw: "Task 1", taskId: "b"),
+            TimelineEntry(ts: 3000, type: .taskEnd,   raw: "Task 1", taskId: "a"),
+            TimelineEntry(ts: 4000, type: .taskEnd,   raw: "Task 1", taskId: "b"),
+        ]
+        let grouped = groupConsecutive(entries)
+        // Each task entry must remain its own group (never collapsed by
+        // identical raw within window).
+        XCTAssertEqual(grouped.count, 4)
+        XCTAssertTrue(grouped.allSatisfy { $0.count == 1 })
+    }
+
     // MARK: - Grouping
 
     func testGroupConsecutiveSameType() {
@@ -144,12 +233,26 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(store.entries[0].ts, 50)
     }
 
-    // MARK: - Type Icons
+    // MARK: - Type Icons (semantic key + ASCII fallback)
 
-    func testTypeIcons() {
+    func testTimelineIconKeys() {
+        XCTAssertEqual(timelineIconKey(for: .chatStart), .running)
+        XCTAssertEqual(timelineIconKey(for: .chatEnd), .success)
+        XCTAssertEqual(timelineIconKey(for: .error), .error)
+        XCTAssertEqual(timelineIconKey(for: .toolRequest), .awaiting)
+        XCTAssertEqual(timelineIconKey(for: .toolRequest, status: "approved"), .success)
+        XCTAssertEqual(timelineIconKey(for: .toolRequest, status: "denied"), .error)
+        XCTAssertEqual(timelineIconKey(for: .taskStart), .task)
+        XCTAssertEqual(timelineIconKey(for: .taskEnd), .task)
+    }
+
+    func testTypeIconsAsciiFallback() {
+        // ASCII fallback used by preview snapshots / monospaced contexts.
+        // SwiftUI renders the SF Symbol via `sfSymbol(for:)`; this glyph
+        // is the secondary surface.
         XCTAssertEqual(timelineTypeIcon(for: .chatStart), "▶")
-        XCTAssertEqual(timelineTypeIcon(for: .chatEnd), "■")
+        XCTAssertEqual(timelineTypeIcon(for: .chatEnd), "✓")
         XCTAssertEqual(timelineTypeIcon(for: .error), "✗")
-        XCTAssertEqual(timelineTypeIcon(for: .toolRequest), "⚠")
+        XCTAssertEqual(timelineTypeIcon(for: .toolRequest), "⏳")
     }
 }

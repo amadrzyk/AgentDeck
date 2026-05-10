@@ -574,6 +574,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const bridgeLogStream = new BridgeLogStream();
   core.wireTimeline(bridgeLogStream);
   core.wireDisplayMonitor();
+  let lastStateEvent: BridgeEvent | null = null;
+  let userFocusedSessionId: string | null = null;
+  const attachFocusedSessionId = <T extends BridgeEvent>(event: T): T => {
+    if ((event as any).type !== 'state_update') return event;
+    return {
+      ...(event as any),
+      focusedSessionId: userFocusedSessionId ?? '',
+    } as T;
+  };
+  const broadcastFocusedState = () => {
+    const gwAlive = gatewayAdapter?.isAlive() ?? false;
+    const stateEvent = attachFocusedSessionId(core.buildStateEvent({
+      agentType: gwAlive ? 'openclaw' : 'daemon' as any,
+      agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
+      snapshot: core.stateMachine.getSnapshot(),
+    }));
+    lastStateEvent = stateEvent;
+    core.wsServer.broadcast(stateEvent);
+  };
 
   // System wake recovery — re-publish mDNS, reconnect devices, refresh usage
   core.onSystemWake(() => {
@@ -612,11 +631,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       core.cachedModelCatalog = merged;
       debug('daemon', `Model catalog merged from sibling: ${merged.length} models total`);
       const snap = core.stateMachine.getSnapshot();
-      const stateEvent = core.buildStateEvent({
+      const stateEvent = attachFocusedSessionId(core.buildStateEvent({
         agentType: gatewayAdapter?.isAlive() ? 'openclaw' : 'daemon' as any,
         agentCapabilities: gatewayAdapter?.isAlive() ? OPENCLAW_CAPABILITIES : undefined,
         snapshot: snap,
-      });
+      }));
       lastStateEvent = stateEvent;
       core.broadcast(stateEvent);
       core.broadcastUsage();
@@ -628,10 +647,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const focusRelay = new SessionFocusRelay();
   focusRelay.setEventHandler((evt) => {
     if (evt.type === 'state_update') {
+      const focusedId = focusRelay.getFocusedSessionId();
+      if (focusedId) userFocusedSessionId = focusedId;
       // Merge daemon metadata into the session's state_update
       const merged: any = {
         ...evt,
-        sessionId: focusRelay.getFocusedSessionId(),
+        sessionId: focusedId,
+        focusedSessionId: userFocusedSessionId ?? '',
         modelCatalog: (evt as any).modelCatalog ?? core.cachedModelCatalog,
         gatewayAvailable: core.cachedGatewayAvailable,
         gatewayConnected: core.cachedGatewayConnected,
@@ -670,7 +692,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.setModuleHealthProvider(moduleHealthProvider);
 
   // Serial module state provider (heartbeat needs cached state)
-  let lastStateEvent: BridgeEvent | null = null;
   const serialModule = startedModules.find(m => m.name === 'serial') as SerialModule | undefined;
   if (serialModule) {
     serialModule.setStateProvider(() => lastStateEvent);
@@ -717,7 +738,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // routes. `setApme` on core is gated against the `daemon` meta-session so
   // register/deregister won't open a bogus run. Session bridges opening their
   // own connection to the same sqlite file is safe under WAL mode.
-  apme = await initApme();
+  // emitTimeline: forward task hierarchy entries (task_start / task_end) into
+  // the daemon's bridgeTimeline so downstream dashboards see task headers.
+  apme = await initApme(undefined, {
+    emitTimeline: (entry) => core.bridgeTimeline.addEntry(entry),
+  });
   if (apme) {
     core.setApme(apme);
     log(`[agentdeck] APME enabled — store=${apme.store.dbPath} routes=/apme/*`);
@@ -788,11 +813,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             if (models) {
               core.cachedModelCatalog = models;
               const snap = core.stateMachine.getSnapshot();
-              const stateEvent = core.buildStateEvent({
+              const stateEvent = attachFocusedSessionId(core.buildStateEvent({
                 agentType: 'openclaw',
                 agentCapabilities: OPENCLAW_CAPABILITIES,
                 snapshot: snap,
-              });
+              }));
               lastStateEvent = stateEvent;
               core.broadcast(stateEvent);
               core.broadcastUsage();
@@ -832,11 +857,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             }
             // Force full state broadcast
             const snap = core.stateMachine.getSnapshot();
-            const gwStateEvent = core.buildStateEvent({
+            const gwStateEvent = attachFocusedSessionId(core.buildStateEvent({
               agentType: 'openclaw',
               agentCapabilities: OPENCLAW_CAPABILITIES,
               snapshot: snap,
-            });
+            }));
             lastStateEvent = gwStateEvent;
             core.wsServer.broadcast(gwStateEvent);
             core.broadcastUsage();
@@ -940,11 +965,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // ===== State changed → broadcast =====
   core.stateMachine.on('state_changed', (snapshot) => {
     const gwAlive = gatewayAdapter?.isAlive() ?? false;
-    const stateEvent = core.buildStateEvent({
+    const stateEvent = attachFocusedSessionId(core.buildStateEvent({
       agentType: gwAlive ? 'openclaw' : 'daemon' as any,
       agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
       snapshot,
-    });
+    }));
     lastStateEvent = stateEvent;
     core.wsServer.broadcast(stateEvent);
     core.maybeBroadcastSessionsList();
@@ -1011,25 +1036,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       return;
     }
     if (cmd.type === 'switch_agent') {
+      userFocusedSessionId = null;
       focusRelay.unfocus(); // Clear session focus on agent switch
       const target = (cmd as any).agent as string;
       if (target === 'openclaw' && gatewayAdapter?.isAlive()) {
         // Force broadcast OpenClaw state to all clients
         const snap = core.stateMachine.getSnapshot();
-        const gwStateEvent = core.buildStateEvent({
+        const gwStateEvent = attachFocusedSessionId(core.buildStateEvent({
           agentType: 'openclaw',
           agentCapabilities: OPENCLAW_CAPABILITIES,
           snapshot: snap,
-        });
+        }));
         lastStateEvent = gwStateEvent;
         core.wsServer.broadcast(gwStateEvent);
       } else if (target === 'claude-code') {
         // Broadcast daemon/claude-code state — clients reconnect to session bridges independently
         const snap = core.stateMachine.getSnapshot();
-        const stateEvent = core.buildStateEvent({
+        const stateEvent = attachFocusedSessionId(core.buildStateEvent({
           agentType: 'daemon' as any,
           snapshot: snap,
-        });
+        }));
         lastStateEvent = stateEvent;
         core.wsServer.broadcast(stateEvent);
       }
@@ -1038,7 +1064,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (cmd.type === 'focus_session') {
       const sessionId = (cmd as any).sessionId as string;
       if (!sessionId) return;
+      userFocusedSessionId = sessionId;
+      broadcastFocusedState();
+      if (sessionId === 'openclaw-gateway' && gatewayAdapter?.isAlive()) {
+        focusRelay.unfocus();
+        return;
+      }
       focusRelay.focus(sessionId);
+      return;
+    }
+    if (cmd.type === 'clear_session_focus') {
+      userFocusedSessionId = null;
+      focusRelay.unfocus();
+      broadcastFocusedState();
       return;
     }
     // Session-scoped command: forward inner command to a specific session's bridge
@@ -1052,6 +1090,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         return;
       }
       // Focus the session first, then route the command
+      userFocusedSessionId = sessionId;
+      broadcastFocusedState();
       focusRelay.focus(sessionId);
       // Small delay to let focus take effect, then route
       setTimeout(() => focusRelay.routeCommand(command), 100);

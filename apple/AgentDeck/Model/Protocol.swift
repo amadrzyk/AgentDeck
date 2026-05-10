@@ -67,18 +67,24 @@ enum DashboardDataRules {
         }
     }
 
+    static func naturalLabelCompare(_ lhs: String, _ rhs: String) -> ComparisonResult {
+        let standard = lhs.localizedStandardCompare(rhs)
+        if standard != .orderedSame { return standard }
+        return lhs.localizedCaseInsensitiveCompare(rhs)
+    }
+
     static func sortSessions(_ sessions: [SessionInfo]) -> [SessionInfo] {
         sessions.sorted { lhs, rhs in
             let typeRank = agentTypeRank(lhs.agentType) - agentTypeRank(rhs.agentType)
             if typeRank != 0 { return typeRank < 0 }
 
-            let projectCompare = (lhs.projectName ?? "").localizedCaseInsensitiveCompare(rhs.projectName ?? "")
+            let projectCompare = naturalLabelCompare(lhs.projectName ?? "", rhs.projectName ?? "")
             if projectCompare != .orderedSame { return projectCompare == .orderedAscending }
 
             let startDiff = startedAtTime(lhs.startedAt) - startedAtTime(rhs.startedAt)
             if startDiff != 0 { return startDiff < 0 }
 
-            return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+            return naturalLabelCompare(lhs.id, rhs.id) == .orderedAscending
         }
     }
 
@@ -88,13 +94,13 @@ enum DashboardDataRules {
             let typeRank = agentTypeRank(lhs.agentType) - agentTypeRank(rhs.agentType)
             if typeRank != 0 { return typeRank < 0 }
 
-            let projectCompare = lhs.projectName.localizedCaseInsensitiveCompare(rhs.projectName)
+            let projectCompare = naturalLabelCompare(lhs.projectName, rhs.projectName)
             if projectCompare != .orderedSame { return projectCompare == .orderedAscending }
 
             let startDiff = startedAtTime(lhs.startedAt) - startedAtTime(rhs.startedAt)
             if startDiff != 0 { return startDiff < 0 }
 
-            return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+            return naturalLabelCompare(lhs.id, rhs.id) == .orderedAscending
         }
     }
     #endif
@@ -108,7 +114,7 @@ enum DashboardDataRules {
 
             let lhsProject = (lhs["projectName"] as? String) ?? ""
             let rhsProject = (rhs["projectName"] as? String) ?? ""
-            let projectCompare = lhsProject.localizedCaseInsensitiveCompare(rhsProject)
+            let projectCompare = naturalLabelCompare(lhsProject, rhsProject)
             if projectCompare != .orderedSame { return projectCompare == .orderedAscending }
 
             let lhsStartedAt = lhs["startedAt"] as? String
@@ -118,7 +124,7 @@ enum DashboardDataRules {
 
             let lhsId = (lhs["id"] as? String) ?? ""
             let rhsId = (rhs["id"] as? String) ?? ""
-            return lhsId.localizedCaseInsensitiveCompare(rhsId) == .orderedAscending
+            return naturalLabelCompare(lhsId, rhsId) == .orderedAscending
         }
     }
 
@@ -233,7 +239,7 @@ enum DashboardDataRules {
         return lhsKey.localizedCaseInsensitiveCompare(rhsKey) == .orderedAscending
     }
 
-    private static func startedAtTime(_ startedAt: String?) -> TimeInterval {
+    static func startedAtTime(_ startedAt: String?) -> TimeInterval {
         guard let startedAt,
               let date = ISO8601DateFormatter().date(from: startedAt) else {
             return .greatestFiniteMagnitude
@@ -419,11 +425,13 @@ struct StateUpdateEvent: Codable, Sendable {
 
     // CodingKeys excludes moduleHealth (parsed manually from raw JSON)
     private enum CodingKeys: String, CodingKey {
-        case type, state, permissionMode, agentType, sessionId, agentCapabilities
+        case type, state, permissionMode, agentType, sessionId, focusedSessionId, agentCapabilities
         case currentTool, toolInput, toolProgress, projectName, modelName, effortLevel
         case billingType, options, promptType, question, navigable, cursorIndex
         case suggestedPrompt, modelCatalog, sessionStatus, remoteUrl, pairingUrl
         case workerSessionCount, ollamaStatus, mlxModels, subscriptions
+        case codexAuthMode, codexWebAuthConnected, codexPlanType
+        case codexAccountId, codexSubscriptionActiveUntil, codexLastRefreshAt
         case antigravityStatus, gatewayAvailable, gatewayConnected, gatewayHasError
         case gatewayAuthStatus, gatewayAuthRequestId, gatewayAuthMessage, gatewayDeviceId
         case daemonPort, mlxModelCatalog
@@ -431,8 +439,12 @@ struct StateUpdateEvent: Codable, Sendable {
     }
     var permissionMode: String?
     var agentType: String?
-    /// Session ID of the focused session (injected by daemon focus relay)
+    /// Session ID associated with this state payload. In daemon mode this is
+    /// the latest hook-attributed session, not necessarily the user's focus.
     var sessionId: String?
+    /// Session explicitly focused by the user. Daemons keep this separate from
+    /// `sessionId` so active sessions can change without moving selection UI.
+    var focusedSessionId: String?
     var agentCapabilities: AgentCapabilities?
     var currentTool: String?
     var toolInput: String?
@@ -455,6 +467,12 @@ struct StateUpdateEvent: Codable, Sendable {
     var ollamaStatus: OllamaStatus?
     var mlxModels: [String]?
     var subscriptions: [SubscriptionInfo]?
+    var codexAuthMode: String?
+    var codexWebAuthConnected: Bool?
+    var codexPlanType: String?
+    var codexAccountId: String?
+    var codexSubscriptionActiveUntil: String?
+    var codexLastRefreshAt: String?
     var antigravityStatus: AntigravityStatusInfo?
     var gatewayAvailable: Bool?
     var gatewayConnected: Bool?
@@ -624,6 +642,7 @@ enum PluginCommand: Encodable, Sendable {
     case diag(action: String)
     case utility(action: String, value: Int?)
     case focusSession(sessionId: String)
+    case clearSessionFocus
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
@@ -662,6 +681,8 @@ enum PluginCommand: Encodable, Sendable {
         case .focusSession(let sessionId):
             try container.encode("focus_session", forKey: .init("type"))
             try container.encode(sessionId, forKey: .init("sessionId"))
+        case .clearSessionFocus:
+            try container.encode("clear_session_focus", forKey: .init("type"))
         }
     }
 }

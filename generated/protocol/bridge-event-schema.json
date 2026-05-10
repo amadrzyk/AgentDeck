@@ -910,6 +910,10 @@
         "effortLevel": {
           "type": "string"
         },
+        "focusedSessionId": {
+          "description": "Session explicitly focused by the user; visual selection should use this.",
+          "type": "string"
+        },
         "gatewayAuthMessage": {
           "description": "Human-readable OpenClaw auth/pairing diagnostic",
           "type": "string"
@@ -1006,7 +1010,7 @@
           "type": "string"
         },
         "sessionId": {
-          "description": "Session ID of the focused session (injected by daemon focus relay)",
+          "description": "Session ID associated with this state payload; may move with hook activity.",
           "type": "string"
         },
         "sessionStatus": {
@@ -1074,6 +1078,10 @@
       ],
       "type": "object"
     },
+    "TaskBoundarySignal": {
+      "description": "A `task` groups consecutive turns within a run. Boundaries are detected automatically from agent events:  - `todo_complete`  — TodoWrite PostToolUse where every todo.status === 'completed'  - `clear`          — UserPromptSubmit `/clear` (also splits the run)  - `session_end`    — closeRun finalization  - `manual`         — reserved for a future explicit task-end marker\n\nA task-level judge reads all turns belonging to the task and writes a one-line `summary` + `compositeScore`. Individual axis scores land in `evals` rows with `layer='task_judge'` and `taskId` set.",
+      "type": "string"
+    },
     "TimelineEntry": {
       "additionalProperties": false,
       "properties": {
@@ -1086,7 +1094,17 @@
         "automated": {
           "type": "boolean"
         },
+        "boundarySignal": {
+          "$ref": "#/definitions/TaskBoundarySignal",
+          "description": "Only on task_end. Why the task closed."
+        },
         "detail": {
+          "type": "string"
+        },
+        "endedAt": {
+          "type": "number"
+        },
+        "projectName": {
           "type": "string"
         },
         "raw": {
@@ -1095,12 +1113,34 @@
         "repeatCount": {
           "type": "number"
         },
+        "runId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "number"
+        },
         "status": {
           "enum": [
             "pending",
             "approved",
             "denied"
           ],
+          "type": "string"
+        },
+        "summaryKind": {
+          "description": "How the row's `raw` summary was produced. Lets clients decide whether the detail pane is worth showing — when `'none'`, detail is just the unfiltered response that the heuristic couldn't summarize, and showing it duplicates content rather than adding value.   - `'llm'`     : LLM-summarized (clean, short, distinct from detail)   - `'heuristic'`: topic-hint extracted from response or prompt   - `'none'`    : last-resort fallback (literal \"Completed\", bare tool name, etc.)",
+          "enum": [
+            "llm",
+            "heuristic",
+            "none"
+          ],
+          "type": "string"
+        },
+        "taskId": {
+          "description": "APME task id. Set on task_start/task_end and on every turn entry inside the task scope.",
           "type": "string"
         },
         "ts": {
@@ -1132,7 +1172,9 @@
         "model_response",
         "memory_recall",
         "tool_exec",
-        "eval_result"
+        "eval_result",
+        "task_start",
+        "task_end"
       ],
       "type": "string"
     },

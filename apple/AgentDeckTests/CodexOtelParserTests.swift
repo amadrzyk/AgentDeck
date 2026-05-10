@@ -70,6 +70,64 @@ final class CodexOtelParserTests: XCTestCase {
         )
     }
 
+    func testTraceBackedTurnStartWithoutThreadIdUsesAnonymousFallback() {
+        let traceId = "8b0e3fb4a3f24585b17c4d85f38c0b41"
+        let json = otlp(spans: [
+            ["traceId": traceId, "name": "turn/start", "attributes": attr([:])]
+        ])
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [.turnStart(threadId: "otel-active", turnId: traceId, cwd: nil)]
+        )
+    }
+
+    func testTraceFallbackDoesNotOverrideDurableThreadId() {
+        let traceId = "8b0e3fb4a3f24585b17c4d85f38c0b41"
+        let json = otlp(spans: [
+            ["traceId": traceId, "name": "turn/start", "attributes": attr([
+                "thread.id": tidCurrent,
+                "turn.id": "u-current",
+                "cwd": "/repo",
+            ])]
+        ])
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [.turnStart(threadId: tidCurrent, turnId: "u-current", cwd: "/repo")]
+        )
+    }
+
+    func testCurrentCwdAliasesAreAccepted() {
+        for key in ["process.cwd", "terminal.cwd", "workspace.root", "workspace.path", "project.root", "project.path"] {
+            let json = otlp(spans: [
+                ["name": "turn/start", "attributes": attr([
+                    "thread.id": tidCurrent,
+                    "turn.id": "u-current",
+                    key: "/Users/puritysb/github/AgentDeck",
+                ])]
+            ])
+            XCTAssertEqual(
+                CodexTelemetryModule.parse(json),
+                [.turnStart(threadId: tidCurrent, turnId: "u-current", cwd: "/Users/puritysb/github/AgentDeck")],
+                "cwd alias \(key) should be accepted"
+            )
+        }
+    }
+
+    func testResourceLevelCwdAliasFallsThrough() {
+        let json: [String: Any] = [
+            "resourceSpans": [[
+                "resource": ["attributes": attr(["workspace.root": "/repo"])],
+                "scopeSpans": [["spans": [
+                    ["name": "turn/start", "attributes": attr(["thread.id": tidCurrent, "turn.id": "u-resource"])]
+                ]]]
+            ]]
+        ]
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [.turnStart(threadId: tidCurrent, turnId: "u-resource", cwd: "/repo")]
+        )
+    }
+
     func testCurrentCodexActivitySpansAreRecognized() {
         let json = otlp(spans: [
             ["name": "responses_websocket.stream_request", "attributes": attr(["thread.id": tidStream, "turn.id": "u-stream"])]
@@ -77,6 +135,17 @@ final class CodexOtelParserTests: XCTestCase {
         XCTAssertEqual(
             CodexTelemetryModule.parse(json),
             [.activity(threadId: tidStream, turnId: "u-stream", name: "responses_websocket.stream_request")]
+        )
+    }
+
+    func testTraceBackedActivityWithoutThreadIdUsesAnonymousFallback() {
+        let traceId = "b9ab795c48bd4e128317e68e7fb7b861"
+        let json = otlp(spans: [
+            ["traceId": traceId, "name": "receiving", "attributes": attr([:])]
+        ])
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [.activity(threadId: "otel-active", turnId: traceId, name: "receiving")]
         )
     }
 
