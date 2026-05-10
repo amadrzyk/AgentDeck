@@ -54,7 +54,7 @@ struct ApmeDashboardWindow: View {
                 .foregroundStyle(.secondary)
             Text("APME Dashboard Unavailable")
                 .font(.title3)
-            Text("The in-process daemon is not running. Start it from the menu bar and try again.")
+            Text("The local dashboard service is not running. Reopen AgentDeck and try again.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

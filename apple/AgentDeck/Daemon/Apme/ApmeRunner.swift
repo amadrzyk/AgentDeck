@@ -421,7 +421,8 @@ actor ApmeRunner {
             turnId: nil,
             layer1Ran: false,
             layer2Ran: true,
-            overall: overall
+            overall: overall,
+            layer1SkippedReason: Self.layer1SkippedReason
         )
         for listener in listeners { listener(result) }
     }

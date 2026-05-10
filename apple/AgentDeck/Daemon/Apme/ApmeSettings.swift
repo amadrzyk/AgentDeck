@@ -1,10 +1,9 @@
 #if os(macOS)
 // ApmeSettings.swift — APME configuration loader (Swift mirror of settings.ts).
 //
-// Phase 1 (App Store MVP): only the `foundationModels` judge backend is supported.
-// MLX, API, OpenClaw backends remain in the enum for schema forward-compatibility
-// with bridge/src/apme/settings.ts but are NOT wired in Phase 1 — if the user's
-// settings.json specifies them, the runner degrades gracefully to `foundationModels`.
+// App Store-safe judge backends: Foundation Models (on-device), MLX local
+// server, and Anthropic API are wired without subprocesses. OpenClaw remains
+// in the enum for schema forward-compatibility with bridge/src/apme/settings.ts.
 //
 // Config source of truth: ~/.agentdeck/settings.json  { "apme": { ... } }
 // The file is shared with the Node.js bridge, so both stacks read/write the same
@@ -14,10 +13,9 @@ import Foundation
 
 // MARK: - Judge backend
 
-/// Supported judge backends. Phase 1 hardcodes `foundationModels`; other cases
-/// exist so the settings file can round-trip values written by the Node bridge
-/// without data loss. Runner falls back to `foundationModels` when selected
-/// backend is unavailable in the current build.
+/// Supported judge backends. `openclaw` currently round-trips settings written
+/// by the Node bridge; the Swift runner degrades it to Foundation Models until
+/// that adapter is wired locally.
 enum ApmeJudgeBackend: String, Codable {
     case foundationModels = "foundationModels"
     case mlx

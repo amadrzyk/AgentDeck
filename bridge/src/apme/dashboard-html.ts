@@ -142,6 +142,8 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 
 <script>
 const B=location.origin;let selId=null;let allRuns=[];
+const AUTH=new URLSearchParams(location.search).get('token')||'';
+function api(path){const sep=path.includes('?')?'&':'?';return B+path+(AUTH?sep+'token='+encodeURIComponent(AUTH):'')}
 
 function showTab(n){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('visible'));
@@ -213,13 +215,13 @@ function renderEmptyState(){
     '<div style="font-size:32px;margin-bottom:16px">📊</div>'+
     '<div style="font-size:16px;color:var(--muted);font-weight:600;margin-bottom:8px">No APME reports yet</div>'+
     '<div style="font-size:13px;color:var(--dim);max-width:420px;margin:0 auto 20px">'+
-      'APME evaluates each coding agent session after it finishes — task quality, outcome, and vibe scores. Start a Claude Code, Codex, or OpenCode session and come back here once it completes.'+
+      'APME evaluates each coding agent session after it finishes — task quality, outcome, and vibe scores. Start Claude Code or Codex in your own workspace and come back here once it completes.'+
     '</div>'+
     '<div style="font-size:12px;color:var(--dim);border-top:1px solid var(--border);padding-top:16px;max-width:420px;margin:0 auto">'+
       '<div style="font-weight:600;margin-bottom:6px;color:var(--muted)">Quick start</div>'+
       '<div style="text-align:left;padding-left:16px">'+
-        '<div>1. Install AgentDeck hooks in Settings → Claude Code Hooks</div>'+
-        '<div>2. Launch a session from the menubar</div>'+
+        '<div>1. Enable AgentDeck hooks in Settings → Claude Code Hooks</div>'+
+        '<div>2. Run your coding agent in your own workspace</div>'+
         '<div>3. When the agent finishes its turn, a row appears here</div>'+
       '</div>'+
     '</div>'+
@@ -227,7 +229,7 @@ function renderEmptyState(){
 }
 async function loadRuns(){
   try{
-    const r=await fetch(B+'/apme/runs?limit=50');const d=await r.json();allRuns=(d.runs||[]).filter(r=>r.taskCategory!=='_empty'&&r.taskPrompt);
+    const r=await fetch(api('/apme/runs?limit=50'));const d=await r.json();allRuns=(d.runs||[]).filter(r=>r.taskCategory!=='_empty'&&r.taskPrompt);
     populateFilters(allRuns);renderRuns(allRuns);
     document.getElementById('status').textContent=allRuns.length+' runs · '+new Date().toLocaleTimeString();
   }catch(e){document.getElementById('status').textContent='Error: '+e.message}
@@ -238,7 +240,7 @@ async function selectRun(id){
   const el=document.getElementById('detail-panel');
   el.innerHTML='<div class="detail-empty">Loading...</div>';
   try{
-    let r=await fetch(B+'/apme/run/'+id);if(!r.ok)r=await fetch(B+'/apme/run?id='+id);
+    let r=await fetch(api('/apme/run/'+id));if(!r.ok)r=await fetch(api('/apme/run?id='+id));
     const d=await r.json();const run=d.run||{};const evals=d.evals||[];const turns=d.turns||[];const vibe=d.vibe;
 
     // Normalize field names — Node.js uses snake_case, Swift may use camelCase in some paths.
@@ -253,6 +255,7 @@ async function selectRun(id){
     const outcomeConf=run.outcome_confidence??run.outcomeConfidence??'';
     const effJson=run.efficiency_json??run.efficiencyJson;
     const compScore=run.composite_score??run.compositeScore;
+    const layer1Skipped=run.layer1_skipped_reason??run.layer1SkippedReason;
 
     const dur=endedAt&&startedAt?endedAt-startedAt:null;
     const tm=startedAt?new Date(startedAt).toLocaleString():'—';
@@ -334,6 +337,10 @@ async function selectRun(id){
         h+='<div style="padding:4px 0">'+icon+' '+e.metric+info+'</div>';
       }
       h+='</div>';
+    }else if(layer1Skipped){
+      h+='<div class="section"><div class="section-head">Deterministic Checks</div>';
+      h+='<div style="font-size:12px;color:var(--muted);line-height:1.5">LLM-only evaluation for this run. Deterministic project checks were skipped ('+esc(layer1Skipped)+').</div>';
+      h+='</div>';
     }
 
     // Turns
@@ -386,12 +393,12 @@ function copyRunReport(rid){
 }
 
 async function submitVibe(rid,v){
-  try{await fetch(B+'/apme/vibe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:rid,verdict:v})});selectRun(rid)}
+  try{await fetch(api('/apme/vibe'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runId:rid,verdict:v})});selectRun(rid)}
   catch(e){alert('Error: '+e.message)}
 }
 
 async function loadScorecard(){
-  try{const r=await fetch(B+'/apme/scorecard');const d=await r.json();const c=d.scorecards||[];
+  try{const r=await fetch(api('/apme/scorecard'));const d=await r.json();const c=d.scorecards||[];
   if(!c.length){document.getElementById('scorecard-content').innerHTML='<div class="empty">No scorecard data yet</div>';return}
   let h='<table><thead><tr><th>Model</th><th>Agent</th><th>Runs</th><th>Score</th><th>Tests</th><th>Cost</th><th>$/Quality</th></tr></thead><tbody>';
   for(const s of c)h+='<tr><td>'+s.modelId+'</td><td>'+s.agentType+'</td><td>'+s.runs+'</td><td>'+fs(s.avgOverall)+'</td><td>'+fs(s.avgTestsPass)+'</td><td>'+(s.totalCost!=null?'$'+s.totalCost.toFixed(2):'—')+'</td><td>'+(s.costPerQuality!=null?'$'+s.costPerQuality.toFixed(2):'—')+'</td></tr>';
@@ -400,7 +407,7 @@ async function loadScorecard(){
 }
 
 async function loadCategories(){
-  try{const r=await fetch(B+'/apme/categories');const d=await r.json();const c=d.categories||[];
+  try{const r=await fetch(api('/apme/categories'));const d=await r.json();const c=d.categories||[];
   if(!c.length){document.getElementById('categories-content').innerHTML='<div class="empty">No category data yet</div>';return}
   let h='<table><thead><tr><th>Category</th><th>Model</th><th>Runs</th><th>Score</th><th>Tests</th><th>Cost</th></tr></thead><tbody>';
   for(const s of c)h+='<tr><td><span class="badge-cat">'+s.taskCategory+'</span></td><td>'+s.modelId+'</td><td>'+s.runs+'</td><td>'+fs(s.avgOverall)+'</td><td>'+fs(s.avgTestsPass)+'</td><td>'+(s.totalCost!=null?'$'+s.totalCost.toFixed(2):'—')+'</td></tr>';

@@ -4228,7 +4228,8 @@ final class DaemonServer {
                 evals: taskEvals,
                 overallScore: overall,
                 outcome: "committed",
-                compositeScore: overall
+                compositeScore: overall,
+                layer1SkippedReason: result.layer1SkippedReason
             )
 
             appendEvalResultTimeline(
@@ -4281,7 +4282,8 @@ final class DaemonServer {
                 evals: turnEvals,
                 overallScore: overall.score,
                 outcome: "committed",
-                compositeScore: overall.score
+                compositeScore: overall.score,
+                layer1SkippedReason: result.layer1SkippedReason
             )
 
             // Timeline entry (★ eval_result) — rendered by every viewer target
@@ -4316,7 +4318,8 @@ final class DaemonServer {
             evals: evals,
             overallScore: overall,
             outcome: run.outcome,
-            compositeScore: run.compositeScore
+            compositeScore: run.compositeScore,
+            layer1SkippedReason: result.layer1SkippedReason
         )
 
         let pctValue = overall ?? run.compositeScore ?? 0
@@ -4361,7 +4364,8 @@ final class DaemonServer {
         evals: [ApmeEval],
         overallScore: Double?,
         outcome: String?,
-        compositeScore: Double?
+        compositeScore: Double?,
+        layer1SkippedReason: String? = nil
     ) {
         var runDict: [String: Any] = [
             "runId": run.id,
@@ -4391,6 +4395,7 @@ final class DaemonServer {
         if let v = run.outputTokens { runDict["outputTokens"] = v }
         if let v = run.costUsd { runDict["costUsd"] = v }
         if let v = run.exitCode { runDict["exitCode"] = v }
+        if let v = layer1SkippedReason { runDict["layer1SkippedReason"] = v }
 
         let event: [String: Any] = [
             "type": "apme_eval",
@@ -4421,6 +4426,7 @@ final class DaemonServer {
             runId: nil
         )
         Task { await timelineStore.add(entry) }
+        broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)] as [String: Any])
     }
 
     @MainActor
