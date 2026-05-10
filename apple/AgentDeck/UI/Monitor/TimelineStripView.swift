@@ -825,6 +825,15 @@ func timelineDisplayGroupsForDashboard(_ groups: [GroupedEntry]) -> [GroupedEntr
             return timelineIsMeaningfulChatStart(entry)
         }
         if entry.type == .chatEnd {
+            // chat_end with a real summary tag carries info distinct from
+            // chat_response's snippet ("Completed · 3s · {topic}" vs. the
+            // first 200 chars of the response), so it stays as a dimmed
+            // metadata sibling — otherwise the Settings → Timeline summary
+            // picker is invisible to the user (its entire output lands here).
+            // "none" sentinel (bridge-set when summarization gave up) and
+            // nil (legacy on-disk rows) revert to the original
+            // dedup-with-chat_response rule because their raw is redundant.
+            if let kind = entry.summaryKind, kind != "none" { return true }
             return !timelineHasPairedChatResponse(for: entry, in: groups)
         }
         return true
