@@ -200,6 +200,7 @@ final class DaemonServer {
     // State caches
     private var cachedSessions: [DaemonSessionEntry] = []
     private let serialEventSnapshot = SerialEventSnapshot()
+    private var lastSessionsListFingerprint: String?
 
     /// Sessions advertised over WS via `session_push_register` from CLI
     /// session bridges. Kept separate from `cachedSessions` so that
@@ -3182,7 +3183,19 @@ final class DaemonServer {
     @MainActor
     private func broadcastSessionsList() {
         let event = buildSessionsListEvent()
+        let fingerprint = Self.stableJSONFingerprint(event)
+        guard fingerprint != lastSessionsListFingerprint else { return }
+        lastSessionsListFingerprint = fingerprint
         broadcastRaw(event)
+    }
+
+    private static func stableJSONFingerprint(_ event: [String: Any]) -> String {
+        if JSONSerialization.isValidJSONObject(event),
+           let data = try? JSONSerialization.data(withJSONObject: event, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            return json
+        }
+        return String(describing: event)
     }
 
     private func buildSessionsListEvent() -> [String: Any] {
@@ -3251,7 +3264,9 @@ final class DaemonServer {
         // But still broadcast cached data so clients aren't left empty
         if !sessions.isEmpty {
             DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier1-failed", "Usage Tier 1 failed for all \(sessions.count) siblings", minInterval: 30)
-            oauthConnected = usageAPI.hasOAuthToken()
+            if usageAPI.isDirectOAuthUsageSupported {
+                oauthConnected = usageAPI.hasOAuthToken()
+            }
             // Don't mark stale here — usageTick's 10-min TTL handles staleness.
             // A transient relay failure with fresh cached data isn't stale.
             broadcastUsage()
@@ -3259,6 +3274,20 @@ final class DaemonServer {
         }
 
         // Tier 3: Direct API (only if no siblings)
+        guard usageAPI.isDirectOAuthUsageSupported else {
+            DaemonLogger.shared.throttledDebug(
+                "Daemon",
+                key: "usage-relay:tier3-unavailable",
+                "Usage Tier 3 skipped: direct OAuth usage unavailable in Swift daemon",
+                minInterval: 300
+            )
+            if cachedApiUsage != nil {
+                apiUsageStale = true
+            }
+            broadcastUsage()
+            return
+        }
+
         DaemonLogger.shared.throttledDebug("Daemon", key: "usage-relay:tier3-start", "Usage Tier 3: direct API", minInterval: 30)
         if let usage = await usageAPI.fetchUsage() {
             cachedApiUsage = usage

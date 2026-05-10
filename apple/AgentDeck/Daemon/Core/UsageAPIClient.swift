@@ -67,6 +67,7 @@ final class UsageAPIClient: Sendable {
     private static let cacheFile = AuthManager.agentDeckDir.appendingPathComponent("usage-cache.json")
     private static let fileCacheTTL: TimeInterval = 120  // seconds
     private static let tokenExpiryMargin: TimeInterval = 600  // 10 minutes
+    static let directOAuthUsageSupported = false
     // .userInteractive: fetchUsage()/fetchUsageRelayed() are reachable from
     // main-actor entry points (DaemonServer initial usage task, query_usage
     // command handler) that sync-wait via DispatchSemaphore. Anything below
@@ -113,6 +114,7 @@ final class UsageAPIClient: Sendable {
     nonisolated(unsafe) private var lastStableCodexAuthStatus: CodexAuthStatus?
 
     var tokenStatus: TokenStatus { lastTokenStatus }
+    var isDirectOAuthUsageSupported: Bool { Self.directOAuthUsageSupported }
     var codexAuthStatus: CodexAuthStatus? {
         codexAuthQueue.sync {
             if let cached = codexAuthCacheEntry,
@@ -149,6 +151,16 @@ final class UsageAPIClient: Sendable {
             fallback.fetchedAt = cached.fetchedAt
             fallback.stale = true
             staleFallback = fallback
+        }
+
+        guard Self.directOAuthUsageSupported else {
+            DaemonLogger.shared.throttledDebug(
+                "UsageAPI",
+                key: "direct-oauth-unsupported",
+                "Direct OAuth usage fetch unavailable in Swift daemon; using relay/admin/cache paths only",
+                minInterval: 300
+            )
+            return staleFallback
         }
 
         // Check backoff
@@ -250,7 +262,8 @@ final class UsageAPIClient: Sendable {
     }
 
     func hasOAuthToken() -> Bool {
-        getOAuthToken() != nil
+        guard Self.directOAuthUsageSupported else { return false }
+        return getOAuthToken() != nil
     }
 
     // MARK: - Keychain
@@ -264,8 +277,9 @@ final class UsageAPIClient: Sendable {
         // Claude Code OAuth credentials live in the user's own keychain and
         // would require a shared Keychain Access Group (which Anthropic does
         // not publish) for SecItemCopyMatching to read them from this app.
-        // Usage polling falls back to the network probe path that doesn't
-        // need OAuth state.
+        // App Store builds therefore do not attempt direct OAuth usage
+        // polling; DaemonServer uses sibling relay, Admin API, or stale cache
+        // semantics instead.
         return nil
     }
 

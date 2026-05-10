@@ -36,6 +36,10 @@ actor ESP32Serial {
         var provisionSent = false
         let readToken = ReadToken()
         let openedAt = Date()
+        var lastReadAt: Date?
+        var lastWriteAt: Date?
+        var deviceInfoRequestsSent = 0
+        var needsLineReset = false
     }
 
     struct DeviceInfo {
@@ -62,7 +66,10 @@ actor ESP32Serial {
     private var failedPorts: [String: PortFailure] = [:]
     private var provisionFingerprintsByPort: [String: String] = [:]
     private static let permanentBlockDuration: TimeInterval = 300  // 5 minutes
-    private static let deviceInfoTimeoutSec: TimeInterval = 30  // reconnect if no device_info after 30s
+    private static let deviceInfoTimeoutSec: TimeInterval = 30  // retry device_info if absent
+    private static let deviceInfoReconnectSec: TimeInterval = 120
+    private static let writeBackpressureRetryLimit = 100
+    private static let writeBackpressureRetryUsec: useconds_t = 20_000
 
     /// Thread-safe queue for incoming serial data (read thread → actor)
     private struct PendingRead: @unchecked Sendable {
@@ -102,13 +109,14 @@ actor ESP32Serial {
     var connectionCount: Int { connections.filter(\.connected).count }
 
     func statusSnapshot() -> sending [String: Any] {
-        [
+        let connectedPorts = Set(connections.filter(\.connected).map(\.port))
+        return [
             "connectionCount": connections.filter(\.connected).count,
             "detectedPorts": lastDetectedPorts,
             "lastOpenError": lastOpenError as Any,
             "lastReadError": lastReadError as Any,
             "lastWriteError": lastWriteError as Any,
-            "portFailures": failedPorts.mapValues { failure in
+            "portFailures": failedPorts.filter { !connectedPorts.contains($0.key) }.mapValues { failure in
                 [
                     "error": failure.error,
                     "isPermanent": failure.isPermanent,
@@ -121,6 +129,9 @@ actor ESP32Serial {
                     "port": conn.port,
                     "connected": conn.connected,
                     "provisionSent": conn.provisionSent,
+                    "lastReadAt": conn.lastReadAt.map { Int($0.timeIntervalSince1970 * 1000) } as Any,
+                    "lastWriteAt": conn.lastWriteAt.map { Int($0.timeIntervalSince1970 * 1000) } as Any,
+                    "deviceInfoRequestsSent": conn.deviceInfoRequestsSent,
                     "deviceInfo": [
                         "board": conn.deviceInfo?.board as Any,
                         "version": conn.deviceInfo?.version as Any,
@@ -372,7 +383,7 @@ actor ESP32Serial {
         DaemonLogger.shared.info("ESP32 opened: \(port) [\(port.contains("usbmodem") ? "CDC" : "UART")]")
 
         // Request device info
-        sendToConnection(&conn, json: #"{"type":"device_info_request"}"#)
+        sendDeviceInfoRequest(to: &conn)
 
         // Brief delay to let ESP32 process and respond, then read initial data
         Thread.sleep(forTimeInterval: 0.5)
@@ -443,6 +454,9 @@ actor ESP32Serial {
 
     private func handleReadData(port: String, data: String) {
         guard let idx = connections.firstIndex(where: { $0.port == port }) else { return }
+        connections[idx].lastReadAt = Date()
+        failedPorts.removeValue(forKey: port)
+        lastReadError = nil
         connections[idx].readBuffer += data
         // Normalize CR/CRLF to LF — ESP32 Serial.println() sends \r\n,
         // cfmakeraw disables ICRNL so \r arrives as-is
@@ -468,6 +482,7 @@ actor ESP32Serial {
                     wifiConfigured: msg["wifiConfigured"] as? Bool,
                     wifiConnected: msg["wifiConnected"] as? Bool
                 )
+                failedPorts.removeValue(forKey: port)
             }
 
             onMessage?(port, msg)
@@ -485,17 +500,31 @@ actor ESP32Serial {
         drainPendingReads()
         guard !connections.isEmpty else { return }
 
-        // Check for connections that never received device_info — reconnect them
+        // Check for connections that never received device_info. A delayed
+        // response is not a device failure: keep the port open, retry the
+        // request, and only reconnect a completely silent port after a longer
+        // grace window.
         let now = Date()
         for i in connections.indices.reversed() where connections[i].connected {
             if connections[i].deviceInfo == nil,
                now.timeIntervalSince(connections[i].openedAt) > Self.deviceInfoTimeoutSec {
                 let port = connections[i].port
-                DaemonLogger.shared.info("ESP32 \(port): no device_info after \(Int(Self.deviceInfoTimeoutSec))s — reconnecting")
-                connections[i].readToken.invalidate()
-                connections[i].connected = false
-                try? connections[i].writeHandle?.close()
-                // Will be pruned + reopened on next pollForDevices() cycle
+                if connections[i].deviceInfoRequestsSent < 3 {
+                    DaemonLogger.shared.throttledDebug(
+                        "ESP32",
+                        key: "device-info-retry:\(port)",
+                        "\(port): device_info not received yet — retrying request",
+                        minInterval: 30
+                    )
+                    sendDeviceInfoRequest(to: &connections[i])
+                } else if connections[i].lastReadAt == nil,
+                          now.timeIntervalSince(connections[i].openedAt) > Self.deviceInfoReconnectSec {
+                    DaemonLogger.shared.info("ESP32 \(port): no serial data after \(Int(Self.deviceInfoReconnectSec))s — reconnecting")
+                    connections[i].readToken.invalidate()
+                    connections[i].connected = false
+                    try? connections[i].writeHandle?.close()
+                    // Will be pruned + reopened on next pollForDevices() cycle
+                }
             }
         }
 
@@ -536,51 +565,83 @@ actor ESP32Serial {
 
     // MARK: - Serial Helpers
 
+    private enum SerialWriteResult {
+        case success
+        case backpressure(String, partial: Bool)
+        case hardFailure(String)
+    }
+
+    private func sendDeviceInfoRequest(to conn: inout SerialConnection) {
+        conn.deviceInfoRequestsSent += 1
+        sendToConnection(&conn, json: #"{"type":"device_info_request"}"#)
+    }
+
     private func sendToConnection(_ conn: inout SerialConnection, json: String) {
         guard conn.connected, let handle = conn.writeHandle else { return }
-        do {
-            let payload = Array((json + "\n").utf8)
-            var offset = 0
-            var retryCount = 0
-            while offset < payload.count {
-                let written = payload.withUnsafeBufferPointer { buffer in
-                    Darwin.write(
-                        handle.fileDescriptor,
-                        buffer.baseAddress!.advanced(by: offset),
-                        payload.count - offset
-                    )
-                }
-                if written > 0 {
-                    offset += written
-                    retryCount = 0
-                    continue
-                }
-                let errNo = errno
-                if written < 0 && (errNo == EAGAIN || errNo == EWOULDBLOCK) && retryCount < 8 {
-                    retryCount += 1
-                    usleep(20_000)
-                    continue
-                }
-                throw NSError(
-                    domain: "ESP32",
-                    code: -1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey: "write returned \(written), wrote \(offset) of \(payload.count), errno=\(errNo)"
-                    ]
-                )
-            }
+        let hadLineReset = conn.needsLineReset
+        let prefix = conn.needsLineReset ? "\n" : ""
+        let payload = Array((prefix + json + "\n").utf8)
+        switch writePayload(payload, to: handle.fileDescriptor) {
+        case .success:
+            conn.needsLineReset = false
+            conn.lastWriteAt = Date()
             lastWriteError = nil
-        } catch {
+            failedPorts.removeValue(forKey: conn.port)
+        case .backpressure(let message, let partial):
+            conn.needsLineReset = hadLineReset || partial
+            lastWriteError = "write backpressure for \(conn.port): \(message)"
+            DaemonLogger.shared.throttledDebug(
+                "ESP32",
+                key: "write-backpressure:\(conn.port)",
+                "\(conn.port): \(message); keeping connection open",
+                minInterval: 30
+            )
+        case .hardFailure(let message):
             conn.readToken.invalidate()
             conn.connected = false
             failedPorts[conn.port] = PortFailure(
-                error: error.localizedDescription,
+                error: message,
                 isPermanent: false,
                 failCount: (failedPorts[conn.port]?.failCount ?? 0) + 1,
                 lastAttempt: Date()
             )
-            lastWriteError = "write failed for \(conn.port): \(error.localizedDescription)"
+            lastWriteError = "write failed for \(conn.port): \(message)"
         }
+    }
+
+    private func writePayload(_ payload: [UInt8], to fd: Int32) -> SerialWriteResult {
+        var offset = 0
+        var retryCount = 0
+        while offset < payload.count {
+            let written = payload.withUnsafeBufferPointer { buffer in
+                Darwin.write(
+                    fd,
+                    buffer.baseAddress!.advanced(by: offset),
+                    payload.count - offset
+                )
+            }
+            if written > 0 {
+                offset += written
+                retryCount = 0
+                continue
+            }
+
+            let errNo = errno
+            if (written < 0 && (errNo == EAGAIN || errNo == EWOULDBLOCK)) || written == 0 {
+                if retryCount < Self.writeBackpressureRetryLimit {
+                    retryCount += 1
+                    usleep(Self.writeBackpressureRetryUsec)
+                    continue
+                }
+                return .backpressure(
+                    "write stalled after \(offset) of \(payload.count) bytes, errno=\(errNo)",
+                    partial: offset > 0
+                )
+            }
+
+            return .hardFailure("write returned \(written), wrote \(offset) of \(payload.count), errno=\(errNo)")
+        }
+        return .success
     }
 
     private static func provisionFingerprint(for msg: [String: Any]) -> String {
