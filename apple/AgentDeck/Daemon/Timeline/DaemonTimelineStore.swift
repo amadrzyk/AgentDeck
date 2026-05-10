@@ -26,6 +26,13 @@ struct DaemonTimelineEntry: Codable, Sendable {
     /// OpenClaw Gateway runId — groups entries belonging to the same
     /// generation cycle so clients can cluster them into a single turn row.
     var runId: String?
+    /// Which backend produced the row's `raw` summary text — set by
+    /// `appendClaudeCodeChatEnd` / `appendCodexChatEnd` once
+    /// `TimelineSummarizer.summarize` returns. Values: `"appleIntelligence"`,
+    /// `"mlx"`, `"ollama"`, `"heuristic"`. Nil for pre-existing entries on
+    /// disk (Codable's optional-missing-key behaviour) and for rows where
+    /// summarization isn't applicable (Gateway pass-through, tool events).
+    var summaryKind: String?
 }
 
 actor DaemonTimelineStore {

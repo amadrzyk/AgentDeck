@@ -4524,29 +4524,43 @@ final class DaemonServer {
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(respEntry)] as [String: Any])
         }
 
-        let durationSec = startTs.map { Int(((now - $0) / 1000).rounded()) }
-        let topic = (!assistantText.isEmpty ? Self.extractTopicHint(from: assistantText) : nil)
-            ?? codexLastPromptTopicBySession[sessionId]
-        var parts = ["Completed"]
-        if let durationSec { parts.append("\(durationSec)s") }
-        if let topic { parts.append(topic) }
-        var endEntry = DaemonTimelineEntry(
-            ts: now,
-            type: "chat_end",
-            raw: parts.joined(separator: " · "),
-            detail: assistantText.isEmpty ? nil : String(assistantText.prefix(1000)),
-            approvalId: nil,
-            status: nil,
-            agentType: "codex-cli",
-            repeatCount: nil,
-            automated: nil
-        )
-        endEntry.sessionId = sessionId
-        endEntry.projectName = projectName
-        endEntry.startedAt = startTs
-        endEntry.endedAt = now
-        Task { await timelineStore.add(endEntry) }
-        broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(endEntry)] as [String: Any])
+        let topicFromPrompt = codexLastPromptTopicBySession[sessionId]
+        let providerRaw = AppPreferences.shared.timelineSummaryProvider
+        let provider = TimelineSummarizer.SummaryProvider(rawValue: providerRaw) ?? .auto
+
+        // Mirror appendClaudeCodeChatEnd: chat_end build + broadcast hops
+        // into a Task so the LLM call doesn't block the Stop-hook handler.
+        Task {
+            let summary = assistantText.isEmpty
+                ? nil
+                : await TimelineSummarizer.summarize(assistantText, provider: provider)
+            let topic = summary?.text ?? topicFromPrompt
+            let durationSec = startTs.map { Int(((now - $0) / 1000).rounded()) }
+            var parts = ["Completed"]
+            if let durationSec { parts.append("\(durationSec)s") }
+            if let topic { parts.append(topic) }
+            var endEntry = DaemonTimelineEntry(
+                ts: now,
+                type: "chat_end",
+                raw: parts.joined(separator: " · "),
+                detail: assistantText.isEmpty ? nil : String(assistantText.prefix(1000)),
+                approvalId: nil,
+                status: nil,
+                agentType: "codex-cli",
+                repeatCount: nil,
+                automated: nil
+            )
+            endEntry.sessionId = sessionId
+            endEntry.projectName = projectName
+            endEntry.startedAt = startTs
+            endEntry.endedAt = now
+            endEntry.summaryKind = summary?.kind ?? (topic == nil ? nil : "heuristic")
+            await timelineStore.add(endEntry)
+            broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(endEntry)] as [String: Any])
+        }
+
+        // Cache cleanup synchronous on main actor — captured values above
+        // are by-value so the in-flight Task is unaffected.
         codexChatStartTsBySession.removeValue(forKey: sessionId)
         codexLastPromptTopicBySession.removeValue(forKey: sessionId)
         codexCurrentToolBySession.removeValue(forKey: sessionId)
@@ -4646,50 +4660,60 @@ final class DaemonServer {
         // to repeat chat_response's response-text prefix verbatim, which read
         // as a duplicate at row-level opacity 0.4–0.6).
         let startTs = sessionId.flatMap { claudeChatStartTsBySession[$0] }
-        let durationSec: Int? = startTs.map { Int(((now - $0) / 1000).rounded()) }
+        let topicFromPrompt = sessionId.flatMap { claudeLastPromptTopicBySession[$0] }
+        let providerRaw = AppPreferences.shared.timelineSummaryProvider
+        let provider = TimelineSummarizer.SummaryProvider(rawValue: providerRaw) ?? .auto
+
+        // chat_end build + broadcast hops into a Task so the LLM call doesn't
+        // block the Stop-hook handler. chat_response (above) was already
+        // broadcast immediately so the user-visible response body never lags.
         // High-entropy label so DaemonTimelineStore's 8 s exact-dedup window
         // does not collapse two legitimate quick turns that happen to share
-        // the same rounded duration (e.g. two `Completed · 2s` rows). Mirrors
-        // bridge/src/index.ts:1440 emitCompletion which prefers a topic hint
-        // from the response text, then the prompt, before falling back to
-        // `Completed`.
-        let topicFromResponse = assistantText.isEmpty
-            ? nil
-            : Self.extractTopicHint(from: assistantText)
-        let topicFromPrompt = sessionId.flatMap { claudeLastPromptTopicBySession[$0] }
-        // Always prepend "Completed" so the dimmed chat_end row is visually
-        // distinct from the bright chat_response row above it. Topic-only
-        // labels matched the chat_response's first line verbatim, which read
-        // as a duplicate; the "Completed · " prefix gives the dashboard a
-        // clear "metadata" cue while duration + topic suffix still provide
-        // the entropy needed to keep DaemonTimelineStore's 8 s exact-dedup
-        // from collapsing two legitimate quick turns.
-        var endRawParts: [String] = ["Completed"]
-        if let d = durationSec { endRawParts.append("\(d)s") }
-        if let topic = topicFromResponse ?? topicFromPrompt {
-            endRawParts.append(topic)
+        // the same rounded duration (e.g. two `Completed · 2s` rows).
+        Task {
+            let summary = assistantText.isEmpty
+                ? nil
+                : await TimelineSummarizer.summarize(assistantText, provider: provider)
+            let topic = summary?.text ?? topicFromPrompt
+            let durationSec: Int? = startTs.map { Int(((now - $0) / 1000).rounded()) }
+            // Always prepend "Completed" so the dimmed chat_end row is visually
+            // distinct from the bright chat_response row above it. Topic-only
+            // labels matched the chat_response's first line verbatim, which read
+            // as a duplicate; the "Completed · " prefix gives the dashboard a
+            // clear "metadata" cue while duration + topic suffix still provide
+            // the entropy needed to keep DaemonTimelineStore's 8 s exact-dedup
+            // from collapsing two legitimate quick turns.
+            var endRawParts: [String] = ["Completed"]
+            if let d = durationSec { endRawParts.append("\(d)s") }
+            if let t = topic { endRawParts.append(t) }
+            let endRaw = endRawParts.joined(separator: " · ")
+            var endEntry = DaemonTimelineEntry(
+                ts: now,
+                type: "chat_end",
+                raw: endRaw,
+                detail: assistantText.isEmpty ? topicFromPrompt.map { "Prompt: \($0)" } : nil,
+                approvalId: nil,
+                status: nil,
+                agentType: "claude-code",
+                repeatCount: nil,
+                automated: nil
+            )
+            endEntry.sessionId = sessionId
+            endEntry.projectName = projectName
+            endEntry.startedAt = startTs
+            endEntry.endedAt = now
+            endEntry.summaryKind = summary?.kind ?? (topic == nil ? nil : "heuristic")
+            await timelineStore.add(endEntry)
+            broadcastRaw([
+                "type": "timeline_event",
+                "entry": claudeCodeEntryDict(endEntry),
+            ] as [String: Any])
         }
-        let endRaw = endRawParts.joined(separator: " · ")
-        var endEntry = DaemonTimelineEntry(
-            ts: now,
-            type: "chat_end",
-            raw: endRaw,
-            detail: assistantText.isEmpty ? topicFromPrompt.map { "Prompt: \($0)" } : nil,
-            approvalId: nil,
-            status: nil,
-            agentType: "claude-code",
-            repeatCount: nil,
-            automated: nil
-        )
-        endEntry.sessionId = sessionId
-        endEntry.projectName = projectName
-        endEntry.startedAt = startTs
-        endEntry.endedAt = now
-        Task { await timelineStore.add(endEntry) }
-        broadcastRaw([
-            "type": "timeline_event",
-            "entry": claudeCodeEntryDict(endEntry),
-        ] as [String: Any])
+
+        // Cache cleanup runs synchronously so a follow-up turn that fires
+        // before the Task above completes still gets a clean session state.
+        // The Task captured `startTs` / `topicFromPrompt` by value so the
+        // wipe here doesn't affect the in-flight chat_end entry.
         if let sid = sessionId {
             claudeChatStartTsBySession.removeValue(forKey: sid)
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
@@ -4818,6 +4842,11 @@ final class DaemonServer {
         if let v = e.startedAt { dict["startedAt"] = v }
         if let v = e.endedAt { dict["endedAt"] = v }
         if let v = e.runId { dict["runId"] = v }
+        // Without this, the daemon writes summaryKind into timeline.json
+        // (Codable round-trip) but dashboards see nil over the live WS feed —
+        // their own UI checks against summaryKind ("none" suppression, future
+        // backend pill) silently no-op.
+        if let v = e.summaryKind { dict["summaryKind"] = v }
         return dict
     }
 
@@ -4839,6 +4868,7 @@ final class DaemonServer {
         entry.sessionId = rawEntry["sessionId"] as? String
         entry.startedAt = (rawEntry["startedAt"] as? NSNumber)?.doubleValue ?? rawEntry["startedAt"] as? Double
         entry.endedAt = (rawEntry["endedAt"] as? NSNumber)?.doubleValue ?? rawEntry["endedAt"] as? Double
+        entry.summaryKind = rawEntry["summaryKind"] as? String
         Task { await timelineStore.add(entry) }
         broadcastRaw(["type": "timeline_event", "entry": rawEntry] as [String: Any])
     }

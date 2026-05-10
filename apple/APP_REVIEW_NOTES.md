@@ -99,6 +99,15 @@ AgentDeck can evaluate finished agent turns against configurable rubrics. In the
 - Alternatives (MLX local server, Anthropic API) are opt-in and clearly labeled in Settings.
 - Layer 1 deterministic checks (git/pnpm introspection) are **disabled** in the App Store build because they require subprocess access outside the sandbox. The UI surfaces this explicitly — users still get Layer 2 LLM-based scoring.
 
+## Timeline summary backend
+
+The dashboard timeline shows a one-line topic under each completed turn (the `chat_end` row). To produce that label, the App Store build calls a chain of cost-free local backends:
+- **Apple Intelligence (FoundationModels)** — on-device, zero-cost, no network. Used first when available (macOS 26+, Apple Silicon, Apple Intelligence enabled). Same framework call shape as APME.
+- **MLX local server** — outbound HTTP to `127.0.0.1:8800`, only attempted when the user has independently started a local MLX server. AgentDeck does not install, prompt for, or spawn MLX; if the server isn't running, the call returns nil within ~2s and the chain falls through.
+- **Heuristic** — pure-Swift first-line extractor. Always available; runs as the chain's floor.
+
+No subprocess, no bundled interpreter, no third-party network call, no install nudge. Users can pick a specific backend (or stick with the default `Auto`) from Settings → Timeline summary. The same `verify-appstore-archive.sh` CI gate that covers APME also covers this path because both share `TimelineSummarizer.swift` / `ApmeJudgeFoundationModels.swift` and only use entitlements already declared (`com.apple.security.network.client` for outbound localhost).
+
 ## Stream Deck+ dependency
 
 AgentDeck's Stream Deck+ integration renders session state on Stream Deck+ keys via Elgato's Stream Deck plugin SDK. This optional hardware path requires Elgato's Stream Deck software. If a user plugs in a Stream Deck+ without Elgato's software, AgentDeck shows that the integration is unavailable and links to Elgato's setup information. Reviewers testing without Elgato hardware can skip this integration entirely — the rest of the app does not depend on it.

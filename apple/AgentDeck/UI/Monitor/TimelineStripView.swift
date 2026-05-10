@@ -321,6 +321,24 @@ struct TimelineStripView: View {
                 .fixedSize(horizontal: false, vertical: allowMultiline)
 
             Spacer()
+
+            // chat_end rows carry a tiny backend pill so the user can see
+            // which provider produced the topic suffix and confirm the
+            // Settings → Timeline summary picker is taking effect. Hidden
+            // for non-chat_end rows and for entries without a kind tag
+            // (legacy on-disk rows, gateway entries, plain heuristic).
+            if isChatEnd, let kindLabel = summaryBackendLabel(group.entry.summaryKind) {
+                Text(kindLabel)
+                    .font(.system(size: max(8, fontScale.label - 1), weight: .semibold, design: .monospaced))
+                    .foregroundStyle(TerrariumHUD.subtext.opacity(0.85))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(
+                        TerrariumHUD.subtext.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 3)
+                    )
+                    .accessibilityLabel("Summary backend: \(kindLabel)")
+            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 1)
@@ -338,6 +356,25 @@ struct TimelineStripView: View {
                     .frame(width: 2, height: 14)
                     .offset(x: -6)
             }
+        }
+    }
+
+    /// Short pill label for `summaryKind`. Every kind that AgentDeck knows
+    /// it produced gets a visible tag — including heuristic, since the
+    /// App Store deployment target is macOS 15 but FoundationModels needs
+    /// macOS 26, so the default `auto` chain falls through to heuristic on
+    /// the majority of installs. Hiding the heuristic pill made the entire
+    /// feature read as "not running" for those users. Pill is suppressed
+    /// only for unrecognized values, the gave-up sentinel ("none"), and
+    /// nil (legacy on-disk rows from before the field existed, plus
+    /// gateway pass-through entries that don't carry one).
+    private func summaryBackendLabel(_ kind: String?) -> String? {
+        switch kind {
+        case "appleIntelligence": return "AI"
+        case "mlx":                return "MLX"
+        case "ollama":             return "Ollama"
+        case "heuristic":          return "Heur"
+        default:                   return nil
         }
     }
 

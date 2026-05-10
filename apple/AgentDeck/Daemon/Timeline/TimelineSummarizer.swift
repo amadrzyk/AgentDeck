@@ -1,11 +1,44 @@
 #if os(macOS)
-// TimelineSummarizer.swift — LLM-based response summarization
-// Ported from bridge/src/timeline-summarizer.ts
+// TimelineSummarizer.swift — LLM-based response summarization for timeline rows.
+//
+// Provider chain (when `.auto`):
+//   Apple Intelligence (FoundationModels, macOS 26+ / iOS 26+)
+//     → MLX local server (127.0.0.1:8800)
+//     → Ollama (127.0.0.1:11434)
+//     → heuristic (extractTopicHint)
+//
+// All backends are cost-free (FoundationModels is on-device free, MLX/Ollama
+// are user-run, heuristic is pure-Swift). API-paid backends are intentionally
+// not part of this chain — see feedback_cost_sensitive_defaults.md.
+//
+// App Store safety:
+//   - No subprocess spawn (verify-appstore-archive.sh-clean)
+//   - No bundled interpreters (FoundationModels comes from the OS, MLX/Ollama
+//     are external user-run services discovered via outbound localhost which
+//     is allowed by `com.apple.security.network.client`)
+//   - No install nudge — silent fallback when a backend is unavailable
 
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 enum TimelineSummarizer {
-    private static let mlxPort = 8800
+    /// User-selectable backend selector. Stored as a raw string in
+    /// AppPreferences so that schema changes don't break round-trip.
+    enum SummaryProvider: String {
+        case auto
+        case appleIntelligence
+        case mlx
+        case heuristic
+    }
+
+    /// `kind` is plumbed onto the timeline entry as `summaryKind` so dashboards
+    /// can label entries (and analytics can split LLM vs heuristic). Values
+    /// stay stable across the schema; downstream just treats anything other
+    /// than "heuristic" as an LLM-derived summary.
+    typealias SummaryResult = (text: String, kind: String)
+
     private static let ollamaPort = 11434
     private static let maxChars = 80
 
@@ -66,21 +99,71 @@ enum TimelineSummarizer {
         return nil
     }
 
-    /// Summarize a response text using local LLM (MLX → Ollama fallback → heuristic)
-    static func summarize(_ text: String) async -> String? {
-        // Try MLX qwen server first
-        if let result = await queryMLX(text) { return result }
+    /// Summarize a response text using the requested provider chain.
+    /// Returns `(text, kind)` where `kind` identifies which backend produced
+    /// the summary — used to populate `DaemonTimelineEntry.summaryKind`.
+    /// Returns `nil` only when even the heuristic produces nothing (very
+    /// short or empty text); otherwise the heuristic is the universal floor.
+    static func summarize(_ text: String, provider: SummaryProvider = .auto) async -> SummaryResult? {
+        switch provider {
+        case .heuristic:
+            return heuristic(text)
 
-        // Fallback to Ollama
-        if let result = await queryOllama(text) { return result }
+        case .appleIntelligence:
+            if let r = await queryFoundationModels(text) { return r }
+            return heuristic(text)
 
-        // Heuristic fallback
-        return extractTopicHint(text)
+        case .mlx:
+            if let r = await queryMLX(text) { return r }
+            return heuristic(text)
+
+        case .auto:
+            if let r = await queryFoundationModels(text) { return r }
+            if let r = await queryMLX(text) { return r }
+            if let r = await queryOllama(text) { return r }
+            return heuristic(text)
+        }
+    }
+
+    private static func heuristic(_ text: String) -> SummaryResult? {
+        guard let h = extractTopicHint(text) else { return nil }
+        return (h, "heuristic")
+    }
+
+    // MARK: - Apple Intelligence (FoundationModels)
+
+    /// On-device summarization via FoundationModels. Returns nil silently
+    /// when the framework is missing, the OS is below 26, or Apple
+    /// Intelligence is disabled / not yet downloaded — caller falls through
+    /// to the next tier. Mirrors the gating used by ApmeJudgeFoundationModels.
+    private static func queryFoundationModels(_ text: String) async -> SummaryResult? {
+#if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard case .available = SystemLanguageModel.default.availability else {
+                return nil
+            }
+            do {
+                let session = LanguageModelSession(
+                    instructions: foundationModelsInstructions
+                )
+                let options = GenerationOptions(temperature: 0.3)
+                let truncated = String(text.prefix(2000))
+                let response = try await session.respond(to: truncated, options: options)
+                if let cleaned = cleanLLMOutput(response.content) {
+                    return (cleaned, "appleIntelligence")
+                }
+            } catch {
+                // Best-effort — never block the timeline pipeline.
+                return nil
+            }
+        }
+#endif
+        return nil
     }
 
     // MARK: - MLX (port 8800)
 
-    private static func queryMLX(_ text: String) async -> String? {
+    private static func queryMLX(_ text: String) async -> SummaryResult? {
         let base = ApmeSettings.loadMlxConfig().endpoint
         guard let url = URL(string: base + "/chat/completions") else { return nil }
         // MLX server not detected (App Store install without mlx-vlm) — skip
@@ -109,8 +192,9 @@ enum TimelineSummarizer {
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let choices = json["choices"] as? [[String: Any]],
                let message = choices.first?["message"] as? [String: Any],
-               let content = message["content"] as? String {
-                return cleanLLMOutput(content)
+               let content = message["content"] as? String,
+               let cleaned = cleanLLMOutput(content) {
+                return (cleaned, "mlx")
             }
         } catch { /* MLX not available */ }
         return nil
@@ -118,7 +202,7 @@ enum TimelineSummarizer {
 
     // MARK: - Ollama
 
-    private static func queryOllama(_ text: String) async -> String? {
+    private static func queryOllama(_ text: String) async -> SummaryResult? {
         let url = URL(string: "http://127.0.0.1:\(ollamaPort)/api/generate")!
         let truncated = String(text.prefix(2000))
         let body: [String: Any] = [
@@ -136,8 +220,9 @@ enum TimelineSummarizer {
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let response = json["response"] as? String {
-                return cleanLLMOutput(response)
+               let response = json["response"] as? String,
+               let cleaned = cleanLLMOutput(response) {
+                return (cleaned, "ollama")
             }
         } catch { /* Ollama not available */ }
         return nil
@@ -210,6 +295,17 @@ enum TimelineSummarizer {
     - 결과 중심 (과정 아님)
     - 한국어로 작성
     - 인사말, 설명 없이 요약만
+    """
+
+    /// FoundationModels uses a separate `instructions` channel rather than a
+    /// system message, so the wording is tuned for that API surface. The
+    /// rules still match the MLX / Ollama prompt.
+    private static let foundationModelsInstructions = """
+    You summarize an AI coding agent's response in a single short line for a timeline UI.
+    Rules:
+    - 최대 80자, 한국어 우선 (응답이 영어면 영어로 80 chars max).
+    - 결과 중심 (process 아님), 인사말/설명 없이 요약만.
+    - Plain text only — no quotes, no list markers, no code fences.
     """
 }
 #endif

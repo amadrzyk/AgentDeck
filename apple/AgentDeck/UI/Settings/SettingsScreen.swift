@@ -187,34 +187,37 @@ struct SettingsScreen: View {
         case display
         case hardware
         case evaluation
+        case timelineSummary
 
         var id: Self { self }
 
         var title: String {
             switch self {
-            case .integrations: "Integrations"
-            case .dashboard:    "Dashboard"
-            case .about:        "About"
-            case .connection:   "Connection"
-            case .daemon:       "Local server"
-            case .pairing:      "iPad / iPhone pairing"
-            case .display:      "Display & sleep"
-            case .hardware:     "ESP32 & Pixoo"
-            case .evaluation:   "Agent evaluation (APME)"
+            case .integrations:    "Integrations"
+            case .dashboard:       "Dashboard"
+            case .about:           "About"
+            case .connection:      "Connection"
+            case .daemon:          "Local server"
+            case .pairing:         "iPad / iPhone pairing"
+            case .display:         "Display & sleep"
+            case .hardware:        "ESP32 & Pixoo"
+            case .evaluation:      "Agent evaluation (APME)"
+            case .timelineSummary: "Timeline summary"
             }
         }
 
         var icon: String {
             switch self {
-            case .integrations: "link"
-            case .dashboard:    "macwindow"
-            case .about:        "info.circle"
-            case .connection:   "network"
-            case .daemon:       "server.rack"
-            case .pairing:      "ipad.and.iphone"
-            case .display:      "display"
-            case .hardware:     "cpu"
-            case .evaluation:   "chart.bar.doc.horizontal"
+            case .integrations:    "link"
+            case .dashboard:       "macwindow"
+            case .about:           "info.circle"
+            case .connection:      "network"
+            case .daemon:          "server.rack"
+            case .pairing:         "ipad.and.iphone"
+            case .display:         "display"
+            case .hardware:        "cpu"
+            case .evaluation:      "chart.bar.doc.horizontal"
+            case .timelineSummary: "text.bubble"
             }
         }
 
@@ -243,12 +246,14 @@ struct SettingsScreen: View {
                 "Optional ESP32 boards and Pixoo LED matrix displays."
             case .evaluation:
                 "APME scores agent turns. Pick a judge backend — local MLX is free."
+            case .timelineSummary:
+                "Pick which model writes the one-line topic on each turn's chat_end row. Apple Intelligence is on-device and free."
             }
         }
     }
 
     private static let essentialSections: [SettingsSection] = [.integrations, .dashboard, .about]
-    private static let advancedSections: [SettingsSection] = [.connection, .daemon, .pairing, .display, .hardware, .evaluation]
+    private static let advancedSections: [SettingsSection] = [.connection, .daemon, .pairing, .display, .hardware, .evaluation, .timelineSummary]
 
     private var macOSSettings: some View {
         NavigationSplitView {
@@ -338,6 +343,8 @@ struct SettingsScreen: View {
             hardwareContent
         case .evaluation:
             apmeContent
+        case .timelineSummary:
+            timelineSummaryContent
         }
     }
     #endif
@@ -940,6 +947,90 @@ struct SettingsScreen: View {
             Divider()
 
             Text("APME data is stored locally on this device. The dashboard is accessible from the menu bar APME button.")
+                .font(.system(size: 10))
+                .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Timeline summary section
+
+    /// Backend picker for the per-turn `chat_end` topic line.
+    /// Mirrors the APME judge picker so the same review-safe pattern
+    /// applies (no install nudge, all-cost-free defaults, FoundationModels-
+    /// first chain). Selection writes to UserDefaults + settings.json
+    /// `timeline.summary.provider`.
+    private var timelineSummaryContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Summary backend")
+                .font(.system(size: 13, weight: .semibold))
+
+            Text("AgentDeck writes a one-line topic under each completed turn. Pick which model produces that line — all options below run locally and are free.")
+                .font(.system(size: 11))
+                .foregroundStyle(TerrariumHUD.subtext)
+
+            Picker("Backend", selection: $preferences.timelineSummaryProvider) {
+                Text("Auto (recommended)").tag("auto")
+                Text("Apple Intelligence (on-device, free)").tag("appleIntelligence")
+                Text("MLX (local server, free)").tag("mlx")
+                Text("Heuristic only (no LLM)").tag("heuristic")
+            }
+#if os(macOS)
+            .pickerStyle(.radioGroup)
+#else
+            .pickerStyle(.inline)
+#endif
+            .labelsHidden()
+
+            Group {
+                switch preferences.timelineSummaryProvider {
+                case "auto":
+                    Label(
+                        "Tries Apple Intelligence first, then MLX, then a heuristic — whichever is available right now.",
+                        systemImage: "sparkles"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                case "appleIntelligence":
+#if os(macOS)
+                    let ready = ApmeJudgeFoundationModels.isAvailable
+                    Label(
+                        ready ? "Apple Intelligence ready" : ApmeJudgeFoundationModels.unavailableReason,
+                        systemImage: ready ? "checkmark.circle.fill" : "exclamationmark.triangle"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(ready ? .green : .orange)
+#else
+                    Label(
+                        "Apple Intelligence summarization runs on the macOS daemon.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+#endif
+                case "mlx":
+                    Label(
+                        "Requires a local MLX server at http://127.0.0.1:8800. AgentDeck silently falls back to the heuristic when the server isn't running.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                case "heuristic":
+                    Label(
+                        "No LLM call. Picks a short line from the start of the response. Fastest and lowest-fidelity option.",
+                        systemImage: "scissors"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(TerrariumHUD.subtext)
+                default:
+                    EmptyView()
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Text("The summary becomes the topic suffix on each chat_end row in the Dashboard timeline strip (e.g. \"Completed · 3s · 코드 리팩토링 완료\"). Changes apply to the next completed turn — earlier rows keep whatever backend produced them.")
                 .font(.system(size: 10))
                 .foregroundStyle(TerrariumHUD.subtext.opacity(0.7))
         }

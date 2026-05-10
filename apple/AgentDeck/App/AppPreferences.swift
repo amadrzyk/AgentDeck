@@ -108,6 +108,19 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Backend selector for the timeline `chat_end` LLM summary path.
+    /// Values: `auto` (Apple Intelligence → MLX → Ollama → heuristic),
+    /// `appleIntelligence` (FoundationModels only → heuristic),
+    /// `mlx` (local MLX server only → heuristic),
+    /// `heuristic` (no LLM call). Default is `auto` so cost-free backends are
+    /// tried first; an explicit pick short-circuits to that backend's tier.
+    @Published var timelineSummaryProvider: String {
+        didSet {
+            defaults.set(timelineSummaryProvider, forKey: Keys.timelineSummaryProvider)
+            writeTimelineSummaryProviderToSettingsJson(timelineSummaryProvider)
+        }
+    }
+
     @Published private(set) var antigravityAccessEnabled: Bool
     @Published private(set) var antigravitySelectedPath: String?
 
@@ -196,6 +209,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         self.antigravitySelectedPath = defaults.string(forKey: Keys.antigravitySelectedPath)
         self.antigravityAccessEnabled = defaults.data(forKey: Keys.antigravityBookmark) != nil
         self.apmeJudgeBackend = defaults.string(forKey: Keys.apmeJudgeBackend) ?? "foundationModels"
+        self.timelineSummaryProvider = defaults.string(forKey: Keys.timelineSummaryProvider) ?? "auto"
         self.hookInstallConsent = HookInstallConsent(rawValue: defaults.string(forKey: Keys.hookInstallConsent) ?? "") ?? .unknown
         self.hooksInstalled = defaults.object(forKey: Keys.hooksInstalled) as? Bool ?? false
         self.codexConfigConsent = HookInstallConsent(rawValue: defaults.string(forKey: Keys.codexConfigConsent) ?? "") ?? .unknown
@@ -231,6 +245,31 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         guard let out = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return }
         // AgentDeckPaths.baseDirectory eagerly creates the parent on first use,
         // so we only need to write the file here.
+        try? out.write(to: url, options: [.atomic])
+        #endif
+    }
+
+    /// Mirror the timeline-summary backend selection into settings.json.
+    /// Lives under `timeline.summary.provider` so it doesn't collide with
+    /// the APME judge backend (under `apme.judge.backend`). Same atomic-write
+    /// + clobber-resistant merge as `writeApmeJudgeBackendToSettingsJson`.
+    private func writeTimelineSummaryProviderToSettingsJson(_ provider: String) {
+        #if os(macOS)
+        let url = AgentDeckPaths.settingsJson
+
+        var root: [String: Any] = [:]
+        if let data = try? Data(contentsOf: url),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            root = parsed
+        }
+
+        var timeline = (root["timeline"] as? [String: Any]) ?? [:]
+        var summary = (timeline["summary"] as? [String: Any]) ?? [:]
+        summary["provider"] = provider
+        timeline["summary"] = summary
+        root["timeline"] = timeline
+
+        guard let out = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return }
         try? out.write(to: url, options: [.atomic])
         #endif
     }
@@ -488,6 +527,7 @@ final class AppPreferences: ObservableObject, @unchecked Sendable {
         static let antigravityBookmark = "prefs.antigravityBookmark"
         static let antigravitySelectedPath = "prefs.antigravitySelectedPath"
         static let apmeJudgeBackend = "prefs.apmeJudgeBackend"
+        static let timelineSummaryProvider = "prefs.timelineSummaryProvider"
         static let hookInstallConsent = "prefs.hookInstallConsent"
         static let hooksInstalled = "prefs.hooksInstalled"
         static let claudeSettingsBookmark = "prefs.claudeSettingsBookmark"
