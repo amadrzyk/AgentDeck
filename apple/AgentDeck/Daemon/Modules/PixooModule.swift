@@ -80,6 +80,7 @@ actor PixooModule: DeviceModule {
     private var devices: [PixooDevice] = []
     private var renderTask: Task<Void, Never>?
     private var probeTask: Task<Void, Never>?
+    private var reassertTask: Task<Void, Never>?
     private var settingsReloadTask: Task<Void, Never>?
     /// Fires when refreshShadow detects a user-visible field change
     /// (configuredDeviceCount, per-device online/failures/backedOff,
@@ -97,6 +98,15 @@ actor PixooModule: DeviceModule {
     private let backoffMaxSec: TimeInterval = 60
     private let probeIntervalSec: TimeInterval = 10
     private let settingsReloadIntervalSec: TimeInterval = 5
+    // Mirrors Node bridge's CHANNEL_REASSERT_MS — re-issues Channel/SetIndex
+    // periodically so a Pixoo that drifted out of "Custom" channel mode
+    // (brownout, firmware glitch) recovers without waiting for the 80s PicID
+    // overflow cycle.
+    private let channelReassertIntervalSec: TimeInterval = 30
+    // Probe failures past this point indicate the daemon's outbound HTTP path
+    // (URLSession + macOS NW stack) is stuck in a way local mitigation can't
+    // unblock — escalate with one ERROR log so the user knows to restart.
+    private let deepHangProbeFailures = 6
     private var lastPushError: String?
     private var lastPushAt: Date?
     private var devicePicIds: [String: Int] = [:]
@@ -119,6 +129,7 @@ actor PixooModule: DeviceModule {
         // don't need to hop back onto the actor just to read a let.
         let probeInterval = probeIntervalSec
         let settingsReloadInterval = settingsReloadIntervalSec
+        let reassertInterval = channelReassertIntervalSec
 
         // Start render loop — render continuously so `/pixoo/frame` has a
         // current preview as soon as settings hot-reload adds a device.
@@ -134,6 +145,16 @@ actor PixooModule: DeviceModule {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(probeInterval))
                 await self?.probeBackedOffDevices()
+            }
+        }
+
+        // Channel reassert loop — Node bridge does this every 30s to nudge
+        // Pixoo firmware back into Custom channel after brownouts. Skipped for
+        // backed-off devices (probe path handles those).
+        reassertTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(reassertInterval))
+                await self?.reassertChannels()
             }
         }
 
@@ -160,6 +181,9 @@ actor PixooModule: DeviceModule {
         probeTask?.cancel()
         await probeTask?.value
         probeTask = nil
+        reassertTask?.cancel()
+        await reassertTask?.value
+        reassertTask = nil
         settingsReloadTask?.cancel()
         await settingsReloadTask?.value
         settingsReloadTask = nil
@@ -361,9 +385,39 @@ actor PixooModule: DeviceModule {
             } else {
                 lastPushError = "probe failed for \(device.ip)"
                 recordPushFailure(ip: device.ip, reason: "probe failed")
+                // Deep hang surfacing: when push-fail (6) + probe-fail (6)
+                // accumulate without recovery, the daemon's outbound HTTP path
+                // is likely stuck NW-stack-deep — local circuit breaker can't
+                // unstick it. Log once at the boundary so the user knows the
+                // app needs a restart, and try a best-effort PicID re-sync.
+                if let state = deviceLogStates[device.ip],
+                   state.consecutiveFailures == backoffThreshold + deepHangProbeFailures {
+                    DaemonLogger.shared.error("[Pixoo] \(device.ip) deep hang — \(state.consecutiveFailures) total failures (push+probe). Outbound HTTP may be stuck NW-stack-deep; restart AgentDeck if push doesn't resume within 30s.")
+                    devicePicIds.removeValue(forKey: device.ip)
+                    await prepareDevice(device)
+                }
             }
         }
         refreshShadow()
+    }
+
+    /// Re-issues `Channel/SetIndex` on each healthy device every 30s. Mirrors
+    /// the Node bridge's CHANNEL_REASSERT_MS so a Pixoo that drifted out of
+    /// Custom channel mode (brownout, firmware hiccup) recovers in 30s instead
+    /// of waiting for the 80s PicID overflow cycle.
+    ///
+    /// Honors the same `displayDimmed` guard as `pushFrame` — when the user's
+    /// monitor is asleep we have already dropped Pixoo brightness to 0, and
+    /// some firmware versions reset brightness on `Channel/SetIndex`, which
+    /// would un-dim the matrix on a sleeping desk every 30 seconds.
+    private func reassertChannels() async {
+        guard !displayDimmed else { return }
+        for device in devices where !isBackedOff(device.ip) {
+            _ = await postCommand(device.ip, payload: [
+                "Command": "Channel/SetIndex",
+                "SelectIndex": 3,
+            ], logFailures: false)
+        }
     }
 
     /// Push current frame to all Pixoo devices via HTTP
