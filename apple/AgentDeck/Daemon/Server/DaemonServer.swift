@@ -200,7 +200,6 @@ final class DaemonServer {
     // State caches
     private var cachedSessions: [DaemonSessionEntry] = []
     private let serialEventSnapshot = SerialEventSnapshot()
-    private var lastSessionsListFingerprint: String?
 
     /// Sessions advertised over WS via `session_push_register` from CLI
     /// session bridges. Kept separate from `cachedSessions` so that
@@ -3182,20 +3181,15 @@ final class DaemonServer {
 
     @MainActor
     private func broadcastSessionsList() {
-        let event = buildSessionsListEvent()
-        let fingerprint = Self.stableJSONFingerprint(event)
-        guard fingerprint != lastSessionsListFingerprint else { return }
-        lastSessionsListFingerprint = fingerprint
-        broadcastRaw(event)
-    }
-
-    private static func stableJSONFingerprint(_ event: [String: Any]) -> String {
-        if JSONSerialization.isValidJSONObject(event),
-           let data = try? JSONSerialization.data(withJSONObject: event, options: [.sortedKeys]),
-           let json = String(data: data, encoding: .utf8) {
-            return json
-        }
-        return String(describing: event)
+        // Broadcast unconditionally — late joiners (recovered ESP32, newly
+        // connecting Android / SD plugin / iOS clients that don't ride the
+        // WS connect handshake) need every emit to land or they end up
+        // showing a stale or empty list. Fingerprint dedupe was added to
+        // protect serial writers from sub-second storms, but
+        // `ESP32Serial.write` now absorbs that pressure via EAGAIN-tolerant
+        // retry (DEVELOPMENT_LOG 2026-05-10), so the dedupe was redundant
+        // and locked recovered boards out.
+        broadcastRaw(buildSessionsListEvent())
     }
 
     private func buildSessionsListEvent() -> [String: Any] {
