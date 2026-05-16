@@ -15,12 +15,20 @@ import Foundation
 
 /// Distilled span events. Equatable for cheap unit-test assertions and
 /// Sendable so the parser can be called from non-isolated contexts.
+///
+/// `cwd` rides on `turnStart`, `toolCall`, and `activity` — every event
+/// type that `DaemonServer.handleCodexTrace` uses to insert/upgrade a
+/// session row. Codex Desktop emits cwd on the turn-boundary span only,
+/// so the parser also surfaces any cwd seen elsewhere in the same batch
+/// as a trace-level fallback (see `parse`) — without that, a toolCall
+/// span landing before turnStart inserts a blank-projectName placeholder
+/// that the upgrade path can never refill.
 enum CodexSpanEvent: Sendable, Equatable {
     case turnStart(threadId: String, turnId: String, cwd: String?)
-    case toolCall(threadId: String, turnId: String, tool: String)
+    case toolCall(threadId: String, turnId: String, tool: String, cwd: String?)
     case toolResult(threadId: String, turnId: String)
     case turnEnd(threadId: String, turnId: String)
-    case activity(threadId: String, turnId: String, name: String)
+    case activity(threadId: String, turnId: String, name: String, cwd: String?)
 }
 
 enum CodexTelemetryModule {
@@ -33,6 +41,40 @@ enum CodexTelemetryModule {
     static func parse(_ json: [String: Any]) -> [CodexSpanEvent] {
         var out: [CodexSpanEvent] = []
         let resourceSpans = (json["resourceSpans"] as? [[String: Any]]) ?? []
+
+        // First pass: build a per-thread cwd map. Codex Desktop emits cwd
+        // on the turn-boundary span only, so a same-batch toolCall/activity
+        // span for the SAME thread needs to inherit that cwd — otherwise the
+        // empty-projectName placeholder inserted by ensureCodexSession can
+        // never be upgraded (resolvedProjectName == "" fails the empty→
+        // non-empty guard). Scoping to threadId, not batch-wide, prevents
+        // session A's cwd from leaking into session B when both are active
+        // under one exporter.
+        //
+        // Resource-level cwd is replicated for every thread that has a span
+        // under that resourceSpans entry: it represents the shared workspace
+        // for the whole resource, so cross-thread "propagation" is intended
+        // (and matches `testResourceLevelCwdAliasFallsThrough`).
+        var cwdByThreadId: [String: String] = [:]
+        for r in resourceSpans {
+            let resourceAttrs = flattenAttrs(((r["resource"] as? [String: Any])?["attributes"] as? [[String: Any]]) ?? [])
+            let scopeSpans = (r["scopeSpans"] as? [[String: Any]]) ?? []
+            for ss in scopeSpans {
+                let spans = (ss["spans"] as? [[String: Any]]) ?? []
+                for span in spans {
+                    let merged = resourceAttrs.merging(
+                        flattenAttrs(span["attributes"] as? [[String: Any]] ?? []),
+                        uniquingKeysWith: { _, new in new }
+                    )
+                    guard let cwd = cwdFromAttributes(merged) else { continue }
+                    let threadId = threadIdAttr(merged) ?? anonymousThreadIdIfTraceBacked(span)
+                    if let tid = threadId, !tid.isEmpty, cwdByThreadId[tid] == nil {
+                        cwdByThreadId[tid] = cwd
+                    }
+                }
+            }
+        }
+
         for r in resourceSpans {
             // Resource-level attrs (set once for the whole batch — typically
             // service.name + identifying ids) can carry thread id when a
@@ -42,7 +84,7 @@ enum CodexTelemetryModule {
             for ss in scopeSpans {
                 let spans = (ss["spans"] as? [[String: Any]]) ?? []
                 for span in spans {
-                    if let event = classify(span: span, resourceAttrs: resourceAttrs) {
+                    if let event = classify(span: span, resourceAttrs: resourceAttrs, cwdByThreadId: cwdByThreadId) {
                         out.append(event)
                     }
                 }
@@ -72,7 +114,7 @@ enum CodexTelemetryModule {
 
     // MARK: - Internals
 
-    private static func classify(span: [String: Any], resourceAttrs: [String: Any]) -> CodexSpanEvent? {
+    private static func classify(span: [String: Any], resourceAttrs: [String: Any], cwdByThreadId: [String: String]) -> CodexSpanEvent? {
         guard let rawName = span["name"] as? String else { return nil }
         let attrs = resourceAttrs.merging(
             flattenAttrs(span["attributes"] as? [[String: Any]] ?? []),
@@ -87,6 +129,14 @@ enum CodexTelemetryModule {
             ?? traceIdAttr(span)
             ?? ""
 
+        // Per-span cwd wins over the per-thread fallback so a turnStart with
+        // an explicit cwd attr always reflects exactly what Codex reported.
+        // The fallback only fires for SAME-thread events that omit cwd (the
+        // toolCall/activity case Codex Desktop produces in practice) —
+        // cross-thread leakage is impossible because the map key is the
+        // resolved threadId itself.
+        let cwd = cwdFromAttributes(attrs) ?? cwdByThreadId[threadId]
+
         // Normalize underscore/slash variants (`codex.tool_call`,
         // `turn/start`) into dotted form so current Codex builds and older
         // logs share one dispatch table.
@@ -96,37 +146,46 @@ enum CodexTelemetryModule {
 
         switch normalized {
         case "codex.turn", "codex.turn.start", "turn.start", "op.dispatch.user.turn", "op.dispatch.user.input.with.turn.context":
-            let cwd = stringAttr(attrs, keys: [
-                "cwd",
-                "codex.cwd",
-                "working.directory",
-                "working_directory",
-                "working.dir",
-                "workdir",
-                "workspace.path",
-                "workspace.root",
-                "workspace_root",
-                "project.path",
-                "project.root",
-                "project_root",
-                "repo.path",
-                "repository.path",
-                "terminal.cwd",
-                "process.cwd",
-            ])
             return .turnStart(threadId: threadId, turnId: turnId, cwd: cwd)
         case "codex.tool.call", "tool.call", "turn.tool.call", "build.tool.call", "handle.tool.call", "handle.tool.call.with.source", "exec.command", "mcp.tools.call":
             let tool = stringAttr(attrs, keys: ["tool.name", "tool", "codex.tool", "mcp.tool.name", "mcp.tool"]) ?? inferredToolName(from: normalized)
-            return .toolCall(threadId: threadId, turnId: turnId, tool: tool)
+            return .toolCall(threadId: threadId, turnId: turnId, tool: tool, cwd: cwd)
         case "codex.tool.result", "tool.result", "tool.call.duration.ms", "dispatch.tool.call.with.code.mode.result", "handle.output.item.done":
             return .toolResult(threadId: threadId, turnId: turnId)
         case "codex.turn.end", "turn.end", "session.task.turn":
             return .turnEnd(threadId: threadId, turnId: turnId)
         case "receiving", "handle.responses", "responses.websocket.stream.request", "model.client.stream.responses.websocket", "stream.request":
-            return .activity(threadId: threadId, turnId: turnId, name: rawName)
+            return .activity(threadId: threadId, turnId: turnId, name: rawName, cwd: cwd)
         default:
             return nil
         }
+    }
+
+    /// 16 attribute aliases under which Codex builds (and the Codex Desktop
+    /// app's OTel exporter) have been observed publishing the workspace
+    /// directory. Centralised so resource-level scan, span-level scan, and
+    /// future ingestion paths read the same list.
+    private static let cwdAttributeKeys: [String] = [
+        "cwd",
+        "codex.cwd",
+        "working.directory",
+        "working_directory",
+        "working.dir",
+        "workdir",
+        "workspace.path",
+        "workspace.root",
+        "workspace_root",
+        "project.path",
+        "project.root",
+        "project_root",
+        "repo.path",
+        "repository.path",
+        "terminal.cwd",
+        "process.cwd",
+    ]
+
+    private static func cwdFromAttributes(_ attrs: [String: Any]) -> String? {
+        stringAttr(attrs, keys: cwdAttributeKeys)
     }
 
     private static func threadIdAttr(_ attrs: [String: Any]) -> String? {

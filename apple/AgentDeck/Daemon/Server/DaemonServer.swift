@@ -2463,13 +2463,13 @@ final class DaemonServer {
                 lastHookAtByPushedSession[sid] = Date()
                 lastTerminalCodexEventBySession.removeValue(forKey: sid)
 
-            case .toolCall(let threadId, _, let tool):
+            case .toolCall(let threadId, _, let tool, let cwd):
                 let sid = "codex:\(threadId)"
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late toolCall for finished session \(sid)")
                     continue
                 }
-                ensureCodexSession(sid, projectName: codexProjectName(from: nil, sessionId: sid))
+                ensureCodexSession(sid, projectName: codexProjectName(from: cwd, sessionId: sid))
                 let usefulTool = Self.usefulCodexToolName(tool)
                 updateSessionHookState(sessionId: sid, state: "processing", currentTool: usefulTool)
                 lastHookAtByPushedSession[sid] = Date()
@@ -2492,13 +2492,13 @@ final class DaemonServer {
                 lastHookAtByPushedSession[sid] = Date()
                 lastTerminalCodexEventBySession[sid] = Date()
 
-            case .activity(let threadId, _, let name):
+            case .activity(let threadId, _, let name, let cwd):
                 let sid = "codex:\(threadId)"
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late activity \(name) for finished session \(sid)")
                     continue
                 }
-                ensureCodexSession(sid, projectName: codexProjectName(from: nil, sessionId: sid))
+                ensureCodexSession(sid, projectName: codexProjectName(from: cwd, sessionId: sid))
                 updateSessionHookState(sessionId: sid, state: "processing")
                 lastHookAtByPushedSession[sid] = Date()
             }

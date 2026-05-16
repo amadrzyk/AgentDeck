@@ -39,7 +39,7 @@ final class CodexOtelParserTests: XCTestCase {
             CodexTelemetryModule.parse(json),
             [
                 .turnStart(threadId: tid2, turnId: "u2", cwd: nil),
-                .toolCall(threadId: tid2, turnId: "u2", tool: "Read"),
+                .toolCall(threadId: tid2, turnId: "u2", tool: "Read", cwd: nil),
                 .toolResult(threadId: tid2, turnId: "u2"),
                 .turnEnd(threadId: tid2, turnId: "u2"),
             ]
@@ -128,13 +128,103 @@ final class CodexOtelParserTests: XCTestCase {
         )
     }
 
+    /// Codex Desktop only puts cwd on the turn-boundary span, so a same-batch
+    /// `tool.call` lands without its own cwd attribute. Trace-level cwd
+    /// (from resource attrs OR a sibling span — here a sibling) must be
+    /// propagated to the toolCall event, otherwise the daemon inserts a
+    /// blank-projectName placeholder that the empty→non-empty upgrade
+    /// guard in `ensureCodexSession` can never refill.
+    func testToolCallInheritsTraceLevelCwd() {
+        let json = otlp(spans: [
+            ["name": "codex.turn.start", "attributes": attr(["thread.id": tidCurrent, "turn.id": "u-batch", "cwd": "/Users/me/proj"])],
+            ["name": "codex.tool.call", "attributes": attr(["thread.id": tidCurrent, "turn.id": "u-batch", "tool.name": "Read"])],
+        ])
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [
+                .turnStart(threadId: tidCurrent, turnId: "u-batch", cwd: "/Users/me/proj"),
+                .toolCall(threadId: tidCurrent, turnId: "u-batch", tool: "Read", cwd: "/Users/me/proj"),
+            ]
+        )
+    }
+
+    /// Same as above but for `activity` spans (the other event type that
+    /// the daemon uses to insert/upgrade a session row).
+    func testActivityInheritsTraceLevelCwd() {
+        let json: [String: Any] = [
+            "resourceSpans": [[
+                "resource": ["attributes": attr(["workspace.root": "/Users/me/proj"])],
+                "scopeSpans": [["spans": [
+                    ["name": "receiving", "attributes": attr(["thread.id": tidStream, "turn.id": "u-act"])]
+                ]]]
+            ]]
+        ]
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [.activity(threadId: tidStream, turnId: "u-act", name: "receiving", cwd: "/Users/me/proj")]
+        )
+    }
+
+    /// Standalone toolCall (no turnStart sibling, no resource cwd) without
+    /// its own cwd attribute must surface `cwd: nil`. Guards against
+    /// over-eager fallback that could borrow cwd from a previous unrelated
+    /// batch.
+    func testToolCallWithoutAnyCwdRemainsNil() {
+        let json = otlp(spans: [
+            ["name": "codex.tool.call", "attributes": attr(["thread.id": tidTool, "turn.id": "u-lone", "tool.name": "Bash"])]
+        ])
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [.toolCall(threadId: tidTool, turnId: "u-lone", tool: "Bash", cwd: nil)]
+        )
+    }
+
+    /// Critical: cwd fallback must NOT leak across threads. When two Codex
+    /// sessions are active under a single OTel exporter, the same batch can
+    /// hold session A's turnStart (with cwd) and session B's toolCall
+    /// (without cwd). Session B's toolCall must NOT borrow session A's cwd
+    /// or the dashboard would label the wrong project for B (Codex
+    /// stop-time review caught this on 2026-05-15).
+    func testCwdFallbackIsScopedToThreadId() {
+        let tidA = "thread-test-A-uuid-01"
+        let tidB = "thread-test-B-uuid-02"
+        let json = otlp(spans: [
+            ["name": "codex.turn.start", "attributes": attr(["thread.id": tidA, "turn.id": "u-A", "cwd": "/Users/me/proj-a"])],
+            ["name": "codex.tool.call", "attributes": attr(["thread.id": tidB, "turn.id": "u-B", "tool.name": "Read"])],
+        ])
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [
+                .turnStart(threadId: tidA, turnId: "u-A", cwd: "/Users/me/proj-a"),
+                .toolCall(threadId: tidB, turnId: "u-B", tool: "Read", cwd: nil),
+            ],
+            "Thread B's toolCall must not inherit thread A's cwd"
+        )
+    }
+
+    /// Per-span cwd wins over per-thread fallback so a heterogeneous batch
+    /// still attributes per-span correctly.
+    func testPerSpanCwdWinsOverTraceLevelCwd() {
+        let json = otlp(spans: [
+            ["name": "codex.turn.start", "attributes": attr(["thread.id": tidCurrent, "turn.id": "u-mix", "cwd": "/Users/me/proj-a"])],
+            ["name": "codex.tool.call", "attributes": attr(["thread.id": tidCurrent, "turn.id": "u-mix", "tool.name": "Read", "cwd": "/Users/me/proj-b"])],
+        ])
+        XCTAssertEqual(
+            CodexTelemetryModule.parse(json),
+            [
+                .turnStart(threadId: tidCurrent, turnId: "u-mix", cwd: "/Users/me/proj-a"),
+                .toolCall(threadId: tidCurrent, turnId: "u-mix", tool: "Read", cwd: "/Users/me/proj-b"),
+            ]
+        )
+    }
+
     func testCurrentCodexActivitySpansAreRecognized() {
         let json = otlp(spans: [
             ["name": "responses_websocket.stream_request", "attributes": attr(["thread.id": tidStream, "turn.id": "u-stream"])]
         ])
         XCTAssertEqual(
             CodexTelemetryModule.parse(json),
-            [.activity(threadId: tidStream, turnId: "u-stream", name: "responses_websocket.stream_request")]
+            [.activity(threadId: tidStream, turnId: "u-stream", name: "responses_websocket.stream_request", cwd: nil)]
         )
     }
 
@@ -145,7 +235,7 @@ final class CodexOtelParserTests: XCTestCase {
         ])
         XCTAssertEqual(
             CodexTelemetryModule.parse(json),
-            [.activity(threadId: "otel-active", turnId: traceId, name: "receiving")]
+            [.activity(threadId: "otel-active", turnId: traceId, name: "receiving", cwd: nil)]
         )
     }
 
@@ -155,7 +245,7 @@ final class CodexOtelParserTests: XCTestCase {
         ])
         XCTAssertEqual(
             CodexTelemetryModule.parse(json),
-            [.toolCall(threadId: tidTool, turnId: "u-tool", tool: "exec")]
+            [.toolCall(threadId: tidTool, turnId: "u-tool", tool: "exec", cwd: nil)]
         )
     }
 
@@ -265,7 +355,7 @@ final class CodexOtelParserTests: XCTestCase {
         ])
         XCTAssertEqual(
             CodexTelemetryModule.parse(json),
-            [.toolCall(threadId: tid4, turnId: "", tool: "Bash")]
+            [.toolCall(threadId: tid4, turnId: "", tool: "Bash", cwd: nil)]
         )
     }
 
