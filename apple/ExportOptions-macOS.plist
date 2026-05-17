@@ -5,7 +5,7 @@
 	<key>method</key>
 	<string>app-store-connect</string>
 	<key>installerSigningCertificate</key>
-	<string>Mac Installer Distribution</string>
+	<string>3rd Party Mac Developer Installer: SEUNG BEOM CHOI (R22679GY5Z)</string>
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>bound.serendipity.agentdeck.dashboard</key>

@@ -60,6 +60,7 @@
 		29B890C4DC7E107CDAD0D209 /* ApmeJudgeMlx.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64EB18086FC44B69D1CBE171 /* ApmeJudgeMlx.swift */; };
 		2A91978796D69836486BB35C /* BubbleSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DD3A6826EADF11BB4C4F139 /* BubbleSystem.swift */; };
 		2B8F7E0477776522FD3417A9 /* ApmeDashboardWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCA36B13CDF6548B698F4C55 /* ApmeDashboardWindow.swift */; };
+		2CA69943196E37F61A932DEF /* OpenClawToolNoiseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BC4C62CBEEE99555CED707 /* OpenClawToolNoiseTests.swift */; };
 		2DDD8DC9B5918E9D0001AE28 /* PlanktonSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70843624A0EEB9E63435EC5 /* PlanktonSystem.swift */; };
 		2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E532E5457B6DFDE324D8F11C /* Protocol.swift */; };
 		2E8F7A4A759E6BE13F311440 /* SessionLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31609846ED73DC70F674FCF0 /* SessionLauncher.swift */; };
@@ -90,6 +91,7 @@
 		441CE4E0A61236F1346DAFFC /* DevicePreviewShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AB7A0263C3AFB217C9DF13 /* DevicePreviewShared.swift */; };
 		447BEA00A4A2B8DA5DEC15AF /* TimelineStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F37E295246F5931D533E31 /* TimelineStripView.swift */; };
 		4492EC65271E1C630601393F /* UsageAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBBD731AC01994F5C7C1A78A /* UsageAPIClient.swift */; };
+		45C2A8320BF4C10E8106CF6B /* OpenClawToolNoiseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BC4C62CBEEE99555CED707 /* OpenClawToolNoiseTests.swift */; };
 		46086D1358BD25389E304052 /* OpenCodeCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2005980598D651492006A3 /* OpenCodeCreature.swift */; };
 		46184E81DD69399DC187E6B6 /* Creature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A9A073192C93C1277AE490 /* Creature.swift */; };
 		469316CAE1172CC311AD34F0 /* CloudCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A135216D37932FE68501F4 /* CloudCreature.swift */; };
@@ -388,6 +390,7 @@
 		51DA1104DBFD7C9FA0C79A5D /* WifiConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WifiConfig.swift; sourceTree = "<group>"; };
 		51DB3C4DCB23D09CFA856786 /* ApmeOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeOutcome.swift; sourceTree = "<group>"; };
 		5200B4548DFE9F98AEE8D504 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		52BC4C62CBEEE99555CED707 /* OpenClawToolNoiseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawToolNoiseTests.swift; sourceTree = "<group>"; };
 		53D4EF93231AAC8CD23FB819 /* ApmeRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeRunner.swift; sourceTree = "<group>"; };
 		573B908900BFBC530F17EAB6 /* WearableTabletPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableTabletPreviews.swift; sourceTree = "<group>"; };
 		57722317EDF1D567981112DE /* DataParticleSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataParticleSystem.swift; sourceTree = "<group>"; };
@@ -566,6 +569,7 @@
 				234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */,
 				3B1754EEF69FF454C638CF1C /* MiniTomlTests.swift */,
 				DAF69E65D3118C105A193227 /* OpenClawTokenExtractTests.swift */,
+				52BC4C62CBEEE99555CED707 /* OpenClawToolNoiseTests.swift */,
 				DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */,
 				5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */,
 				1BBA59C83638DB2F6B90C44A /* ProviderRailEvaluatorTests.swift */,
@@ -1128,6 +1132,7 @@
 				D369DAE31A2E86FD08922453 /* GatewayParityTests.swift in Sources */,
 				23EA982402128EB1158AB6A9 /* MiniTomlTests.swift in Sources */,
 				7B0F7E18D01881EF81E3F08E /* OpenClawTokenExtractTests.swift in Sources */,
+				2CA69943196E37F61A932DEF /* OpenClawToolNoiseTests.swift in Sources */,
 				A12AD232C2625E0919A0CFDF /* ProjectNameResolverTests.swift in Sources */,
 				27F0FAF7D849BC85134C3333 /* ProtocolTests.swift in Sources */,
 				D8EC7333D6CEB08ED84E4BC2 /* ProviderRailEvaluatorTests.swift in Sources */,
@@ -1151,6 +1156,7 @@
 				5E39A0DA9E8B9E175292E84D /* GatewayParityTests.swift in Sources */,
 				A7E6158A1A9242B77356F1E8 /* MiniTomlTests.swift in Sources */,
 				9A5DC975FE1C36D4AB0B13A4 /* OpenClawTokenExtractTests.swift in Sources */,
+				45C2A8320BF4C10E8106CF6B /* OpenClawToolNoiseTests.swift in Sources */,
 				4C5100ED3B4CE6BEDA3F2721 /* ProjectNameResolverTests.swift in Sources */,
 				3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */,
 				F9D579C6EF0D2683CD40F9FC /* ProviderRailEvaluatorTests.swift in Sources */,
@@ -1515,7 +1521,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1601,7 +1607,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
