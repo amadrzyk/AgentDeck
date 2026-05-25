@@ -1,16 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
-  agentTypeRank, sortSessions, assignDisplayNames, naturalLabelCompare,
+  agentTypeRank, sortSessions, assignDisplayNames, naturalLabelCompare, foldCodexSessionsForDisplay,
 } from '../session-utils.js';
+import type { FoldableSession } from '../session-utils.js';
 
 describe('agentTypeRank', () => {
-  it('ranks openclaw first, then claude-code, codex-cli, opencode, others', () => {
+  it('ranks openclaw first, then claude-code, codex-cli, codex-app, opencode, others', () => {
     expect(agentTypeRank('openclaw')).toBe(0);
     expect(agentTypeRank('claude-code')).toBe(1);
     expect(agentTypeRank('codex-cli')).toBe(2);
-    expect(agentTypeRank('opencode')).toBe(3);
-    expect(agentTypeRank('something-else')).toBe(4);
-    expect(agentTypeRank(undefined)).toBe(4);
+    expect(agentTypeRank('codex-app')).toBe(3);
+    expect(agentTypeRank('opencode')).toBe(4);
+    expect(agentTypeRank('something-else')).toBe(5);
+    expect(agentTypeRank(undefined)).toBe(5);
   });
 });
 
@@ -79,6 +81,21 @@ describe('sortSessions', () => {
     const snapshot = sessions.map(s => s.id);
     sortSessions(sessions);
     expect(sessions.map(s => s.id)).toEqual(snapshot);
+  });
+});
+
+describe('foldCodexSessionsForDisplay', () => {
+  it('folds Codex CLI and Codex App separately even with the same project', () => {
+    const sessions: FoldableSession[] = [
+      { id: 'codex:cli', projectName: 'AgentDeck', agentType: 'codex-cli', state: 'processing' },
+      { id: 'codex:app-1', projectName: 'AgentDeck', agentType: 'codex-app', state: 'processing' },
+      { id: 'codex:app-2', projectName: 'AgentDeck', agentType: 'codex-app', state: 'idle' },
+    ];
+    const folded = foldCodexSessionsForDisplay(sessions);
+
+    expect(folded).toHaveLength(2);
+    expect(folded.map(s => s.id).sort()).toEqual(['codex:app-1', 'codex:cli']);
+    expect(folded.find(s => s.agentType === 'codex-app')?.groupSize).toBe(2);
   });
 });
 

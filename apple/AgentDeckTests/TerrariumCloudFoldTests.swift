@@ -13,13 +13,14 @@ final class TerrariumCloudFoldTests: XCTestCase {
         id: String,
         project: String?,
         state: String = "processing",
-        startedAt: String? = nil
+        startedAt: String? = nil,
+        agentType: String = "codex-cli"
     ) -> SessionInfo {
         SessionInfo(
             id: id,
             port: 9120,
             projectName: project,
-            agentType: "codex-cli",
+            agentType: agentType,
             alive: true,
             state: state,
             modelName: nil,
@@ -76,6 +77,26 @@ final class TerrariumCloudFoldTests: XCTestCase {
         for c in terrarium.cloudCreatures {
             XCTAssertEqual(c.groupSize, 1, "Singleton groups have groupSize 1")
         }
+    }
+
+    /// Codex App OTel and Codex CLI hooks may report the same workspace at
+    /// the same time. They must remain two visible Codex creatures instead
+    /// of folding solely by projectName.
+    func testCodexAppAndCliInSameProjectRenderSeparateSprites() {
+        var state = DashboardState()
+        state.state = .idle
+        state.bridgeConnected = true
+        state.siblingSessions = [
+            session(id: "codex:cli", project: "AgentDeck", state: "processing", agentType: "codex-cli"),
+            session(id: "codex:app-1", project: "AgentDeck", state: "processing", startedAt: "2026-04-30T00:00:01Z", agentType: "codex-app"),
+            session(id: "codex:app-2", project: "AgentDeck", state: "idle", startedAt: "2026-04-30T00:00:02Z", agentType: "codex-app"),
+        ]
+
+        let terrarium = state.toTerrariumState()
+
+        XCTAssertEqual(terrarium.cloudCreatures.count, 2)
+        XCTAssertEqual(Set(terrarium.cloudCreatures.map(\.groupSize)), [1, 2])
+        XCTAssertEqual(Set(terrarium.cloudCreatures.compactMap { $0.projectName }), ["AgentDeck"])
     }
 
     /// Empty / missing projectName MUST fold across distinct ids — when a
@@ -246,12 +267,8 @@ final class TerrariumCloudFoldTests: XCTestCase {
         XCTAssertEqual(CodexHookIdentity.sessionKey(from: ["session_id": uuid]), "codex:\(uuid)")
     }
 
-    /// Regression guard for the anonymous-OTel duplicate-row fix.
-    /// `DaemonServer.hasRealCodexSession` decides whether the OTel
-    /// anonymous placeholder (`codex:otel-active`) should be suppressed in
-    /// favour of a real thread-id session. Without this predicate the
-    /// macOS dashboard surfaced two Codex rows per process: one blank
-    /// (anonymous OTel spans with no cwd) and one with the real project.
+    /// Regression guard for Codex session classification. The anonymous OTel
+    /// placeholder is not real; CLI and App thread-id rows both are.
     func testHasRealCodexSessionIgnoresAnonymousPlaceholder() {
         let anonymous = DaemonSessionEntry(
             id: "codex:otel-active",
@@ -266,6 +283,13 @@ final class TerrariumCloudFoldTests: XCTestCase {
             pid: 0,
             projectName: "AgentDeck",
             agentType: "codex-cli"
+        )
+        let realCodexApp = DaemonSessionEntry(
+            id: "codex:019dee40-c853-74e0-b46d-dae33eb1d02c",
+            port: 9120,
+            pid: 0,
+            projectName: "Codex App",
+            agentType: "codex-app"
         )
         let claude = DaemonSessionEntry(
             id: "claude:1",
@@ -286,9 +310,9 @@ final class TerrariumCloudFoldTests: XCTestCase {
         // Claude-only — agent type guard rejects non-codex sessions.
         XCTAssertFalse(DaemonServer.hasRealCodexSession(in: [claude.id: claude]))
 
-        // Real codex thread-id session — predicate fires, anonymous insert
-        // gets skipped at the call site.
+        // Real codex thread-id sessions.
         XCTAssertTrue(DaemonServer.hasRealCodexSession(in: [realCodex.id: realCodex]))
+        XCTAssertTrue(DaemonServer.hasRealCodexSession(in: [realCodexApp.id: realCodexApp]))
 
         // Real codex + anonymous coexisting (the actual regression
         // scenario): predicate still returns true so anonymous would be
@@ -313,6 +337,7 @@ final class TerrariumCloudFoldTests: XCTestCase {
     func testClaudeOctopusIsNotFolded() {
         var state = DashboardState()
         state.state = .idle
+        state.agentType = "openclaw"
         state.bridgeConnected = true
         state.siblingSessions = [
             SessionInfo(id: "claude:1", port: 9121, projectName: "AgentDeck", agentType: "claude-code", alive: true, state: "processing"),

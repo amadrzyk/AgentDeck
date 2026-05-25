@@ -834,7 +834,8 @@ private fun typeColor(type: String) = when (type) {
 
 private fun agentTag(agentType: String?): String = when (agentType) {
     "claude-code" -> "Claude"
-    "codex-cli" -> "Codex"
+    "codex-cli" -> "Codex CLI"
+    "codex-app" -> "Codex App"
     "openclaw" -> "OpenClaw"
     "opencode" -> "OpenCode"
     "daemon" -> "Daemon"

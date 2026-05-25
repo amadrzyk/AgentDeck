@@ -151,7 +151,7 @@ export function agentLogoIcon(
   if (agent === 'claude-code') {
     return robotCreatureIcon(brandColor, size, opacity, cx, cy);
   }
-  if (agent === 'codex-cli') {
+  if (agent === 'codex-cli' || agent === 'codex-app') {
     return codexCloudCreatureIcon(size, opacity, cx, cy);
   }
   if (agent === 'opencode') {
@@ -178,7 +178,7 @@ export function agentLogoWatermark(
   if (agent === 'claude-code') {
     return robotCreatureIcon(fill, 72, markOpacity, 72, 72);
   }
-  if (agent === 'codex-cli') {
+  if (agent === 'codex-cli' || agent === 'codex-app') {
     return codexCloudCreatureIcon(72, markOpacity, 72, 72);
   }
   if (agent === 'opencode') {

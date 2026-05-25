@@ -132,6 +132,8 @@ export function createTowerMode(refresh: RefreshCallback): UtilityMode {
       const agentShort = s.agentType === 'claude-code' ? 'CC'
         : s.agentType === 'openclaw' ? 'OpenClaw'
         : s.agentType === 'opencode' ? 'OpenCode'
+        : s.agentType === 'codex-cli' ? 'Codex CLI'
+        : s.agentType === 'codex-app' ? 'Codex App'
         : s.agentType === 'codex' ? 'Codex'
         : s.agentType?.slice(0, 6) ?? '';
 

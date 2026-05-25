@@ -37,9 +37,10 @@ class SessionDisplayOrderingTest {
         assertEquals(0, agentTypeRank("openclaw"))
         assertEquals(1, agentTypeRank("claude-code"))
         assertEquals(2, agentTypeRank("codex-cli"))
-        assertEquals(3, agentTypeRank("opencode"))
-        assertEquals(4, agentTypeRank("unknown"))
-        assertEquals(4, agentTypeRank(null))
+        assertEquals(3, agentTypeRank("codex-app"))
+        assertEquals(4, agentTypeRank("opencode"))
+        assertEquals(5, agentTypeRank("unknown"))
+        assertEquals(5, agentTypeRank(null))
     }
 
     @Test

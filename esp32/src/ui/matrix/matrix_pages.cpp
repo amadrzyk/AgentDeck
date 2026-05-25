@@ -23,6 +23,12 @@ static bool isDimMode() { return smoothBrightness < 40; }
 // Forward declarations (definitions follow below)
 static inline int xyToIdx(int x, int y);
 
+static bool isCodexAgentType(const char* agentType) {
+    return agentType &&
+           (strcmp(agentType, "codex-cli") == 0 ||
+            strcmp(agentType, "codex-app") == 0);
+}
+
 // Build a disconnect status line. Returns color for rendering.
 // Called with state lock NOT held; reads g_state internally.
 // Disconnect is a benign idle state, not an error — keep labels short and
@@ -377,15 +383,17 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         if (strcmp(g_state.sessions[i].agentType, "daemon") == 0) continue;
         strncpy(agents[agentCount].state, g_state.sessions[i].state, 19);
         agents[agentCount].state[19] = '\0';
-        if (strcmp(g_state.sessions[i].agentType, "codex-cli") == 0) {
+        if (isCodexAgentType(g_state.sessions[i].agentType)) {
             agents[agentCount].kind = AGENT_CODEX;
             agents[agentCount].instanceIdx = codexSeen++;
         } else if (strcmp(g_state.sessions[i].agentType, "opencode") == 0) {
             agents[agentCount].kind = AGENT_OPENCODE;
             agents[agentCount].instanceIdx = opencodeSeen++;
-        } else {
+        } else if (strcmp(g_state.sessions[i].agentType, "claude-code") == 0) {
             agents[agentCount].kind = AGENT_CLAUDE;
             agents[agentCount].instanceIdx = claudeSeen++;
+        } else {
+            continue;
         }
         agentCount++;
     }
@@ -584,7 +592,7 @@ void MatrixPages::renderInfo(CRGB* leds, float animTime) {
             strncpy(entries[entryCount].model, g_state.modelName[0] ? g_state.modelName : "CLAUDE", 31);
         } else if (strcmp(agentType, "openclaw") == 0) {
             strncpy(entries[entryCount].model, "OPENCLAW", 31);
-        } else if (strcmp(agentType, "codex-cli") == 0) {
+        } else if (isCodexAgentType(agentType)) {
             strncpy(entries[entryCount].model, "CODEX", 31);
         } else {
             strncpy(entries[entryCount].model, agentType, 31);

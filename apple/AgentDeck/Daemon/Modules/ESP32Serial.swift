@@ -28,6 +28,7 @@ actor ESP32Serial {
     struct SerialConnection: Identifiable {
         let id = UUID()
         let port: String
+        let fd: Int32
         var writeHandle: FileHandle?
         var readHandle: FileHandle?
         var connected = true
@@ -40,11 +41,13 @@ actor ESP32Serial {
         var lastWriteAt: Date?
         var deviceInfoRequestsSent = 0
         var needsLineReset = false
+        var writeBackpressureCount = 0
     }
 
     struct DeviceInfo {
         var board: String?
         var version: String?
+        var protocolRevision: Int?
         var wifiConfigured: Bool?
         var wifiConnected: Bool?
     }
@@ -70,6 +73,7 @@ actor ESP32Serial {
     private static let deviceInfoReconnectSec: TimeInterval = 120
     private static let writeBackpressureRetryLimit = 100
     private static let writeBackpressureRetryUsec: useconds_t = 20_000
+    private static let writeBackpressureDisconnectThreshold = 15
 
     /// Thread-safe queue for incoming serial data (read thread → actor)
     private struct PendingRead: @unchecked Sendable {
@@ -132,9 +136,11 @@ actor ESP32Serial {
                     "lastReadAt": conn.lastReadAt.map { Int($0.timeIntervalSince1970 * 1000) } as Any,
                     "lastWriteAt": conn.lastWriteAt.map { Int($0.timeIntervalSince1970 * 1000) } as Any,
                     "deviceInfoRequestsSent": conn.deviceInfoRequestsSent,
+                    "writeBackpressureCount": conn.writeBackpressureCount,
                     "deviceInfo": [
                         "board": conn.deviceInfo?.board as Any,
                         "version": conn.deviceInfo?.version as Any,
+                        "protocolRevision": conn.deviceInfo?.protocolRevision as Any,
                         "wifiConfigured": conn.deviceInfo?.wifiConfigured as Any,
                         "wifiConnected": conn.deviceInfo?.wifiConnected as Any,
                     ] as [String: Any],
@@ -225,12 +231,8 @@ actor ESP32Serial {
         guard let type = event["type"] as? String,
               Self.serialForwardedEvents.contains(type) else { return }
 
-        let prepared = prepareForSerial(event)
-        guard let data = try? JSONSerialization.data(withJSONObject: prepared),
-              let json = String(data: data, encoding: .utf8) else { return }
-
         for i in connections.indices where connections[i].connected {
-            sendToConnection(&connections[i], json: json)
+            sendEvent(event, to: &connections[i])
         }
     }
 
@@ -314,6 +316,11 @@ actor ESP32Serial {
         }
 
         guard let conn = openPort(port) else { return }
+        // If connection was already marked disconnected during openPort (due to initialization write stalls)
+        guard conn.connected else {
+            DaemonLogger.shared.error("ESP32: Port \(port) was closed during initialization (e.g. write stall)")
+            return
+        }
         lastReadError = nil
         // IMPORTANT: append to connections array BEFORE starting read thread,
         // otherwise handleReadData won't find the connection by port name
@@ -322,7 +329,7 @@ actor ESP32Serial {
             DaemonLogger.shared.throttledDebug("ESP32", key: "missing-read:\(port)", "No read handle for \(port), skipping", minInterval: 60)
             return
         }
-        startReading(port: port, handle: readHandle, token: conn.readToken)
+        startReading(port: port, handle: readHandle, fd: conn.fd, token: conn.readToken)
     }
 
     private func openPort(_ port: String) -> SerialConnection? {
@@ -378,7 +385,7 @@ actor ESP32Serial {
 
         lastOpenError = nil
 
-        var conn = SerialConnection(port: port, writeHandle: writeHandle, readHandle: readHandle)
+        var conn = SerialConnection(port: port, fd: descriptor, writeHandle: writeHandle, readHandle: readHandle)
 
         DaemonLogger.shared.info("ESP32 opened: \(port) [\(port.contains("usbmodem") ? "CDC" : "UART")]")
 
@@ -391,28 +398,20 @@ actor ESP32Serial {
         let initN = Darwin.read(descriptor, &initBuf, initBuf.count)
         if initN > 0, let initStr = String(bytes: initBuf[0..<initN], encoding: .utf8) {
             enqueuePendingRead(port: port, data: initStr)
+            if let info = Self.parseDeviceInfo(from: initStr) {
+                conn.deviceInfo = info
+            }
         }
 
         // Send initial state
-        if let events = initialStateProvider?() {
-            for event in events {
-                guard let type = event["type"] as? String,
-                      Self.serialForwardedEvents.contains(type) else { continue }
-                let prepared = prepareForSerial(event)
-                if let data = try? JSONSerialization.data(withJSONObject: prepared),
-                   let json = String(data: data, encoding: .utf8) {
-                    sendToConnection(&conn, json: json)
-                }
-            }
-        }
+        sendInitialState(to: &conn)
 
         return conn
     }
 
-    private func startReading(port: String, handle: FileHandle, token: ReadToken) {
+    private func startReading(port: String, handle: FileHandle, fd: Int32, token: ReadToken) {
         // Use a dedicated thread for serial reading — FileHandle.readabilityHandler
         // uses dispatch sources which don't reliably trigger for serial port fds.
-        let fd = handle.fileDescriptor
         // Read on a dispatch queue — poll fd with O_NONBLOCK
         let readQueue = DispatchQueue(label: "esp32.read.\(port)", qos: .default)
         readQueue.async { [weak self, handle] in
@@ -476,13 +475,18 @@ actor ESP32Serial {
             DaemonLogger.shared.sampledDebug("ESP32", key: "recv:\(port):\(type)", every: 20, "← \(port): \(type)")
 
             if type == "device_info" {
+                let hadDeviceInfo = connections[idx].deviceInfo != nil
                 connections[idx].deviceInfo = DeviceInfo(
                     board: msg["board"] as? String,
                     version: msg["version"] as? String,
+                    protocolRevision: msg["protocolRevision"] as? Int,
                     wifiConfigured: msg["wifiConfigured"] as? Bool,
                     wifiConnected: msg["wifiConnected"] as? Bool
                 )
                 failedPorts.removeValue(forKey: port)
+                if !hadDeviceInfo {
+                    sendInitialState(to: &connections[idx])
+                }
             }
 
             onMessage?(port, msg)
@@ -531,25 +535,19 @@ actor ESP32Serial {
         var sentData = false
 
         if let event = stateProvider?() {
-            let prepared = prepareForSerial(event)
-            if let data = try? JSONSerialization.data(withJSONObject: prepared),
-               let json = String(data: data, encoding: .utf8) {
-                for i in connections.indices where connections[i].connected {
-                    sendToConnection(&connections[i], json: json)
+            for i in connections.indices where connections[i].connected {
+                if sendEvent(event, to: &connections[i]) {
+                    sentData = true
                 }
-                sentData = true
             }
         }
 
         if let event = usageProvider?(),
            event["fiveHourPercent"] != nil {
-            let prepared = prepareForSerial(event)
-            if let data = try? JSONSerialization.data(withJSONObject: prepared),
-               let json = String(data: data, encoding: .utf8) {
-                for i in connections.indices where connections[i].connected {
-                    sendToConnection(&connections[i], json: json)
+            for i in connections.indices where connections[i].connected {
+                if sendEvent(event, to: &connections[i]) {
+                    sentData = true
                 }
-                sentData = true
             }
         }
 
@@ -576,19 +574,39 @@ actor ESP32Serial {
         sendToConnection(&conn, json: #"{"type":"device_info_request"}"#)
     }
 
+    private func sendInitialState(to conn: inout SerialConnection) {
+        guard let events = initialStateProvider?() else { return }
+        for event in events {
+            sendEvent(event, to: &conn)
+        }
+    }
+
+    @discardableResult
+    private func sendEvent(_ event: [String: Any], to conn: inout SerialConnection) -> Bool {
+        guard let type = event["type"] as? String,
+              Self.serialForwardedEvents.contains(type) else { return false }
+        let prepared = prepareForSerial(event, connection: conn)
+        guard let data = try? JSONSerialization.data(withJSONObject: prepared),
+              let json = String(data: data, encoding: .utf8) else { return false }
+        sendToConnection(&conn, json: json)
+        return true
+    }
+
     private func sendToConnection(_ conn: inout SerialConnection, json: String) {
-        guard conn.connected, let handle = conn.writeHandle else { return }
+        guard conn.connected, conn.writeHandle != nil else { return }
         let hadLineReset = conn.needsLineReset
         let prefix = conn.needsLineReset ? "\n" : ""
         let payload = Array((prefix + json + "\n").utf8)
-        switch writePayload(payload, to: handle.fileDescriptor) {
+        switch writePayload(payload, to: conn.fd) {
         case .success:
             conn.needsLineReset = false
+            conn.writeBackpressureCount = 0
             conn.lastWriteAt = Date()
             lastWriteError = nil
             failedPorts.removeValue(forKey: conn.port)
         case .backpressure(let message, let partial):
             conn.needsLineReset = hadLineReset || partial
+            conn.writeBackpressureCount += 1
             lastWriteError = "write backpressure for \(conn.port): \(message)"
             DaemonLogger.shared.throttledDebug(
                 "ESP32",
@@ -596,9 +614,25 @@ actor ESP32Serial {
                 "\(conn.port): \(message); keeping connection open",
                 minInterval: 30
             )
+            if conn.writeBackpressureCount >= Self.writeBackpressureDisconnectThreshold {
+                let failCount = (failedPorts[conn.port]?.failCount ?? 0) + 1
+                let failure = "\(message) after \(conn.writeBackpressureCount) consecutive write stall(s)"
+                conn.readToken.invalidate()
+                conn.connected = false
+                try? conn.writeHandle?.close()
+                failedPorts[conn.port] = PortFailure(
+                    error: failure,
+                    isPermanent: false,
+                    failCount: failCount,
+                    lastAttempt: Date()
+                )
+                lastWriteError = "write failed for \(conn.port): \(failure)"
+                DaemonLogger.shared.debug("ESP32", "\(conn.port): closing stalled serial connection for reconnect")
+            }
         case .hardFailure(let message):
             conn.readToken.invalidate()
             conn.connected = false
+            try? conn.writeHandle?.close()
             failedPorts[conn.port] = PortFailure(
                 error: message,
                 isPermanent: false,
@@ -653,7 +687,7 @@ actor ESP32Serial {
     }
 
     /// Strip fields ESP32 doesn't need (reduce payload for small RX buffers)
-    private func prepareForSerial(_ event: [String: Any]) -> [String: Any] {
+    private func prepareForSerial(_ event: [String: Any], connection: SerialConnection) -> [String: Any] {
         var e = event
         let type = event["type"] as? String
 
@@ -691,7 +725,71 @@ actor ESP32Serial {
                 }
             }
         }
+        if Self.needsLegacyCodexAppAlias(connection.deviceInfo) {
+            e = Self.aliasCodexAppAgentTypes(e) as? [String: Any] ?? e
+        }
         return e
+    }
+
+    private static func parseDeviceInfo(from data: String) -> DeviceInfo? {
+        for line in data
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("{"),
+                  let jsonData = trimmed.data(using: .utf8),
+                  let msg = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  (msg["type"] as? String) == "device_info" else { continue }
+            return DeviceInfo(
+                board: msg["board"] as? String,
+                version: msg["version"] as? String,
+                protocolRevision: msg["protocolRevision"] as? Int,
+                wifiConfigured: msg["wifiConfigured"] as? Bool,
+                wifiConnected: msg["wifiConnected"] as? Bool
+            )
+        }
+        return nil
+    }
+
+    private static func needsLegacyCodexAppAlias(_ deviceInfo: DeviceInfo?) -> Bool {
+        guard deviceInfo?.board == "round_amoled" else { return false }
+        // Round AMOLED v0.1.0 predates codex-app and falls back to the
+        // Claude creature for unknown agent types. Newer firmware advertises
+        // protocolRevision 2 / v0.1.1 and can render codex-app directly.
+        if (deviceInfo?.protocolRevision ?? 0) >= 2 { return false }
+        return !isVersion(deviceInfo?.version, atLeast: "0.1.1")
+    }
+
+    private static func isVersion(_ version: String?, atLeast minimum: String) -> Bool {
+        guard let version else { return false }
+        let lhs = version.split(separator: ".").map { Int($0) ?? 0 }
+        let rhs = minimum.split(separator: ".").map { Int($0) ?? 0 }
+        let count = max(lhs.count, rhs.count)
+        for idx in 0..<count {
+            let l = idx < lhs.count ? lhs[idx] : 0
+            let r = idx < rhs.count ? rhs[idx] : 0
+            if l != r { return l > r }
+        }
+        return true
+    }
+
+    private static func aliasCodexAppAgentTypes(_ value: Any) -> Any {
+        if let dict = value as? [String: Any] {
+            var mapped: [String: Any] = [:]
+            for (key, child) in dict {
+                if key == "agentType", (child as? String) == "codex-app" {
+                    mapped[key] = "codex-cli"
+                } else {
+                    mapped[key] = aliasCodexAppAgentTypes(child)
+                }
+            }
+            return mapped
+        }
+        if let array = value as? [Any] {
+            return array.map { aliasCodexAppAgentTypes($0) }
+        }
+        return value
     }
 
     // MARK: - Constants

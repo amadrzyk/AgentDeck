@@ -492,6 +492,7 @@ export function setOctopi(
     (s.agentType as string) !== 'daemon' &&
     (s.agentType as string) !== 'openclaw' &&
     (s.agentType as string) !== 'codex-cli' &&
+    (s.agentType as string) !== 'codex-app' &&
     (s.agentType as string) !== 'opencode'
   );
   const count = octSessions.length;
@@ -542,7 +543,7 @@ export function setJellyfish(
   ctx: TerrariumContext,
   sessions: Array<{ id?: string; state: string; name?: string; agentType?: string }>,
 ): void {
-  const jellySessions = sessions.filter(s => (s.agentType as string) === 'codex-cli');
+  const jellySessions = sessions.filter(s => (s.agentType as string) === 'codex-cli' || (s.agentType as string) === 'codex-app');
   const count = jellySessions.length;
   const nameCounts = new Map<string, number>();
   for (const s of jellySessions) {

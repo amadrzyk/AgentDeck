@@ -1361,11 +1361,16 @@ private struct D200hSessionInfo {
 
     static func parse(_ dict: [String: Any]) -> D200hSessionInfo {
         let id = dict["id"] as? String ?? ""
-        let rawProjectName = dict["projectName"] as? String ?? dict["agentType"] as? String ?? ""
+        let agentType = dict["agentType"] as? String ?? ""
+        let rawProjectName = dict["projectName"] as? String ?? ""
         let isVirtualGateway = id == "openclaw-gateway"
         let normalizedProjectName: String
         if isVirtualGateway && (rawProjectName.isEmpty || rawProjectName.caseInsensitiveCompare("Gateway") == .orderedSame) {
             normalizedProjectName = "OpenClaw"
+        } else if rawProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, agentType == "codex-app" {
+            normalizedProjectName = "Codex App"
+        } else if rawProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, agentType == "codex-cli" {
+            normalizedProjectName = "Codex CLI"
         } else {
             normalizedProjectName = rawProjectName
         }
@@ -1373,7 +1378,7 @@ private struct D200hSessionInfo {
             id: id,
             projectName: normalizedProjectName,
             displayName: normalizedProjectName,
-            agentType: dict["agentType"] as? String ?? "",
+            agentType: agentType,
             state: dict["state"] as? String ?? "idle",
             port: dict["port"] as? Int ?? 0,
             currentTool: dict["currentTool"] as? String ?? "",
@@ -1557,7 +1562,7 @@ private enum D200hRenderer {
     static func agentBrandColor(_ agent: String) -> CGColor {
         switch agent {
         case "openclaw": return rgb(255, 77, 77)
-        case "codex-cli": return rgb(99, 102, 241)
+        case "codex-cli", "codex-app": return rgb(99, 102, 241)
         case "opencode": return rgb(241, 236, 236)
         default: return rgb(192, 112, 88)
         }
@@ -1661,6 +1666,7 @@ private enum D200hRenderer {
             switch session.agentType {
             case "openclaw": agentLbl = "OPENCLAW"
             case "codex-cli": agentLbl = "CODEX CLI"
+            case "codex-app": agentLbl = "CODEX APP"
             case "opencode": agentLbl = "OPENCODE"
             default: agentLbl = "CLAUDE CODE"
             }
@@ -1875,7 +1881,7 @@ private enum D200hRenderer {
 
     private static func sessionGlyph(for agentType: String) -> ButtonSlot.IconGlyph {
         switch agentType {
-        case "codex-cli": return .codexCli
+        case "codex-cli", "codex-app": return .codexCli
         case "opencode": return .openCode
         case "openclaw": return .openClaw
         default: return .claudeCode

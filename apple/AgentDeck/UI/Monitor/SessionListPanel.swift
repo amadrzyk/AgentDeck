@@ -294,7 +294,7 @@ struct SessionListPanel: View {
     @ViewBuilder
     private func agentIconView(for agentType: String?) -> some View {
         switch agentType {
-        case "claude-code", "codex-cli", "openclaw", "opencode":
+        case "claude-code", "codex-cli", "codex-app", "openclaw", "opencode":
             AgentBrandIcon(
                 agentType: agentType,
                 tint: SessionBrand.color(for: agentType),
@@ -312,7 +312,7 @@ struct SessionListPanel: View {
 
     private func sessionListIconInset(for agentType: String?) -> CGFloat {
         switch agentType {
-        case "codex-cli":
+        case "codex-cli", "codex-app":
             // Codex's official SVG reaches the viewBox edges. Give it a real
             // internal inset instead of padding outside the Image frame so
             // the left/top anti-aliased pixels do not clip in the 16pt row slot.
@@ -328,7 +328,8 @@ struct SessionListPanel: View {
         let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmed.isEmpty { return trimmed }
         switch agentType {
-        case "codex-cli": return "Codex"
+        case "codex-cli": return "Codex CLI"
+        case "codex-app": return "Codex App"
         case "claude-code": return "Claude Code"
         case "openclaw": return "OpenClaw"
         case "opencode": return "OpenCode"

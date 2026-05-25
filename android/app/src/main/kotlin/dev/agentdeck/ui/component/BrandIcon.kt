@@ -154,6 +154,7 @@ private fun appendNumber(s: String, start: Int, sb: StringBuilder): Int {
 fun brandColorForAgent(agentType: String?): Color = when (agentType) {
     "claude-code" -> Color(0xFFC07058)
     "codex-cli"   -> Color(0xFF6166E0)
+    "codex-app"   -> Color(0xFF6166E0)
     "openclaw"    -> Color(0xFFFF4D4D)
     "opencode"    -> Color(0xFFF1ECEC)
     "daemon"      -> Color(0xFF8C8C99)
@@ -174,7 +175,7 @@ private class BrandIconSpec(
                 color = Color(0xFFC07058),  // terracotta
                 einkColor = Color(0xFF333333),
             )
-            "codex-cli" -> BrandIconSpec(
+            "codex-cli", "codex-app" -> BrandIconSpec(
                 pathDataList = listOf(OPENAI_PATH),
                 viewBox = 24f,
                 color = Color(0xFF6166E0),  // indigo

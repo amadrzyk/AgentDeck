@@ -158,12 +158,13 @@ extension AgentStateHolder {
         _ = daemonService  // Kept in signature to avoid call-site churn.
 
         let anthropicSaved = anthropicAdminKeySavedValue()
+        let shouldSurfaceClaude = Self.shouldSurfaceClaudeSetup(for: state)
         let descriptors: [IntegrationDescriptor] = [
-            IntegrationCatalog.claudeCode,
+            shouldSurfaceClaude ? IntegrationCatalog.claudeCode : nil,
             IntegrationCatalog.codex,
             IntegrationCatalog.openClaw,
             IntegrationCatalog.antigravity,
-        ]
+        ].compactMap { $0 }
         var items: [SetupItem] = descriptors.compactMap { descriptor in
             let status = IntegrationStatusEvaluator.status(
                 for: descriptor,
@@ -185,7 +186,9 @@ extension AgentStateHolder {
         // `~/.claude/settings.local.json`. Respect `.declined` so users
         // who actively opted out aren't nagged; only surface for `.unknown`
         // or previously-accepted installs that have been wiped.
-        if !preferences.hooksInstalled && preferences.hookInstallConsent != .declined {
+        if shouldSurfaceClaude,
+           !preferences.hooksInstalled,
+           preferences.hookInstallConsent != .declined {
             items.append(SetupItem(
                 id: "hooks",
                 icon: "bolt.slash",
@@ -195,15 +198,15 @@ extension AgentStateHolder {
             ))
         }
 
-        // Codex observation consent — only nudge users who actually run
-        // Codex (the daemon already saw an auth mode for it). Without that
-        // gate every fresh-install user would see the nudge regardless of
-        // whether they own the CLI, which is exactly the noise the
-        // App Review companion-install ban warns against.
-        let codexAuthVisible = (state.codexAuthMode.flatMap { $0.isEmpty ? nil : $0 }) != nil
-        if codexAuthVisible
-            && !preferences.codexConfigInstalled
-            && preferences.codexConfigConsent != .declined {
+        // Codex observation consent. This must not depend on a prior Codex CLI
+        // run: the CLI can incidentally install the same managed config block,
+        // but the standalone App Store app needs a visible, user-approved path
+        // before any Codex App / Codex CLI session has emitted telemetry.
+        if Self.shouldShowCodexObservationSetup(
+            codexAuthMode: state.codexAuthMode,
+            codexConfigInstalled: preferences.codexConfigInstalled,
+            codexConfigConsent: preferences.codexConfigConsent
+        ) {
             items.append(SetupItem(
                 id: "codex-config",
                 icon: "bolt.slash",
@@ -214,6 +217,38 @@ extension AgentStateHolder {
         }
 
         return items
+    }
+
+    static func shouldShowCodexObservationSetup(
+        codexAuthMode: String?,
+        codexConfigInstalled: Bool,
+        codexConfigConsent: AppPreferences.HookInstallConsent
+    ) -> Bool {
+        _ = codexAuthMode
+        return !codexConfigInstalled && codexConfigConsent != .declined
+    }
+
+    static func shouldSurfaceClaudeSetup(for state: DashboardState) -> Bool {
+        let visibleTypes = visibleAgentTypes(in: state)
+        return visibleTypes.isEmpty || visibleTypes.contains("claude-code")
+    }
+
+    private static func visibleAgentTypes(in state: DashboardState) -> Set<String> {
+        var types = Set<String>()
+        func add(_ raw: String?) {
+            guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty,
+                  value != "daemon",
+                  value != "monitor" else { return }
+            types.insert(value)
+        }
+        if state.state != .disconnected {
+            add(state.agentType)
+        }
+        for session in state.siblingSessions where session.alive {
+            add(session.agentType)
+        }
+        return types
     }
     #else
     func setupNeededItems(preferences: AppPreferences) -> [SetupItem] {

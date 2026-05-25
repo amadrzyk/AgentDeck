@@ -63,6 +63,12 @@ static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 #endif
 }
 
+static bool isCodexAgentType(const char* agentType) {
+    return agentType &&
+           (strcmp(agentType, "codex-cli") == 0 ||
+            strcmp(agentType, "codex-app") == 0);
+}
+
 // Decode a pixel back to R/G/B (handles swap)
 static inline void decodePixel(uint16_t px, uint8_t& r, uint8_t& g, uint8_t& b) {
 #if defined(BOARD_BOX_86)
@@ -196,19 +202,16 @@ void render(float dt) {
     bool isDaemon = hasData && (strcmp(g_state.agentType, "daemon") == 0 ||
                                  strcmp(g_state.agentType, "openclaw") == 0);
     bool isOctopusAgent = hasData &&
-                          strcmp(g_state.agentType, "openclaw") != 0 &&
-                          strcmp(g_state.agentType, "codex-cli") != 0 &&
-                          strcmp(g_state.agentType, "opencode") != 0 &&
-                          strcmp(g_state.agentType, "daemon") != 0;
+                          strcmp(g_state.agentType, "claude-code") == 0;
     bool isCloudAgent = hasData &&
-                        strcmp(g_state.agentType, "codex-cli") == 0;
+                        isCodexAgentType(g_state.agentType);
     bool isOpenCodeAgent = hasData &&
                            strcmp(g_state.agentType, "opencode") == 0;
     uint8_t octCount = hasData ? g_state.octopusCount : 0;
     // Default to 1 octopus only for claude-code agents (before sessions_list arrives)
     if (octCount == 0 && isOctopusAgent) octCount = 1;
     uint8_t cloudCount = hasData ? g_state.cloudCount : 0;
-    // Default to 1 cloud for codex-cli agents (before sessions_list arrives)
+    // Default to 1 cloud for Codex CLI/App agents (before sessions_list arrives)
     if (cloudCount == 0 && isCloudAgent) cloudCount = 1;
     uint8_t opencodeCount = hasData ? g_state.opencodeCount : 0;
     if (opencodeCount == 0 && isOpenCodeAgent) opencodeCount = 1;
@@ -249,7 +252,7 @@ void render(float dt) {
             if (strcmp(g_state.sessions[s].agentType, "claude-code") == 0 && octIdx < MAX_OCTOPUS) {
                 octStates[octIdx] = mapSessionState(g_state.sessions[s].state);
                 octIdx++;
-            } else if (strcmp(g_state.sessions[s].agentType, "codex-cli") == 0 && cloudIdx < MAX_CLOUD) {
+            } else if (isCodexAgentType(g_state.sessions[s].agentType) && cloudIdx < MAX_CLOUD) {
                 cloudStates[cloudIdx] = mapSessionState(g_state.sessions[s].state);
                 cloudIdx++;
             } else if (MAX_OPENCODE > 0 && strcmp(g_state.sessions[s].agentType, "opencode") == 0 && ocIdx < MAX_OPENCODE) {

@@ -79,8 +79,9 @@ fun agentTypeRank(agentType: String?): Int = when (agentType) {
     "openclaw" -> 0
     "claude-code" -> 1
     "codex-cli" -> 2
-    "opencode" -> 3
-    else -> 4
+    "codex-app" -> 3
+    "opencode" -> 4
+    else -> 5
 }
 
 private val naturalChunks = Regex("\\d+|\\D+")
@@ -143,6 +144,7 @@ fun agentIcon(agentType: String?): String = when (agentType) {
     "claude-code" -> "\u273B"         // ✻ (Claude sparkle)
     "openclaw" -> "\uD83E\uDD9E"     // 🦞 (crayfish)
     "codex-cli" -> "\u276F"           // ❯ (terminal prompt)
+    "codex-app" -> "\u276F"           // ❯ (Codex mark)
     "opencode" -> "\u25A3"            // ▣ (nested square)
     else -> "\u25CF"                   // ● bullet
 }

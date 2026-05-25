@@ -114,6 +114,58 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(e.codexSubscriptionActiveUntil, "2026-05-01T00:00:00Z")
     }
 
+    #if os(macOS)
+    func testCodexObservationSetupDoesNotRequirePriorCodexAuthSignal() {
+        XCTAssertTrue(AgentStateHolder.shouldShowCodexObservationSetup(
+            codexAuthMode: nil,
+            codexConfigInstalled: false,
+            codexConfigConsent: .unknown
+        ))
+        XCTAssertFalse(AgentStateHolder.shouldShowCodexObservationSetup(
+            codexAuthMode: nil,
+            codexConfigInstalled: true,
+            codexConfigConsent: .accepted
+        ))
+        XCTAssertFalse(AgentStateHolder.shouldShowCodexObservationSetup(
+            codexAuthMode: "chatgpt",
+            codexConfigInstalled: false,
+            codexConfigConsent: .declined
+        ))
+    }
+
+    func testClaudeSetupIsHiddenWhenOnlyOtherAgentsAreVisible() {
+        var state = DashboardState()
+        state.state = .idle
+        state.agentType = "openclaw"
+        state.siblingSessions = [
+            SessionInfo(
+                id: "codex-app",
+                port: 0,
+                projectName: "AgentDeck",
+                agentType: "codex-app"
+            )
+        ]
+
+        XCTAssertFalse(AgentStateHolder.shouldSurfaceClaudeSetup(for: state))
+    }
+
+    func testClaudeSetupStillShowsForEmptyOrClaudeSetups() {
+        XCTAssertTrue(AgentStateHolder.shouldSurfaceClaudeSetup(for: DashboardState()))
+
+        var state = DashboardState()
+        state.siblingSessions = [
+            SessionInfo(
+                id: "claude",
+                port: 0,
+                projectName: "AgentDeck",
+                agentType: "claude-code"
+            )
+        ]
+
+        XCTAssertTrue(AgentStateHolder.shouldSurfaceClaudeSetup(for: state))
+    }
+    #endif
+
     // MARK: - Usage Update
 
     func testDecodeUsageUpdate() throws {
@@ -464,6 +516,22 @@ final class ProtocolTests: XCTestCase {
 
         XCTAssertEqual(folded.compactMap { $0["id"] as? String }, ["codex:a", "codex:b"])
         XCTAssertNil(folded.first?["groupSize"])
+    }
+
+    func testFoldCodexSessionPayloadsKeepsCliAndAppSeparate() {
+        let folded = DashboardDataRules.foldCodexSessionPayloadsForDisplay([
+            ["id": "codex:cli-1", "port": 9120, "projectName": "AgentDeck", "agentType": "codex-cli", "alive": true, "state": "processing"],
+            ["id": "codex:app-1", "port": 9120, "projectName": "AgentDeck", "agentType": "codex-app", "alive": true, "state": "processing"],
+            ["id": "codex:app-2", "port": 9120, "projectName": "AgentDeck", "agentType": "codex-app", "alive": true, "state": "idle"],
+        ])
+
+        let ids = Set(folded.compactMap { $0["id"] as? String })
+        XCTAssertEqual(folded.count, 2)
+        XCTAssertTrue(ids.contains("codex:cli-1"))
+        XCTAssertTrue(ids.contains("codex:app-1"))
+        let app = folded.first { ($0["agentType"] as? String) == "codex-app" }
+        XCTAssertEqual(app?["groupSize"] as? Int, 2)
+        XCTAssertEqual(app?["foldedSessionIds"] as? [String], ["codex:app-1", "codex:app-2"])
     }
 
     func testOpenClawDisplayLinesKeepsOnlyDefaultModel() {

@@ -198,8 +198,10 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     // Build multi-agent creature list from sibling sessions
     val agents = mutableListOf<AgentCreatureState>()
 
-    // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, codex-cli, or opencode
-    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw" && agentType != "codex-cli" && agentType != "opencode") {
+    fun isCodexAgent(type: String?): Boolean = type == "codex-cli" || type == "codex-app"
+
+    // Primary agent — skip if disconnected (no session), daemon-like, openclaw proxy, codex, or opencode
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType != "openclaw" && !isCodexAgent(agentType) && agentType != "opencode") {
         agents.add(
             AgentCreatureState(
                 sessionId = sessionId ?: "primary",
@@ -218,7 +220,7 @@ fun DashboardState.toTerrariumState(): TerrariumState {
     for (sibling in siblingSessions) {
         if (sessionId != null && sibling.id == sessionId) continue // skip self (null guard)
         val siblingType = sibling.agentType
-        if (siblingType == "openclaw" || siblingType == "daemon" || siblingType == "codex-cli" || siblingType == "opencode") continue // not octopus
+        if (siblingType == "openclaw" || siblingType == "daemon" || isCodexAgent(siblingType) || siblingType == "opencode") continue // not octopus
         agents.add(
             AgentCreatureState(
                 sessionId = sibling.id,
@@ -232,10 +234,10 @@ fun DashboardState.toTerrariumState(): TerrariumState {
         )
     }
 
-    // Build cloud creatures list from codex-cli sessions
+    // Build cloud creatures list from Codex sessions
     val cloudCreatures = mutableListOf<AgentCreatureState>()
-    // Primary codex-cli agent
-    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && agentType == "codex-cli") {
+    // Primary Codex agent
+    if (agentState != AgentState.DISCONNECTED && !isDaemonLike && isCodexAgent(agentType)) {
         cloudCreatures.add(
             AgentCreatureState(
                 sessionId = sessionId ?: "primary-cloud",
@@ -248,11 +250,11 @@ fun DashboardState.toTerrariumState(): TerrariumState {
             )
         )
     }
-    // Sibling codex-cli sessions
+    // Sibling Codex sessions
     var cloudSlot = cloudCreatures.size
     for (sibling in siblingSessions) {
         if (sessionId != null && sibling.id == sessionId) continue
-        if (sibling.agentType != "codex-cli") continue
+        if (!isCodexAgent(sibling.agentType)) continue
         cloudCreatures.add(
             AgentCreatureState(
                 sessionId = sibling.id,

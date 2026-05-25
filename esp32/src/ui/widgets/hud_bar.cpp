@@ -47,6 +47,28 @@ static constexpr int GAUGE_INNER = GAUGE_SIZE - GAUGE_BORDER * 2;
 static constexpr int GAUGE_GAP = 8;
 static constexpr int GAUGE_RADIUS = 6;
 
+static bool isCodexAgentType(const char* agentType) {
+    return agentType &&
+           (strstr(agentType, "codex-cli") != nullptr ||
+            strstr(agentType, "codex-app") != nullptr);
+}
+
+static uint32_t agentDotColor(const char* agentType) {
+    if (agentType && strstr(agentType, "openclaw") != nullptr) {
+        return Theme::CrayfishShell;
+    }
+    if (isCodexAgentType(agentType)) {
+        return Theme::CloudBody;
+    }
+    if (agentType && strstr(agentType, "opencode") != nullptr) {
+        return Theme::OpenCodeOuter;
+    }
+    if (agentType && strstr(agentType, "claude-code") != nullptr) {
+        return Theme::ClaudeBody;
+    }
+    return Theme::HUDDim;
+}
+
 namespace HUD {
 
 // Helper: create a water-fill gauge column: [gauge box] + "1h 55m"
@@ -394,14 +416,7 @@ void update() {
             if (!sessions[i].alive) continue;
 
             // Pick color by agent type
-            uint32_t dotColor;
-            if (strstr(sessions[i].agentType, "openclaw") != nullptr) {
-                dotColor = Theme::CrayfishShell;  // red
-            } else if (strstr(sessions[i].agentType, "codex-cli") != nullptr) {
-                dotColor = Theme::CloudBody;       // indigo
-            } else {
-                dotColor = Theme::ClaudeBody;     // terracotta
-            }
+            uint32_t dotColor = agentDotColor(sessions[i].agentType);
 
             // State color for status dot
             uint32_t sColor = sessionStateColor(sessions[i].state);
@@ -415,9 +430,7 @@ void update() {
         }
     } else if (hasData) {
         // Fallback: show primary session info (only when real data received)
-        uint32_t dotColor = (strstr(primaryAgent, "openclaw") != nullptr) ? Theme::CrayfishShell
-            : (strstr(primaryAgent, "codex-cli") != nullptr) ? Theme::CloudBody
-            : Theme::ClaudeBody;
+        uint32_t dotColor = agentDotColor(primaryAgent);
         uint32_t sColor = stateColor(primaryState);
 
         pos += snprintf(buf + pos, sizeof(buf) - pos,

@@ -35,7 +35,8 @@ struct AttentionTheaterHUD: View {
     private var agentLabel: String {
         switch session.agentType {
         case "claude-code": return "Claude"
-        case "codex-cli":   return "Codex"
+        case "codex-cli":   return "Codex CLI"
+        case "codex-app":   return "Codex App"
         case "openclaw":    return "OpenClaw"
         case "opencode":    return "OpenCode"
         default:            return session.agentType?.capitalized ?? "Agent"

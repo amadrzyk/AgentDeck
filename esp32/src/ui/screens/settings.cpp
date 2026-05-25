@@ -144,7 +144,7 @@ lv_obj_t* settingsCreate() {
     lv_obj_t* lblVer = lv_label_create(screen);
     lv_obj_set_style_text_color(lblVer, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(lblVer, &lv_font_montserrat_10, 0);
-    lv_label_set_text(lblVer, "AgentDeck Display v0.1.0");
+    lv_label_set_text_fmt(lblVer, "AgentDeck Display v%s", FIRMWARE_VERSION);
 
     return screen;
 }

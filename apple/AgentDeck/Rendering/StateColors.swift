@@ -72,6 +72,7 @@ enum StateColors {
         case "claude-code": return Color(hex: Hex.claudeCode)
         case "openclaw":    return Color(hex: Hex.openclaw)
         case "codex-cli":   return Color(hex: Hex.codexCli)
+        case "codex-app":   return Color(hex: Hex.codexCli)
         case "opencode":    return Color(hex: Hex.opencode)
         case "monitor":     return Color(hex: Hex.monitor)
         default:            return Color(hex: Hex.monitor)  // slate fallback

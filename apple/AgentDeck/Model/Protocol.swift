@@ -52,8 +52,9 @@ enum DashboardDataRules {
         case "openclaw": 0
         case "claude-code": 1
         case "codex-cli": 2
-        case "opencode": 3
-        default: 4
+        case "codex-app": 3
+        case "opencode": 4
+        default: 5
         }
     }
 
@@ -140,7 +141,7 @@ enum DashboardDataRules {
                 continue
             }
 
-            let key = project.lowercased()
+            let key = "\(codexDisplayKind(session))|\(project.lowercased())"
             if codexByProject[key] == nil { codexProjectOrder.append(key) }
             codexByProject[key, default: []].append(session)
         }
@@ -250,7 +251,11 @@ enum DashboardDataRules {
     private static func isCodexPayload(_ session: [String: Any]) -> Bool {
         let id = session["id"] as? String
         let agentType = session["agentType"] as? String
-        return agentType == "codex-cli" || id?.hasPrefix("codex:") == true
+        return agentType == "codex-cli" || agentType == "codex-app" || id?.hasPrefix("codex:") == true
+    }
+
+    private static func codexDisplayKind(_ session: [String: Any]) -> String {
+        (session["agentType"] as? String) == "codex-app" ? "codex-app" : "codex-cli"
     }
 
     private static func nonEmptyString(_ value: Any?) -> String? {

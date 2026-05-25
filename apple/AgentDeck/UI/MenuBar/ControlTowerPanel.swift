@@ -74,40 +74,16 @@ struct ControlTowerPanel: View {
             }
             .measureChromeHeight()
 
-            ScrollView(
-                .vertical,
-                showsIndicators: measuredContentHeight > scrollContentMaxHeight
-            ) {
-                VStack(alignment: .leading, spacing: 14) {
-                    sessionsListSection
-                    topologySection
-                    utilityLinksRow
-                    rateLimitsSection
-                    anthropicApiUsageSection
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                // Publishes the body's natural height to the parent
-                // ScrollView frame so it can shrink to fit instead of
-                // greedily claiming `scrollContentMaxHeight`.
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ContentHeightKey.self,
-                            value: proxy.size.height
-                        )
+            Group {
+                if measuredContentHeight > scrollContentMaxHeight {
+                    ScrollView(.vertical, showsIndicators: true) {
+                        innerContentVStack
                     }
-                )
+                    .frame(height: scrollContentMaxHeight)
+                } else {
+                    innerContentVStack
+                }
             }
-            // Bind the ScrollView frame to the body's measured height,
-            // capped at `scrollContentMaxHeight`. When content fits, no
-            // scrollbar appears and the popup shrinks; only the overflow
-            // portion engages scrolling.
-            .frame(
-                maxHeight: measuredContentHeight > 0
-                    ? min(scrollContentMaxHeight, measuredContentHeight)
-                    : scrollContentMaxHeight
-            )
             .onPreferenceChange(ContentHeightKey.self) { measuredContentHeight = $0 }
 
             VStack(spacing: 0) {
@@ -307,6 +283,26 @@ struct ControlTowerPanel: View {
     private var remainingSessions: [SessionInfo] {
         guard let featured = featuredAwaitingSession else { return sortedSessions }
         return sortedSessions.filter { $0.id != featured.id }
+    }
+
+    private var innerContentVStack: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sessionsListSection
+            topologySection
+            utilityLinksRow
+            rateLimitsSection
+            anthropicApiUsageSection
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ContentHeightKey.self,
+                    value: proxy.size.height
+                )
+            }
+        )
     }
 
     private var sessionsListSection: some View {

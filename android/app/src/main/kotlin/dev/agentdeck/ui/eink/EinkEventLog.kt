@@ -174,7 +174,8 @@ private fun sourceTag(entry: TimelineEntry): String {
     return when (entry.agentType) {
         "claude-code" -> "Claude "
         "openclaw" -> "OpenClaw "
-        "codex-cli" -> "Codex "
+        "codex-cli" -> "Codex CLI "
+        "codex-app" -> "Codex App "
         "opencode" -> "OpenCode "
         null -> ""
         else -> "Agent "

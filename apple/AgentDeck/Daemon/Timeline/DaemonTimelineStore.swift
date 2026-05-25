@@ -179,7 +179,7 @@ actor DaemonTimelineStore {
             return false
         }
         let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if entry.agentType == "codex-cli", entry.sessionId == "codex:otel-active" {
+        if (entry.agentType == "codex-cli" || entry.agentType == "codex-app"), entry.sessionId == "codex:otel-active" {
             return ["tool", "tool completed", "unknown", "unknown completed", "exec", "exec completed"].contains(raw)
         }
         // OpenClaw session.tool placeholder rows. The producer guard added

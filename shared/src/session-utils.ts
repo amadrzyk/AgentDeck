@@ -42,15 +42,16 @@ export function sessionTier(state: string | undefined): SessionTier {
 
 /**
  * Rank agent types for stable ordering.
- * openclaw=0 (always first), claude-code=1, codex-cli=2, opencode=3, others=4.
+ * openclaw=0 (always first), claude-code=1, codex-cli=2, codex-app=3, opencode=4, others=5.
  */
 export function agentTypeRank(agentType: string | undefined): number {
   switch (agentType) {
     case 'openclaw': return 0;
     case 'claude-code': return 1;
     case 'codex-cli': return 2;
-    case 'opencode': return 3;
-    default: return 4;
+    case 'codex-app': return 3;
+    case 'opencode': return 4;
+    default: return 5;
   }
 }
 
@@ -123,7 +124,7 @@ export function foldCodexSessionsForDisplay<T extends FoldableSession>(sessions:
       passthrough.push(session);
       continue;
     }
-    const key = project.toLocaleLowerCase();
+    const key = `${codexDisplayKind(session)}:${project.toLocaleLowerCase()}`;
     const group = codexByProject.get(key);
     if (group) group.push(session);
     else codexByProject.set(key, [session]);
@@ -137,7 +138,11 @@ export function foldCodexSessionsForDisplay<T extends FoldableSession>(sessions:
 }
 
 function isCodexSession(session: FoldableSession): boolean {
-  return session.agentType === 'codex-cli' || session.id.startsWith('codex:');
+  return session.agentType === 'codex-cli' || session.agentType === 'codex-app' || session.id.startsWith('codex:');
+}
+
+function codexDisplayKind(session: FoldableSession): 'codex-cli' | 'codex-app' {
+  return session.agentType === 'codex-app' ? 'codex-app' : 'codex-cli';
 }
 
 function foldCodexProjectGroup<T extends FoldableSession>(group: T[]): T {

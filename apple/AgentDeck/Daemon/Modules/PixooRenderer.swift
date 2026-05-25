@@ -142,7 +142,7 @@ final class PixooRenderer {
     private static let phi = (1.0 + sqrt(5.0)) / 2.0
     private static let sessionToneFactors: [Double] = [1.08, 1.0, 0.9, 0.8, 0.72, 0.64]
     private static let codingAgents = Set(["claude-code"])
-    private static let cloudAgents = Set(["codex-cli"])
+    private static let cloudAgents = Set(["codex-cli", "codex-app"])
     private static let opencodeAgents = Set(["opencode"])
 
     private static let octopusGrid: [[Int]] = [
@@ -514,8 +514,8 @@ final class PixooRenderer {
         for session in dashboardState.siblingSessions where session.alive {
             guard let agentType = session.agentType, isCreatureAgent(agentType) else { continue }
             let mapped = mapSessionState(session.state)
-            if agentType == "codex-cli" {
-                let key = codexKey(projectName: session.projectName, id: session.id)
+            if agentType == "codex-cli" || agentType == "codex-app" {
+                let key = "\(agentType):\(codexKey(projectName: session.projectName, id: session.id))"
                 if let existing = codexFolded[key] {
                     let pickStart = (session.startedAt ?? "") > (existing.startedAt ?? "")
                     let mergedState = statePriority(mapped) > statePriority(existing.state) ? mapped : existing.state

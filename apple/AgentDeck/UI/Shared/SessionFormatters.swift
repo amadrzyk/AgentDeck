@@ -15,7 +15,8 @@ func displayAgentLabel(_ type: String?) -> String {
     switch type {
     case "claude-code": return "Claude"
     case "openclaw":    return "OpenClaw"
-    case "codex-cli":   return "Codex"
+    case "codex-cli":   return "Codex CLI"
+    case "codex-app":   return "Codex App"
     case "opencode":    return "OpenCode"
     case "daemon":      return "Daemon"
     case .some(let t):  return t.replacingOccurrences(of: "-", with: " ").capitalized

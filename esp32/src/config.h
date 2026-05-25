@@ -21,6 +21,8 @@ constexpr uint16_t BRIDGE_PORT_MAX     = 9139;
 constexpr const char* MDNS_SERVICE     = "_agentdeck";
 constexpr const char* MDNS_PROTO       = "_tcp";
 constexpr const char* AP_SSID          = "AgentDeck-Setup";
+constexpr const char* FIRMWARE_VERSION = "0.1.1";
+constexpr uint8_t PROTOCOL_REVISION    = 2;
 
 // ===== WebSocket =====
 constexpr uint32_t WS_RECONNECT_MIN_MS  = 1000;

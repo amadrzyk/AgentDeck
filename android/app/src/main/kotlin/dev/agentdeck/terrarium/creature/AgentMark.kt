@@ -35,7 +35,7 @@ sealed class AgentMark(
         fun fromAgentType(agentType: String?): AgentMark? = when (agentType) {
             "claude-code" -> ClaudeCode
             "openclaw" -> OpenClaw
-            "codex-cli" -> null // CloudCreature uses its own >_ prompt, no watermark needed
+            "codex-cli", "codex-app" -> null // CloudCreature uses its own >_ prompt, no watermark needed
             "opencode" -> null  // OpenCodeCreature is itself the logo, no watermark needed
             else -> null
         }

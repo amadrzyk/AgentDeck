@@ -278,7 +278,8 @@ private fun AgentState.wireName(): String = when (this) {
 
 private fun agentLabel(agentType: String?): String = when (agentType) {
     "claude-code" -> "Claude"
-    "codex-cli" -> "Codex"
+    "codex-cli" -> "Codex CLI"
+    "codex-app" -> "Codex App"
     "openclaw" -> "OpenClaw"
     "opencode" -> "OpenCode"
     null -> "Agent"

@@ -30,6 +30,7 @@ export const AGENT_BRAND_COLORS: Record<string, string> = {
   'claude-code': '#C07058',  // terracotta
   'openclaw':    '#ff4d4d',  // red
   'codex-cli':   '#6366f1',  // indigo
+  'codex-app':   '#6366f1',  // indigo
   'opencode':    '#F1ECEC',  // cream
   'monitor':     '#94a3b8',  // slate
 };

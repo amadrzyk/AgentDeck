@@ -322,6 +322,9 @@ final class DaemonServer {
     /// without a Swift 6 strict-concurrency violation. The value is an
     /// immutable `let`, so the relaxation is pure compile-time visibility.
     nonisolated private static let codexAnonymousOtelSessionId = "codex:otel-active"
+    nonisolated private static let codexCliAgentType = "codex-cli"
+    nonisolated private static let codexAppAgentType = "codex-app"
+    nonisolated private static let codexAppFallbackProjectName = "Codex App"
 
     /// Session id of the most recent hook event that carried one. Used to
     /// stamp state_update broadcasts so dashboard clients can attribute
@@ -1823,30 +1826,32 @@ final class DaemonServer {
         lastHookAtByPushedSession.removeValue(forKey: sessionId)
     }
 
-    /// Returns true when at least one real (non-anonymous) codex session is
-    /// being tracked. Used to suppress the OTel anonymous placeholder
-    /// (`codex:otel-active`) so dashboards never show a blank duplicate row
-    /// next to a real thread-id session. `nonisolated` so XCTest can call
-    /// it directly without hopping onto the main actor.
+    /// Returns true when at least one real (non-anonymous) Codex session is
+    /// being tracked. `nonisolated` so XCTest can call it directly without
+    /// hopping onto the main actor.
     nonisolated static func hasRealCodexSession(in entries: [String: DaemonSessionEntry]) -> Bool {
         for (sid, entry) in entries {
             if sid == codexAnonymousOtelSessionId { continue }
-            if entry.agentType == "codex-cli" { return true }
+            if entry.agentType == codexCliAgentType || entry.agentType == codexAppAgentType { return true }
         }
         return false
     }
 
-    /// Drop the OTel anonymous placeholder (`codex:otel-active`) when a
-    /// real-thread-id codex entry is about to be inserted on a different
-    /// sid. Centralises the anonymous-evict invariant across every codex
-    /// insert path — `session_push_register`, `session_push_state`, the
-    /// resurrection synthesizer, `codex_session_start`, and the codex
-    /// notification agentType-refresh fast path. Without a single helper
-    /// each new insert site had to remember to evict; missing one was the
-    /// Codex stop-time review's recurring complaint.
+    nonisolated private static func hasRealCodexAppSession(in entries: [String: DaemonSessionEntry]) -> Bool {
+        for (sid, entry) in entries {
+            if sid == codexAnonymousOtelSessionId { continue }
+            if entry.agentType == codexAppAgentType { return true }
+        }
+        return false
+    }
+
+    /// Drop the OTel anonymous placeholder (`codex:otel-active`) only when a
+    /// real-thread-id Codex App entry is about to be inserted. CLI hook
+    /// sessions are a different source and must coexist with the Codex App
+    /// observation row.
     @MainActor
     private func evictCodexAnonymousIfNeeded(forIncomingSid sid: String, agentType: String?) {
-        guard agentType == "codex-cli" else { return }
+        guard agentType == Self.codexAppAgentType else { return }
         guard sid != Self.codexAnonymousOtelSessionId else { return }
         guard pushedSessionsById[Self.codexAnonymousOtelSessionId] != nil else { return }
         purgeCodexSessionState(Self.codexAnonymousOtelSessionId)
@@ -2094,13 +2099,6 @@ final class DaemonServer {
             // (Pixoo, D200H, Terrarium, SessionListPanel) pick the Codex
             // brand instead of mis-painting them as Claude Code.
             let resurrectedAgentType = isCodexEvent ? "codex-cli" : "claude-code"
-            // Mid-session codex hooks (e.g. `codex_user_prompt_submit` after
-            // a daemon restart) reach here with a real thread-id sessionId
-            // and resurrect a `codex-cli` row. The OTel anonymous placeholder
-            // may already be alive from progress spans the daemon saw before
-            // this hook — evict it so the resurrected real row doesn't ship
-            // as a blank duplicate alongside the recovered thread.
-            evictCodexAnonymousIfNeeded(forIncomingSid: sessionId, agentType: resurrectedAgentType)
             var entry = DaemonSessionEntry(
                 id: sessionId,
                 port: Int(port),
@@ -2131,12 +2129,6 @@ final class DaemonServer {
             let projectName = ProjectNameResolver.projectName(fromHookPayload: json)
             if !projectName.isEmpty { stateMachine.projectName = projectName }
             if let sessionId {
-                // Evict the OTel anonymous placeholder (`codex:otel-active`)
-                // when a real thread-id session_start hook lands. The hook
-                // path bypasses `ensureCodexSession`, so without this the
-                // anonymous row hangs around as a blank duplicate next to
-                // the real session row.
-                evictCodexAnonymousIfNeeded(forIncomingSid: sessionId, agentType: "codex-cli")
                 var entry: DaemonSessionEntry
                 if let existing = pushedSessionsById[sessionId] {
                     entry = existing.projectName.isEmpty && !projectName.isEmpty
@@ -2290,11 +2282,6 @@ final class DaemonServer {
             // both signals are configured).
             if let sessionId, var entry = pushedSessionsById[sessionId] {
                 entry.agentType = "codex-cli"
-                // notify can race ahead of an OTel turn_start span when both
-                // signals are configured; if the anonymous placeholder was
-                // alive at that moment it now has a real codex twin, so the
-                // helper drops it the same way every other insert path does.
-                evictCodexAnonymousIfNeeded(forIncomingSid: sessionId, agentType: "codex-cli")
                 pushedSessionsById[sessionId] = entry
                 upsertIntoCachedSessions(entry)
             }
@@ -2525,16 +2512,12 @@ final class DaemonServer {
 
         func ensureCodexSession(_ sid: String, projectName: String = "") {
             // Anonymous OTel placeholder (`codex:otel-active`) is only useful
-            // when no real Codex session is tracked yet — its job is to keep
-            // the dashboard creature alive while OTel emits progress spans
-            // without a durable thread id. The moment any real `codex:<id>`
-            // row exists, the anonymous insert would just become a blank
-            // duplicate row, which is exactly the Codex stop-time review
-            // complaint we just landed a fix for. Suppress the create here;
-            // the symmetric branch below evicts a stale anonymous row when
-            // a real codex sid arrives.
+            // when no real Codex App session is tracked yet — its job is to
+            // keep the dashboard creature alive while OTel emits progress
+            // spans without a durable thread id. CLI hook sessions are a
+            // separate source and must coexist with Codex App observation.
             if sid == Self.codexAnonymousOtelSessionId {
-                if Self.hasRealCodexSession(in: pushedSessionsById) {
+                if Self.hasRealCodexAppSession(in: pushedSessionsById) {
                     return
                 }
             } else if pushedSessionsById[Self.codexAnonymousOtelSessionId] != nil {
@@ -2542,15 +2525,19 @@ final class DaemonServer {
                 didTouchSessionsList = true
             }
             let resolvedProjectName = Self.nonEmptyString(projectName) ?? ""
+            let displayProjectName = resolvedProjectName.isEmpty
+                ? Self.codexAppFallbackProjectName
+                : resolvedProjectName
             if let existing = pushedSessionsById[sid] {
-                if existing.projectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                let existingName = existing.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if (existingName.isEmpty || existingName == Self.codexAppFallbackProjectName),
                    !resolvedProjectName.isEmpty {
                     var updated = DaemonSessionEntry(
                         id: existing.id,
                         port: existing.port,
                         pid: existing.pid,
                         projectName: resolvedProjectName,
-                        agentType: "codex-cli",
+                        agentType: Self.codexAppAgentType,
                         tmuxSession: existing.tmuxSession,
                         tty: existing.tty,
                         parentTty: existing.parentTty,
@@ -2574,8 +2561,8 @@ final class DaemonServer {
                 id: sid,
                 port: Int(port),
                 pid: 0,
-                projectName: resolvedProjectName,
-                agentType: "codex-cli",
+                projectName: displayProjectName,
+                agentType: Self.codexAppAgentType,
                 tmuxSession: nil,
                 tty: nil,
                 parentTty: nil,
@@ -2586,14 +2573,23 @@ final class DaemonServer {
             upsertIntoCachedSessions(entry)
             trackCodexProcessingState(sessionId: sid, entry: entry)
             didTouchSessionsList = true
-            DaemonLogger.shared.debug("CodexOTel", "Opened \(sid) project=\(resolvedProjectName.isEmpty ? "(none)" : resolvedProjectName)")
+            DaemonLogger.shared.debug("CodexOTel", "Opened \(sid) project=\(displayProjectName)")
+        }
+
+        let observedCodexAppSession = LocalCodexAppObserver.collect().first
+        func sessionIdForCodexOtelThread(_ threadId: String) -> (sid: String, observedProjectName: String?) {
+            if threadId == "otel-active", let observed = observedCodexAppSession {
+                return (observed.id, observed.projectName)
+            }
+            return ("codex:\(threadId)", nil)
         }
 
         for event in events {
             switch event {
             case .turnStart(let threadId, _, let cwd):
-                let sid = "codex:\(threadId)"
-                let projectName = codexProjectName(from: cwd, sessionId: sid)
+                let resolved = sessionIdForCodexOtelThread(threadId)
+                let sid = resolved.sid
+                let projectName = resolved.observedProjectName ?? codexProjectName(from: cwd, sessionId: sid)
                 if pushedSessionsById[sid] == nil {
                     ensureCodexSession(sid, projectName: projectName)
                 } else {
@@ -2606,18 +2602,19 @@ final class DaemonServer {
                 lastTerminalCodexEventBySession.removeValue(forKey: sid)
 
             case .toolCall(let threadId, _, let tool, let cwd):
-                let sid = "codex:\(threadId)"
+                let resolved = sessionIdForCodexOtelThread(threadId)
+                let sid = resolved.sid
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late toolCall for finished session \(sid)")
                     continue
                 }
-                ensureCodexSession(sid, projectName: codexProjectName(from: cwd, sessionId: sid))
+                ensureCodexSession(sid, projectName: resolved.observedProjectName ?? codexProjectName(from: cwd, sessionId: sid))
                 let usefulTool = Self.usefulCodexToolName(tool)
                 updateSessionHookState(sessionId: sid, state: "processing", currentTool: usefulTool)
                 lastHookAtByPushedSession[sid] = Date()
 
             case .toolResult(let threadId, _):
-                let sid = "codex:\(threadId)"
+                let sid = sessionIdForCodexOtelThread(threadId).sid
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late toolResult for finished session \(sid)")
                     continue
@@ -2626,7 +2623,7 @@ final class DaemonServer {
                 lastHookAtByPushedSession[sid] = Date()
 
             case .turnEnd(let threadId, _):
-                let sid = "codex:\(threadId)"
+                let sid = sessionIdForCodexOtelThread(threadId).sid
                 updateSessionHookState(sessionId: sid, state: "idle", clearTool: true)
                 _ = stateMachine.transition(trigger: "stop", source: .hook)
                 stateMachine.toolCalls += 1
@@ -2635,12 +2632,13 @@ final class DaemonServer {
                 lastTerminalCodexEventBySession[sid] = Date()
 
             case .activity(let threadId, _, let name, let cwd):
-                let sid = "codex:\(threadId)"
+                let resolved = sessionIdForCodexOtelThread(threadId)
+                let sid = resolved.sid
                 guard lastTerminalCodexEventBySession[sid] == nil else {
                     DaemonLogger.shared.debug("CodexOTel", "Ignored late activity \(name) for finished session \(sid)")
                     continue
                 }
-                ensureCodexSession(sid, projectName: codexProjectName(from: cwd, sessionId: sid))
+                ensureCodexSession(sid, projectName: resolved.observedProjectName ?? codexProjectName(from: cwd, sessionId: sid))
                 updateSessionHookState(sessionId: sid, state: "processing")
                 lastHookAtByPushedSession[sid] = Date()
             }
@@ -2710,7 +2708,7 @@ final class DaemonServer {
     }
 
     private static func isCodexSession(sessionId: String, entry: DaemonSessionEntry) -> Bool {
-        sessionId.hasPrefix("codex:") || entry.agentType == "codex-cli"
+        sessionId.hasPrefix("codex:") || entry.agentType == codexCliAgentType || entry.agentType == codexAppAgentType
     }
 
     private static func usefulCodexToolName(_ raw: String?) -> String? {
@@ -3332,6 +3330,32 @@ final class DaemonServer {
             merged.append(pushed)
         }
 
+        let hasObservedCodexAppSession = merged.contains { entry in
+            entry.id.hasPrefix("observed:codex-app:")
+        }
+        if hasObservedCodexAppSession,
+           pushedSessionsById[Self.codexAnonymousOtelSessionId] != nil {
+            purgeCodexSessionState(Self.codexAnonymousOtelSessionId)
+            merged.removeAll { $0.id == Self.codexAnonymousOtelSessionId }
+        }
+
+        let hasDurableCodexAppSession = merged.contains { entry in
+            entry.agentType == Self.codexAppAgentType
+                && entry.id != Self.codexAnonymousOtelSessionId
+        }
+        let observedCodexAppSessions = hasDurableCodexAppSession
+            ? []
+            : LocalCodexAppObserver.collect()
+        if !observedCodexAppSessions.isEmpty,
+           pushedSessionsById[Self.codexAnonymousOtelSessionId] != nil {
+            purgeCodexSessionState(Self.codexAnonymousOtelSessionId)
+        }
+        let observedIds = Set(observedCodexAppSessions.map(\.id))
+        let mergedIds = Set(merged.map(\.id))
+        for observed in observedCodexAppSessions where !mergedIds.contains(observed.id) {
+            merged.append(observed)
+        }
+
         let enriched = await enrichSessionsWithState(merged)
 
         // Prune pushed sessions whose /health probe failed repeatedly — the
@@ -3352,6 +3376,7 @@ final class DaemonServer {
             // Keep filesystem entries unconditionally; drop pushed entries
             // whose probe failed (already pruned above, double-gate for safety).
             if registryEntries.contains(where: { $0.id == entry.id }) { return true }
+            if observedIds.contains(entry.id) { return true }
             return livePushedIds.contains(entry.id)
         })
         broadcastSessionsList()
@@ -3714,8 +3739,12 @@ final class DaemonServer {
         if let pixooModule {
             modules["pixoo"] = pixooModule.statusSnapshot()
         }
-        if let serialModule {
-            modules["serial"] = await serialModule.statusSnapshot()
+        if serialModule != nil {
+            // HTTP /health is used by tiny hook scripts and must answer even
+            // while the serial actor is busy pushing frames to physical boards.
+            // The poll cache is refreshed out-of-band and is sufficient for
+            // liveness/device diagnostics.
+            modules["serial"] = cachedSerialStatus ?? ["available": true, "connections": [] as [Any]]
         }
         if let sd = cachedStreamDeck {
             modules["streamDeck"] = [
@@ -3782,8 +3811,7 @@ final class DaemonServer {
         if let codex = codexAuthStatusSnapshot() {
             Self.writeCodexAuthStatus(codex, into: &e)
         }
-        let subscriptions = buildSubscriptions()
-        if !subscriptions.isEmpty { e["subscriptions"] = subscriptions }
+        e["subscriptions"] = buildSubscriptions()
         return e
     }
 
@@ -3892,8 +3920,7 @@ final class DaemonServer {
         if let antigravity = cachedAntigravityStatus {
             e["antigravityStatus"] = antigravityPayload(antigravity)
         }
-        let subscriptions = buildSubscriptions()
-        if !subscriptions.isEmpty { e["subscriptions"] = subscriptions }
+        e["subscriptions"] = buildSubscriptions()
 
         e["adminApiKeyPresent"] = AnthropicAdminApiClient.shared.hasKey()
         if let admin = cachedAdminApiUsage {
@@ -3921,8 +3948,7 @@ final class DaemonServer {
         if let ollama = cachedOllamaStatus { event["ollamaStatus"] = ollama }
         if !cachedMlxModels.isEmpty { event["mlxModels"] = cachedMlxModels }
         if !cachedMlxModelCatalog.isEmpty { event["mlxModelCatalog"] = cachedMlxModelCatalog }
-        let subscriptions = buildSubscriptions()
-        if !subscriptions.isEmpty { event["subscriptions"] = subscriptions }
+        event["subscriptions"] = buildSubscriptions()
         if let antigravity = cachedAntigravityStatus {
             event["antigravityStatus"] = antigravityPayload(antigravity)
         }
@@ -3931,16 +3957,10 @@ final class DaemonServer {
     @MainActor
     private func buildSubscriptions() -> [[String: Any]] {
         var subscriptions: [[String: Any]] = []
-        if let codex = codexAuthStatusSnapshot() {
-            // keep usage metadata fields in usage_update only
-            if let name = Self.chatGptSubscriptionName(codex) {
-                var item: [String: Any] = ["name": name]
-                if let until = codex.subscriptionActiveUntil {
-                    item["until"] = until
-                }
-                subscriptions.append(item)
-            }
-        }
+        // ChatGPT/Codex plan metadata comes from local Codex auth files and
+        // is not a live subscription source for the App Store daemon. Keep it
+        // out of the subscription footer; the external CLI daemon may still
+        // relay this row when it owns the full developer bridge.
         if cachedApiUsage?.inferredBillingType == "subscription" || stateMachine.billingType == "subscription" {
             subscriptions.append(["name": "Claude"])
         }

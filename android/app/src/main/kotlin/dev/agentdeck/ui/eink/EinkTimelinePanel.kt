@@ -337,7 +337,8 @@ private fun sourceLabel(entry: TimelineEntry): String {
     val project = entry.projectName?.takeIf { it.isNotBlank() }
     val agent = when (entry.agentType) {
         "claude-code" -> "Claude"
-        "codex-cli" -> "Codex"
+        "codex-cli" -> "Codex CLI"
+        "codex-app" -> "Codex App"
         "openclaw" -> "OpenClaw"
         "opencode" -> "OpenCode"
         "daemon" -> "Daemon"

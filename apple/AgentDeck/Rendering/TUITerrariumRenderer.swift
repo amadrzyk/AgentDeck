@@ -339,7 +339,7 @@ private enum TerrariumGridBuilder {
         case "claude-code":
             // octopus-ish: tentacles + eye
             return state == "processing" ? ["(", "\u{25CF}", ")"] : ["(", "o", ")"]
-        case "codex-cli":
+        case "codex-cli", "codex-app":
             // cloud / jellyfish
             return state == "processing" ? ["<", "\u{25C7}", ">"] : ["<", "o", ">"]
         case "opencode":
@@ -358,6 +358,7 @@ private enum TerrariumGridBuilder {
         switch agent {
         case "claude-code": return "cc"
         case "codex-cli":   return "cx"
+        case "codex-app":   return "ca"
         case "opencode":    return "oc"
         case "openclaw":    return "ow"
         default:            return "a\(index)"
@@ -388,7 +389,7 @@ private enum TerrariumGridBuilder {
 #if DEBUG
 #Preview("TUI terrarium — mixed states") {
     let config = TerrariumPreviewConfig(
-        agents: ["claude-code", "codex-cli", "opencode", "openclaw"],
+            agents: ["claude-code", "codex-cli", "codex-app", "opencode", "openclaw"],
         states: ["processing", "awaiting_permission", "idle", "processing"],
         animationFrame: 42
     )

@@ -111,13 +111,14 @@ extension DashboardState {
             && agentType != "daemon"
             && agentType != "openclaw"
             && agentType != "codex-cli"
+            && agentType != "codex-app"
             && agentType != "opencode"
 
         // Octopus siblings (exclude daemon/openclaw/codex-cli/opencode), sorted by ID for stable positioning.
         // Also exclude the currently-focused session's id to prevent double-rendering when focus relay
         // promotes a sibling to primary (agentType → claude-code, sessionId → sibling.id).
         let siblings = siblingSessions
-            .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" && $0.agentType != "opencode" }
+            .filter { $0.agentType != "daemon" && $0.agentType != "openclaw" && $0.agentType != "codex-cli" && $0.agentType != "codex-app" && $0.agentType != "opencode" }
             .filter { !(primaryIsOctopus && $0.id == sessionId) }
             .sorted { $0.id < $1.id }
 
@@ -214,7 +215,11 @@ extension DashboardState {
             let cloudState: CloudVisualState
             let startedAt: String?
         }
-        let primaryIsCloud = state != .disconnected && agentType == "codex-cli"
+        func isCodexCloudAgent(_ type: String?) -> Bool {
+            type == "codex-cli" || type == "codex-app"
+        }
+
+        let primaryIsCloud = state != .disconnected && isCodexCloudAgent(agentType)
         let cloudPrimary: CloudPrimary? = primaryIsCloud ? CloudPrimary(
             id: sessionId ?? "cl-primary",
             projectName: projectName,
@@ -225,7 +230,7 @@ extension DashboardState {
         ) : nil
 
         let cloudSiblingsRaw = siblingSessions
-            .filter { $0.agentType == "codex-cli" }
+            .filter { isCodexCloudAgent($0.agentType) }
             .filter { !(primaryIsCloud && $0.id == sessionId) }
 
         // Group key: projectName when present, else a single shared key so
@@ -235,7 +240,7 @@ extension DashboardState {
         // hook payload, OTel span without `cwd` attr) they should still
         // collapse instead of stacking up as separate phantoms. Distinct
         // projects continue to render as distinct sprites.
-        func cloudGroupKey(projectName: String?, id: String) -> String {
+        func cloudGroupKey(projectName: String?) -> String {
             if let p = projectName, !p.isEmpty { return p }
             return "__codex_no_project__"
         }
@@ -254,12 +259,13 @@ extension DashboardState {
         var cloudGroups: [String: [(id: String, projectName: String?, modelName: String?, cloudState: CloudVisualState, startedAt: String?)]] = [:]
 
         if let p = cloudPrimary {
-            let key = cloudGroupKey(projectName: p.projectName, id: p.id)
+            let type = agentType ?? "codex-cli"
+            let key = "\(type):\(cloudGroupKey(projectName: p.projectName))"
             cloudGroupOrder.append(key)
             cloudGroups[key, default: []].append((id: p.id, projectName: p.projectName, modelName: p.modelName, cloudState: p.cloudState, startedAt: p.startedAt))
         }
         for sibling in cloudSiblingsRaw {
-            let key = cloudGroupKey(projectName: sibling.projectName, id: sibling.id)
+            let key = "\(sibling.agentType ?? "codex-cli"):\(cloudGroupKey(projectName: sibling.projectName))"
             if cloudGroups[key] == nil { cloudGroupOrder.append(key) }
             cloudGroups[key, default: []].append((
                 id: sibling.id,

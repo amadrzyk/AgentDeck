@@ -376,7 +376,8 @@ fun buildAttentionFeatured(
 ): AttentionFeatured {
     val agentLabel = when (session.agentType) {
         "claude-code" -> "Claude"
-        "codex-cli"   -> "Codex"
+        "codex-cli"   -> "Codex CLI"
+        "codex-app"   -> "Codex App"
         "openclaw"    -> "OpenClaw"
         "opencode"    -> "OpenCode"
         else          -> session.agentType?.replaceFirstChar { it.uppercaseChar() } ?: "Agent"

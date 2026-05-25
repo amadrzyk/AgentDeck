@@ -75,7 +75,7 @@ internal fun isLowSignalEntry(entry: TimelineEntry): Boolean {
     // real signal. Codex stop-time review 2026-05-18.
     if (detailHasRealSignal(entry.detail)) return false
     val raw = entry.summary.trim().lowercase()
-    if (entry.agentType == "codex-cli" && entry.sessionId == "codex:otel-active") {
+    if ((entry.agentType == "codex-cli" || entry.agentType == "codex-app") && entry.sessionId == "codex:otel-active") {
         return raw in lowSignalRawSet
     }
     // OpenClaw session.tool placeholder rows. The macOS daemon producer

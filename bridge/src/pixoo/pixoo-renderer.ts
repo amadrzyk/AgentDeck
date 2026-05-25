@@ -71,7 +71,7 @@ const creatureInstances = new Map<string, CreatureInstance>();
 /** Agent types that represent coding agents (draw as octopus). */
 const CODING_AGENTS = new Set(['claude-code']);
 /** Agent types drawn as jellyfish (cloud creature). */
-const JELLYFISH_AGENTS = new Set(['codex-cli']);
+const JELLYFISH_AGENTS = new Set(['codex-cli', 'codex-app']);
 /** Agent types drawn as nested-square opencode. */
 const OPENCODE_AGENTS = new Set(['opencode']);
 

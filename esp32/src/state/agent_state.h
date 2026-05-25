@@ -50,7 +50,7 @@ struct SessionInfo {
     char id[32];
     char projectName[40];
     char modelName[32];
-    char agentType[16];  // "claude-code" / "openclaw"
+    char agentType[16];  // "claude-code" / "openclaw" / "codex-cli" / "codex-app"
     char state[20];
     uint16_t port;
     bool alive;
@@ -103,7 +103,7 @@ struct DashboardState {
     SessionInfo sessions[6];
     uint8_t sessionCount;
     uint8_t octopusCount;   // derived: claude-code sessions alive
-    uint8_t cloudCount;     // derived: codex-cli sessions alive
+    uint8_t cloudCount;     // derived: Codex CLI/App sessions alive
     uint8_t opencodeCount;  // derived: opencode sessions alive
     uint8_t crayfishCount;  // derived: openclaw sessions alive
     char sessionNames[6][24]; // display names for octopus instances (matches max MAX_OCTOPUS)

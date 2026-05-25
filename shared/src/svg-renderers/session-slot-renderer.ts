@@ -269,7 +269,7 @@ export function renderSessionSlot(
   const agent = (session.agentType as AgentType) || 'claude-code';
   const nameForDisplay = displayName ?? session.projectName;
   const modelText = formatModelEffort(session.modelName, session.effortLevel, 15);
-  const p1 = agent === 'claude-code' ? '#D97757' : agent === 'codex-cli' ? '#8BA4FF' : agent === 'openclaw' ? '#FF6B6B' : '#F1ECEC';
+  const p1 = agent === 'claude-code' ? '#D97757' : (agent === 'codex-cli' || agent === 'codex-app') ? '#8BA4FF' : agent === 'openclaw' ? '#FF6B6B' : '#F1ECEC';
   const sColor = stateColor(session.state);
   const signalColor = isWorking ? '#F5B942' : sColor;
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';

@@ -121,6 +121,7 @@
 		590D75801E10021127334F88 /* ActivityPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6186E147F760B85461F02022 /* ActivityPanel.swift */; };
 		59639A63610FCE07B0AFA654 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB8FA0272112623E20C79FDC /* VoiceRecorder.swift */; };
 		5A90801088DFF80C8E0EDED6 /* CrayfishCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */; };
+		5ADCEA267661D3C4934EC6BD /* LocalCodexAppObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */; };
 		5B1640167CAEBC66B8D0BE35 /* LocalSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FD383032B3C47C9B547426 /* LocalSessionDiscovery.swift */; };
 		5E39A0DA9E8B9E175292E84D /* GatewayParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234CFF4B2832E6B1CA98AF10 /* GatewayParityTests.swift */; };
 		5F62235C4D677989E2B7972D /* MiniToml.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F61897614FBE52B61AB8B4 /* MiniToml.swift */; };
@@ -197,6 +198,7 @@
 		9E30D4D0BEE3CB402E8741D8 /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
 		9ED5461741C1FC0A6ADC249F /* Timeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28DFE82D8F7AC7C7566940F3 /* Timeline.swift */; };
 		9F873E9EA03C9927B275638C /* SessionFocusRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */; };
+		A0E4BE7512FF07BD0DFDB2E0 /* LocalCodexAppObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */; };
 		A12AD232C2625E0919A0CFDF /* ProjectNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */; };
 		A14FF06EAC0C5B5CCFC81875 /* DaemonTimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE17EFB01F43FCB1A53F644D /* DaemonTimelineStore.swift */; };
 		A1D061096206EB863B801727 /* CodexOtelRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB6B378D92D82E58DA5E925 /* CodexOtelRoutes.swift */; };
@@ -347,6 +349,7 @@
 		0831DD21D16F2AB4056ADD8E /* ApmeTuner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeTuner.swift; sourceTree = "<group>"; };
 		0DD3A6826EADF11BB4C4F139 /* BubbleSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleSystem.swift; sourceTree = "<group>"; };
 		0F083DDE39507B6693AED227 /* ApmeCategoryE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeCategoryE2ETests.swift; sourceTree = "<group>"; };
+		118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCodexAppObserver.swift; sourceTree = "<group>"; };
 		125A43BCFF7E55A34B4C5FC1 /* AgentDeckLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDeckLogo.swift; sourceTree = "<group>"; };
 		15083D65B8571C662DD6E2CE /* PortDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortDiagnostics.swift; sourceTree = "<group>"; };
 		19949AA33CE27D478B358976 /* MonitorHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorHUD.swift; sourceTree = "<group>"; };
@@ -824,6 +827,7 @@
 		BC0F891F91474D201E8D5F53 /* Session */ = {
 			isa = PBXGroup;
 			children = (
+				118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */,
 				61E3177DE60C73B3A102F9FB /* SessionAggregator.swift */,
 				788166EF7E8CB65CDE3D3D67 /* SessionFocusRelay.swift */,
 				CF788F02F06C01E401DC8EA6 /* SessionRegistry.swift */,
@@ -1241,6 +1245,7 @@
 				CF27ABB66E4B268C31C44E6E /* IntegrationsView.swift in Sources */,
 				54A5C71CB7264DAFC6FF694D /* KelpField.swift in Sources */,
 				ABE80C830C69CB0A2D03A767 /* LightRaySystem.swift in Sources */,
+				5ADCEA267661D3C4934EC6BD /* LocalCodexAppObserver.swift in Sources */,
 				E35D8D73F3FFFCD795B1236A /* LocalSessionDiscovery.swift in Sources */,
 				3935F4C5BEE0F6FA479AB2A6 /* Logger.swift in Sources */,
 				071A3FB5F200FFCFA82F4294 /* MatrixTerminalPreviews.swift in Sources */,
@@ -1384,6 +1389,7 @@
 				8B7311262C05E2B32F563760 /* IntegrationsView.swift in Sources */,
 				0AC3F569F362D121D985EA52 /* KelpField.swift in Sources */,
 				7B25A56536275C7DF023DFEB /* LightRaySystem.swift in Sources */,
+				A0E4BE7512FF07BD0DFDB2E0 /* LocalCodexAppObserver.swift in Sources */,
 				5B1640167CAEBC66B8D0BE35 /* LocalSessionDiscovery.swift in Sources */,
 				F0C03AF0FCFD56AC72DE9FD3 /* Logger.swift in Sources */,
 				A7C44EC8857DB5EA6890BACA /* MatrixTerminalPreviews.swift in Sources */,

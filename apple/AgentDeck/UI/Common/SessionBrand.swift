@@ -20,6 +20,7 @@ enum SessionBrand {
         switch agentType {
         case "claude-code": return Color(red: 0.753, green: 0.439, blue: 0.345) // #C07058
         case "codex-cli":   return Color(red: 0.38,  green: 0.40,  blue: 0.88)  // indigo
+        case "codex-app":   return Color(red: 0.38,  green: 0.40,  blue: 0.88)  // indigo
         case "openclaw":    return Color(red: 1.0,   green: 0.30,  blue: 0.30)  // #FF4D4D
         case "opencode":    return Color(red: 0.945, green: 0.925, blue: 0.925) // near-white
         case "daemon":      return Color(red: 0.55,  green: 0.55,  blue: 0.60)
@@ -66,6 +67,7 @@ struct SessionCreatureIcon: View {
         case "claude-code": return "Claude Code session"
         case "openclaw":    return "OpenClaw session"
         case "codex-cli":   return "Codex session"
+        case "codex-app":   return "Codex App session"
         case "opencode":    return "OpenCode session"
         case "daemon":      return "Daemon"
         default:            return "Unknown agent session"
@@ -124,6 +126,7 @@ struct AgentBrandIcon: View {
         case "claude-code": return "Claude Code session"
         case "openclaw":    return "OpenClaw session"
         case "codex-cli":   return "Codex session"
+        case "codex-app":   return "Codex App session"
         case "opencode":    return "OpenCode session"
         case "daemon":      return "Daemon"
         default:            return "Unknown agent session"
@@ -140,6 +143,7 @@ private struct AgentBrandIconSpec {
         switch agentType {
         case "claude-code": return .claude
         case "codex-cli":   return .codex
+        case "codex-app":   return .codex
         case "openclaw":    return .openClaw
         case "opencode":    return .openCode
         default:            return nil

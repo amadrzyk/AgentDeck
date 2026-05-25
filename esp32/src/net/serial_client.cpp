@@ -38,7 +38,8 @@ static void sendDeviceInfoSerial() {
     resp["board"] = "ips_35";
     #endif
 
-    resp["version"] = "0.1.0";
+    resp["version"] = FIRMWARE_VERSION;
+    resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
     resp["wifiConnected"] = wifiConnected();
     if (wifiConnected()) {

@@ -23,6 +23,19 @@ def fetch_json(url, timeout=3):
     except:
         return None
 
+def fetch_sessions(base):
+    """Fetch canonical sessions from current and older daemon shapes."""
+    sessions = fetch_json(f'{base}/sessions')
+    if isinstance(sessions, list):
+        return sessions
+    if isinstance(sessions, dict) and isinstance(sessions.get('sessions'), list):
+        return sessions['sessions']
+
+    status = fetch_json(f'{base}/status')
+    if isinstance(status, dict) and isinstance(status.get('sessions'), list):
+        return status['sessions']
+    return []
+
 def format_reset_time(iso_str):
     """Convert ISO 8601 timestamp to relative time like Android's formatResetTime()."""
     if not iso_str:
@@ -86,16 +99,31 @@ def main():
                     daemon = fetch_json('http://localhost:9120/health')
                     gw_cache[0] = bool(daemon and daemon.get('gateway') == 'connected')
 
+                gateway_connected = bool(
+                    health.get('gatewayConnected') or
+                    health.get('gateway') == 'connected' or
+                    gw_cache[0]
+                )
                 msg = {
                     'type': 'state_update',
                     'state': health.get('state', 'idle'),
                     'projectName': health.get('projectName', ''),
-                    'agentType': health.get('agentType', 'claude-code'),
-                    'gatewayAvailable': gw_cache[0],
+                    'agentType': health.get('agentType', 'daemon'),
+                    'gatewayAvailable': gateway_connected,
+                    'gatewayConnected': gateway_connected,
                 }
                 s.write((json.dumps(msg) + '\n').encode())
 
-            # 2. usage_update (every 3rd cycle = 15s)
+            # 2. canonical sessions_list (every cycle)
+            sessions = fetch_sessions(base)
+            if sessions:
+                msg = {
+                    'type': 'sessions_list',
+                    'sessions': sessions,
+                }
+                s.write((json.dumps(msg) + '\n').encode())
+
+            # 3. usage_update (every 3rd cycle = 15s)
             if cycle % 3 == 0:
                 usage = fetch_json(f'{base}/usage')
                 if usage and 'usage' in usage:

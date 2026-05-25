@@ -177,6 +177,16 @@ struct MenuBarTopologyList: View {
     private var downstreamRows: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let health = stateHolder.state.moduleHealth {
+                // Stream Deck — mirror TopologyRail's hierarchy
+                if let sd = health.streamDeck, !sd.devices.isEmpty {
+                    ForEach(sd.devices, id: \.id) { dev in
+                        RailRow(
+                            status: .ok,
+                            name: streamDeckDisplayName(for: dev),
+                            subtitle: streamDeckDetail(for: dev)
+                        )
+                    }
+                }
                 // D200H first — always the most permanent peripheral.
                 if let d = health.d200h {
                     RailRow(
@@ -286,11 +296,31 @@ struct MenuBarTopologyList: View {
 
     private var hasAnyDownstream: Bool {
         guard let h = stateHolder.state.moduleHealth else { return false }
+        if let sd = h.streamDeck, !sd.devices.isEmpty { return true }
         if let adb = h.adb, (adb.available || !adb.devices.isEmpty || adb.lastError != nil) { return true }
         if h.d200h != nil { return true }
         if let p = h.pixoo, p.configuredDeviceCount > 0 { return true }
         if let s = h.serial, !s.connectedBoards.isEmpty { return true }
         return false
+    }
+
+    private func streamDeckDisplayName(for dev: StreamDeckDeviceInfo) -> String {
+        if !dev.name.isEmpty { return dev.name }
+        switch dev.family {
+        case "streamdeckplus":   return "Stream Deck+"
+        case "streamdeck":       return "Stream Deck"
+        case "streamdeckmini":   return "Stream Deck Mini"
+        case "streamdeckxl":     return "Stream Deck XL"
+        case "streamdeckpedal":  return "Stream Deck Pedal"
+        default:                 return "Stream Deck"
+        }
+    }
+
+    private func streamDeckDetail(for dev: StreamDeckDeviceInfo) -> String {
+        if let c = dev.columns, let r = dev.rows, c > 0, r > 0 {
+            return "\(c)×\(r) keys"
+        }
+        return dev.family ?? ""
     }
 
     private func esp32Name(for board: String?) -> String {

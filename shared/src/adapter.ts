@@ -5,7 +5,7 @@ import type { TimelineEntry } from './timeline.js';
 
 // ===== Agent Types =====
 
-export type AgentType = 'claude-code' | 'openclaw' | 'codex-cli' | 'opencode' | 'monitor';
+export type AgentType = 'claude-code' | 'openclaw' | 'codex-cli' | 'codex-app' | 'opencode' | 'monitor';
 
 export interface AgentCapabilities {
   type: AgentType;
@@ -217,6 +217,19 @@ export const CODEX_CLI_CAPABILITIES: AgentCapabilities = {
   hasModeSwitching: false,
   hasDiffReview: false,
   hasOptionLists: true,
+  hasNavigablePrompts: false,
+  hasSuggestedPrompts: false,
+  hasApiUsage: false,
+  hasModelCatalog: false,
+};
+
+export const CODEX_APP_CAPABILITIES: AgentCapabilities = {
+  type: 'codex-app',
+  displayName: 'Codex App',
+  hasTerminal: false,
+  hasModeSwitching: false,
+  hasDiffReview: false,
+  hasOptionLists: false,
   hasNavigablePrompts: false,
   hasSuggestedPrompts: false,
   hasApiUsage: false,

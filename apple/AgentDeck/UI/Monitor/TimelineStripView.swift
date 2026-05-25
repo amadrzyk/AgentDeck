@@ -317,7 +317,7 @@ struct TimelineStripView: View {
                     agentType: group.entry.agentType,
                     tint: brandColor.opacity(isChatEnd ? 0.65 : 1),
                     size: 10,
-                    contentInset: group.entry.agentType == "codex-cli" ? 0.9 : 0.5
+                    contentInset: (group.entry.agentType == "codex-cli" || group.entry.agentType == "codex-app") ? 0.9 : 0.5
                 )
                 .frame(width: 12, height: 12)
 
@@ -912,7 +912,8 @@ struct TimelineStripView: View {
     private func agentTag(_ agentType: String?) -> String {
         switch agentType {
         case "claude-code": "Claude"
-        case "codex-cli": "Codex"
+        case "codex-cli": "Codex CLI"
+        case "codex-app": "Codex App"
         case "openclaw": "OpenClaw"
         case "opencode": "OpenCode"
         case "daemon": "Daemon"
@@ -1051,7 +1052,7 @@ func timelineIsLowSignalEntry(_ entry: TimelineEntry) -> Bool {
         return false
     }
     let raw = entry.raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    if entry.agentType == "codex-cli", entry.sessionId == "codex:otel-active" {
+    if (entry.agentType == "codex-cli" || entry.agentType == "codex-app"), entry.sessionId == "codex:otel-active" {
         return ["tool", "tool completed", "unknown", "unknown completed", "exec", "exec completed"].contains(raw)
     }
     // OpenClaw placeholder rows. Producer drops new ones at source as of
@@ -1210,7 +1211,8 @@ private struct TimelineSessionFilter: Equatable {
         switch agentType {
         case "openclaw": return "OpenClaw"
         case "claude-code": return "Claude"
-        case "codex-cli": return "Codex"
+        case "codex-cli": return "Codex CLI"
+        case "codex-app": return "Codex App"
         case "opencode": return "OpenCode"
         default: return sessionId
         }

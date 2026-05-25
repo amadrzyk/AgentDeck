@@ -9,6 +9,7 @@ enum AgentType: String, Codable, Sendable {
     case claudeCode = "claude-code"
     case openclaw
     case codexCli = "codex-cli"
+    case codexApp = "codex-app"
 }
 
 // MARK: - Agent Capabilities

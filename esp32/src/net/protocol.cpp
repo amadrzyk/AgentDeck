@@ -23,6 +23,12 @@ static AgentState parseState(const char* s) {
     return AgentState::DISCONNECTED;
 }
 
+static bool isCodexAgent(const char* agentType) {
+    return agentType &&
+           (strcmp(agentType, "codex-cli") == 0 ||
+            strcmp(agentType, "codex-app") == 0);
+}
+
 static void handleStateUpdate(JsonObject& obj) {
     lockState();
 
@@ -209,7 +215,7 @@ static void handleSessionsList(JsonObject& obj) {
                 sizeof(g_state.sessions[i].projectName) - 1);
         strncpy(g_state.sessions[i].modelName, s["modelName"] | "",
                 sizeof(g_state.sessions[i].modelName) - 1);
-        strncpy(g_state.sessions[i].agentType, s["agentType"] | "claude-code",
+        strncpy(g_state.sessions[i].agentType, s["agentType"] | "",
                 sizeof(g_state.sessions[i].agentType) - 1);
         strncpy(g_state.sessions[i].state, s["state"] | "",
                 sizeof(g_state.sessions[i].state) - 1);
@@ -224,11 +230,11 @@ static void handleSessionsList(JsonObject& obj) {
                     g_state.crayfishState = CrayfishState::ROUTING;
                 else if (g_state.sessions[i].state[0] != '\0')
                     g_state.crayfishState = CrayfishState::SITTING;
-            } else if (strcmp(g_state.sessions[i].agentType, "codex-cli") == 0) {
+            } else if (isCodexAgent(g_state.sessions[i].agentType)) {
                 g_state.cloudCount++;
             } else if (strcmp(g_state.sessions[i].agentType, "opencode") == 0) {
                 g_state.opencodeCount++;
-            } else if (strcmp(g_state.sessions[i].agentType, "daemon") != 0) {
+            } else if (strcmp(g_state.sessions[i].agentType, "claude-code") == 0) {
                 g_state.octopusCount++;
             }
         }
@@ -280,7 +286,7 @@ static void handleSessionsList(JsonObject& obj) {
     uint8_t cloudNameIdx = 0;
     for (uint8_t i = 0; i < g_state.sessionCount && cloudNameIdx < MAX_CLOUD; i++) {
         if (g_state.sessions[i].alive &&
-            strcmp(g_state.sessions[i].agentType, "codex-cli") == 0) {
+            isCodexAgent(g_state.sessions[i].agentType)) {
             const char* name = g_state.sessions[i].projectName;
             if (name[0]) {
                 strncpy(cloudRawNames[cloudNameIdx], name, sizeof(cloudRawNames[cloudNameIdx]) - 1);
@@ -481,7 +487,8 @@ static void sendDeviceInfo() {
     resp["board"] = "ips_35";
     #endif
 
-    resp["version"] = "0.1.0";
+    resp["version"] = FIRMWARE_VERSION;
+    resp["protocolRevision"] = PROTOCOL_REVISION;
     resp["wifiConfigured"] = (WiFi.SSID().length() > 0);
     resp["wifiConnected"] = Net::wifiConnected();
     if (Net::wifiConnected()) {

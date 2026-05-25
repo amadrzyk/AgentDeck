@@ -28,7 +28,7 @@ private struct AgentSlotPalette {
         switch agent {
         case "claude-code":
             return .init(primary: Color(hex: "#D97757"), secondary: Color(hex: "#BE6D52"))
-        case "codex-cli":
+        case "codex-cli", "codex-app":
             return .init(primary: Color(hex: "#8BA4FF"), secondary: Color(hex: "#5981FF"))
         case "openclaw":
             return .init(primary: Color(hex: "#FF6B6B"), secondary: Color(hex: "#CC3333"))
