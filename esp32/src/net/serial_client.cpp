@@ -24,12 +24,17 @@ static bool deviceInfoSent = false;
 
 namespace Net {
 
+// Forward declaration
+static void sendHeartbeatAck();
+
 static void sendDeviceInfoSerial() {
     JsonDocument resp;
     resp["type"] = "device_info";
 
     #if defined(BOARD_ULANZI_TC001)
     resp["board"] = "ulanzi_tc001";
+    #elif defined(BOARD_TTGO_T_DISPLAY)
+    resp["board"] = "ttgo_t_display";
     #elif IS_ROUND
     resp["board"] = "round_amoled";
     #elif defined(BOARD_BOX_86)
@@ -91,6 +96,9 @@ void serialLoop() {
                         deviceInfoSent = true;
                         sendDeviceInfoSerial();
                     }
+
+                    // Send heartbeat acknowledgment to bridge
+                    sendHeartbeatAck();
                 }
 
                 serialBufPos = 0;
@@ -118,6 +126,16 @@ void serialLoop() {
         }
         unlockState();
     }
+}
+
+static void sendHeartbeatAck() {
+    JsonDocument resp;
+    resp["type"] = "heartbeat_ack";
+    resp["uptime"] = millis() / 1000;  // Uptime in seconds
+
+    char buf[128];
+    serializeJson(resp, buf, sizeof(buf));
+    Serial.println(buf);
 }
 
 bool serialConnected() {

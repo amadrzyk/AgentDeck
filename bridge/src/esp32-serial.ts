@@ -21,11 +21,11 @@ import { debug } from './logger.js';
 
 /** @internal Exported for testing only */
 export const ESP32_PORT_PATTERNS = [
-  /\/dev\/cu\.usbserial-\d+/,    // CP210x / CH340 (cu.usbserial-XXXX)
-  /\/dev\/cu\.wchusbserial\d+/,  // CH340 (cu.wchusbserialXXXX — 86 Box)
-  /\/dev\/cu\.usbmodem\d+/,      // Native USB JTAG (IPS 3.5", Round AMOLED)
-  /\/dev\/ttyUSB\d+/,            // Linux CH340
-  /\/dev\/ttyACM\d+/,            // Linux native USB
+  /\/dev\/cu\.usbserial-\w+/,    // CP210x / CH340 (cu.usbserial-XXXX)
+  /\/dev\/cu\.wchusbserial\w+/,  // CH340 (cu.wchusbserialXXXX — 86 Box)
+  /\/dev\/cu\.usbmodem\w+/,      // Native USB JTAG (IPS 3.5", Round AMOLED)
+  /\/dev\/ttyUSB\w+/,            // Linux CH340
+  /\/dev\/ttyACM\w+/,            // Linux native USB
 ];
 
 /** @internal Exported for testing only */
@@ -33,6 +33,9 @@ export const EXCLUDE_PATTERNS = [
   /Bluetooth/i,
   /WLAN/i,
 ];
+
+/** Staleness threshold: connections with no read for this long are considered stale */
+const STALE_THRESHOLD_MS = 60000; // 60 seconds
 
 /** @internal Exported for testing only */
 export interface SerialConnection {
@@ -43,6 +46,8 @@ export interface SerialConnection {
   connected: boolean;
   deviceInfo: { board?: string; version?: string; wifiConfigured?: boolean; wifiConnected?: boolean } | null;
   provisionSent: boolean;
+  lastReadAt: number;  // Timestamp of last successful read from ESP32
+  lastWriteAt: number; // Timestamp of last successful write to ESP32
 }
 
 let connections: SerialConnection[] = [];
@@ -141,6 +146,7 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
   try {
     const msg = JSON.parse(line) as ESP32ToHostMessage;
     if (msg.type) {
+      conn.lastReadAt = Date.now();  // Update last read timestamp
       debug('ESP32', `← ${conn.port}: ${msg.type}`);
       conn.deviceInfo = conn.deviceInfo || {};
 
@@ -171,6 +177,8 @@ async function openPort(port: string): Promise<SerialConnection | null> {
     const conn: SerialConnection = {
       port, stream, reader: null, readBuf: '',
       connected: true, deviceInfo: null, provisionSent: false,
+      lastReadAt: Date.now(),  // Initialize to now, will be updated on first read
+      lastWriteAt: Date.now(),
     };
 
     stream.on('error', (err) => {
@@ -279,6 +287,7 @@ function sendToConnection(conn: SerialConnection, json: string): void {
   }
   try {
     conn.stream.write(json + '\n');
+    conn.lastWriteAt = Date.now();  // Update last write timestamp
   } catch {
     conn.connected = false;
   }
@@ -344,6 +353,40 @@ function sendHeartbeat(): void {
         sendToConnection(conn, json);
       }
     }
+  }
+
+  // Check for stale connections and trigger recovery
+  checkStaleConnections();
+}
+
+/**
+ * Check for stale connections (no read for >60s) and close them.
+ * This allows re-poll to automatically reconnect devices that stopped responding.
+ */
+function checkStaleConnections(): void {
+  const now = Date.now();
+  let staleCount = 0;
+
+  for (const conn of connections) {
+    if (!conn.connected) continue;
+
+    const readAge = now - conn.lastReadAt;
+    if (readAge > STALE_THRESHOLD_MS) {
+      debug('ESP32', `Stale connection detected: ${conn.port} (${Math.floor(readAge / 1000)}s no response)`);
+      conn.connected = false;
+      try { conn.stream.end(); } catch { /* ignore */ }
+      try { conn.reader?.destroy(); } catch { /* ignore */ }
+      staleCount++;
+    }
+  }
+
+  if (staleCount > 0) {
+    // Remove stale connections immediately, then trigger re-poll
+    connections = connections.filter(c => c.connected);
+    debug('ESP32', `Closed ${staleCount} stale connection(s), re-polling...`);
+    pollForDevices().catch(err => {
+      debug('ESP32', `Re-poll after stale cleanup failed: ${err.message}`);
+    });
   }
 }
 
@@ -520,4 +563,37 @@ export function esp32ConnectionCount(): number {
  */
 export function getESP32Ports(): string[] {
   return connections.filter(c => c.connected).map(c => c.port);
+}
+
+/**
+ * Get detailed connection status for all ESP32 devices.
+ * Used by /api/status endpoint to show connection health.
+ */
+export function getSerialConnectionStatus(): Array<{
+  port: string;
+  connected: boolean;
+  board?: string;
+  version?: string;
+  wifiConfigured?: boolean;
+  wifiConnected?: boolean;
+  lastReadAt: number;
+  lastWriteAt: number;
+  lastReadSecondsAgo: number;
+  lastWriteSecondsAgo: number;
+  stale: boolean;
+}> {
+  const now = Date.now();
+  return connections.map(c => ({
+    port: c.port,
+    connected: c.connected,
+    board: c.deviceInfo?.board,
+    version: c.deviceInfo?.version,
+    wifiConfigured: c.deviceInfo?.wifiConfigured,
+    wifiConnected: c.deviceInfo?.wifiConnected,
+    lastReadAt: c.lastReadAt,
+    lastWriteAt: c.lastWriteAt,
+    lastReadSecondsAgo: Math.floor((now - c.lastReadAt) / 1000),
+    lastWriteSecondsAgo: Math.floor((now - c.lastWriteAt) / 1000),
+    stale: c.connected && (now - c.lastReadAt) > STALE_THRESHOLD_MS,
+  }));
 }
