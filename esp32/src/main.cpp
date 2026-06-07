@@ -20,7 +20,7 @@
 #include "net/mdns_discovery.h"
 #include "net/ws_client.h"
 
-#ifdef BOARD_ULANZI_TC001
+#ifdef BOARD_LED8X32
 #include "ui/matrix/matrix_display.h"
 #else
 #include "ui/display.h"
@@ -35,7 +35,7 @@
 DashboardState g_state;
 SemaphoreHandle_t g_stateMutex = nullptr;
 
-#ifndef BOARD_ULANZI_TC001
+#ifndef BOARD_LED8X32
 // ===== Screen objects (LVGL boards only) =====
 static lv_obj_t* scrSplash = nullptr;
 static lv_obj_t* scrAquarium = nullptr;
@@ -79,9 +79,10 @@ static void networkTask(void* param) {
         Net::wifiLoop();
 
         // === Continuous mDNS discovery ===
-        // Even if we already connected, keep polling so we detect IP changes
-        // (DHCP renewal, daemon restart on different host) and can re-target WS.
-        if (Net::wifiConnected() && Net::mdnsPoll(bridge)) {
+        // Only perform mDNS polling if we are NOT connected. 
+        // Constant mDNS querying while connected consumes CPU, Wi-Fi bandwidth,
+        // and induces severe packet jitter/latency spikes on ESP32, leading to disconnects.
+        if (Net::wifiConnected() && !Net::wsConnected() && Net::mdnsPoll(bridge)) {
             bool ipChanged = (strcmp(currentBridgeIp, bridge.ip) != 0) || (currentBridgePort != bridge.port);
             if (ipChanged || !Net::wsConnected()) {
                 if (ipChanged) {
@@ -97,7 +98,12 @@ static void networkTask(void* param) {
                 strncpy(g_state.authToken, bridge.token, sizeof(g_state.authToken) - 1);
                 unlockState();
 
-                Net::wsConnect(bridge.ip, bridge.port, bridge.token);
+                static uint32_t lastConnectTimeMs = 0;
+                uint32_t now = millis();
+                if (!Net::wsConnecting() && (ipChanged || (now - lastConnectTimeMs > 10000))) {
+                    lastConnectTimeMs = now;
+                    Net::wsConnect(bridge.ip, bridge.port, bridge.token);
+                }
             }
         }
 
@@ -129,7 +135,7 @@ static void networkTask(void* param) {
     }
 }
 
-#ifndef BOARD_ULANZI_TC001
+#ifndef BOARD_LED8X32
 // ===== Settings long-press handler =====
 static void onLongPress(lv_event_t* e) {
     if (currentView == VIEW_AQUARIUM) {
@@ -292,7 +298,7 @@ static void uiTask(void* param) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
-#else // BOARD_ULANZI_TC001
+#else // BOARD_LED8X32
 // ===== UI task — LED matrix (Core 1) =====
 static void uiTask(void* param) {
     Serial.println("[UI] Matrix task started on core 1");
@@ -311,19 +317,27 @@ static void uiTask(void* param) {
         vTaskDelay(pdMS_TO_TICKS(RENDER_INTERVAL_MS));
     }
 }
-#endif // BOARD_ULANZI_TC001
+#endif // BOARD_LED8X32
 
 // ===== Arduino setup =====
 void setup() {
     Serial.setRxBufferSize(2048);  // Default 256 too small for large JSON messages
     Serial.begin(115200);
-#ifdef BOARD_ULANZI_TC001
+#if defined(BOARD_LED8X32)
     // Silence buzzer immediately (GPIO15 floats during boot → beep)
     pinMode(15, OUTPUT);
     digitalWrite(15, LOW);
     // CH340 UART: no CDC wait needed
     delay(200);
     Serial.println("\n=== AgentDeck Ulanzi TC001 LED Matrix ===");
+#elif defined(BOARD_TTGO)
+    // CH9102 UART: no CDC wait needed
+    delay(200);
+    Serial.println("\n=== AgentDeck TTGO T-Display ===");
+#elif defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
+    // CH340 UART: no CDC wait needed
+    delay(200);
+    Serial.println("\n=== AgentDeck 86 Box 4\" ===");
 #else
     // Native USB CDC: wait for host connection (up to 3 seconds)
     for (int i = 0; i < 30 && !Serial; i++) delay(100);
@@ -332,24 +346,26 @@ void setup() {
 #endif
     Serial.flush();
     Serial.printf("Board: %s  Screen: %dx%d\n",
-#if defined(BOARD_ULANZI_TC001)
+#if defined(BOARD_LED8X32)
         "Ulanzi TC001",
-#elif defined(BOARD_IPS_35)
+#elif defined(BOARD_TTGO)
+        "TTGO T-Display",
+#elif defined(BOARD_IPS35)
         "IPS 3.5\"",
-#elif defined(BOARD_BOX_86)
+#elif defined(BOARD_RGB48)
         "86 Box 4\"",
-#elif defined(BOARD_ROUND_AMOLED)
+#elif defined(BOARD_AMOLED)
         "AMOLED Round 1.8\"",
 #else
         "Unknown",
 #endif
-#if defined(BOARD_ULANZI_TC001)
+#if defined(BOARD_LED8X32)
         SCREEN_W, SCREEN_H);
 #else
         g_screenW, g_screenH);
 #endif
 
-#ifndef BOARD_ULANZI_TC001
+#if !defined(BOARD_LED8X32) && !defined(BOARD_TTGO)
     // Init PSRAM
     if (psramFound()) {
         Serial.printf("PSRAM: %d KB free\n", ESP.getFreePsram() / 1024);
