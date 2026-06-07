@@ -10,14 +10,16 @@
 #define LV_COLOR_DEPTH 16
 
 /* Memory */
-#define LV_MEM_CUSTOM 1  /* Use stdlib malloc/free (PSRAM) */
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
+#define LV_USE_STDLIB_STRING LV_STDLIB_CLIB
+#define LV_USE_STDLIB_SPRINTF LV_STDLIB_CLIB
 
 /* Display refresh */
 #define LV_DEF_REFR_PERIOD 33  /* ~30fps */
 #define LV_DPI_DEF 130
 
-/* Drawing */
-#define LV_DRAW_BUF_STRIDE_ALIGN 1
+/* Drawing — improved alignment for ST7701 RGB parallel to reduce flicker */
+#define LV_DRAW_BUF_STRIDE_ALIGN 32
 #define LV_DRAW_BUF_ALIGN 4
 #define LV_USE_DRAW_SW 1
 #define LV_USE_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE
@@ -32,8 +34,8 @@
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 /* OS */
-#define LV_USE_OS LV_OS_FREERTOS
-#define LV_USE_FREERTOS 1
+#define LV_USE_OS LV_OS_NONE
+#define LV_USE_FREERTOS 0
 
 /* Widget usage */
 #define LV_USE_LABEL 1

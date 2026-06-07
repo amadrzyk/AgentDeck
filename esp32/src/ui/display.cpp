@@ -11,12 +11,12 @@
 int16_t g_screenW = SCREEN_W;
 int16_t g_screenH = SCREEN_H;
 
-#if !defined(BOARD_ROUND_AMOLED) && !defined(BOARD_IPS_35) && !defined(BOARD_JC8012P4A1C)
+#if !defined(BOARD_AMOLED) && !defined(BOARD_IPS35) && !defined(BOARD_IPS10)
 #include <LovyanGFX.hpp>
 #endif
 
 // Platform-specific includes for ESP32-S3 Bus_RGB / Panel_RGB
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 #endif
@@ -26,7 +26,7 @@ int16_t g_screenH = SCREEN_H;
 // Board-specific display driver
 // ============================================================
 
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
 // ===== ESP32-S3-4848S040: ST7701 RGB 16-bit parallel =====
 // Verified pin map from factory firmware backup.
 // ST7701 init via 3-wire SPI, display via RGB parallel bus.
@@ -41,7 +41,7 @@ public:
         // RGB parallel bus configuration
         {
             auto cfg = _bus_instance.config();
-            cfg.freq_write = 10000000;  // 10MHz — balance between tearing and refresh rate
+            cfg.freq_write = 10000000;  // 10MHz — balanced for ST7701 RGB parallel stability
             cfg.panel = &_panel_instance;  // CRITICAL: Bus_RGB needs panel pointer
 
             cfg.pin_pclk    = BOARD_PIN_PCLK;   // 21
@@ -68,12 +68,12 @@ public:
             cfg.pin_d15 = BOARD_PIN_R4;   // 0
 
             cfg.hsync_pulse_width  = 8;
-            cfg.hsync_back_porch   = 50;
+            cfg.hsync_back_porch   = 60;  // Increased from 50 (more stable)
             cfg.hsync_front_porch  = 10;
             cfg.hsync_polarity     = 0;
 
             cfg.vsync_pulse_width  = 8;
-            cfg.vsync_back_porch   = 20;
+            cfg.vsync_back_porch   = 30;  // Increased from 20 (more stable)
             cfg.vsync_front_porch  = 10;
             cfg.vsync_polarity     = 0;
 
@@ -138,7 +138,7 @@ public:
     }
 };
 
-#elif defined(BOARD_TTGO_T_DISPLAY)
+#elif defined(BOARD_TTGO)
 // ===== TTGO T-Display: ST7789 1.14" 135x240 SPI =====
 class LGFX : public lgfx::LGFX_Device {
 public:
@@ -196,7 +196,7 @@ public:
     }
 };
 
-#elif defined(BOARD_IPS_35)
+#elif defined(BOARD_IPS35)
 // ===== JC3248W535: AXS15231B QSPI =====
 // Requires Arduino_Canvas wrapper — direct QSPI writes produce black screen.
 // Canvas buffers in PSRAM (~307KB), flush() sends to display.
@@ -243,7 +243,7 @@ static bool touch_read_axs15231b(uint16_t* x, uint16_t* y) {
     return true;
 }
 
-#elif defined(BOARD_ROUND_AMOLED)
+#elif defined(BOARD_AMOLED)
 // ===== JC3636W518: ST77916 QSPI AMOLED =====
 // Custom init: st77916_150 base + COLMOD 0x55 fix + gamma WRITE_C8_BYTES fix + OTP cal
 // Panel is 1.5" variant (not 1.8") — uses different GIP/power values than default 180 init.
@@ -437,7 +437,7 @@ static bool touch_read_cst816s(uint16_t* x, uint16_t* y) {
     return true;
 }
 
-#elif defined(BOARD_JC8012P4A1C)
+#elif defined(BOARD_IPS10)
 // ===== JC8012P4A1C: JD9365 MIPI-DSI 800x1280 + GSL3680 I2C Touch =====
 #include "lcd/jd9365_lcd.h"
 #include "touch/esp_lcd_touch.h"
@@ -465,7 +465,7 @@ static bool touch_read_gsl3680(uint16_t* x, uint16_t* y) {
 // Common LVGL integration
 // ============================================================
 
-#if !defined(BOARD_ROUND_AMOLED) && !defined(BOARD_IPS_35) && !defined(BOARD_JC8012P4A1C)
+#if !defined(BOARD_AMOLED) && !defined(BOARD_IPS35) && !defined(BOARD_IPS10)
 static LGFX tft;
 #endif
 static lv_display_t* disp = nullptr;
@@ -478,20 +478,32 @@ static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px
     uint32_t w = (area->x2 - area->x1 + 1);
     uint32_t h = (area->y2 - area->y1 + 1);
 
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48)
+    static uint32_t flushCount = 0;
+    static uint32_t lastFlushMs = 0;
+    uint32_t now = millis();
+    flushCount++;
+    if (now - lastFlushMs > 5000 || flushCount < 5) {
+        Serial.printf("[Display] Flush #%u: area(%d,%d %dx%d) px_map=%p\n",
+                      flushCount, area->x1, area->y1, w, h, px_map);
+        lastFlushMs = now;
+    }
+#endif
+
+#if defined(BOARD_RGB48)
     // RGB panel: pushImage writes directly to DMA framebuffer
     // swap565_t tells LovyanGFX data is already byte-swapped (RGB565_SWAPPED from LVGL)
     tft.pushImage(area->x1, area->y1, w, h, (lgfx::swap565_t*)px_map);
-#elif defined(BOARD_IPS_35)
+#elif defined(BOARD_IPS35)
     // AXS15231B via Canvas: draw partial area to buffer, flush only on last area
     gfx->draw16bitBeRGBBitmap(area->x1, area->y1, (uint16_t*)px_map, w, h);
     if (lv_display_flush_is_last(display)) {
         gfx_canvas->flush();
     }
-#elif defined(BOARD_ROUND_AMOLED)
+#elif defined(BOARD_AMOLED)
     // ST77916 QSPI: direct draw (no Canvas needed)
     gfx->draw16bitBeRGBBitmap(area->x1, area->y1, (uint16_t*)px_map, w, h);
-#elif defined(BOARD_JC8012P4A1C)
+#elif defined(BOARD_IPS10)
     // JD9365 MIPI-DSI. We manually transpose the 1280x800 logical landscape map
     // into the physical 800x1280 portrait panel (rotation 270).
     if (rotated_buf) {
@@ -521,11 +533,11 @@ static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px
 // LVGL touch read callback
 static void touch_read(lv_indev_t* indev, lv_indev_data_t* data) {
     uint16_t x, y;
-#if defined(BOARD_ROUND_AMOLED)
+#if defined(BOARD_AMOLED)
     if (touch_read_cst816s(&x, &y)) {
-#elif defined(BOARD_IPS_35)
+#elif defined(BOARD_IPS35)
     if (touch_read_axs15231b(&x, &y)) {
-#elif defined(BOARD_JC8012P4A1C)
+#elif defined(BOARD_IPS10)
     if (touch_read_gsl3680(&x, &y)) {
         // Map physical coordinate (x_phys, y_phys) to logical (x_log, y_log)
         // for 270-degree landscape: x_log = BOARD_NATIVE_H - 1 - y_phys, y_log = x_phys
@@ -547,7 +559,7 @@ static void touch_read(lv_indev_t* indev, lv_indev_data_t* data) {
 namespace UI {
 
 void displayInit() {
-#if defined(BOARD_ROUND_AMOLED)
+#if defined(BOARD_AMOLED)
     // === ST77916 QSPI AMOLED init via Arduino_GFX ===
 
     // Wait for USB CDC Serial to enumerate (native JTAG USB)
@@ -585,7 +597,7 @@ void displayInit() {
     Wire.begin(BOARD_PIN_TOUCH_SDA, BOARD_PIN_TOUCH_SCL);
     Serial.println("[Display] Touch CST816S initialized");
 
-#elif defined(BOARD_IPS_35)
+#elif defined(BOARD_IPS35)
     // === AXS15231B QSPI IPS init via Arduino_GFX ===
 
     // Wait for USB CDC Serial to enumerate (native JTAG USB)
@@ -645,7 +657,7 @@ void displayInit() {
     Wire.begin(BOARD_PIN_TOUCH_SDA, BOARD_PIN_TOUCH_SCL, 400000);
     Serial.println("[Display] Touch AXS15231B initialized");
 
-#elif defined(BOARD_JC8012P4A1C)
+#elif defined(BOARD_IPS10)
     // Wait for USB CDC Serial to enumerate (native JTAG USB)
     delay(2000);
     Serial.println("[Display] === IPS 10.1\" JD9365 MIPI-DSI via esp_lcd ===");
@@ -713,7 +725,40 @@ void displayInit() {
     Serial.println("[Display] Calling tft.init()...");
     tft.init();
     Serial.println("[Display] tft.init() complete");
-#if defined(BOARD_TTGO_T_DISPLAY)
+
+#if defined(BOARD_RGB48) || defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
+    // 86box: Test panel rendering with colored screens to diagnose black screen issue
+    Serial.println("[Display] ===== PANEL TEST START =====");
+    Serial.printf("[Display] Screen size: %dx%d\n", tft.width(), tft.height());
+    Serial.printf("[Display] Color format: %s\n",
+                  tft.getColorDepth() == 16 ? "RGB565" : "Other");
+
+    // Red screen test
+    Serial.println("[Display] Filling RED...");
+    tft.fillScreen(0xF800);  // RGB565 red
+    delay(1000);
+
+    // Green screen test
+    Serial.println("[Display] Filling GREEN...");
+    tft.fillScreen(0x07E0);  // RGB565 green
+    delay(1000);
+
+    // Blue screen test
+    Serial.println("[Display] Filling BLUE...");
+    tft.fillScreen(0x001F);  // RGB565 blue
+    delay(1000);
+
+    // White screen test
+    Serial.println("[Display] Filling WHITE...");
+    tft.fillScreen(0xFFFF);  // RGB565 white
+    delay(1000);
+
+    // Clear to black
+    Serial.println("[Display] Clearing to BLACK...");
+    tft.fillScreen(0x0000);
+    Serial.println("[Display] ===== PANEL TEST END =====");
+#endif
+#if defined(BOARD_TTGO)
     // Read saved orientation from NVS (default: portrait)
     {
         Preferences prefs;
@@ -746,7 +791,7 @@ void displayInit() {
     font_kr_12 = lv_font_montserrat_12;  // Copy struct to RAM
     font_kr_12.fallback = &font_noto_kr_12;  // Set Korean fallback
 
-#if defined(BOARD_JC8012P4A1C)
+#if defined(BOARD_IPS10)
     // Create logical landscape display directly (1280x800) and perform software transposition in disp_flush
     disp = lv_display_create(BOARD_NATIVE_H, BOARD_NATIVE_W);
     lv_display_set_flush_cb(disp, disp_flush);
@@ -755,13 +800,15 @@ void displayInit() {
     lv_display_set_flush_cb(disp, disp_flush);
 #endif
 
-#if defined(BOARD_BOX_86)
+#if defined(BOARD_RGB48)
     // RGB panel: LVGL renders into internal SRAM buffer (fast), then memcpy to DMA
     // RGB565_SWAPPED = LVGL outputs big-endian RGB565 matching DMA byte order
     // Use internal SRAM (not PSRAM) for LVGL buffer to avoid PSRAM bus contention
     static constexpr size_t BUF_LINES = 40;
     size_t bufPixels = SCREEN_W * BUF_LINES;
     size_t bufSize = bufPixels * sizeof(uint16_t);
+    Serial.printf("[Display] Buffer alloc: %zu pixels, %zu bytes (%d lines)\n", bufPixels, bufSize, BUF_LINES);
+
     // Try internal SRAM first for speed, fall back to PSRAM
     uint16_t* buf1 = (uint16_t*)heap_caps_malloc(bufSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     uint16_t* buf2 = (uint16_t*)heap_caps_malloc(bufSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
@@ -779,18 +826,19 @@ void displayInit() {
         Serial.println("[Display] Buffer alloc failed!");
         return;
     }
+    Serial.printf("[Display] Buffers: buf1=%p, buf2=%p\n", buf1, buf2);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_buffers(disp, buf1, buf2, bufSize,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped, partial)\n", g_screenW, g_screenH);
 #else
     // SPI/QSPI panels: partial render with DMA-capable buffers, big-endian RGB565
-#if defined(BOARD_TTGO_T_DISPLAY)
+#if defined(BOARD_TTGO)
     static constexpr size_t BUF_LINES = 10;
 #else
     static constexpr size_t BUF_LINES = 40;
 #endif
-#if defined(BOARD_JC8012P4A1C)
+#if defined(BOARD_IPS10)
     size_t bufPixels = BOARD_NATIVE_H * BUF_LINES;
 #else
     size_t bufPixels = SCREEN_W * BUF_LINES;
@@ -813,7 +861,7 @@ void displayInit() {
     }
     lv_display_set_buffers(disp, buf1, buf2, bufSize,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-#if defined(BOARD_JC8012P4A1C)
+#if defined(BOARD_IPS10)
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
     Serial.printf("[Display] LVGL initialized %dx%d (RGB565 native)\n", g_screenW, g_screenH);
 #else
@@ -834,17 +882,17 @@ lv_display_t* getDisplay() {
 void setBrightness(int level) {
     if (level < 0) level = 0;
     if (level > 255) level = 255;
-#if defined(BOARD_ROUND_AMOLED)
+#if defined(BOARD_AMOLED)
     // AMOLED: simple on/off via BL pin (no PWM)
     digitalWrite(BOARD_PIN_BL, level > 0 ? HIGH : LOW);
-#elif defined(BOARD_IPS_35)
+#elif defined(BOARD_IPS35)
     // AXS15231B: PWM backlight
     analogWrite(BOARD_PIN_BL, level);
-#elif defined(BOARD_JC8012P4A1C)
+#elif defined(BOARD_IPS10)
     // Backlight on/off
     pinMode(BOARD_PIN_BL, OUTPUT);
     digitalWrite(BOARD_PIN_BL, level > 0 ? HIGH : LOW);
-#elif defined(BOARD_TTGO_T_DISPLAY)
+#elif defined(BOARD_TTGO)
     // TTGO T-Display: PWM backlight with explicit re-init to prevent stuck PWM after sleep
     if (level <= 0) {
         // Force complete off when brightness is 0
@@ -870,7 +918,7 @@ void lvglLoop() {
 }
 
 bool isLandscape() {
-#if defined(BOARD_IPS_35) || defined(BOARD_TTGO_T_DISPLAY) || defined(BOARD_JC8012P4A1C)
+#if defined(BOARD_IPS35) || defined(BOARD_TTGO) || defined(BOARD_IPS10)
     return g_screenW > g_screenH;
 #else
     return true;
@@ -878,14 +926,14 @@ bool isLandscape() {
 }
 
 void setOrientation(bool landscape) {
-#if defined(BOARD_IPS_35) || defined(BOARD_TTGO_T_DISPLAY)
+#if defined(BOARD_IPS35) || defined(BOARD_TTGO)
     bool currentLandscape = g_screenW > g_screenH;
     if (landscape == currentLandscape) return;
 
     g_screenW = landscape ? SCREEN_W : SCREEN_H;
     g_screenH = landscape ? SCREEN_H : SCREEN_W;
 
-#if defined(BOARD_IPS_35)
+#if defined(BOARD_IPS35)
     gfx->setRotation(landscape ? 1 : 0);
 #else
     tft.setRotation(landscape ? 1 : 0);
