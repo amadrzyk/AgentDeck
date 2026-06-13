@@ -6,6 +6,7 @@
 #include "config.h"
 #include <cstring>
 #include <algorithm>
+#include "net/serial_client.h"
 
 using std::min;
 
@@ -113,25 +114,27 @@ lv_obj_t* create(lv_obj_t* parent) {
         // ===== Landscape layout (240×135) =====
         // Compact horizontal layout
 
-        // State + Project + Model on one line
+        // State + Project + Model on one line (with top breathing room)
         lblState = lv_label_create(widget);
         lv_obj_set_style_text_font(lblState, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(lblState, lv_color_hex(Theme::StatusGreen), 0);
-        lv_obj_align(lblState, LV_ALIGN_TOP_LEFT, 4, 4);
+        lv_obj_align(lblState, LV_ALIGN_TOP_LEFT, 8, 12);
         lv_label_set_text(lblState, "● IDLE");
 
         lblProject = lv_label_create(widget);
         lv_obj_set_style_text_font(lblProject, &font_kr_12, 0);
         lv_obj_set_style_text_color(lblProject, lv_color_hex(Theme::HUDText), 0);
-        lv_obj_align(lblProject, LV_ALIGN_TOP_MID, 0, 4);
-        lv_obj_set_width(lblProject, 100);
+        lv_obj_set_width(lblProject, screenW / 2);
+        lv_obj_set_style_text_align(lblProject, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(lblProject, LV_ALIGN_TOP_MID, 0, 12);
         lv_label_set_long_mode(lblProject, LV_LABEL_LONG_DOT);
         lv_label_set_text(lblProject, "Connecting...");
 
         lblModel = lv_label_create(widget);
         lv_obj_set_style_text_font(lblModel, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(lblModel, lv_color_hex(Theme::HUDDim), 0);
-        lv_obj_align(lblModel, LV_ALIGN_TOP_RIGHT, -4, 5);
+        lv_obj_set_style_text_align(lblModel, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_align(lblModel, LV_ALIGN_TOP_RIGHT, -8, 13);
         lv_obj_set_width(lblModel, 80);
         lv_label_set_long_mode(lblModel, LV_LABEL_LONG_DOT);
         lv_label_set_text(lblModel, "");
@@ -157,6 +160,7 @@ void update() {
     if (!widget) return;
 
     lockState();
+    bool hasData = g_state.dataReceived;
     AgentState state = g_state.state;
     char project[40], model[32];
     strncpy(project, g_state.projectName, sizeof(project) - 1);
@@ -166,6 +170,7 @@ void update() {
 
     float p5h = g_state.fiveHourPercent;
     float p7d = g_state.sevenDayPercent;
+    bool connected = hasData && (g_state.wsConnected || Net::serialConnected());
     unlockState();
 
     // Update state label with color
@@ -191,7 +196,7 @@ void update() {
 
     // Update usage gauges
     char buf[16];
-    bool showTankStatus = (p5h >= 0.0f || p7d >= 0.0f);
+    bool showTankStatus = connected && (p5h >= 0.0f || p7d >= 0.0f);
     if (showTankStatus) {
         lv_obj_clear_flag(lblUsage5h, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lblUsage7d, LV_OBJ_FLAG_HIDDEN);

@@ -45,6 +45,7 @@ import {
   initOptionDial,
   updateOptionDialState,
   setOptionSetupRequired,
+  setOptionDialRequestId,
 } from './actions/option-dial.js';
 import {
   VoiceDialAction,
@@ -78,6 +79,7 @@ import {
   getSessionSlotManager,
   getFocusedSession,
   setDaemonConnected,
+  setDaemonStale,
 } from './actions/session-slot-button.js';
 import { timelineStore } from './timeline-store.js';
 
@@ -112,6 +114,7 @@ let currentEffortLevel: string | undefined;
 let currentBillingType: BillingType = 'unknown';
 let currentOptions: import('@agentdeck/shared').PromptOption[] = [];
 let currentQuestion: string | undefined;
+let currentRequestId: string | undefined;
 let currentNavigable = false;
 let currentCursorIndex = 0;
 let currentSuggestedPrompt: string | undefined;
@@ -315,6 +318,11 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
   if (ev.question !== undefined) {
     currentQuestion = ev.question;
   }
+
+  // Capture gated-permission requestId (observed sessions). The daemon only
+  // sets it on awaiting_permission; omitting it elsewhere clears the gate.
+  currentRequestId = ev.state === State.AWAITING_PERMISSION ? ev.requestId : undefined;
+  setOptionDialRequestId(currentRequestId);
 
   // Capture navigable/cursorIndex
   if (ev.navigable !== undefined) {
@@ -583,6 +591,11 @@ connMgr.on('connected', () => {
   // Request fresh usage data immediately on connect (covers sleep/wake recovery)
   connMgr.send({ type: 'query_usage' });
   broadcastStateUpdate();
+});
+
+connMgr.on('stale-changed', (stale: boolean) => {
+  dinfo('Plugin', `daemon stale-changed: ${stale}`);
+  setDaemonStale(stale);
 });
 
 connMgr.on('disconnected', () => {

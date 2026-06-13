@@ -14,6 +14,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include "config.h"
+#include "../boards/board_config.h"
 #include "state/agent_state.h"
 #include "net/serial_client.h"
 #include "net/wifi_manager.h"
@@ -52,7 +53,7 @@ static enum {
 
 // ===== Network task (Core 0) =====
 static void networkTask(void* param) {
-    Serial.println("[Net] Task started on core 0");
+    Serial.printf("[Net] Task started on core %d\n", xPortGetCoreID());
 
     // 1. Serial JSON listener (always active — USB is always connected)
     Net::serialInit();
@@ -155,7 +156,7 @@ static void settingsGesture(lv_event_t* e) {
 
 // ===== UI task (Core 1) =====
 static void uiTask(void* param) {
-    Serial.println("[UI] Task started on core 1");
+    Serial.printf("[UI] Task started on core %d\n", xPortGetCoreID());
 
     // Initialize display + LVGL
     UI::displayInit();
@@ -184,7 +185,13 @@ static void uiTask(void* param) {
     bool everConnected = false;
     bool prevConnStatus = false;   // Track connection changes for status overlay
     bool prevWifiStatus = false;
-    constexpr uint32_t SPLASH_AUTO_MS = 1500;       // Boot splash → aquarium after 1.5s
+
+#if defined(BOARD_ESP32_C6_147)
+    // BOOT button (GPIO9) toggles orientation — this board has no touch
+    pinMode(BOARD_PIN_BTN1, INPUT_PULLUP);
+    bool btnPrev = true;           // idle = HIGH (pulled up)
+    uint32_t btnLastMs = 0;
+#endif
 
     while (true) {
         uint32_t now = millis();
@@ -192,6 +199,22 @@ static void uiTask(void* param) {
         float dt = dt_ms / 1000.0f;
         lastFrameMs = now;
         if (dt > 0.1f) dt = 0.1f;
+
+#if defined(BOARD_ESP32_C6_147)
+        // Poll BOOT button: falling edge (with debounce) flips orientation
+        {
+            bool btnNow = digitalRead(BOARD_PIN_BTN1);  // LOW = pressed
+            if (btnPrev && !btnNow && (now - btnLastMs) > 250) {
+                btnLastMs = now;
+                lockState();
+                g_state.pendingLandscape = !UI::isLandscape();
+                g_state.orientationChanged = true;
+                unlockState();
+                Serial.println("[Button] BOOT pressed — toggling orientation");
+            }
+            btnPrev = btnNow;
+        }
+#endif
 
         // LVGL tick
         if (dt_ms > 0) lv_tick_inc(dt_ms);
@@ -205,14 +228,24 @@ static void uiTask(void* param) {
         if (orientChange) {
             UI::setOrientation(newLandscape);
             // Recreate all screens with new dimensions
+            scrSplash = Screens::splashCreate();
             scrAquarium = Screens::aquariumCreate();
             Screens::permissionCreate(scrAquarium);
             lv_obj_add_event_cb(lv_obj_get_child(scrAquarium, 0), onLongPress, LV_EVENT_LONG_PRESSED, NULL);
             scrTimeline = Screens::timelineCreate();
             scrSettings = Screens::settingsCreate();
             lv_obj_add_event_cb(scrSettings, settingsGesture, LV_EVENT_GESTURE, NULL);
-            lv_screen_load(scrAquarium);
-            currentView = VIEW_AQUARIUM;
+
+            if (currentView == VIEW_SPLASH) {
+                lv_screen_load(scrSplash);
+            } else if (currentView == VIEW_TIMELINE) {
+                lv_screen_load(scrTimeline);
+            } else if (currentView == VIEW_SETTINGS) {
+                lv_screen_load(scrSettings);
+            } else {
+                lv_screen_load(scrAquarium);
+                currentView = VIEW_AQUARIUM;
+            }
         }
 
         // Read view state
@@ -239,19 +272,13 @@ static void uiTask(void* param) {
                 // Connected — go to aquarium immediately
                 lv_screen_load_anim(scrAquarium, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
                 currentView = VIEW_AQUARIUM;
-            } else if (now - splashStartMs > SPLASH_AUTO_MS) {
-                // Not connected but splash timeout — show aquarium with status overlay
-                lv_screen_load_anim(scrAquarium, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
-                currentView = VIEW_AQUARIUM;
-                // Show initial connection status on aquarium
-                // Serial connection counts as connected (no WiFi needed)
+            } else {
+                // Not connected — remain on splash screen with status text
                 if (!Net::wifiConnected() && !Net::serialConnected()) {
-                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::NO_WIFI);
-                } else if (!connected) {
-                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::SEARCHING);
+                    Screens::splashSetStatus("No WiFi");
+                } else {
+                    Screens::splashSetStatus("Searching for bridges...");
                 }
-            } else if (Net::wifiConnected()) {
-                Screens::splashSetStatus("Searching for bridges...");
             }
         }
 
@@ -304,8 +331,19 @@ static void uiTask(void* param) {
         // LVGL timer handler
         lv_timer_handler();
 
-        // ~5ms yield for smooth animation
-        vTaskDelay(pdMS_TO_TICKS(5));
+#if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
+        // Small SPI panels: frame-pace to a stable ~30fps. The terrarium fully
+        // invalidates every frame, so an uncapped loop floods the no-DMA SPI bus and
+        // causes intermittent tearing/flicker. Sleep the remainder of the frame budget.
+        {
+            uint32_t work = millis() - now;
+            vTaskDelay(pdMS_TO_TICKS(work < RENDER_INTERVAL_MS ? (RENDER_INTERVAL_MS - work) : 1));
+        }
+#else
+        // ~5ms yield for smooth animation (minimum 1 tick to prevent busy loops on 100Hz systems)
+        uint32_t yield_ticks = pdMS_TO_TICKS(5);
+        vTaskDelay(yield_ticks > 0 ? yield_ticks : 1);
+#endif
     }
 }
 #else // BOARD_LED8X32
@@ -344,6 +382,11 @@ void setup() {
     // CH9102 UART: no CDC wait needed
     delay(200);
     Serial.println("\n=== AgentDeck TTGO T-Display ===");
+#elif defined(BOARD_ESP32_C6_147)
+    // Native USB CDC: wait for host connection (up to 3 seconds)
+    for (int i = 0; i < 30 && !Serial; i++) delay(100);
+    delay(200);
+    Serial.println("\n=== AgentDeck ESP32-C6 1.47 ===");
 #elif defined(BOARD_BOX_86) || defined(BOARD_86_BOX)
     // CH340 UART: no CDC wait needed
     delay(200);
@@ -360,6 +403,8 @@ void setup() {
         "Ulanzi TC001",
 #elif defined(BOARD_TTGO)
         "TTGO T-Display",
+#elif defined(BOARD_ESP32_C6_147)
+        "ESP32-C6 1.47\"",
 #elif defined(BOARD_IPS35)
         "IPS 3.5\"",
 #elif defined(BOARD_RGB48)
@@ -375,7 +420,7 @@ void setup() {
         g_screenW, g_screenH);
 #endif
 
-#if !defined(BOARD_LED8X32) && !defined(BOARD_TTGO)
+#if !defined(BOARD_LED8X32) && !defined(BOARD_TTGO) && !defined(BOARD_ESP32_C6_147)
     // Init PSRAM
     if (psramFound()) {
         Serial.printf("PSRAM: %d KB free\n", ESP.getFreePsram() / 1024);

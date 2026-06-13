@@ -106,6 +106,16 @@ describe('StateMachine', () => {
       sm.handleUserAction('select_option');
       expect(sm.getState()).toBe(State.PROCESSING);
     });
+
+    it('option_prompt carries the question into the snapshot', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleParserEvent('option_prompt', {
+        options: [{ index: 0, label: 'A' }, { index: 1, label: 'B' }],
+        question: 'Which approach do you prefer?',
+      });
+      expect(sm.getSnapshot().question).toBe('Which approach do you prefer?');
+    });
   });
 
   // === Diff Flow ===
@@ -193,7 +203,7 @@ describe('StateMachine', () => {
       expect(sm.getState()).toBe(State.IDLE);
     });
 
-    it('AWAITING_PERMISSION does NOT timeout (waits for user)', () => {
+    it('AWAITING_PERMISSION survives the 5min PROCESSING window but recovers after the 10min backstop', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
       sm.handleParserEvent('permission_prompt', {
@@ -201,11 +211,16 @@ describe('StateMachine', () => {
       });
       expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
 
+      // Does not fire at the shorter PROCESSING threshold — a long user pause is legitimate.
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
       expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+
+      // Backstop fires after the full 10min so a parser-missed recovery can't strand it.
+      vi.advanceTimersByTime(5 * 60 * 1000);
+      expect(sm.getState()).toBe(State.IDLE);
     });
 
-    it('AWAITING_OPTION does NOT timeout (waits for user)', () => {
+    it('AWAITING_OPTION recovers after the 10min backstop', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
       sm.handleParserEvent('option_prompt', {
@@ -215,9 +230,12 @@ describe('StateMachine', () => {
 
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
       expect(sm.getState()).toBe(State.AWAITING_OPTION);
+
+      vi.advanceTimersByTime(5 * 60 * 1000);
+      expect(sm.getState()).toBe(State.IDLE);
     });
 
-    it('AWAITING_DIFF does NOT timeout (waits for user)', () => {
+    it('AWAITING_DIFF recovers after the 10min backstop', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
       sm.handleParserEvent('diff_prompt', {
@@ -227,6 +245,48 @@ describe('StateMachine', () => {
 
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
       expect(sm.getState()).toBe(State.AWAITING_DIFF);
+
+      vi.advanceTimersByTime(5 * 60 * 1000);
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+
+    it('AWAITING backstop resets when the user responds (no false recovery)', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleParserEvent('permission_prompt', {
+        options: [{ index: 0, label: 'Yes' }],
+      });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+
+      // User responds via keyboard before the backstop — PTY spinner recovers to PROCESSING.
+      vi.advanceTimersByTime(9 * 60 * 1000);
+      sm.handleParserEvent('spinner_start', {});
+      expect(sm.getState()).toBe(State.PROCESSING);
+
+      // The original awaiting backstop must not fire now that we've moved on.
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+
+    it('AWAITING backstop re-arms on PTY activity (silence-based, not a hard cap from entry)', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleParserEvent('permission_prompt', {
+        options: [{ index: 0, label: 'Yes' }],
+      });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+
+      // PTY activity at 9min (prompt still rendering / user reading) re-arms the timer.
+      vi.advanceTimersByTime(9 * 60 * 1000);
+      sm.onPtyActivity();
+
+      // 5 more min (14 total since entry) — a hard cap would have fired; the re-arm keeps it.
+      vi.advanceTimersByTime(5 * 60 * 1000);
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+
+      // 10min of genuine silence since the last activity — now the backstop fires.
+      vi.advanceTimersByTime(5 * 60 * 1000 + 100);
+      expect(sm.getState()).toBe(State.IDLE);
     });
 
     it('timer resets on state change before timeout', () => {
