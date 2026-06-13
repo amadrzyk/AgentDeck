@@ -431,7 +431,11 @@ final class TimelineTests: XCTestCase {
         store.addEntry(TimelineEntry(ts: 2000, type: .toolRequest, raw: "Read"))
 
         XCTAssertEqual(store.entries.count, 2)
-        XCTAssertEqual(store.grouped.count, 2)
+        // `grouped` is no longer stored on TimelineStore — the view layer runs
+        // groupConsecutive() per render against the (session-filtered) entries.
+        // Mirror that here instead of reading a removed property.
+        let grouped = groupConsecutive(store.entries, windowSeconds: 60)
+        XCTAssertEqual(grouped.count, 2)
     }
 
     func testTimelineStoreUpsert() {
