@@ -90,6 +90,7 @@ export class PassiveSessionObserver {
     const observed = [
       ...collectClaudeSessions(processes),
       ...(await collectCodexSessions(processes)),
+      ...(await collectOpenCodeSessions(processes)),
     ];
     const next = dedupeObservedSessions(observed, managedSessions, processes);
     // Only notify on real change — an unconditional callback would emit a
@@ -363,6 +364,61 @@ async function collectCodexSessions(processes: ProcInfo[]): Promise<ObservedSess
   return sessions;
 }
 
+/**
+ * Surface standalone `opencode` processes (not launched via `agentdeck opencode`).
+ * Unlike Claude Code / Codex, OpenCode has no lifecycle hooks, so without this a
+ * directly-run `opencode` is invisible to the daemon and its creature never appears.
+ * OpenCode keeps no easily-parsed per-PID session state, so we report it as alive/idle
+ * with the project derived from the process cwd — enough to surface the creature.
+ */
+async function collectOpenCodeSessions(processes: ProcInfo[]): Promise<ObservedSession[]> {
+  const procs = processes.filter((p) =>
+    cmdHasBinary(p.command, 'opencode') &&
+    !p.command.includes('grep') &&
+    !p.command.includes(' mcp') &&
+    !p.command.includes('agentdeck')
+  );
+  if (procs.length === 0) return [];
+  const cwdByPid = await cwdForPids(procs.map((p) => p.pid));
+  return procs.map((proc) => {
+    const cwd = cwdByPid.get(proc.pid);
+    return {
+      id: `observed:opencode:${proc.pid}`,
+      port: 0,
+      pid: proc.pid,
+      projectName: cwd ? projectNameFromCwd(cwd) : 'OpenCode',
+      agentType: 'opencode' as const,
+      alive: true,
+      state: 'idle' as const,
+      startedAt: new Date().toISOString(),
+      controlMode: 'observed' as const,
+      cwd,
+    };
+  });
+}
+
+/** cwd path for each pid via `lsof -d cwd` (best-effort; empty map on failure). */
+async function cwdForPids(pids: number[]): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  if (pids.length === 0) return map;
+  try {
+    const args = ['-a', '-d', 'cwd', '-Fn', ...pids.map((p) => `-p${p}`)];
+    const { stdout } = await execFileAsync('lsof', args, {
+      encoding: 'utf8',
+      timeout: 2_000,
+      maxBuffer: 1024 * 1024,
+    });
+    let cur: number | null = null;
+    for (const line of stdout.split('\n')) {
+      if (line.startsWith('p')) cur = Number(line.slice(1));
+      else if (line.startsWith('n') && cur != null) map.set(cur, line.slice(1));
+    }
+  } catch {
+    // lsof unavailable / permission — fall back to no cwd (projectName "OpenCode").
+  }
+  return map;
+}
+
 function dedupeObservedSessions(
   observed: ObservedSession[],
   managedSessions: EnrichedSession[],
@@ -376,7 +432,7 @@ function dedupeObservedSessions(
 
   return observed.filter((session) => {
     if (managedIds.has(session.id)) return false;
-    const rawId = session.id.replace(/^observed:(?:claude|codex):/, '');
+    const rawId = session.id.replace(/^observed:(?:claude|codex|opencode):/, '');
     if (managedIds.has(rawId)) return false;
     return !managedPids.some((pid) => pid === session.pid || isDescendantOf(session.pid, pid, byPid));
   });
