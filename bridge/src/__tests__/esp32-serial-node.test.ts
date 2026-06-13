@@ -10,7 +10,6 @@ import type {
   StateUpdateEvent,
   UsageEvent,
   BridgeEvent,
-  DeviceInfoMessage,
   WifiProvisionMessage,
 } from '@agentdeck/shared/protocol';
 import { State, PermissionMode } from '@agentdeck/shared';

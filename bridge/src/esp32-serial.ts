@@ -53,7 +53,6 @@ const INITIAL_READ_TIMEOUT_MS = 20000;
 const DEVICE_INFO_RETRY_MS = 5000;
 const DEVICE_INFO_READ_RETRY_MS = 5000;
 const DEVICE_INFO_MAX_REQUESTS = 10;
-const SERIAL_OPEN_TIMEOUT_MS = 3000;
 const SERIAL_OPEN_PROBE_TIMEOUT_MS = 1500;
 const SERIAL_WRITE_INTERVAL_MS = 120;
 const SERIAL_MAX_QUEUE = 24;
@@ -200,7 +199,7 @@ export function roundRobinByAgentType(sessions: any[], cap: number): any[] {
   return result;
 }
 
-export function prepareForSerial(event: BridgeEvent, conn?: Pick<SerialConnection, 'deviceInfo'>): BridgeEvent {
+export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnection, 'deviceInfo'>): BridgeEvent {
   const e = event as any;
 
   if (event.type === 'usage_update') {
