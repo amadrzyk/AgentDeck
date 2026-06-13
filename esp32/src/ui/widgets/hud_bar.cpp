@@ -13,20 +13,46 @@ static lv_obj_t* logoLine = nullptr;   // accent underline
 static lv_obj_t* lblSessions = nullptr;
 
 #if defined(BOARD_IPS10)
-// === IPS10 (800×1280) tablet sidebar: logo header + sessions + usage + always-on timeline ===
+// === IPS10 (800×1280) tablet sidebar: a LIVING AGENT MOSAIC ===
+// One cell per active agent; each cell's height fluidly grows when the agent is working
+// and shrinks when idle, and shows inline what that agent is doing. Replaces the static
+// session list + separate timeline with a single dynamic surface.
 static lv_obj_t* lblLogoImg = nullptr;
-static lv_obj_t* lblTimelineHeader = nullptr;
-static lv_obj_t* lblTimeline = nullptr;   // recolor list, newest first
 static constexpr int IPS10_SIDEBAR_W = 300;
-static constexpr int IPS10_TIMELINE_ROWS = 16;
+static constexpr int MOSAIC_MAX = 6;        // up to 6 agent cells (matches sessions[6])
+static lv_obj_t* cellsBox = nullptr;        // flex column holding the cells
+static lv_obj_t* cell[MOSAIC_MAX] = {nullptr};
+static lv_obj_t* cellName[MOSAIC_MAX] = {nullptr};   // project + state dot (recolor)
+static lv_obj_t* cellAct[MOSAIC_MAX]  = {nullptr};   // "what it's doing" line
+static float cellCurH[MOSAIC_MAX] = {0};    // animated current heights (lerped toward target)
 
-// Local timeline formatters (mirror timeline_scr.cpp; kept local to avoid cross-file coupling).
-static uint32_t ips10TimelineColor(const char* type) {
-    if (strstr(type, "error") != nullptr) return Theme::StatusRed;
-    if (strstr(type, "tool") != nullptr) return Theme::StatusBlue;
-    if (strstr(type, "permission") != nullptr || strstr(type, "await") != nullptr) return Theme::StatusAmber;
-    if (strstr(type, "chat") != nullptr) return Theme::StatusGreen;
-    return Theme::HUDText;
+// Activity weight by state → drives cell size. Working dominates; idle stays small-but-present.
+static float ips10StateWeight(const char* state) {
+    if (strcmp(state, "processing") == 0) return 1.0f;
+    if (strstr(state, "awaiting") != nullptr) return 0.72f;
+    return 0.40f;  // idle / unknown
+}
+// Human phrase for the in-cell activity line.
+static const char* ips10StatePhrase(const char* state) {
+    if (strcmp(state, "processing") == 0) return "working";
+    if (strcmp(state, "awaiting_permission") == 0) return "awaiting permission";
+    if (strcmp(state, "awaiting_option") == 0) return "choosing option";
+    if (strcmp(state, "awaiting_diff") == 0) return "reviewing diff";
+    if (strcmp(state, "idle") == 0) return "idle";
+    return state;
+}
+static uint32_t ips10AgentColor(const char* agentType) {
+    if (strstr(agentType, "openclaw") != nullptr) return Theme::CrayfishShell;
+    if (strstr(agentType, "codex") != nullptr) return Theme::CloudBody;
+    if (strstr(agentType, "opencode") != nullptr) return Theme::OpenCodeOuter;
+    if (strstr(agentType, "claude") != nullptr) return Theme::ClaudeBody;
+    return Theme::HUDDim;
+}
+static uint32_t ips10StateColor(const char* state) {
+    if (strcmp(state, "idle") == 0) return Theme::StatusGreen;
+    if (strcmp(state, "processing") == 0) return Theme::StatusBlue;
+    if (strstr(state, "awaiting") != nullptr) return Theme::StatusAmber;
+    return Theme::HUDDim;
 }
 #endif
 
@@ -196,15 +222,64 @@ void init(lv_obj_t* parent) {
     lv_obj_set_style_pad_all(logoLine, 0, 0);
     lv_obj_clear_flag(logoLine, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Sessions
-    lblSessions = lv_label_create(panelLeft);
-    lv_obj_set_style_text_color(lblSessions, lv_color_hex(Theme::HUDDim), 0);
-    lv_obj_set_style_text_font(lblSessions, &font_kr_12, 0);
-    lv_label_set_recolor(lblSessions, true);
-    lv_label_set_text(lblSessions, "");
-    lv_obj_set_width(lblSessions, IPS10_SIDEBAR_W - 28);
+    // Not used on IPS10 (the mosaic replaces the flat session list); keep null so
+    // the shared update() path guards them out.
+    lblSessions = nullptr;
 
-    // Usage gauges container (gauge row appended by shared code below)
+    // === Agent mosaic — flex column that fills the remaining sidebar height ===
+    cellsBox = lv_obj_create(panelLeft);
+    lv_obj_set_width(cellsBox, IPS10_SIDEBAR_W - 28);
+    lv_obj_set_flex_grow(cellsBox, 1);          // eat all leftover vertical space
+    lv_obj_set_style_bg_opa(cellsBox, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(cellsBox, 0, 0);
+    lv_obj_set_style_pad_all(cellsBox, 0, 0);
+    lv_obj_set_style_pad_row(cellsBox, 6, 0);
+    lv_obj_clear_flag(cellsBox, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(cellsBox, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(cellsBox, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+    for (int i = 0; i < MOSAIC_MAX; i++) {
+        cell[i] = lv_obj_create(cellsBox);
+        lv_obj_set_width(cell[i], lv_pct(100));
+        lv_obj_set_height(cell[i], 56);
+        lv_obj_set_style_bg_color(cell[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_bg_opa(cell[i], (lv_opa_t)18, 0);
+        lv_obj_set_style_radius(cell[i], 8, 0);
+        lv_obj_set_style_border_width(cell[i], 0, 0);
+        // Agent-type color accent down the left edge.
+        lv_obj_set_style_border_side(cell[i], LV_BORDER_SIDE_LEFT, 0);
+        lv_obj_set_style_border_width(cell[i], 3, 0);
+        lv_obj_set_style_border_color(cell[i], lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_set_style_pad_left(cell[i], 8, 0);
+        lv_obj_set_style_pad_right(cell[i], 6, 0);
+        lv_obj_set_style_pad_top(cell[i], 5, 0);
+        lv_obj_set_style_pad_bottom(cell[i], 5, 0);
+        lv_obj_set_style_pad_row(cell[i], 2, 0);
+        lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(cell[i], LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(cell[i], LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+        cellName[i] = lv_label_create(cell[i]);
+        lv_obj_set_style_text_color(cellName[i], lv_color_hex(Theme::HUDText), 0);
+        lv_obj_set_style_text_font(cellName[i], &font_kr_12, 0);
+        lv_label_set_recolor(cellName[i], true);
+        lv_label_set_long_mode(cellName[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_width(cellName[i], IPS10_SIDEBAR_W - 28 - 24);
+        lv_label_set_text(cellName[i], "");
+
+        cellAct[i] = lv_label_create(cell[i]);
+        lv_obj_set_style_text_color(cellAct[i], lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_set_style_text_font(cellAct[i], &lv_font_montserrat_10, 0);
+        lv_label_set_recolor(cellAct[i], true);
+        lv_label_set_long_mode(cellAct[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_width(cellAct[i], IPS10_SIDEBAR_W - 28 - 24);
+        lv_label_set_text(cellAct[i], "");
+
+        lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
+        cellCurH[i] = 56;
+    }
+
+    // Compact usage gauges pinned at the bottom (gauge row appended by shared code below)
     panelRight = lv_obj_create(panelLeft);
     lv_obj_set_size(panelRight, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(panelRight, LV_OPA_TRANSP, 0);
@@ -219,20 +294,6 @@ void init(lv_obj_t* parent) {
     lv_obj_set_style_text_color(lblTankHeader, lv_color_hex(Theme::HUDDim), 0);
     lv_obj_set_style_text_font(lblTankHeader, &lv_font_montserrat_10, 0);
     lv_label_set_text(lblTankHeader, "CLAUDE USAGE");
-
-    // Timeline header + list (always on for the tablet board)
-    lblTimelineHeader = lv_label_create(panelLeft);
-    lv_obj_set_style_text_color(lblTimelineHeader, lv_color_hex(Theme::HUDDim), 0);
-    lv_obj_set_style_text_font(lblTimelineHeader, &lv_font_montserrat_10, 0);
-    lv_label_set_text(lblTimelineHeader, "TIMELINE");
-
-    lblTimeline = lv_label_create(panelLeft);
-    lv_obj_set_style_text_color(lblTimeline, lv_color_hex(Theme::HUDText), 0);
-    lv_obj_set_style_text_font(lblTimeline, &font_kr_12, 0);
-    lv_label_set_recolor(lblTimeline, true);
-    lv_label_set_long_mode(lblTimeline, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(lblTimeline, IPS10_SIDEBAR_W - 28);
-    lv_label_set_text(lblTimeline, "");
 
 #elif IS_ROUND
     // === Round AMOLED layout: top status bar + bottom gauges ===
@@ -585,7 +646,7 @@ void update() {
     if (pos > 0 && buf[pos - 1] == '\n') buf[pos - 1] = '\0';
     else buf[pos] = '\0';
 
-    lv_label_set_text(lblSessions, buf);
+    if (lblSessions) lv_label_set_text(lblSessions, buf);  // null on IPS10 (mosaic instead)
 
     // === Right panel: water-fill gauges ===
     updateGauge(gauge5hFill, gauge5hPct, gauge5hReset, p5h, reset5h, usageStale);
@@ -602,30 +663,91 @@ void update() {
     }
 
 #if defined(BOARD_IPS10)
-    // === Timeline list (tablet board only) — newest first, from the firmware ring buffer ===
-    if (lblTimeline) {
-        char tbuf[900];
-        int tpos = 0;
+    // === Living agent mosaic — one cell per agent, height fluidly tracks activity,
+    //     each cell narrates inline what that agent is doing. ===
+    if (cellsBox) {
+        struct MCell { uint32_t accent; uint32_t stateCol; char name[40]; char agent[16]; char state[20]; char model[32]; };
+        MCell mc[MOSAIC_MAX];
+        int n = 0;
+        char latestAction[48] = "";
+
         lockState();
-        int tlVisible = (int)g_state.timelineCount;
-        if (tlVisible > IPS10_TIMELINE_ROWS) tlVisible = IPS10_TIMELINE_ROWS;
-        for (int i = 0; i < tlVisible; i++) {
-            int idx = (g_state.timelineHead + g_state.timelineCount - 1 - i) % TIMELINE_MAX_ENTRIES;
-            TimelineEntry& e = g_state.timeline[idx];
-            int hh = (e.ts / 3600) % 24;
-            int mm = (e.ts / 60) % 60;
-            char raw[40];
-            strncpy(raw, e.raw, sizeof(raw) - 1);
-            raw[sizeof(raw) - 1] = '\0';
-            for (char* c = raw; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';  // protect recolor
-            tpos += snprintf(tbuf + tpos, sizeof(tbuf) - tpos, "#%06lX %02d:%02d %s#\n",
-                             (unsigned long)ips10TimelineColor(e.type), hh, mm, raw);
-            if (tpos >= (int)sizeof(tbuf) - 80) break;
+        if (g_state.timelineCount > 0) {
+            int li = (g_state.timelineHead + g_state.timelineCount - 1) % TIMELINE_MAX_ENTRIES;
+            strncpy(latestAction, g_state.timeline[li].raw, sizeof(latestAction) - 1);
+            latestAction[sizeof(latestAction) - 1] = '\0';
+        }
+        for (uint8_t s = 0; s < g_state.sessionCount && n < MOSAIC_MAX; s++) {
+            if (!g_state.sessions[s].alive) continue;
+            const SessionInfo& si = g_state.sessions[s];
+            mc[n].accent = ips10AgentColor(si.agentType);
+            mc[n].stateCol = ips10StateColor(si.state);
+            strncpy(mc[n].name, si.projectName[0] ? si.projectName : si.id, sizeof(mc[n].name) - 1);
+            mc[n].name[sizeof(mc[n].name) - 1] = '\0';
+            strncpy(mc[n].agent, si.agentType, sizeof(mc[n].agent) - 1); mc[n].agent[sizeof(mc[n].agent) - 1] = '\0';
+            strncpy(mc[n].state, si.state, sizeof(mc[n].state) - 1); mc[n].state[sizeof(mc[n].state) - 1] = '\0';
+            strncpy(mc[n].model, si.modelName, sizeof(mc[n].model) - 1); mc[n].model[sizeof(mc[n].model) - 1] = '\0';
+            n++;
+        }
+        bool hasOC = false;
+        for (int i = 0; i < n; i++) if (strstr(mc[i].agent, "openclaw")) hasOC = true;
+        if (g_state.gatewayConnected && !hasOC && n < MOSAIC_MAX) {
+            mc[n].accent = Theme::CrayfishShell; mc[n].stateCol = Theme::StatusGreen;
+            strcpy(mc[n].name, "OpenClaw"); strcpy(mc[n].agent, "openclaw");
+            strcpy(mc[n].state, "idle"); mc[n].model[0] = '\0'; n++;
+        }
+        if (n == 0 && hasData) {  // single-session fallback (no sessions_list yet)
+            mc[0].accent = ips10AgentColor(g_state.agentType);
+            const char* ps = (primaryState == AgentState::PROCESSING) ? "processing" :
+                             (primaryState == AgentState::AWAITING_PERMISSION || primaryState == AgentState::AWAITING_OPTION ||
+                              primaryState == AgentState::AWAITING_DIFF) ? "awaiting_permission" : "idle";
+            mc[0].stateCol = ips10StateColor(ps);
+            strncpy(mc[0].name, primaryProject[0] ? primaryProject : "Agent", sizeof(mc[0].name) - 1);
+            mc[0].name[sizeof(mc[0].name) - 1] = '\0';
+            strncpy(mc[0].agent, primaryAgent, sizeof(mc[0].agent) - 1); mc[0].agent[sizeof(mc[0].agent) - 1] = '\0';
+            strncpy(mc[0].state, ps, sizeof(mc[0].state) - 1); mc[0].state[sizeof(mc[0].state) - 1] = '\0';
+            mc[0].model[0] = '\0'; n = 1;
         }
         unlockState();
-        if (tpos == 0) snprintf(tbuf, sizeof(tbuf), "#808080 (no activity yet)#");
-        else if (tbuf[tpos - 1] == '\n') tbuf[tpos - 1] = '\0';
-        lv_label_set_text(lblTimeline, tbuf);
+
+        for (int i = 0; i < n; i++)  // protect recolor markup
+            for (char* c = mc[i].name; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
+        for (char* c = latestAction; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
+
+        int avail = lv_obj_get_content_height(cellsBox);
+        float wsum = 0; float weights[MOSAIC_MAX];
+        for (int i = 0; i < n; i++) { weights[i] = ips10StateWeight(mc[i].state); wsum += weights[i]; }
+        int gaps = (n > 1) ? (n - 1) * 6 : 0;
+        int usable = avail - gaps;
+        if (usable < n * 44) usable = n * 44;  // floor when layout not ready
+        bool actionUsed = false;
+
+        for (int i = 0; i < MOSAIC_MAX; i++) {
+            if (i >= n) { lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN); continue; }
+            // Fluid height: lerp current toward the activity-weighted target.
+            float target = (wsum > 0) ? (usable * weights[i] / wsum) : (usable / (float)n);
+            if (target < 44) target = 44;
+            cellCurH[i] += (target - cellCurH[i]) * 0.25f;
+            lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_height(cell[i], (int)(cellCurH[i] + 0.5f));
+            lv_obj_set_style_border_color(cell[i], lv_color_hex(mc[i].accent), 0);
+
+            char nb[96];
+            snprintf(nb, sizeof(nb), "#%06lX " LV_SYMBOL_BULLET "# %s", (unsigned long)mc[i].stateCol, mc[i].name);
+            lv_label_set_text(cellName[i], nb);
+
+            char ab[96];
+            bool working = (strcmp(mc[i].state, "processing") == 0);
+            if (working && latestAction[0] && !actionUsed) {
+                snprintf(ab, sizeof(ab), LV_SYMBOL_PLAY " %s", latestAction);
+                actionUsed = true;
+            } else if (mc[i].model[0]) {
+                snprintf(ab, sizeof(ab), "%s \xC2\xB7 %s", ips10StatePhrase(mc[i].state), mc[i].model);
+            } else {
+                snprintf(ab, sizeof(ab), "%s", ips10StatePhrase(mc[i].state));
+            }
+            lv_label_set_text(cellAct[i], ab);
+        }
     }
 #endif
 
