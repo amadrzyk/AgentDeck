@@ -18,13 +18,18 @@ static lv_obj_t* lblSessions = nullptr;
 // and shrinks when idle, and shows inline what that agent is doing. Replaces the static
 // session list + separate timeline with a single dynamic surface.
 static lv_obj_t* lblLogoImg = nullptr;
-static constexpr int IPS10_SIDEBAR_W = 300;
-static constexpr int MOSAIC_MAX = 6;        // up to 6 agent cells (matches sessions[6])
-static lv_obj_t* cellsBox = nullptr;        // flex column holding the cells
+static constexpr int IPS10_SIDEBAR_W = 372;   // wide enough for a real 2D treemap
+static constexpr int MOSAIC_MAX = 6;          // up to 6 agent cells (matches sessions[6])
+static lv_obj_t* cellsBox = nullptr;          // absolute-positioned container for the treemap
 static lv_obj_t* cell[MOSAIC_MAX] = {nullptr};
 static lv_obj_t* cellName[MOSAIC_MAX] = {nullptr};   // project + state dot (recolor)
 static lv_obj_t* cellAct[MOSAIC_MAX]  = {nullptr};   // "what it's doing" line
-static float cellCurH[MOSAIC_MAX] = {0};    // animated current heights (lerped toward target)
+// Animated current rect per cell (lerped toward the treemap target) — fluid boundaries.
+static float cellCurX[MOSAIC_MAX] = {0};
+static float cellCurY[MOSAIC_MAX] = {0};
+static float cellCurW[MOSAIC_MAX] = {0};
+static float cellCurH[MOSAIC_MAX] = {0};
+static bool cellInit[MOSAIC_MAX] = {false};   // snap (no lerp) on a cell's first appearance
 
 // Activity weight by state → drives cell size. Working dominates; idle stays small-but-present.
 static float ips10StateWeight(const char* state) {
@@ -226,34 +231,31 @@ void init(lv_obj_t* parent) {
     // the shared update() path guards them out.
     lblSessions = nullptr;
 
-    // === Agent mosaic — flex column that fills the remaining sidebar height ===
+    // === Agent treemap — absolute-positioned cells tile the whole region in 2D ===
     cellsBox = lv_obj_create(panelLeft);
     lv_obj_set_width(cellsBox, IPS10_SIDEBAR_W - 28);
     lv_obj_set_flex_grow(cellsBox, 1);          // eat all leftover vertical space
     lv_obj_set_style_bg_opa(cellsBox, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cellsBox, 0, 0);
     lv_obj_set_style_pad_all(cellsBox, 0, 0);
-    lv_obj_set_style_pad_row(cellsBox, 6, 0);
     lv_obj_clear_flag(cellsBox, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(cellsBox, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(cellsBox, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    // No flex layout → children are placed by absolute lv_obj_set_pos (the treemap).
 
     for (int i = 0; i < MOSAIC_MAX; i++) {
         cell[i] = lv_obj_create(cellsBox);
-        lv_obj_set_width(cell[i], lv_pct(100));
-        lv_obj_set_height(cell[i], 56);
+        lv_obj_set_size(cell[i], 80, 60);
+        lv_obj_set_pos(cell[i], 0, 0);
         lv_obj_set_style_bg_color(cell[i], lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_bg_opa(cell[i], (lv_opa_t)18, 0);
+        lv_obj_set_style_bg_opa(cell[i], (lv_opa_t)20, 0);
         lv_obj_set_style_radius(cell[i], 8, 0);
-        lv_obj_set_style_border_width(cell[i], 0, 0);
         // Agent-type color accent down the left edge.
         lv_obj_set_style_border_side(cell[i], LV_BORDER_SIDE_LEFT, 0);
         lv_obj_set_style_border_width(cell[i], 3, 0);
         lv_obj_set_style_border_color(cell[i], lv_color_hex(Theme::HUDDim), 0);
         lv_obj_set_style_pad_left(cell[i], 8, 0);
         lv_obj_set_style_pad_right(cell[i], 6, 0);
-        lv_obj_set_style_pad_top(cell[i], 5, 0);
-        lv_obj_set_style_pad_bottom(cell[i], 5, 0);
+        lv_obj_set_style_pad_top(cell[i], 6, 0);
+        lv_obj_set_style_pad_bottom(cell[i], 6, 0);
         lv_obj_set_style_pad_row(cell[i], 2, 0);
         lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(cell[i], LV_FLEX_FLOW_COLUMN);
@@ -264,7 +266,7 @@ void init(lv_obj_t* parent) {
         lv_obj_set_style_text_font(cellName[i], &font_kr_12, 0);
         lv_label_set_recolor(cellName[i], true);
         lv_label_set_long_mode(cellName[i], LV_LABEL_LONG_DOT);
-        lv_obj_set_width(cellName[i], IPS10_SIDEBAR_W - 28 - 24);
+        lv_obj_set_width(cellName[i], 60);
         lv_label_set_text(cellName[i], "");
 
         cellAct[i] = lv_label_create(cell[i]);
@@ -272,11 +274,10 @@ void init(lv_obj_t* parent) {
         lv_obj_set_style_text_font(cellAct[i], &lv_font_montserrat_10, 0);
         lv_label_set_recolor(cellAct[i], true);
         lv_label_set_long_mode(cellAct[i], LV_LABEL_LONG_DOT);
-        lv_obj_set_width(cellAct[i], IPS10_SIDEBAR_W - 28 - 24);
+        lv_obj_set_width(cellAct[i], 60);
         lv_label_set_text(cellAct[i], "");
 
         lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
-        cellCurH[i] = 56;
     }
 
     // Compact usage gauges pinned at the bottom (gauge row appended by shared code below)
@@ -714,23 +715,56 @@ void update() {
             for (char* c = mc[i].name; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
         for (char* c = latestAction; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
 
-        int avail = lv_obj_get_content_height(cellsBox);
-        float wsum = 0; float weights[MOSAIC_MAX];
-        for (int i = 0; i < n; i++) { weights[i] = ips10StateWeight(mc[i].state); wsum += weights[i]; }
-        int gaps = (n > 1) ? (n - 1) * 6 : 0;
-        int usable = avail - gaps;
-        if (usable < n * 44) usable = n * 44;  // floor when layout not ready
-        bool actionUsed = false;
+        int availW = lv_obj_get_content_width(cellsBox);
+        int availH = lv_obj_get_content_height(cellsBox);
+        if (availW < 40) availW = IPS10_SIDEBAR_W - 28;   // floors when layout not ready yet
+        if (availH < 40) availH = 640;
 
+        // Activity weights + descending order (bigger weight → placed first / larger tile).
+        float weights[MOSAIC_MAX]; int order[MOSAIC_MAX]; float wsum = 0;
+        for (int i = 0; i < n; i++) { weights[i] = ips10StateWeight(mc[i].state); wsum += weights[i]; order[i] = i; }
+        if (wsum <= 0) wsum = 1;
+        for (int a = 0; a < n; a++)
+            for (int b = a + 1; b < n; b++)
+                if (weights[order[b]] > weights[order[a]]) { int tmp = order[a]; order[a] = order[b]; order[b] = tmp; }
+
+        // Slice-and-dice treemap: split the longer side each step so tiles stay squarish,
+        // each agent's AREA ∝ its activity. Always fills the whole region in 2D.
+        float tx = 0, ty = 0, tw = availW, th = availH, rem = wsum;
+        float tgtX[MOSAIC_MAX], tgtY[MOSAIC_MAX], tgtW[MOSAIC_MAX], tgtH[MOSAIC_MAX];
+        for (int k = 0; k < n; k++) {
+            int gi = order[k];
+            if (k == n - 1) { tgtX[gi] = tx; tgtY[gi] = ty; tgtW[gi] = tw; tgtH[gi] = th; break; }
+            float frac = weights[gi] / rem;
+            if (tw >= th) { float cw = tw * frac; tgtX[gi] = tx; tgtY[gi] = ty; tgtW[gi] = cw; tgtH[gi] = th; tx += cw; tw -= cw; }
+            else          { float ch = th * frac; tgtX[gi] = tx; tgtY[gi] = ty; tgtW[gi] = tw; tgtH[gi] = ch; ty += ch; th -= ch; }
+            rem -= weights[gi];
+        }
+
+        bool actionUsed = false;
+        const float GAP = 4.0f;
         for (int i = 0; i < MOSAIC_MAX; i++) {
-            if (i >= n) { lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN); continue; }
-            // Fluid height: lerp current toward the activity-weighted target.
-            float target = (wsum > 0) ? (usable * weights[i] / wsum) : (usable / (float)n);
-            if (target < 44) target = 44;
-            cellCurH[i] += (target - cellCurH[i]) * 0.25f;
+            if (i >= n) { lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN); cellInit[i] = false; continue; }
+            // Snap on first appearance, then fluidly lerp the rect toward its treemap target.
+            if (!cellInit[i]) {
+                cellCurX[i] = tgtX[i]; cellCurY[i] = tgtY[i]; cellCurW[i] = tgtW[i]; cellCurH[i] = tgtH[i];
+                cellInit[i] = true;
+            } else {
+                cellCurX[i] += (tgtX[i] - cellCurX[i]) * 0.22f;
+                cellCurY[i] += (tgtY[i] - cellCurY[i]) * 0.22f;
+                cellCurW[i] += (tgtW[i] - cellCurW[i]) * 0.22f;
+                cellCurH[i] += (tgtH[i] - cellCurH[i]) * 0.22f;
+            }
+            int px = (int)(cellCurX[i] + 0.5f);
+            int py = (int)(cellCurY[i] + 0.5f);
+            int pw = (int)(cellCurW[i] - GAP + 0.5f); if (pw < 10) pw = 10;
+            int ph = (int)(cellCurH[i] - GAP + 0.5f); if (ph < 10) ph = 10;
             lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_height(cell[i], (int)(cellCurH[i] + 0.5f));
+            lv_obj_set_pos(cell[i], px, py);
+            lv_obj_set_size(cell[i], pw, ph);
             lv_obj_set_style_border_color(cell[i], lv_color_hex(mc[i].accent), 0);
+            lv_obj_set_width(cellName[i], pw - 18);
+            lv_obj_set_width(cellAct[i], pw - 18);
 
             char nb[96];
             snprintf(nb, sizeof(nb), "#%06lX " LV_SYMBOL_BULLET "# %s", (unsigned long)mc[i].stateCol, mc[i].name);

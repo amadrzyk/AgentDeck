@@ -94,7 +94,7 @@ static uint16_t c6_canvas_buf[SCREEN_W * SCREEN_H];
 // Tablet layout: terrarium occupies the LEFT region; the HUD sidebar (logo/sessions/
 // usage/timeline) overlays the right. Shrinking the canvas width keeps creatures —
 // positioned by fraction of canvas width — clear of the sidebar automatically.
-static constexpr int IPS10_TERRARIUM_W = 480;  // 800 − ~300px sidebar − margins
+static constexpr int IPS10_TERRARIUM_W = 408;  // 800 − ~372px treemap sidebar − margins
 #define canvasW IPS10_TERRARIUM_W
 #define canvasH g_screenH
 #else
