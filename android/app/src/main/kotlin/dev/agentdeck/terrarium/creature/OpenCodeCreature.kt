@@ -218,12 +218,15 @@ class OpenCodeCreature(
         size: Float,
         alpha: Float,
     ) {
-        val outerHalf = size / 2f
-        val gap = size * 0.10f  // gap between outer and inner (thinner frame)
-        val innerHalf = outerHalf - gap
+        // Canonical opencode mark: a single-color vertical rectangular RING (16:20) with a
+        // HOLLOW center (terrarium shows through), matching opencode.ai — not two filled
+        // nested squares whose dark inner read as a shadow.
+        val rectW = size * 0.80f   // 16:20 → slightly tall
+        val rectH = size
+        val thick = rectW * 0.28f  // frame thickness ~ brand 4/16
+        val cornerR = size * 0.05f
 
-        // Outer frame color
-        val outerColor = when (visualState) {
+        val frameColor = when (visualState) {
             OctopusVisualState.SLEEPING -> OUTER_DIM
             OctopusVisualState.WORKING -> {
                 val t = sin(time * TerrariumTiming.THINKING_PULSE_SPEED) * 0.5f + 0.5f
@@ -232,42 +235,26 @@ class OpenCodeCreature(
             else -> OUTER_FRAME
         }
 
-        // Inner square color
-        val innerColor = when (visualState) {
-            OctopusVisualState.SLEEPING -> INNER_DIM
-            else -> INNER_SQUARE
-        }
-
-        // Outer frame (filled rectangle)
-        val cornerR = size * 0.06f
+        // Thick rounded-rect stroke = hollow ring. Stroke is centered, so inset by thick/2.
         scope.drawRoundRect(
-            color = outerColor,
+            color = frameColor,
             alpha = alpha,
-            topLeft = Offset(cx - outerHalf, cy - outerHalf),
-            size = Size(outerHalf * 2f, outerHalf * 2f),
+            topLeft = Offset(cx - rectW / 2f + thick / 2f, cy - rectH / 2f + thick / 2f),
+            size = Size(rectW - thick, rectH - thick),
             cornerRadius = CornerRadius(cornerR, cornerR),
+            style = Stroke(width = thick),
         )
 
-        // Inner square (slightly smaller corner radius)
-        val innerCornerR = cornerR * 0.6f
-        scope.drawRoundRect(
-            color = innerColor,
-            alpha = alpha,
-            topLeft = Offset(cx - innerHalf, cy - innerHalf),
-            size = Size(innerHalf * 2f, innerHalf * 2f),
-            cornerRadius = CornerRadius(innerCornerR, innerCornerR),
-        )
-
-        // Working state: subtle border glow
+        // Working state: subtle outer glow
         if (visualState == OctopusVisualState.WORKING) {
             val glowAlpha = (sin(time * 2f) * 0.15f + 0.15f) * alpha
             scope.drawRoundRect(
                 color = GLOW_COLOR,
                 alpha = glowAlpha,
-                topLeft = Offset(cx - outerHalf - 2f, cy - outerHalf - 2f),
-                size = Size(outerHalf * 2f + 4f, outerHalf * 2f + 4f),
+                topLeft = Offset(cx - rectW / 2f - 2f, cy - rectH / 2f - 2f),
+                size = Size(rectW + 4f, rectH + 4f),
                 cornerRadius = CornerRadius(cornerR + 2f, cornerR + 2f),
-                style = Stroke(width = 3f),
+                style = Stroke(width = 2f),
             )
         }
     }

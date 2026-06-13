@@ -247,11 +247,24 @@ static const uint8_t SPR_JELLYFISH[6] = {
 static const uint8_t SPR_JELLYFISH_ACC[6] = { // ">_" prompt marking (light)
     0b00000, 0b00000, 0b00100, 0b00000, 0b00000, 0b00000
 };
+// OpenCode is the canonical rectangular RING — 5×6 (same height as the other creatures,
+// but taller than wide like opencode.svg). The frame is the bright body; the inner gets a
+// dim "shadow" accent for depth.
 static const uint8_t SPR_OPENCODE[6] = {
-    0b11111, 0b10001, 0b10101, 0b10001, 0b11111, 0b00000
+    0b11111,
+    0b10001,
+    0b10001,
+    0b10001,
+    0b10001,
+    0b11111,
 };
-static const uint8_t SPR_OPENCODE_ACC[6] = {  // bright nested-square core
-    0b00000, 0b00000, 0b00100, 0b00000, 0b00000, 0b00000
+static const uint8_t SPR_OPENCODE_ACC[6] = {  // dim inner shadow fill (drawn in a darker tone)
+    0b00000,
+    0b01110,
+    0b01110,
+    0b01110,
+    0b01110,
+    0b00000,
 };
 static const uint8_t SPR_CRAYFISH[6] = {
     0b10001, 0b01110, 0b11111, 0b01110, 0b00100, 0b01010
@@ -506,7 +519,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         return;
     }
 
-    // Per-agent-type color: Claude=terracotta, Codex=indigo, OpenCode=cyan
+    // Per-agent-type color: Claude=terracotta, Codex=indigo, OpenCode=warm light gray (brand #F1ECEC)
     auto agentColor = [&](const char* state, AgentKind kind, int instanceIdx) -> CRGB {
         CRGB baseColor;
         if (strcmp(state, "processing") == 0) {
@@ -516,7 +529,8 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
                     baseColor = CRGB(30 + (uint8_t)(70 * pulse), 30 + (uint8_t)(70 * pulse), 80 + (uint8_t)(160 * pulse));
                     break;
                 case AGENT_OPENCODE:
-                    baseColor = CRGB(0, 60 + (uint8_t)(140 * pulse), 80 + (uint8_t)(160 * pulse));
+                    // Warm light gray pulsing toward bright (matches the #F1ECEC mark), not cyan.
+                    baseColor = CRGB(70 + (uint8_t)(140 * pulse), 66 + (uint8_t)(132 * pulse), 66 + (uint8_t)(132 * pulse));
                     break;
                 default: // AGENT_CLAUDE
                     baseColor = CRGB(50 + (uint8_t)(150 * pulse), 30 + (uint8_t)(90 * pulse), 22 + (uint8_t)(68 * pulse));
@@ -530,7 +544,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
         else if (strcmp(state, "idle") == 0) {
             switch (kind) {
                 case AGENT_CODEX:    baseColor = CRGB(30, 30, 80);  break;  // dim indigo
-                case AGENT_OPENCODE: baseColor = CRGB(0, 40, 55);   break;  // dim cyan
+                case AGENT_OPENCODE: baseColor = CRGB(72, 67, 67);  break;  // dim warm gray (brand #F1ECEC)
                 default:             baseColor = CRGB(80, 45, 35);  break;  // dim terracotta
             }
         }
@@ -556,15 +570,16 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
     auto agentAccent = [](AgentKind kind) -> const uint8_t* {
         switch (kind) {
             case AGENT_CODEX:    return SPR_JELLYFISH_ACC;
-            case AGENT_OPENCODE: return SPR_OPENCODE_ACC;
+            case AGENT_OPENCODE: return SPR_OPENCODE_ACC;  // dim inner shadow
             default:             return SPR_OCTOPUS_ACC;
         }
     };
-    // Lit accent color, brightness tied to the body so it never floats when dim.
+    // Accent color. Most agents get a brighter lit detail; OpenCode's inner is a DIM
+    // shadow (darker than the frame) so the ring reads with depth, not a lit core.
     auto agentAccentColor = [](AgentKind kind, CRGB body) -> CRGB {
         switch (kind) {
             case AGENT_CODEX:    return accentScaled(CRGB(220, 225, 255), body, 1.4f); // ">_" marking
-            case AGENT_OPENCODE: return accentScaled(CRGB(120, 230, 255), body, 1.5f); // bright core
+            case AGENT_OPENCODE: return CRGB(body.r * 2 / 5, body.g * 2 / 5, body.b * 2 / 5); // inner shadow
             default:             return accentScaled(CRGB(235, 150, 110), body, 1.5f); // octopus head
         }
     };

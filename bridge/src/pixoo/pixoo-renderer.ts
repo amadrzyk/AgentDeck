@@ -865,9 +865,12 @@ export function renderFrame(
     for (let i = 0; i < Math.min(sessionCount, 6); i++) {
       const dotX = 1 + i * 3;  // 2px dot + 1px gap
       const c = orderedCreatures[i];
+      // Color the dot by agent type so OpenCode is distinguishable, not painted as an octopus.
       const dotColor = c.creatureType === 'jellyfish'
         ? getJellyfishPaletteForSession(i).body
-        : getOctopusPaletteForSession(i).body;
+        : c.creatureType === 'opencode'
+          ? getOpenCodePaletteForSession(i).outer
+          : getOctopusPaletteForSession(i).body;
       setPixel(outputBuf, dotX, 1, dotColor);
       setPixel(outputBuf, dotX + 1, 1, dotColor);
       setPixel(outputBuf, dotX, 2, dotColor);

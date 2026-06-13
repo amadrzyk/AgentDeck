@@ -1042,50 +1042,38 @@ export function drawOpenCode(
 ): void {
   const w = Math.sqrt(buf.length / 3);
   const [scx, scy] = worldToScreen(worldX, worldY, camera);
+
+  // Canonical opencode mark: a single-color vertical rectangular RING (16:20) with a
+  // HOLLOW center — drawn procedurally so it scales cleanly to any panel (64px, 32px,
+  // iDotMatrix) instead of grid sprites that overflowed 32px or drew a filled shadow.
   const worldW = 10 / 64;
-  const pixW = Math.max(1, Math.round(worldW * camera.zoom * w / OC_GRID_MD_COLS));
-  const pixH = pixW;
+  const unit = Math.max(1, Math.round((worldW * camera.zoom * w) / OC_GRID_MD_COLS));
+  const outerW = Math.max(5, 6 * unit);
+  const outerH = Math.max(6, Math.round(outerW * 1.25)); // slightly tall (16:20)
+  const thick = Math.max(1, Math.round(outerW * 0.28));   // frame thickness ~ brand 4/16
 
   const breathPx = state === 'working'
     ? Math.round(Math.sin(animFrame * 0.3) * 1.5)
     : state === 'idle' ? Math.round(Math.sin(animFrame * 0.08) * 0.7) : 0;
 
-  const select = selectGrid(
-    camera.zoom, w,
-    OPENCODE_GRID_HD, OC_HD_COLS, OC_HD_ROWS,
-    OPENCODE_GRID_MD, OC_GRID_MD_COLS, OC_GRID_MD_ROWS,
-    OPENCODE_LOD, OC_LOD_COLS, OC_LOD_ROWS
-  );
-  const grid = select.grid;
-  const gc = select.cols;
-  const gr = select.rows;
-
-  const baseX = scx - Math.round((gc * pixW) / 2);
-  const baseY = scy + breathPx - Math.round((gr * pixH) / 2);
-
-  const outerColor = state === 'working'
+  const color = state === 'working'
     ? lerpColor(palette.outer, palette.pulse, 0.5 + Math.sin(animFrame * 0.2) * 0.5)
     : state === 'sleeping' ? palette.sleeping : palette.outer;
-  const innerColor = state === 'sleeping'
-    ? scaleColor(palette.inner, 0.6) : palette.inner;
 
-  for (let r = 0; r < gr; r++) {
-    for (let c = 0; c < gc; c++) {
-      const cell = grid[r][c];
-      if (cell === 0) continue;
-      const color = (cell === OPENCODE_CORE) ? innerColor : outerColor;
-      for (let dy = 0; dy < pixH; dy++) {
-        for (let dx = 0; dx < pixW; dx++) {
-          setPixel(buf, baseX + c * pixW + dx, baseY + r * pixH + dy, color);
-        }
-      }
+  const x0 = scx - Math.round(outerW / 2);
+  const y0 = scy + breathPx - Math.round(outerH / 2);
+  for (let dy = 0; dy < outerH; dy++) {
+    for (let dx = 0; dx < outerW; dx++) {
+      const onFrame = dx < thick || dx >= outerW - thick || dy < thick || dy >= outerH - thick;
+      if (!onFrame) continue; // hollow center
+      setPixel(buf, x0 + dx, y0 + dy, color);
     }
   }
 
   if (state === 'asking') {
-    // Amber three-dot asking indicator
-    const dotCx = scx + Math.round(gc / 2) + 3;
-    const dotCy = baseY - 2 + Math.round(Math.sin(animFrame * 0.26) * 1.4);
+    // Amber three-dot asking indicator above the mark
+    const dotCx = scx + Math.round(outerW / 2) + 3;
+    const dotCy = y0 - 2 + Math.round(Math.sin(animFrame * 0.26) * 1.4);
     for (let i = -1; i <= 1; i++) {
       blendPixel(buf, dotCx + i * 3, dotCy, COLORS.stateAwaiting, 0.75);
       blendPixel(buf, dotCx + i * 3 + 1, dotCy, COLORS.stateAwaiting, 0.45);

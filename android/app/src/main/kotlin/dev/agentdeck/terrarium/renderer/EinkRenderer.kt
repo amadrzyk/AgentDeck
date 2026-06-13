@@ -891,65 +891,47 @@ private fun drawEinkOpenCode(
     }
     val cy = h * baseYFraction + bobY
 
-    val bodyWidth = w * 0.052f * scaleFactor
-    val outerSize = bodyWidth * 1.6f
-    val outerHalf = outerSize / 2f
-    val cornerR = outerSize * 0.06f
-    val innerSize = outerSize * 0.60f
-    val innerHalf = innerSize / 2f
-    val innerCornerR = innerSize * 0.04f
+    // Canonical opencode mark: a single-color vertical rectangular RING (16:20) with a
+    // HOLLOW center (water shows through), matching opencode.ai — not a filled square
+    // with a dark inner. On B&W e-ink the water is light, so the ring uses the dark gray
+    // for contrast; on color e-ink it uses the light brand color against the blue water.
+    val rectH = w * 0.052f * scaleFactor * 1.6f
+    val rectW = rectH * 0.80f
+    val thick = rectW * 0.28f
+    val cornerR = rectW * 0.06f
+    val outerSize = rectH          // reused by the name tag + asking bubble below
+    val outerHalf = rectH / 2f
 
-    val outerColor = if (state == OctopusVisualState.SLEEPING) {
+    val frameColor = if (state == OctopusVisualState.SLEEPING) {
         einkPick(GRAY_OPENCODE_SLEEP, COLOR_OPENCODE_SLEEP)
     } else {
-        einkPick(GRAY_OPENCODE_OUTER, COLOR_OPENCODE_OUTER)
-    }
-    val innerColor = if (state == OctopusVisualState.SLEEPING) {
-        einkPick(GRAY_OPENCODE_SLEEP, COLOR_OPENCODE_SLEEP)
-    } else {
-        einkPick(GRAY_OPENCODE_INNER, COLOR_OPENCODE_INNER)
+        einkPick(GRAY_OPENCODE_INNER, COLOR_OPENCODE_OUTER)
     }
 
-    // Outer frame (rounded rect)
-    paint.style = Paint.Style.FILL
-    paint.color = outerColor
-    canvas.drawRoundRect(
-        cx - outerHalf, cy - outerHalf, cx + outerHalf, cy + outerHalf,
-        cornerR, cornerR, paint,
-    )
-
-    // Outer frame outline for e-ink edge definition
+    // Thick rounded-rect stroke = hollow ring (stroke centered → inset by thick/2).
     paint.style = Paint.Style.STROKE
-    paint.color = einkPick(GRAY_OPENCODE_INNER, COLOR_OPENCODE_INNER)
-    paint.strokeWidth = 1.5f * scaleFactor
+    paint.color = frameColor
+    paint.strokeWidth = thick
     canvas.drawRoundRect(
-        cx - outerHalf, cy - outerHalf, cx + outerHalf, cy + outerHalf,
+        cx - rectW / 2f + thick / 2f, cy - rectH / 2f + thick / 2f,
+        cx + rectW / 2f - thick / 2f, cy + rectH / 2f - thick / 2f,
         cornerR, cornerR, paint,
     )
 
-    // Inner square (rounded rect)
-    paint.style = Paint.Style.FILL
-    paint.color = innerColor
-    canvas.drawRoundRect(
-        cx - innerHalf, cy - innerHalf, cx + innerHalf, cy + innerHalf,
-        innerCornerR, innerCornerR, paint,
-    )
-
-    // Working state: subtle border glow
+    // Working state: subtle outer glow
     if (state == OctopusVisualState.WORKING) {
         val glowAlpha = (kotlin.math.sin(animFrame * kotlin.math.PI / 8) * 0.15f + 0.15f).toFloat()
-        paint.color = outerColor
+        paint.color = frameColor
         paint.alpha = (glowAlpha * 255).toInt()
-        paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2f * scaleFactor
         canvas.drawRoundRect(
-            cx - outerHalf - 2f, cy - outerHalf - 2f,
-            cx + outerHalf + 2f, cy + outerHalf + 2f,
+            cx - rectW / 2f - 2f, cy - rectH / 2f - 2f,
+            cx + rectW / 2f + 2f, cy + rectH / 2f + 2f,
             cornerR + 2f, cornerR + 2f, paint,
         )
-        paint.style = Paint.Style.FILL
         paint.alpha = 255
     }
+    paint.style = Paint.Style.FILL
 
     // Name tag (behind bubble)
     if (displayName != null) {

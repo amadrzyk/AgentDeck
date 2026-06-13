@@ -1,6 +1,7 @@
 #include "opencode.h"
 #include "draw.h"
 #include "renderer.h"
+#include "creature_glyphs_generated.h"
 #include "../theme.h"
 #include "../display.h"
 #include "config.h"
@@ -11,31 +12,15 @@
 #include <cmath>
 
 /**
- * OpenCode logo glyph — nested-square geometric mark.
- * From opencode-logo-dark.svg: bright outer frame, dark inner square.
- *
- * Cell values:
- *   0 = transparent (gap between frames)
- *   8 = outer frame (#F1ECEC)
- *   9 = inner square (#4B4646)
+ * OpenCode mark — the canonical vertical rectangular RING from opencode.svg
+ * (outer 16×20, inner 8×12 hollow, evenodd), rasterized at build time into
+ * CreatureGlyphs::OPENCODE_A8. Single light color, HOLLOW center (water shows
+ * through) — replaces the old filled nested-square grid whose dark inner read
+ * as a shadow.
  *
  * States map to Y positions like other creatures:
- *   SLEEPING  -> floor (dimmed)
- *   FLOATING  -> standing (gentle bob)
- *   WORKING   -> near top (bob + pulse)
- *   ASKING    -> mid position (speech bubble "?")
+ *   SLEEPING  -> floor (dimmed)   FLOATING -> standing   WORKING -> near top   ASKING -> bubble
  */
-static const uint8_t OPENCODE_GRID[9][10] = {
-    {8,8,8,8,8,8,8,8,8,8},
-    {8,0,0,0,0,0,0,0,0,8},
-    {8,0,9,9,9,9,9,9,0,8},
-    {8,0,9,0,0,0,0,9,0,8},
-    {8,0,9,0,0,0,0,9,0,8},
-    {8,0,9,0,0,0,0,9,0,8},
-    {8,0,9,9,9,9,9,9,0,8},
-    {8,0,0,0,0,0,0,0,0,8},
-    {8,8,8,8,8,8,8,8,8,8},
-};
 
 // Minimum 1 to avoid zero-length arrays on boards with MAX_OPENCODE=0
 constexpr uint8_t OPENCODE_ARR_SIZE = (MAX_OPENCODE > 0) ? MAX_OPENCODE : 1;
@@ -129,8 +114,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     // Animation parameters
     float breathBob = 0;
     float bodyAlpha = 1.0f;
-    uint32_t outerColor = Theme::OpenCodeOuter;
-    uint32_t innerColor = Theme::OpenCodeInner;
+    uint32_t frameColor = Theme::OpenCodeOuter;
 
     switch (state) {
         case CreatureState::SLEEPING:
@@ -146,7 +130,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
             breathBob = fastSin(t * 2.0f) * bodyRadius * 0.006f * h * 0.02f;
             // Pulse: outer frame brightens
             float pulse = fastSin(t * 2.5f) * 0.5f + 0.5f;
-            outerColor = lerpColor(Theme::OpenCodeOuter, Theme::OpenCodePulse, pulse);
+            frameColor = lerpColor(Theme::OpenCodeOuter, Theme::OpenCodePulse, pulse);
             break;
         }
 
@@ -159,22 +143,6 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     int cy = (int)(renderY * h + breathBob);
     uint8_t alpha = (uint8_t)(255 * bodyAlpha);
 
-    // Pixel-fill lambda
-    auto fillRectA = [&](int x, int y, int rw, int rh, uint32_t color24, uint8_t a) {
-        for (int dy = 0; dy < rh; dy++) {
-            for (int dx = 0; dx < rw; dx++) {
-                Draw::pixelA(x + dx, y + dy, color24, a);
-            }
-        }
-    };
-
-    // Grid dimensions — square cells
-    int glyphW = (int)(bodyRadius * 2.0f);
-    int cellW = max(1, glyphW / 10);
-    int cellH = cellW;
-    int glyphX = cx - (10 * cellW) / 2;
-    int glyphY = cy - (9 * cellH) / 2;
-
     // Working state: subtle outer glow behind body
     if (state == CreatureState::WORKING) {
         float glow = fastSin(t * 2.0f) * 0.5f + 0.5f;
@@ -182,15 +150,12 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
         Draw::circle(cx, cy, glowR, Theme::OpenCodeOuter, (uint8_t)(glow * 20));
     }
 
-    // Render grid
-    for (int row = 0; row < 9; row++) {
-        for (int col = 0; col < 10; col++) {
-            uint8_t cell = OPENCODE_GRID[row][col];
-            if (cell == 0) continue;
-            uint32_t color = (cell == 8) ? outerColor : innerColor;
-            fillRectA(glyphX + col * cellW, glyphY + row * cellH, cellW, cellH, color, alpha);
-        }
-    }
+    // Render the canonical hollow ring from the rasterized mask. The mark fills the
+    // 24-unit viewBox box; map it into a square box so the mark reads at its true
+    // 16:20 (slightly tall) proportion with a hollow, water-showing center.
+    int glyphBox = max(2, (int)(bodyRadius * 2.6f));
+    Draw::alphaMask(CreatureGlyphs::OPENCODE_A8, CreatureGlyphs::OPENCODE_W, CreatureGlyphs::OPENCODE_H,
+                    cx - glyphBox / 2, cy - glyphBox / 2, glyphBox, glyphBox, frameColor, alpha);
 
     // Speech bubble for ASKING state
     if (state == CreatureState::ASKING) {
@@ -234,7 +199,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     int textW = txtSize.x + (total >= 3 ? 8 : 12);
     int tagH = 16;
     int tagX = cx - textW / 2;
-    int tagY = glyphY - tagH - 4;
+    int tagY = (cy - glyphBox / 2) - tagH - 4;
 
     // Background pill with rounded ends
     for (int dy = 0; dy < tagH; dy++) {

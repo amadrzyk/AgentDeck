@@ -117,15 +117,15 @@ function openClawCreatureIcon(size: number, opacity: number, cx: number, cy: num
 }
 
 function openCodeCreatureIcon(size: number, opacity: number, cx: number, cy: number): string {
-  const outer = Math.round(size * 0.76);
-  const ring = Math.max(4, outer * 0.18);
-  const inner = outer * 0.48;
-  const half = outer / 2;
+  // Canonical opencode mark (opencode.svg, viewBox 24, evenodd): a single-color vertical
+  // rectangular RING with a HOLLOW center — not filled nested squares. Map so the mark
+  // (16×20) sits centered on (cx,cy) at ~0.6×size tall.
+  const s = (size * 0.72) / 24;
+  const tx = cx - 12 * s;
+  const ty = cy - 12 * s;
   return [
-    `<g opacity="${opacity}">`,
-    `<rect x="${(cx - half).toFixed(1)}" y="${(cy - half).toFixed(1)}" width="${outer}" height="${outer}" rx="${Math.max(3, outer * 0.08).toFixed(1)}" fill="#F1ECEC"/>`,
-    `<rect x="${(cx - half + ring).toFixed(1)}" y="${(cy - half + ring).toFixed(1)}" width="${(outer - ring * 2).toFixed(1)}" height="${(outer - ring * 2).toFixed(1)}" rx="${Math.max(2, outer * 0.05).toFixed(1)}" fill="#4B4646"/>`,
-    `<rect x="${(cx - inner / 2).toFixed(1)}" y="${(cy - inner / 2).toFixed(1)}" width="${inner.toFixed(1)}" height="${inner.toFixed(1)}" rx="${Math.max(2, inner * 0.06).toFixed(1)}" fill="#4B4646" opacity="0.92"/>`,
+    `<g opacity="${opacity}" transform="translate(${tx.toFixed(2)} ${ty.toFixed(2)}) scale(${s.toFixed(4)})">`,
+    `<path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" fill-rule="evenodd" fill="#F1ECEC"/>`,
     `</g>`,
   ].join('');
 }

@@ -31,6 +31,12 @@ const CRAYFISH_VIEWBOX = 120;
 const CRAYFISH_BODY_PATH =
   'M60 10c-30 0-45 25-45 45s15 40 30 45v10h10v-10s5 2 10 0v10h10v-10c15-5 30-25 30-45S90 10 60 10';
 
+// OpenCode mark — viewBox 0 0 24 24, fill-rule evenodd. A vertical rectangular RING
+// (outer 16×20, inner 8×12 hollow) — single color, HOLLOW center (matches opencode.ai),
+// not the old filled-nested-squares with a dark inner that read as a shadow.
+const OPENCODE_VIEWBOX = 24;
+const OPENCODE_PATH = 'M16 6H8v12h8V6zm4 16H4V2h16v20z';
+
 // Master mask resolution. One high-res master is bilinearly sampled by the firmware
 // for every board size (16px on TTGO up to ~200px on IPS10), so a single 64² master
 // (4 KB flash each) is plenty and keeps eye cutouts soft rather than aliased.
@@ -41,6 +47,7 @@ const MASTER = 64;
 const glyphs = [
   { name: 'OCTOPUS', viewBox: OCTOPUS_VIEWBOX, path: OCTOPUS_PATH, evenodd: true },
   { name: 'CRAYFISH_BODY', viewBox: CRAYFISH_VIEWBOX, path: CRAYFISH_BODY_PATH, evenodd: false },
+  { name: 'OPENCODE', viewBox: OPENCODE_VIEWBOX, path: OPENCODE_PATH, evenodd: true },
 ];
 
 async function rasterizeAlpha({ viewBox, path, evenodd }) {
