@@ -139,6 +139,7 @@ actor OpenClawAdapter {
     private var currentSessionKey: String?
     private var currentRunId: String?
     private var promptCapturedForRunId: String? // guard: emit prompt entry once per runId
+    private var automatedRunId: String? // runId whose prompt was a scheduled (cron) turn — flagged automated
     private var pendingApprovalId: String?
     private struct RPCResponse: @unchecked Sendable {
         let ok: Bool
@@ -219,6 +220,7 @@ actor OpenClawAdapter {
         isConnected = false
         sessionsSubscribed = false
         promptCapturedForRunId = nil
+        automatedRunId = nil
         if wasConnected {
             self._onConnectionChanged?(false)
         }
@@ -388,13 +390,21 @@ actor OpenClawAdapter {
             if let prompt = payload["prompt"] as? String, !prompt.isEmpty,
                promptCapturedForRunId != currentRunId {
                 promptCapturedForRunId = currentRunId
+                // Scheduled (cron) turns echo the entire instruction prompt — often
+                // a multi-KB blob whose text contains shell verbs like `ls -lt` /
+                // `tail -50`. Dumping it verbatim made the timeline read as if
+                // OpenClaw were running bash. Cap `detail` (mirrors the Node path's
+                // ~1000-char cap) and flag cron turns `automated` so the dashboard
+                // can dim/collapse them instead of surfacing the raw prompt.
+                let isCron = prompt.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[cron:")
+                if isCron { automatedRunId = currentRunId }
                 let entry = DaemonTimelineEntry(
                     ts: Self.payloadTimestamp(payload),
                     type: "model_call",
                     raw: String(prompt.prefix(200)),
-                    detail: prompt,
+                    detail: String(prompt.prefix(1000)),
                     approvalId: nil, status: nil,
-                    agentType: "openclaw", repeatCount: nil, automated: nil,
+                    agentType: "openclaw", repeatCount: nil, automated: isCron ? true : nil,
                     runId: currentRunId
                 )
                 emitTimelineEntry(entry)
@@ -402,13 +412,14 @@ actor OpenClawAdapter {
 
             // Capture full assembled response on final so timeline shows real content.
             if chatState == "final", let response = payload["response"] as? String, !response.isEmpty {
+                let isAutomated = automatedRunId == currentRunId
                 let entry = DaemonTimelineEntry(
                     ts: Self.payloadTimestamp(payload),
                     type: "model_response",
                     raw: String(response.prefix(200)),
-                    detail: response,
+                    detail: String(response.prefix(1000)),
                     approvalId: nil, status: nil,
-                    agentType: "openclaw", repeatCount: nil, automated: nil,
+                    agentType: "openclaw", repeatCount: nil, automated: isAutomated ? true : nil,
                     runId: currentRunId
                 )
                 emitTimelineEntry(entry)
@@ -1321,16 +1332,21 @@ actor OpenClawAdapter {
             ?? ""
         guard !text.isEmpty else { return }
         let role = payload["role"] as? String ?? "message"
+        // Mirror the chat-event path: cap `detail` (cron/instruction prompts can be
+        // multi-KB blobs of shell-verb text) and flag scheduled turns `automated`
+        // so the dashboard can dim/collapse the raw prompt instead of surfacing it.
+        let isCron = role != "assistant"
+            && text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[cron:")
         let entry = DaemonTimelineEntry(
             ts: Self.payloadTimestamp(payload),
             type: role == "assistant" ? "model_response" : "model_call",
             raw: String(text.prefix(200)),
-            detail: text,
+            detail: String(text.prefix(1000)),
             approvalId: nil,
             status: nil,
             agentType: "openclaw",
             repeatCount: nil,
-            automated: nil,
+            automated: isCron ? true : nil,
             runId: currentRunId
         )
         emitTimelineEntry(entry)

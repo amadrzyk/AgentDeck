@@ -300,6 +300,26 @@ async function fetchUsageRelayed(selfPort: number): Promise<ApiUsageData | null>
   return fetchUsageFromApi();
 }
 
+/**
+ * Stamp OpenClaw origin onto a timeline entry emitted by the Gateway adapter.
+ *
+ * The adapter emits bare entries (no agentType/projectName); without this the
+ * BridgeCore attributor falls back to the daemon's hardcoded projectName
+ * ('AgentDeck') and leaves agentType null, so OpenClaw cron activity gets
+ * mis-grouped under AgentDeck and never renders as OpenClaw. `?? ` fallbacks
+ * preserve any value the adapter did set, and the downstream attributor's own
+ * `?? ` keeps these in turn.
+ */
+export function enrichGatewayTimelineEntry<T extends { agentType?: string; projectName?: string }>(
+  entry: T,
+): T {
+  return {
+    ...entry,
+    agentType: entry.agentType ?? 'openclaw',
+    projectName: entry.projectName ?? 'OpenClaw',
+  };
+}
+
 // ===== Daemon options =====
 
 export interface DaemonOptions {
@@ -1161,9 +1181,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           break;
         case 'timeline':
           if (evt.entry) {
-            if (evt.upsert) core.bridgeTimeline.upsertEntry(evt.entry);
-            else core.bridgeTimeline.addEntry(evt.entry);
-            if (evt.entry.type === 'tool_request') bridgeLogStream.trackToolRequest(evt.entry.raw);
+            // This handler is wired exclusively to the OpenClaw Gateway adapter
+            // (see agentType:'openclaw' at the model_catalog case above), but the
+            // adapter emits bare timeline entries without agentType/projectName.
+            // Stamp the OpenClaw origin so the attributor doesn't default them to
+            // 'AgentDeck'/null. See enrichGatewayTimelineEntry.
+            const enriched = enrichGatewayTimelineEntry(evt.entry);
+            if (evt.upsert) core.bridgeTimeline.upsertEntry(enriched);
+            else core.bridgeTimeline.addEntry(enriched);
+            if (enriched.type === 'tool_request') bridgeLogStream.trackToolRequest(enriched.raw);
           }
           break;
         case 'connection': {
