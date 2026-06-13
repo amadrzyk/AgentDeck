@@ -212,21 +212,32 @@ void render(uint16_t* buf, int w, int h, float time, CrayfishState state) {
     Draw::circle(cx + eyeSpacing + (int)(1 * scale) + tiltOffX, eyeY - (int)(1 * scale),
                  hlR, eyeColor, alpha);
 
-    // === Antennae (SVG: curved lines from (45,15)→(30,8) and (75,15)→(90,8)) ===
-    int antBaseY = eyeY - eyeR;
-    int antLen = (int)(15 * scale);
+    // === Antennae — emanate from the head top (viewBox y≈15) and sweep UP-and-OUT
+    //     well above the body silhouette, so the shell-colored stroke reads against
+    //     the water instead of vanishing shell-on-shell over the body. Drawn 2px
+    //     thick with a tip knob so they stay visible at every board size. ===
+    int antBaseX = (int)(15 * scale);   // viewBox ±15 from center (on the head)
+    int antBaseY = cy - (int)(40 * scale);
+    int antTipX  = (int)(34 * scale);   // sweep outward past the body edge
+    int antTipY  = cy - (int)(64 * scale);  // clear above the head into the water
+    uint8_t antA = (uint8_t)(alpha * 0.9f);
+    int knobR = max(1, (int)(2.4f * scale));
+
     // Left antenna
-    Draw::line(cx - eyeSpacing + tiltOffX + (int)antennaWiggleX,
-               antBaseY - (int)antennaWiggleY,
-               cx - eyeSpacing - antLen + tiltOffX + (int)(antennaWiggleX * 1.5f),
-               antBaseY - antLen + (int)(antennaWiggleY),
-               shellColor, (uint8_t)(alpha * 0.8f));
+    int lbx = cx - antBaseX + tiltOffX + (int)antennaWiggleX;
+    int ltx = cx - antTipX + tiltOffX + (int)(antennaWiggleX * 1.8f);
+    int lty = antTipY - (int)antennaWiggleY;
+    Draw::line(lbx, antBaseY, ltx, lty, shellColor, antA);
+    Draw::line(lbx + 1, antBaseY, ltx + 1, lty, shellColor, antA);  // 2px thickness
+    Draw::circle(ltx, lty, knobR, shellColor, antA);
+
     // Right antenna
-    Draw::line(cx + eyeSpacing + tiltOffX - (int)antennaWiggleX,
-               antBaseY - (int)antennaWiggleY,
-               cx + eyeSpacing + antLen + tiltOffX - (int)(antennaWiggleX * 1.5f),
-               antBaseY - antLen + (int)(antennaWiggleY),
-               shellColor, (uint8_t)(alpha * 0.8f));
+    int rbx = cx + antBaseX + tiltOffX - (int)antennaWiggleX;
+    int rtx = cx + antTipX + tiltOffX - (int)(antennaWiggleX * 1.8f);
+    int rty = antTipY - (int)antennaWiggleY;
+    Draw::line(rbx, antBaseY, rtx, rty, shellColor, antA);
+    Draw::line(rbx - 1, antBaseY, rtx - 1, rty, shellColor, antA);  // 2px thickness
+    Draw::circle(rtx, rty, knobR, shellColor, antA);
 }
 
 }  // namespace Crayfish

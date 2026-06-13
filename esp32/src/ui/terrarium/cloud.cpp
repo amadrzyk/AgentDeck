@@ -173,7 +173,7 @@ void render(uint16_t* buf, int w, int h, float time, float dt,
     if (state != CreatureState::SLEEPING) {
         uint32_t promptColor = Theme::CloudPrompt;
         uint8_t promptAlpha = (uint8_t)(alpha * 0.9f);
-        int ps = max(1, (int)(bodyW * 0.045f));
+        int ps = max(1, (int)(bodyW * 0.058f));  // larger ">_" so the prompt reads clearly in the smaller body
         int step = ps * 3;
         int pox = cx - step * 2;
         int poy = cy - step / 2;

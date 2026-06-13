@@ -114,8 +114,8 @@ constexpr float CfHomeY      = 0.55f;
 constexpr float CfSittingY   = 0.68f;
 constexpr float CfRoutingY   = 0.52f;
 
-// Cloud (Codex CLI)
-constexpr float CloudRadiusFrac = 0.050f;
+// Cloud (Codex CLI) — slightly smaller body so the ">_" prompt reads more prominently
+constexpr float CloudRadiusFrac = 0.046f;
 constexpr float CloudHomeX      = 0.50f;
 constexpr float CloudStandingY  = 0.62f;
 constexpr float CloudSleepY     = 0.70f;
@@ -169,8 +169,8 @@ constexpr float CfHomeY      = 0.58f;
 constexpr float CfSittingY   = 0.72f;
 constexpr float CfRoutingY   = 0.55f;
 
-// Cloud (Codex CLI)
-constexpr float CloudRadiusFrac = 0.045f;
+// Cloud (Codex CLI) — slightly smaller body so the ">_" prompt reads more prominently
+constexpr float CloudRadiusFrac = 0.041f;
 constexpr float CloudHomeX      = 0.50f;
 constexpr float CloudStandingY  = 0.63f;
 constexpr float CloudSleepY     = 0.75f;
