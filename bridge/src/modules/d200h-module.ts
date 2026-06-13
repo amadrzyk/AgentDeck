@@ -323,6 +323,10 @@ export class D200hModule implements DeviceModule {
 
       if (event.type === 'button' && event.data.pressed) {
         this.buttonPressCount++;
+        // Real button input received → input path is empirically working.
+        // Clear any stale lastOpenError left by a failed keyboard-interface open
+        // (buttons arrive via the consumer-control interface regardless).
+        if (this.lastOpenError) this.lastOpenError = null;
         const isMultiSession = this.lastSessions.length > 1;
         const commands = isMultiSession ? MULTI_SESSION_COMMANDS : SINGLE_SESSION_COMMANDS;
         let cmd = commands[event.data.index];
