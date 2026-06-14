@@ -600,6 +600,25 @@ final class DaemonServer {
             collector.emitTimelineEntry = timelineEmit
             gatewayCollector.emitTimelineEntry = timelineEmit
 
+            // Phase 6 cutover (default OFF): when AGENTDECK_TIMELINE_PROJECTION=1,
+            // the timeline becomes a projection of the SessionSample — locally
+            // emitted chat/tool rows are suppressed and re-derived from sample
+            // events (added with bypassSuppression). Mirrors the bridge wiring.
+            if ProcessInfo.processInfo.environment["AGENTDECK_TIMELINE_PROJECTION"] == "1" {
+                Task { await self.timelineStore.setSuppressLocalChatTool(true) }
+                let projectedEmit: (DaemonTimelineEntry) -> Void = { [weak self] entry in
+                    guard let self else { return }
+                    Task { await self.timelineStore.add(entry, bypassSuppression: true) }
+                    self.broadcastRaw([
+                        "type": "timeline_event",
+                        "entry": self.claudeCodeEntryDict(entry),
+                    ] as [String: Any])
+                }
+                collector.emitProjectedTimelineEntry = projectedEmit
+                gatewayCollector.emitProjectedTimelineEntry = projectedEmit
+                DaemonLogger.shared.info("[APME] timeline projection ENABLED — chat/tool rows derive from SessionSample")
+            }
+
             // Register the eval-result broadcaster. Mirrors the TS daemon's
             // `apme.runner.onResult` handler in bridge/src/daemon-server.ts
             // (lines 902-974). Persists turn-level outcome/composite, emits
@@ -2051,6 +2070,27 @@ final class DaemonServer {
             }
             return
         case "respond", "interrupt", "escape", "select_option", "send_prompt", "navigate_option", "switch_mode":
+            // Session-scoped option select from a multi-up panel (IPS10 D1 mosaic):
+            // any awaiting cell can be answered, not just the focused one. Focus the
+            // named session first, then route a plain select_option to its bridge.
+            if type == "select_option",
+               let sessionId = cmd["sessionId"] as? String,
+               let target = cachedSessions.first(where: { $0.id == sessionId }) {
+                userFocusedSessionId = sessionId
+                broadcastStateUpdate()
+                let inner = SendableDict(["type": "select_option", "index": cmd["index"] ?? 0])
+                let focusLocally = isLocalObservedSession(target)
+                Task {
+                    if focusLocally {
+                        await self.focusRelay.focusLocal(sessionId: sessionId)
+                    } else {
+                        await self.focusRelay.focus(sessionId: sessionId)
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                    _ = await self.focusRelay.routeCommand(inner.value)
+                }
+                return
+            }
             // Route to focused session if available, otherwise legacy forwarding
             let cmdBox = SendableDict(cmd)
             Task {
@@ -4839,7 +4879,19 @@ final class DaemonServer {
         }
         if let navigable = s.navigable, navigable { d["navigable"] = true }
         if let q = s.question { d["question"] = q }
-        if let sa = s.startedAt { d["startedAt"] = sa }
+        if let pt = s.promptType { d["promptType"] = pt }
+        if let rid = s.requestId { d["requestId"] = rid }
+        if let sa = s.startedAt {
+            d["startedAt"] = sa
+            // Per-session elapsed (seconds) for NTP-less devices (ESP32 D1 mosaic).
+            if let elapsed = s.elapsedSec {
+                d["elapsedSec"] = elapsed
+            } else if let started = ISO8601DateFormatter().date(from: sa) {
+                d["elapsedSec"] = max(0, Int(Date().timeIntervalSince(started)))
+            }
+        } else if let elapsed = s.elapsedSec {
+            d["elapsedSec"] = elapsed
+        }
         return d
     }
 
@@ -5752,7 +5804,10 @@ final class DaemonServer {
         if entry.type == "task_end", entry.taskId != nil {
             Task { await timelineStore.upsert(entry) }
         } else {
-            Task { await timelineStore.add(entry) }
+            // Gateway entries originate from the Node side (already projected /
+            // external) — bypass the Phase 6 suppression so they're never
+            // dropped when projection mode is on.
+            Task { await timelineStore.add(entry, bypassSuppression: true) }
         }
         broadcastRaw(["type": "timeline_event", "entry": rawEntry] as [String: Any])
     }

@@ -92,6 +92,8 @@ export async function handleApmeRequest(
       const tasks = rawTasks.map((t) => ({
         ...t,
         evals: apme.store.listEvalsForTask(t.id),
+        // The canonical SessionSample (typed trajectory + cost) for this task.
+        sample: apme.store.getSample(t.id),
       }));
       sendJson(res, 200, {
         schema: EVAL_SCHEMA_VERSION,
@@ -133,6 +135,23 @@ export async function handleApmeRequest(
 
     if (method === 'GET' && path === '/apme/categories') {
       sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, categories: apme.store.categoryScorecard() });
+      return true;
+    }
+
+    // ── Pareto frontier (quality vs cost) ─────────────────────────────────────
+    // The model-orchestration menu: frontier = the real quality/cost tradeoff
+    // curve; dominated = strictly-worse models never worth choosing.
+    if (method === 'GET' && path === '/apme/pareto') {
+      const category = url.searchParams.get('category') ?? undefined;
+      const { paretoForCategory } = await import('./pareto.js');
+      const { frontier, dominated } = paretoForCategory(apme.store.sampleScorecard(), category);
+      sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, category: category ?? null, frontier, dominated });
+      return true;
+    }
+
+    // ── Sample-granularity scorecard ──────────────────────────────────────────
+    if (method === 'GET' && path === '/apme/samples') {
+      sendJson(res, 200, { schema: EVAL_SCHEMA_VERSION, scorecards: apme.store.sampleScorecard() });
       return true;
     }
 

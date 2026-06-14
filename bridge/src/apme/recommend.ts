@@ -9,6 +9,7 @@
 
 import type { AgentType } from '@agentdeck/shared';
 import type { ApmeStore } from './store.js';
+import { paretoForCategory } from './pareto.js';
 
 export interface RecommendInput {
   taskKind?: string;
@@ -33,6 +34,55 @@ export class ApmeRecommender {
 
   recommend(input: RecommendInput): RecommendCandidate[] {
     if (!this.store.enabled) return [];
+
+    // Work at sample granularity (the canonical eval unit) and restrict to the
+    // Pareto frontier — dominated models (strictly worse on quality AND cost)
+    // are never worth recommending. This is the model-orchestration payoff:
+    // the menu is the quality/cost tradeoff curve, not a flat ranking.
+    const scorecard = this.store.sampleScorecard();
+    let { frontier } = paretoForCategory(scorecard, input.taskKind);
+
+    // Fall back to the whole frontier if the category has too little data.
+    if (frontier.length === 0) frontier = paretoForCategory(scorecard, undefined).frontier;
+
+    // Fall back to the run-level scorecard when no sample-granularity data has
+    // accumulated yet (legacy runs, or before the first task judge resolves).
+    if (frontier.length === 0) return this.recommendFromRuns(input);
+
+    let candidates = frontier;
+    if (input.availableModels) {
+      candidates = candidates.filter((p) => input.availableModels!.includes(p.modelId));
+    }
+    if (input.budgetUsd !== undefined) {
+      candidates = candidates.filter((p) => p.costPerSample <= input.budgetUsd!);
+    }
+    if (input.latencyBudgetMs !== undefined) {
+      candidates = candidates.filter((p) => p.avgLatencyMs == null || p.avgLatencyMs <= input.latencyBudgetMs!);
+    }
+
+    candidates = [...candidates].sort((a, b) => {
+      // Budget-conscious or local-preferring → cheapest first; else best quality.
+      if (input.preferLocal || (input.budgetUsd !== undefined && input.budgetUsd < 5)) {
+        return a.costPerSample - b.costPerSample || b.quality - a.quality;
+      }
+      return b.quality - a.quality || a.costPerSample - b.costPerSample;
+    });
+
+    return candidates.slice(0, 3).map((p) => ({
+      modelId: p.modelId,
+      agentType: p.agentType as AgentType,
+      expectedScore: p.quality,
+      expectedCostUsd: p.costPerSample,
+      confidence: Math.min(1, p.samples / 20),
+      rationale: `${p.samples} samples, avg ${(p.quality * 100).toFixed(0)}%, $${p.costPerSample.toFixed(4)}/sample${
+        p.avgLatencyMs != null ? `, ${Math.round(p.avgLatencyMs)}ms` : ''
+      } — on the cost/quality frontier`,
+    }));
+  }
+
+  /** Legacy run-level recommendation (v_model_scorecard). Used when no
+   *  sample-granularity composite scores exist yet. */
+  private recommendFromRuns(input: RecommendInput): RecommendCandidate[] {
     const rows = this.store.scorecard();
     const filtered = input.availableModels
       ? rows.filter((r) => input.availableModels!.includes(r.modelId))
@@ -40,7 +90,6 @@ export class ApmeRecommender {
     return filtered
       .filter((r) => r.runs >= 3 && (r.avgOverall ?? 0) > 0)
       .sort((a, b) => {
-        // Prefer cost-per-quality if budget is tight, otherwise raw quality.
         if (input.budgetUsd !== undefined && input.budgetUsd < 5) {
           return (a.costPerQuality ?? Infinity) - (b.costPerQuality ?? Infinity);
         }

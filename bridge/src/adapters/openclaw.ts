@@ -37,8 +37,11 @@ import {
   openclawChatEventToSpans,
   openclawChatSendToSpan,
   openclawIdleGapTaskBoundary,
+  openclawSessionToolToSpans,
+  openclawSessionMessageToSpans,
   OPENCLAW_IDLE_GAP_MS,
 } from '../apme/adapters/openclaw-hook.js';
+import type { SessionToolPayload, SessionMessagePayload } from '@agentdeck/shared';
 
 function extractGatewayTokenFromJson(json: unknown): string | null {
   if (!json || typeof json !== 'object') return null;
@@ -1089,6 +1092,23 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         debug('adapter:openclaw', 'Gateway shutdown event');
         this.emitAdapterEvent({ source: 'hook', event: 'SessionEnd', data: {} });
         break;
+
+      // ===== Granular session streams (previously dropped) =====
+      // `session.tool` carries per-tool input/output; `session.message` carries
+      // out-of-band (e.g. cron/automation) prompts & responses. Both were
+      // silently swallowed by the old default case, leaving the sample's tool
+      // trajectory empty of detail. Route them into the APME normalizer so the
+      // SessionSample captures the full tool-use trajectory (req #6).
+      case 'session.tool': {
+        const apmeCtx = this.buildApmeCtx();
+        if (apmeCtx) this.ingestApmeSpans(openclawSessionToolToSpans(apmeCtx, payload as SessionToolPayload));
+        break;
+      }
+      case 'session.message': {
+        const apmeCtx = this.buildApmeCtx();
+        if (apmeCtx) this.ingestApmeSpans(openclawSessionMessageToSpans(apmeCtx, payload as SessionMessagePayload));
+        break;
+      }
 
       default:
         debug('adapter:openclaw', `Unhandled event: ${event}`);

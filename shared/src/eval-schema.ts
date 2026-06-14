@@ -80,7 +80,10 @@ export type ApmeEvalLayer =
   | 'llm_judge'
   | 'vibe'
   | 'turn_judge'
-  | 'task_judge';
+  | 'task_judge'
+  /** Pure, sample-trajectory scorers (no LLM): trajectory quality, tool
+   *  efficiency, reliability. Computed over a SessionSample's typed events. */
+  | 'trajectory';
 
 export interface ApmeEvalRowDb {
   id?: number;
@@ -131,6 +134,29 @@ export interface ApmeTaskRow {
   taskCategory?: string | null;
   /** Raw judge JSON (done/missed/reasoning) for the task rollup. */
   notesJson?: string | null;
+  // ── Sample header: agent identity + cost (req #2 / #7) ──
+  /** Real model id for this sample (the task IS the SessionSample header). */
+  modelId?: string | null;
+  /** JSON string of SampleModelConfig (provider, subagents, mcpServers). */
+  modelConfig?: string | null;
+  /** Aggregated from the sample's ModelEvents. */
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  costUsd?: number | null;
+  latencyMs?: number | null;
+}
+
+/** Per-(agent, model, category) scorecard row at sample granularity — the
+ *  recommender's real unit. Backed by `v_sample_scorecard`. */
+export interface ApmeSampleScorecardRow {
+  agentType: string;
+  modelId: string;
+  taskCategory: string | null;
+  samples: number;
+  avgQuality: number | null;
+  totalCost: number | null;
+  avgLatencyMs: number | null;
+  costPerQuality: number | null;
 }
 
 export interface ApmeRubricRow {

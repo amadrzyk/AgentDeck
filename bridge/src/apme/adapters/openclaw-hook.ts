@@ -63,6 +63,8 @@ import type {
   TelemetrySpan,
   TelemetryAttributes,
   ChatEventPayload,
+  SessionToolPayload,
+  SessionMessagePayload,
 } from '@agentdeck/shared';
 import { spanNameForKind } from '@agentdeck/shared';
 
@@ -142,6 +144,78 @@ export function openclawChatEventToSpans(
   }
 
   return [];
+}
+
+/**
+ * Convert a Gateway `session.tool` event into spans. This granular per-tool
+ * stream carries the tool INPUT/OUTPUT that the coarse `chat.final` tools array
+ * lacks — and it was previously silently dropped (openclaw.ts default case), so
+ * the sample's tool trajectory had no detail. A `running`/`pending` status maps
+ * to a `tool_call` (opens a pending ToolEvent); a terminal status maps to a
+ * `tool_result` (resolves it). Pure — no side effects.
+ */
+export function openclawSessionToolToSpans(
+  ctx: AdapterContext,
+  payload: SessionToolPayload,
+): TelemetrySpan[] {
+  const name = payload.name ?? payload.tool;
+  if (!name) return [];
+  const ts = typeof payload.ts === 'number' ? payload.ts : Date.now();
+  const status = (payload.status ?? '').toLowerCase();
+  const pending = status === '' || status === 'running' || status === 'pending' || status === 'started' || status === 'in_progress';
+  const kind: TelemetrySpan['kind'] = pending ? 'tool_call' : 'tool_result';
+  const attrs: TelemetryAttributes = {
+    'agentdeck.agent_type': ctx.agentType,
+    ...(ctx.cwd ? { 'agentdeck.cwd': ctx.cwd } : {}),
+    'gen_ai.tool.name': name,
+    'agentdeck.tool_name': name,
+    'agentdeck.raw_payload': {
+      ...(payload.status ? { status: payload.status } : {}),
+      ...(payload.input !== undefined ? { tool_input: payload.input } : {}),
+      ...(payload.output !== undefined ? { tool_response: payload.output } : {}),
+    },
+  };
+  return [{
+    traceId: ctx.traceId,
+    spanId: randomUUID(),
+    parentSpanId: ctx.activeTurnId,
+    name: spanNameForKind(kind),
+    kind,
+    ts,
+    attributes: attrs,
+  }];
+}
+
+/**
+ * Convert a Gateway `session.out-of-band message` into a turn span. User
+ * messages open a turn (turn_start); assistant messages set the response
+ * (turn_response). Previously dropped, so gateway-initiated turns (cron,
+ * automations) had no captured prompt/response in the sample.
+ */
+export function openclawSessionMessageToSpans(
+  ctx: AdapterContext,
+  payload: SessionMessagePayload,
+): TelemetrySpan[] {
+  const text = (typeof payload.text === 'string' ? payload.text : undefined)
+    ?? (typeof payload.content === 'string' ? payload.content : undefined);
+  if (!text || !text.trim()) return [];
+  const ts = typeof payload.ts === 'number' ? payload.ts : Date.now();
+  const role = (payload.role ?? '').toLowerCase();
+  const kind: TelemetrySpan['kind'] = role === 'assistant' ? 'turn_response' : 'turn_start';
+  const attrs: TelemetryAttributes = {
+    'agentdeck.agent_type': ctx.agentType,
+    ...(ctx.cwd ? { 'agentdeck.cwd': ctx.cwd } : {}),
+    ...(kind === 'turn_start' ? { 'agentdeck.prompt_text': text } : { 'agentdeck.response_text': text }),
+  };
+  return [{
+    traceId: ctx.traceId,
+    spanId: randomUUID(),
+    parentSpanId: ctx.activeTurnId,
+    name: spanNameForKind(kind),
+    kind,
+    ts,
+    attributes: attrs,
+  }];
 }
 
 /**

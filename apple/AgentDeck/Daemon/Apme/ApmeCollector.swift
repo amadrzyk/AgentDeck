@@ -30,6 +30,11 @@ final class ApmeCollector {
     /// bridge wires in bridge/src/apme/index.ts:72-103.
     var emitTimelineEntry: ((DaemonTimelineEntry) -> Void)?
 
+    /// Phase 6 cutover: emit a projected (chat/tool) timeline row from a sample
+    /// event, bypassing suppression. Set only when projection mode is enabled.
+    /// Mirrors `emitProjectedTimeline` in bridge/src/apme/index.ts.
+    var emitProjectedTimelineEntry: ((DaemonTimelineEntry) -> Void)?
+
     /// Maps a hookSessionId → runId. A hookSessionId is generated per
     /// session_start and lives until session_end.
     private var sessionToRun: [String: String] = [:]
@@ -78,6 +83,9 @@ final class ApmeCollector {
     private var activeTask: ActiveTask?
     /// runId → next task_index. Lives across task close/open within a run.
     private var runTaskCount: [String: Int] = [:]
+    /// Last cumulative usage seen for the active session — ModelEvents are
+    /// emitted from the delta (snapshots carry session totals). Reset per session.
+    private var lastUsage: (inp: Int, out: Int) = (0, 0)
 
     /// Pending idle-gap timer. After every `closeTurn` we arm a 90 s timer
     /// (`idleGapSec`); if no new `user_prompt_submit` arrives, the timer
@@ -140,6 +148,7 @@ final class ApmeCollector {
             )
             store.insertRun(run)
             sessionToRun[hookSessionId] = runId
+            lastUsage = (0, 0) // reset the cumulative-usage delta baseline per session
             DaemonLogger.shared.debug("APME", "openRun \(runId.prefix(8)) hookSession=\(hookSessionId) agent=\(agentType)")
 
         case "session_end":
@@ -230,6 +239,13 @@ final class ApmeCollector {
                 }
                 store.insertTurn(id: turnId, runId: runId, turnIndex: turnIndex, prompt: prompt, startedAt: nowMs(), taskId: task?.id)
 
+                // Sample trajectory: the user message opens the turn's typed event log.
+                if let task {
+                    appendSampleEvent(taskId: task.id, runId: runId, turnIndex: turnIndex,
+                                      kind: "user_message", core: prompt ?? "turn\(turnIndex)",
+                                      payload: ["text": prompt ?? ""])
+                }
+
                 // Multi-turn task signal: if the active task already had a
                 // turn before this one (priorFirstTurn != nil), the user is
                 // continuing a conversation rather than starting a single
@@ -255,6 +271,15 @@ final class ApmeCollector {
                 if toolName == "Write" { turn.filesCreated += 1 }
                 activeTurn = turn
 
+                // Sample trajectory: a tool call starts as a pending ToolEvent;
+                // its PostToolUse result resolves the SAME row (one row, not two).
+                if let task = activeTask, let toolName {
+                    appendSampleEvent(taskId: task.id, runId: turn.runId, turnIndex: turn.index,
+                                      kind: "tool", core: "\(toolName):\(turn.toolCalls)",
+                                      toolName: toolName, toolStatus: "pending",
+                                      payload: extractToolInput(data).map { ["input": $0] })
+                }
+
                 // Explicit task signal: the agent is using TodoWrite to plan
                 // multi-step work. Promote the active task to a visible
                 // timeline row on the first TodoWrite call so the user sees
@@ -262,6 +287,33 @@ final class ApmeCollector {
                 // TodoWrite calls are no-ops via the idempotent helper.
                 if toolName == "TodoWrite" {
                     emitDeferredTaskStartIfNeeded()
+                }
+            }
+
+            // Sample trajectory: resolve the pending ToolEvent on PostToolUse.
+            if (event.lowercased() == "tool_end" || event == "PostToolUse"),
+               let toolName = data["tool_name"] as? String,
+               let task = activeTask, let turnIndex = activeTurn?.index {
+                let isError = (data["is_error"] as? Bool ?? false) || (data["error"] != nil)
+                let output = extractToolOutput(data)
+                if let pending = store.findPendingToolEvent(taskId: task.id, turnIndex: turnIndex, toolName: toolName),
+                   let pid = pending["id"] as? Int {
+                    var payloadObj: [String: Any] = [:]
+                    if let s = pending["payload"] as? String, let d = s.data(using: .utf8),
+                       let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { payloadObj = o }
+                    if let output { payloadObj["output"] = output }
+                    let payloadStr = (try? JSONSerialization.data(withJSONObject: payloadObj)).flatMap { String(data: $0, encoding: .utf8) }
+                    store.updateSampleEvent(id: pid, fields: [
+                        "toolStatus": isError ? "error" : "success",
+                        "toolError": isError ? "error" : nil,
+                        "payload": payloadStr as Any?,
+                    ])
+                } else {
+                    appendSampleEvent(taskId: task.id, runId: task.runId, turnIndex: turnIndex,
+                                      kind: "tool", core: "\(toolName):resolved:\(turnIndex):\(store.nextSampleSeq(task.id))",
+                                      toolName: toolName, toolStatus: isError ? "error" : "success",
+                                      toolError: isError ? "error" : nil,
+                                      payload: output.map { ["output": $0] })
                 }
             }
 
@@ -297,6 +349,24 @@ final class ApmeCollector {
         ]
         if let c = costUsd { fields["costUsd"] = c }
         store.updateRun(id: runId, fields: fields)
+
+        // ── Per-task ModelEvent from the cumulative delta ──
+        let dIn = max(0, inputTokens - lastUsage.inp)
+        let dOut = max(0, outputTokens - lastUsage.out)
+        lastUsage = (inputTokens, outputTokens)
+        if (dIn > 0 || dOut > 0), let task = activeTask {
+            let model = store.getRun(id: runId)?.modelId
+            let turnIndex = activeTurn?.index ?? task.lastTurnIndex ?? 0
+            let cost = ApmePricing.usd(model: model, inputTokens: dIn, outputTokens: dOut)
+            appendSampleEvent(taskId: task.id, runId: runId, turnIndex: turnIndex,
+                              kind: "model", core: "\(inputTokens):\(outputTokens)",
+                              model: model, inputTokens: dIn, outputTokens: dOut,
+                              costUsd: cost, latencyMs: 0)
+            let mc: [String: Any] = ["modelId": model ?? "unknown", "provider": ApmePricing.provider(for: model)]
+            let mcStr = (try? JSONSerialization.data(withJSONObject: mc)).flatMap { String(data: $0, encoding: .utf8) }
+            store.updateTask(id: task.id, fields: ["modelId": model as Any?, "modelConfig": mcStr as Any?])
+            store.recomputeSampleCost(task.id)
+        }
     }
 
     // MARK: - Sibling session tracking
@@ -333,6 +403,97 @@ final class ApmeCollector {
                 "taskCategorySource": "auto",
             ])
         }
+    }
+
+    // MARK: - SessionSample trajectory (the normalizer's typed event log)
+
+    /// Composite dedup key. The Node/Swift daemons are alternative (not
+    /// concurrent) writers, so a raw composite key is sufficient for
+    /// storage-time dedup within a writer; SQLite's UNIQUE(task_id, dedup_key)
+    /// makes it atomic via INSERT OR IGNORE.
+    private func makeDedupKey(kind: String, turnIndex: Int, core: String) -> String {
+        let c = core.count > 160 ? "\(core.prefix(160)):\(core.count)" : core
+        return "\(kind)|\(turnIndex)|\(c)"
+    }
+
+    @discardableResult
+    private func appendSampleEvent(taskId: String, runId: String, turnIndex: Int, kind: String,
+                                   core: String, ts: Int? = nil, model: String? = nil,
+                                   inputTokens: Int? = nil, outputTokens: Int? = nil,
+                                   costUsd: Double? = nil, latencyMs: Int? = nil,
+                                   toolName: String? = nil, toolStatus: String? = nil,
+                                   toolError: String? = nil, payload: [String: Any]? = nil) -> Bool {
+        var payloadStr: String? = nil
+        if let payload,
+           let data = try? JSONSerialization.data(withJSONObject: payload),
+           let s = String(data: data, encoding: .utf8) { payloadStr = s }
+        let inserted = store.insertSampleEvent(
+            taskId: taskId, runId: runId, turnIndex: turnIndex, seq: store.nextSampleSeq(taskId),
+            ts: ts ?? nowMs(), kind: kind, model: model, inputTokens: inputTokens,
+            outputTokens: outputTokens, costUsd: costUsd, latencyMs: latencyMs,
+            toolName: toolName, toolStatus: toolStatus, toolError: toolError,
+            payload: payloadStr, dedupKey: makeDedupKey(kind: kind, turnIndex: turnIndex, core: core))
+        // Phase 6: project the event to a timeline row (bypasses suppression).
+        if inserted, let emit = emitProjectedTimelineEntry,
+           let projected = projectSampleEvent(taskId: taskId, runId: runId, ts: ts ?? nowMs(),
+                                               kind: kind, toolName: toolName, toolStatus: toolStatus,
+                                               toolError: toolError, payload: payload) {
+            emit(projected)
+        }
+        return inserted
+    }
+
+    /// Build a projected timeline entry from a sample event. Mirrors
+    /// bridge/src/apme/sample-to-timeline.ts. Returns nil for kinds that don't
+    /// surface as a standalone row (model/state).
+    private func projectSampleEvent(taskId: String, runId: String, ts: Int, kind: String,
+                                    toolName: String?, toolStatus: String?, toolError: String?,
+                                    payload: [String: Any]?) -> DaemonTimelineEntry? {
+        let run = store.getRun(id: runId)
+        func base(type: String, raw: String, detail: String?, status: String?) -> DaemonTimelineEntry {
+            DaemonTimelineEntry(
+                ts: Double(ts), type: type, raw: raw, detail: detail,
+                status: status, agentType: run?.agentType, projectName: run?.projectName,
+                sessionId: run?.sessionId, runId: runId, taskId: taskId)
+        }
+        switch kind {
+        case "user_message":
+            let text = (payload?["text"] as? String) ?? ""
+            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return base(type: "chat_start", raw: String(text.prefix(120)), detail: String(text.prefix(4000)), status: nil)
+        case "assistant_message":
+            let text = (payload?["text"] as? String) ?? ""
+            let rk = (payload?["responseKind"] as? String) ?? "text"
+            guard rk == "text", !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return base(type: "chat_response", raw: String(text.prefix(120)), detail: String(text.prefix(8000)), status: nil)
+        case "tool":
+            let name = toolName ?? "tool"
+            var inputSummary = ""
+            if let inp = payload?["input"] {
+                if let s = inp as? String { inputSummary = String(s.prefix(80)) }
+                else if let d = inp as? [String: Any] {
+                    for key in ["command", "file_path", "path", "pattern", "query", "cmd"] {
+                        if let v = d[key] as? String { inputSummary = String(v.prefix(80)); break }
+                    }
+                }
+            }
+            let raw = inputSummary.isEmpty ? name : "\(name) · \(inputSummary)"
+            let status = toolStatus == "error" ? "denied" : (toolStatus == "success" ? "approved" : "pending")
+            return base(type: "tool_resolved", raw: raw, detail: toolError.map { String($0.prefix(1000)) }, status: status)
+        case "info":
+            let label = (payload?["label"] as? String) ?? "info"
+            return base(type: "error", raw: String(label.prefix(120)), detail: payload?["detail"] as? String, status: nil)
+        default:
+            return nil // model / state — no standalone row
+        }
+    }
+
+    private func extractToolInput(_ data: [String: Any]) -> Any? {
+        return data["tool_input"] ?? data["input"]
+    }
+
+    private func extractToolOutput(_ data: [String: Any]) -> Any? {
+        return data["tool_response"] ?? data["output"] ?? data["result"]
     }
 
     // MARK: - Private
@@ -686,6 +847,13 @@ final class ApmeCollector {
             "response": clamped,
             "efficiencyJson": efficiencyJson,
         ])
+        // Sample trajectory: the assistant response closes the turn's event arc.
+        if let taskId = existingTurn?["task_id"] as? String {
+            let tIdx = (existingTurn?["turn_index"] as? Int) ?? activeTurn?.index ?? 0
+            appendSampleEvent(taskId: taskId, runId: runId, turnIndex: tIdx,
+                              kind: "assistant_message", core: String(clamped.prefix(200)),
+                              payload: ["text": clamped, "responseKind": "text"])
+        }
         DaemonLogger.shared.debug("APME", "setTurnResponse turn=\(turnId.prefix(8)) respLen=\(clamped.count) kind=text")
 
         // Mid-session classification: the TS bug this fixes was that the

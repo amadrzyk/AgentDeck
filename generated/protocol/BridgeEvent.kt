@@ -763,6 +763,7 @@ enum class Layer(val value: String) {
     Deterministic("deterministic"),
     LlmJudge("llm_judge"),
     TaskJudge("task_judge"),
+    Trajectory("trajectory"),
     TurnJudge("turn_judge"),
     Vibe("vibe");
 
@@ -771,6 +772,7 @@ enum class Layer(val value: String) {
             "deterministic" -> Deterministic
             "llm_judge"     -> LlmJudge
             "task_judge"    -> TaskJudge
+            "trajectory"    -> Trajectory
             "turn_judge"    -> TurnJudge
             "vibe"          -> Vibe
             else            -> throw IllegalArgumentException()
@@ -837,15 +839,20 @@ data class SessionInfo (
     val cwd: String? = null,
     val effortLevel: String? = null,
 
+    @Json(name = "elapsedSec")
+    val elapsedSEC: Double? = null,
+
     @Json(name = "foldedSessionIds")
     val foldedSessionIDS: List<String>? = null,
 
     val groupSize: Double? = null,
     val id: String,
     val modelName: String? = null,
+    val options: List<PromptOption>? = null,
     val pid: Double? = null,
     val port: Double,
     val projectName: String,
+    val promptType: PromptType? = null,
     val question: String? = null,
 
     @Json(name = "requestId")

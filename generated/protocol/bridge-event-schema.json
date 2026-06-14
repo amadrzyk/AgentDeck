@@ -118,7 +118,8 @@
             "llm_judge",
             "vibe",
             "turn_judge",
-            "task_judge"
+            "task_judge",
+            "trajectory"
           ],
           "type": "string"
         },
@@ -845,6 +846,9 @@
         "effortLevel": {
           "type": "string"
         },
+        "elapsedSec": {
+          "type": "number"
+        },
         "foldedSessionIds": {
           "items": {
             "type": "string"
@@ -860,6 +864,12 @@
         "modelName": {
           "type": "string"
         },
+        "options": {
+          "items": {
+            "$ref": "#/definitions/PromptOption"
+          },
+          "type": "array"
+        },
         "pid": {
           "type": "number"
         },
@@ -867,6 +877,15 @@
           "type": "number"
         },
         "projectName": {
+          "type": "string"
+        },
+        "promptType": {
+          "enum": [
+            "yes_no",
+            "yes_no_always",
+            "multi_select",
+            "diff_review"
+          ],
           "type": "string"
         },
         "question": {

@@ -31,8 +31,8 @@ export const agentCommand = {
   respond(value: string): ResponseCommand {
     return { type: "respond", value };
   },
-  selectOption(index: number): SelectOptionCommand {
-    return { type: "select_option", index };
+  selectOption(index: number, sessionId?: string): SelectOptionCommand {
+    return { type: "select_option", index, sessionId };
   },
   navigateOption(direction: 'up' | 'down'): NavigateOptionCommand {
     return { type: "navigate_option", direction };

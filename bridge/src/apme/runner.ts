@@ -20,6 +20,8 @@ import type { ApmeStore } from './store.js';
 import type { ApmeConfig, ApmeJudgeConfig, ApmeJudgeBackend } from './settings.js';
 import { loadApmeConfig, shouldJudge, DEFAULT_APME_CONFIG } from './settings.js';
 import { loadMlxSettings, mlxChatUrl } from '@agentdeck/shared';
+import type { SessionSample, TrajectoryEvent } from '@agentdeck/shared';
+import { runSampleScorers } from './scorers/index.js';
 import type { ApmeRunRow, ParsedJudge } from './types.js';
 import { execSync } from 'child_process';
 
@@ -225,6 +227,14 @@ export class ApmeRunner {
       lines.push(`… (${turns.length - TURN_CAP} more turns omitted)`);
     }
 
+    // The canonical SessionSample gives the judge the typed tool trajectory
+    // (req #5/#6) and per-sample cost (req #7) — context the turn rows lack.
+    const sample = this.store.getSample(taskId);
+    const trajectoryLines = sample ? buildTrajectoryLines(sample) : [];
+    const costLine = sample
+      ? `cost: ${sample.cost.inputTokens}in/${sample.cost.outputTokens}out tok, $${sample.cost.costUsd.toFixed(4)}, model ${sample.model.modelId}`
+      : '';
+
     const judgePrompt = [
       rubric.prompt,
       '',
@@ -232,9 +242,11 @@ export class ApmeRunner {
       `task_category: ${category ?? task.taskCategory ?? 'unknown'}`,
       `turn_count: ${turns.length}`,
       `boundary_signal: ${boundarySignal ?? task.boundarySignal}`,
+      ...(costLine ? [costLine] : []),
       '',
       '--- TURNS ---',
       ...lines,
+      ...(trajectoryLines.length ? ['', '--- TOOL TRAJECTORY ---', ...trajectoryLines] : []),
       '',
       'Respond with strict JSON only.',
     ].join('\n');
@@ -273,6 +285,26 @@ export class ApmeRunner {
           judgeModel,
           createdAt: now,
         });
+      }
+
+      // Pure sample-trajectory scorers (tool churn, error rate) — they add
+      // signal the LLM judge can miss and are cheap/deterministic. Stored under
+      // layer='trajectory' so they don't collide with task_judge axes.
+      if (sample) {
+        try {
+          for (const r of runSampleScorers(sample)) {
+            this.store.insertEvalForTask({
+              id: 0, runId, taskId,
+              layer: r.layer,
+              metric: r.metric,
+              score: r.score,
+              raw: r.reasoning ? JSON.stringify({ reasoning: r.reasoning, scorer: r.scorer }) : null,
+              rubricVer: null,
+              judgeModel: `scorer:${r.scorer}`,
+              createdAt: now,
+            });
+          }
+        } catch (err) { debug('APME', `sample scorers failed task=${taskId.slice(0, 8)}: ${String(err)}`); }
       }
 
       const compositeScore = parsed.scores.overall ?? null;
@@ -672,6 +704,33 @@ function runCommand(command: string, cwd: string, timeoutMs: number): Promise<Cm
 }
 
 // ─── Layer 2 execution ────────────────────────────────────────────────────────
+
+/** Render a SessionSample's typed trajectory as compact judge-prompt lines.
+ *  Gives the judge tool-call sequences + model usage the turn rows omit. */
+export function buildTrajectoryLines(sample: SessionSample, cap = 30): string[] {
+  const lines: string[] = [];
+  const events: TrajectoryEvent[] = sample.events.slice(0, cap);
+  for (const e of events) {
+    switch (e.kind) {
+      case 'tool': {
+        let input = '';
+        try { input = e.input == null ? '' : JSON.stringify(e.input).slice(0, 120); } catch { input = ''; }
+        lines.push(`  tool ${e.name}(${input})${e.status ? ` → ${e.status}` : ''}${e.error ? ` [err: ${String(e.error).slice(0, 80)}]` : ''}`);
+        break;
+      }
+      case 'model':
+        lines.push(`  model ${e.model}: ${e.inputTokens}in/${e.outputTokens}out tok${e.costUsd ? ` ($${e.costUsd.toFixed(4)})` : ''}`);
+        break;
+      case 'state':
+        lines.push(`  state → ${e.to}`);
+        break;
+      default:
+        break; // user/assistant messages already shown in the TURNS section
+    }
+  }
+  if (sample.events.length > cap) lines.push(`  … (${sample.events.length - cap} more events)`);
+  return lines;
+}
 
 // `ParsedJudge` is the canonical eval v1 type imported from `@agentdeck/shared`.
 

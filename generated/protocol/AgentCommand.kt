@@ -24,12 +24,13 @@ sealed class AgentCommand {
         }
     }
 
-    data class SelectOption(val index: Int) : AgentCommand() {
+    data class SelectOption(val index: Int, val sessionId: String? = null) : AgentCommand() {
         override val typeTag: String = "select_option"
         override fun toJson(): String {
             val buf = StringBuilder()
             buf.append("{\"type\":\"select_option\"")
             buf.append(",\"index\":").append(encode(index))
+            if (sessionId != null) buf.append(",\"sessionId\":").append(encode(sessionId))
             buf.append("}")
             return buf.toString()
         }

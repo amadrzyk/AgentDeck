@@ -47,15 +47,15 @@ data class PluginCommand (
     val type: Type,
     val value: Value? = null,
     val index: Double? = null,
+
+    @Json(name = "sessionId")
+    val sessionID: String? = null,
+
     val direction: Direction? = null,
     val text: String? = null,
     val mode: Mode? = null,
     val action: Action? = null,
     val agent: Agent? = null,
-
-    @Json(name = "sessionId")
-    val sessionID: String? = null,
-
     val command: Command? = null,
 
     /**

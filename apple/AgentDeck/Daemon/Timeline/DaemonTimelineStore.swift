@@ -82,7 +82,22 @@ actor DaemonTimelineStore {
         loadFromDisk()
     }
 
-    func add(_ entry: DaemonTimelineEntry) {
+    /// Chat/tool entry types that, in projection mode, derive from the
+    /// SessionSample projection instead of the adapters' direct emitters.
+    static let projectedTypes: Set<String> = [
+        "chat_start", "chat_response", "chat_end", "tool_request", "tool_resolved", "tool_exec",
+    ]
+
+    /// Phase 6 cutover (default OFF). When true, locally-emitted chat/tool rows
+    /// are dropped; the SessionSample projection (added via `bypassSuppression`)
+    /// becomes the single source. Mirrors BridgeTimelineStore.
+    private var suppressLocalChatTool = false
+    func setSuppressLocalChatTool(_ v: Bool) { suppressLocalChatTool = v }
+
+    func add(_ entry: DaemonTimelineEntry, bypassSuppression: Bool = false) {
+        if suppressLocalChatTool, !bypassSuppression, Self.projectedTypes.contains(entry.type) {
+            return
+        }
         guard !Self.shouldDropLowSignalEntry(entry) else { return }
 
         // Exact dedup: same ts + type + raw within 8s.

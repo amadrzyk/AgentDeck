@@ -6,7 +6,7 @@
  */
 
 import { BridgeCore } from './bridge-core.js';
-import { initApme } from './apme/index.js';
+import { initApme, isTimelineProjectionEnabled } from './apme/index.js';
 import { readLastTurn as readClaudeTranscriptLastTurn } from './apme/claude-transcript-reader.js';
 import { claudeHookToSpans } from './apme/adapters/claude-hook.js';
 import { codexHookToSpans } from './apme/adapters/codex-hook.js';
@@ -236,11 +236,18 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   // Optional: degrades to no-op if better-sqlite3 isn't installed.
   // emitTimeline forwards task_start/task_end so the dashboard sees the task
   // hierarchy header rows that group turns by APME boundary signal.
+  const projectTimeline = isTimelineProjectionEnabled();
   const apme = await initApme(undefined, {
     emitTimeline: (entry) => core.bridgeTimeline.addEntry(entry),
+    projectSampleTimeline: projectTimeline,
+    emitProjectedTimeline: (entry) => core.bridgeTimeline.addEntry(entry, { bypassSuppression: true }),
   });
   if (apme) {
     core.setApme(apme, process.cwd());
+    if (projectTimeline) {
+      core.bridgeTimeline.setSuppressLocalChatTool(true);
+      log('APME timeline projection ENABLED (AGENTDECK_TIMELINE_PROJECTION=1) — chat/tool rows derive from SessionSample');
+    }
     log('APME enabled — runs will be logged to ~/.agentdeck/apme.sqlite');
 
     // Wire APME eval results → timeline entries (session bridge mode).

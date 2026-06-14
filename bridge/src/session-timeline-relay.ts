@@ -120,11 +120,13 @@ export class SessionTimelineRelay {
         const evt = JSON.parse(raw.toString());
         if (evt.type === 'timeline_event' && evt.entry) {
           const entry = enrichEntry(evt.entry as TimelineEntry);
-          if (evt.upsert) this.timeline.upsertEntry(entry);
-          else this.timeline.addEntry(entry);
+          // Relayed entries already passed (or bypassed) suppression at their
+          // origin session bridge — never re-suppress them on the daemon.
+          if (evt.upsert) this.timeline.upsertEntry(entry, { bypassSuppression: true });
+          else this.timeline.addEntry(entry, { bypassSuppression: true });
         } else if (evt.type === 'timeline_history' && Array.isArray(evt.entries)) {
           for (const entry of evt.entries as TimelineEntry[]) {
-            this.timeline.addEntry(enrichEntry(entry));
+            this.timeline.addEntry(enrichEntry(entry), { bypassSuppression: true });
           }
         } else if (evt.type === 'state_update' && Array.isArray(evt.modelCatalog) && evt.modelCatalog.length > 0) {
           this.onModelCatalog?.(evt.modelCatalog as ModelCatalogEntry[]);

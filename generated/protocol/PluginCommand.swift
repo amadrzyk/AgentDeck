@@ -33,12 +33,12 @@ struct ADPluginCommand: Codable, Equatable {
     var type: ADType
     var value: ADValue?
     var index: Double?
+    var sessionId: String?
     var direction: ADDirection?
     var text: String?
     var mode: ADMode?
     var action: ADAction?
     var agent: ADAgent?
-    var sessionId: String?
     var command: ADCommand?
     /// Human-readable label for the surface (appears verbatim in diagnostics).
     var clientLabel: String?
@@ -60,12 +60,12 @@ struct ADPluginCommand: Codable, Equatable {
         case type = "type"
         case value = "value"
         case index = "index"
+        case sessionId = "sessionId"
         case direction = "direction"
         case text = "text"
         case mode = "mode"
         case action = "action"
         case agent = "agent"
-        case sessionId = "sessionId"
         case command = "command"
         case clientLabel = "clientLabel"
         case clientType = "clientType"
@@ -104,12 +104,12 @@ extension ADPluginCommand {
         type: ADType? = nil,
         value: ADValue?? = nil,
         index: Double?? = nil,
+        sessionId: String?? = nil,
         direction: ADDirection?? = nil,
         text: String?? = nil,
         mode: ADMode?? = nil,
         action: ADAction?? = nil,
         agent: ADAgent?? = nil,
-        sessionId: String?? = nil,
         command: ADCommand?? = nil,
         clientLabel: String?? = nil,
         clientType: String?? = nil,
@@ -128,12 +128,12 @@ extension ADPluginCommand {
             type: type ?? self.type,
             value: value ?? self.value,
             index: index ?? self.index,
+            sessionId: sessionId ?? self.sessionId,
             direction: direction ?? self.direction,
             text: text ?? self.text,
             mode: mode ?? self.mode,
             action: action ?? self.action,
             agent: agent ?? self.agent,
-            sessionId: sessionId ?? self.sessionId,
             command: command ?? self.command,
             clientLabel: clientLabel ?? self.clientLabel,
             clientType: clientType ?? self.clientType,

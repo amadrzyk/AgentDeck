@@ -27,6 +27,13 @@ import type {
   ApmeScorecardRow,
   ApmeTaskRow,
 } from './types.js';
+import type {
+  ApmeSampleEventRow,
+  ApmeSampleScorecardRow,
+  SessionSample,
+  SampleModelConfig,
+  TrajectoryEvent,
+} from '@agentdeck/shared';
 
 // ─── Schema ────────────────────────────────────────────────────────────────────
 
@@ -102,10 +109,42 @@ CREATE TABLE IF NOT EXISTS tasks (
   outcome          TEXT,
   composite_score  REAL,
   task_category    TEXT,
-  notes_json       TEXT
+  notes_json       TEXT,
+  model_id         TEXT,
+  model_config     TEXT,
+  input_tokens     INTEGER,
+  output_tokens    INTEGER,
+  cost_usd         REAL,
+  latency_ms       INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
+
+-- Typed trajectory events — the SessionSample.events projection. The single
+-- source of truth that BOTH the timeline and APME eval derive from. Storage-
+-- time dedup via the UNIQUE index + INSERT OR IGNORE (no race-sensitive window).
+CREATE TABLE IF NOT EXISTS sample_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  run_id        TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  turn_index    INTEGER,
+  seq           INTEGER NOT NULL,
+  ts            INTEGER NOT NULL,
+  kind          TEXT NOT NULL,
+  model         TEXT,
+  input_tokens  INTEGER,
+  output_tokens INTEGER,
+  cost_usd      REAL,
+  latency_ms    INTEGER,
+  tool_name     TEXT,
+  tool_status   TEXT,
+  tool_error    TEXT,
+  payload       TEXT,
+  dedup_key     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sevents_task ON sample_events(task_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sevents_dedup ON sample_events(task_id, dedup_key);
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +232,28 @@ FROM runs r
 LEFT JOIN v_run_metrics m ON m.run_id = r.id
 WHERE r.task_category IS NOT NULL AND r.task_category != 'unknown'
 GROUP BY r.task_category, r.model_id;
+
+-- Sample-granularity scorecard: quality vs cost per (agent, model, category).
+-- The recommender + Pareto frontier read this. Uses the task's own model_id /
+-- cost (the sample header), falling back to the run's model when unset.
+CREATE VIEW IF NOT EXISTS v_sample_scorecard AS
+SELECT
+  r.agent_type AS agent_type,
+  COALESCE(t.model_id, r.model_id, 'unknown') AS model_id,
+  t.task_category AS task_category,
+  COUNT(*) AS samples,
+  AVG(t.composite_score) AS avg_quality,
+  SUM(t.cost_usd) AS total_cost,
+  AVG(t.latency_ms) AS avg_latency_ms,
+  CASE
+    WHEN AVG(t.composite_score) > 0
+    THEN SUM(t.cost_usd) / AVG(t.composite_score)
+    ELSE NULL
+  END AS cost_per_quality
+FROM tasks t
+JOIN runs r ON r.id = t.run_id
+WHERE t.ended_at IS NOT NULL AND t.composite_score IS NOT NULL
+GROUP BY r.agent_type, COALESCE(t.model_id, r.model_id, 'unknown'), t.task_category;
 `;
 
 // ─── Default rubric v1 (seeded on first boot) ──────────────────────────────────
@@ -489,6 +550,23 @@ export class ApmeStore {
       try { this.db.exec('ALTER TABLE evals ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE'); }
       catch { /* ignore */ }
     }
+    // Tasks sample-header columns (model identity + cost) — added for the
+    // SessionSample rebuild. Older DBs get them via ALTER.
+    const taskCols = (this.db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map(c => c.name);
+    for (const [col, sql] of [
+      ['model_id', 'ALTER TABLE tasks ADD COLUMN model_id TEXT'],
+      ['model_config', 'ALTER TABLE tasks ADD COLUMN model_config TEXT'],
+      ['input_tokens', 'ALTER TABLE tasks ADD COLUMN input_tokens INTEGER'],
+      ['output_tokens', 'ALTER TABLE tasks ADD COLUMN output_tokens INTEGER'],
+      ['cost_usd', 'ALTER TABLE tasks ADD COLUMN cost_usd REAL'],
+      ['latency_ms', 'ALTER TABLE tasks ADD COLUMN latency_ms INTEGER'],
+    ] as Array<[string, string]>) {
+      if (!taskCols.includes(col)) {
+        try { this.db.exec(sql); } catch { /* ignore */ }
+      }
+    }
+    // sample_events table + indexes are created via CREATE TABLE IF NOT EXISTS
+    // in DDL; nothing to ALTER. The v_sample_scorecard view likewise.
   }
 
   private seedDefaultRubric(): void {
@@ -686,6 +764,12 @@ export class ApmeStore {
       taskCategory: 'task_category',
       notesJson: 'notes_json',
       boundarySignal: 'boundary_signal',
+      modelId: 'model_id',
+      modelConfig: 'model_config',
+      inputTokens: 'input_tokens',
+      outputTokens: 'output_tokens',
+      costUsd: 'cost_usd',
+      latencyMs: 'latency_ms',
     };
     const sets: string[] = [];
     const vals: unknown[] = [];
@@ -964,6 +1048,141 @@ export class ApmeStore {
     return rows.map((r) => r.id);
   }
 
+  // ─── Sample events (typed trajectory) ────────────────────────────────────────
+
+  /** Append one typed trajectory event. INSERT OR IGNORE on the UNIQUE
+   *  (task_id, dedup_key) index makes storage-time dedup atomic — duplicates
+   *  never persist. Returns true if a row was actually inserted. */
+  insertSampleEvent(row: ApmeSampleEventRow): boolean {
+    if (!this.db) return false;
+    const res = this.db.prepare(
+      `INSERT OR IGNORE INTO sample_events
+        (task_id, run_id, turn_index, seq, ts, kind, model, input_tokens, output_tokens,
+         cost_usd, latency_ms, tool_name, tool_status, tool_error, payload, dedup_key)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      row.taskId, row.runId, row.turnIndex ?? null, row.seq, row.ts, row.kind,
+      row.model ?? null, row.inputTokens ?? null, row.outputTokens ?? null,
+      row.costUsd ?? null, row.latencyMs ?? null,
+      row.toolName ?? null, row.toolStatus ?? null, row.toolError ?? null,
+      row.payload ?? null, row.dedupKey ?? null,
+    );
+    return res.changes > 0;
+  }
+
+  /** Update a previously-inserted event (e.g. a tool pending→resolved) by id. */
+  updateSampleEvent(id: number, fields: Partial<ApmeSampleEventRow>): void {
+    if (!this.db) return;
+    const map: Record<string, string> = {
+      toolStatus: 'tool_status', toolError: 'tool_error', payload: 'payload',
+      costUsd: 'cost_usd', latencyMs: 'latency_ms', model: 'model',
+      inputTokens: 'input_tokens', outputTokens: 'output_tokens', ts: 'ts',
+    };
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      const col = map[k]; if (!col || v === undefined) continue;
+      sets.push(`${col} = ?`); vals.push(v);
+    }
+    if (sets.length === 0) return;
+    vals.push(id);
+    this.db.prepare(`UPDATE sample_events SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  /** Find a tool event still pending for (task, turn, toolName), to resolve it. */
+  findPendingToolEvent(taskId: string, turnIndex: number, toolName: string): ApmeSampleEventRow | null {
+    if (!this.db) return null;
+    const row = this.db.prepare(
+      `SELECT * FROM sample_events
+       WHERE task_id = ? AND turn_index = ? AND kind = 'tool' AND tool_name = ?
+         AND (tool_status IS NULL OR tool_status = 'pending')
+       ORDER BY seq DESC LIMIT 1`,
+    ).get(taskId, turnIndex, toolName) as Record<string, unknown> | undefined;
+    return row ? rowToSampleEvent(row) : null;
+  }
+
+  listSampleEventRows(taskId: string): ApmeSampleEventRow[] {
+    if (!this.db) return [];
+    const rows = this.db.prepare(
+      'SELECT * FROM sample_events WHERE task_id = ? ORDER BY seq ASC',
+    ).all(taskId) as Record<string, unknown>[];
+    return rows.map(rowToSampleEvent);
+  }
+
+  listSampleEvents(taskId: string): TrajectoryEvent[] {
+    return this.listSampleEventRows(taskId).map(sampleEventRowToTrajectory).filter((e): e is TrajectoryEvent => e !== null);
+  }
+
+  /** Next monotonic seq within a task. */
+  nextSampleSeq(taskId: string): number {
+    if (!this.db) return 0;
+    const row = this.db.prepare('SELECT COALESCE(MAX(seq),-1)+1 AS s FROM sample_events WHERE task_id = ?').get(taskId) as { s: number };
+    return row.s;
+  }
+
+  /** Assemble the full SessionSample (header + cost + typed trajectory). */
+  getSample(taskId: string): SessionSample | null {
+    if (!this.db) return null;
+    const task = this.getTask(taskId);
+    if (!task) return null;
+    const run = this.getRun(task.runId);
+    const events = this.listSampleEvents(taskId);
+    let modelConfig: SampleModelConfig | null = null;
+    if (task.modelConfig) { try { modelConfig = JSON.parse(task.modelConfig) as SampleModelConfig; } catch { /* ignore */ } }
+    const modelId = task.modelId ?? run?.modelId ?? modelConfig?.modelId ?? 'unknown';
+    return {
+      id: task.id,
+      runId: task.runId,
+      sessionId: run?.sessionId ?? '',
+      agentType: (run?.agentType ?? 'claude-code') as SessionSample['agentType'],
+      index: task.taskIndex,
+      boundarySignal: task.boundarySignal,
+      startedAt: task.startedAt,
+      endedAt: task.endedAt ?? null,
+      model: modelConfig ?? { modelId },
+      projectName: run?.projectName ?? null,
+      projectPath: run?.projectPath ?? null,
+      events,
+      cost: {
+        inputTokens: task.inputTokens ?? 0,
+        outputTokens: task.outputTokens ?? 0,
+        costUsd: task.costUsd ?? 0,
+        latencyMs: task.latencyMs ?? 0,
+      },
+      summary: task.summary ?? null,
+      outcome: task.outcome ?? null,
+      compositeScore: task.compositeScore ?? null,
+      taskCategory: task.taskCategory ?? null,
+    };
+  }
+
+  /** Recompute the task's cost aggregate by summing its ModelEvents. */
+  recomputeSampleCost(taskId: string): void {
+    if (!this.db) return;
+    const row = this.db.prepare(
+      `SELECT COALESCE(SUM(input_tokens),0) AS it, COALESCE(SUM(output_tokens),0) AS ot,
+              COALESCE(SUM(cost_usd),0) AS cu, COALESCE(SUM(latency_ms),0) AS lm
+       FROM sample_events WHERE task_id = ? AND kind = 'model'`,
+    ).get(taskId) as { it: number; ot: number; cu: number; lm: number };
+    this.updateTask(taskId, {
+      inputTokens: row.it, outputTokens: row.ot, costUsd: row.cu, latencyMs: row.lm,
+    });
+  }
+
+  sampleScorecard(): ApmeSampleScorecardRow[] {
+    if (!this.db) return [];
+    const rows = this.db.prepare('SELECT * FROM v_sample_scorecard').all() as Record<string, unknown>[];
+    return rows.map((r) => ({
+      agentType: r.agent_type as string,
+      modelId: r.model_id as string,
+      taskCategory: (r.task_category as string | null) ?? null,
+      samples: r.samples as number,
+      avgQuality: (r.avg_quality as number | null) ?? null,
+      totalCost: (r.total_cost as number | null) ?? null,
+      avgLatencyMs: (r.avg_latency_ms as number | null) ?? null,
+      costPerQuality: (r.cost_per_quality as number | null) ?? null,
+    }));
+  }
+
   // ─── Scorecard ───────────────────────────────────────────────────────────────
 
   scorecard(): ApmeScorecardRow[] {
@@ -1039,7 +1258,58 @@ function rowToTask(r: Record<string, unknown>): ApmeTaskRow {
     compositeScore: (r.composite_score as number | null) ?? null,
     taskCategory: (r.task_category as string | null) ?? null,
     notesJson: (r.notes_json as string | null) ?? null,
+    modelId: (r.model_id as string | null) ?? null,
+    modelConfig: (r.model_config as string | null) ?? null,
+    inputTokens: (r.input_tokens as number | null) ?? null,
+    outputTokens: (r.output_tokens as number | null) ?? null,
+    costUsd: (r.cost_usd as number | null) ?? null,
+    latencyMs: (r.latency_ms as number | null) ?? null,
   };
+}
+
+function rowToSampleEvent(r: Record<string, unknown>): ApmeSampleEventRow {
+  return {
+    id: r.id as number,
+    taskId: r.task_id as string,
+    runId: r.run_id as string,
+    turnIndex: (r.turn_index as number | null) ?? null,
+    seq: r.seq as number,
+    ts: r.ts as number,
+    kind: r.kind as ApmeSampleEventRow['kind'],
+    model: (r.model as string | null) ?? null,
+    inputTokens: (r.input_tokens as number | null) ?? null,
+    outputTokens: (r.output_tokens as number | null) ?? null,
+    costUsd: (r.cost_usd as number | null) ?? null,
+    latencyMs: (r.latency_ms as number | null) ?? null,
+    toolName: (r.tool_name as string | null) ?? null,
+    toolStatus: (r.tool_status as string | null) ?? null,
+    toolError: (r.tool_error as string | null) ?? null,
+    payload: (r.payload as string | null) ?? null,
+    dedupKey: (r.dedup_key as string | null) ?? null,
+  };
+}
+
+/** Decode a stored sample_events row back into a typed TrajectoryEvent. */
+function sampleEventRowToTrajectory(r: ApmeSampleEventRow): TrajectoryEvent | null {
+  const base = { ts: r.ts, turnIndex: r.turnIndex ?? 0 };
+  let p: Record<string, unknown> = {};
+  if (r.payload) { try { p = JSON.parse(r.payload) as Record<string, unknown>; } catch { /* ignore */ } }
+  switch (r.kind) {
+    case 'user_message':
+      return { ...base, kind: 'user_message', text: (p.text as string) ?? '' };
+    case 'assistant_message':
+      return { ...base, kind: 'assistant_message', text: (p.text as string) ?? '', responseKind: ((p.responseKind as string) ?? 'text') as 'text' | 'tool_only' | 'empty' };
+    case 'model':
+      return { ...base, kind: 'model', model: r.model ?? 'unknown', inputTokens: r.inputTokens ?? 0, outputTokens: r.outputTokens ?? 0, costUsd: r.costUsd ?? 0, latencyMs: r.latencyMs ?? 0 };
+    case 'tool':
+      return { ...base, kind: 'tool', name: r.toolName ?? 'tool', input: p.input, output: p.output, error: r.toolError ?? null, status: (r.toolStatus as 'pending' | 'success' | 'error' | undefined) ?? undefined };
+    case 'state':
+      return { ...base, kind: 'state', from: (p.from as string | null) ?? null, to: (p.to as string) ?? 'unknown' };
+    case 'info':
+      return { ...base, kind: 'info', label: (p.label as string) ?? 'info', detail: (p.detail as string | null) ?? null };
+    default:
+      return null;
+  }
 }
 
 function rowToRubric(r: Record<string, unknown>): ApmeRubricRow {

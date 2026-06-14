@@ -315,6 +315,9 @@ export interface SessionInfo {
   totalTokens?: number;
   question?: string;  // awaiting prompt question text (hook/observed sessions: from Notification message; managed PTY: parsed header)
   requestId?: string;  // present when a gated PreToolUse permission is pending device approval; devices render Allow/Deny + send permission_decision
+  promptType?: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';  // shape of the awaiting prompt (per-session, for inline approve/deny + option buttons on rich panels)
+  options?: PromptOption[];  // per-session awaiting options (multi_select) — lets a 10-up panel render inline choices for any session, not just the focused one
+  elapsedSec?: number;  // derived seconds since startedAt — devices without reliable NTP render elapsed without recomputing from a wall clock
 }
 
 export interface SessionsListEvent {
@@ -337,7 +340,7 @@ export interface TimelineHistoryMsg {
 
 /** A single evaluation score on a completed run. */
 export interface ApmeEvalRow {
-  layer: 'deterministic' | 'llm_judge' | 'vibe' | 'turn_judge' | 'task_judge';
+  layer: 'deterministic' | 'llm_judge' | 'vibe' | 'turn_judge' | 'task_judge' | 'trajectory';
   metric: string;           // e.g. 'build_ok', 'tests_pass', 'intent', 'overall'
   score: number;            // 0.0 - 1.0
   rubricVer?: number;
@@ -475,6 +478,7 @@ export interface ResponseCommand {
 export interface SelectOptionCommand {
   type: 'select_option';
   index: number; // 0-based option index
+  sessionId?: string; // route to a specific session's awaiting prompt; omitted ⇒ focused session (legacy)
 }
 
 export interface NavigateOptionCommand {

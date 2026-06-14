@@ -332,6 +332,9 @@
         "index": {
           "type": "number"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "type": {
           "const": "select_option",
           "type": "string"

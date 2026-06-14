@@ -1593,6 +1593,7 @@ enum ADLayer: String, Codable, Equatable {
     case deterministic = "deterministic"
     case llmJudge = "llm_judge"
     case taskJudge = "task_judge"
+    case trajectory = "trajectory"
     case turnJudge = "turn_judge"
     case vibe = "vibe"
 }
@@ -1764,13 +1765,16 @@ struct ADSessionInfo: Codable, Equatable {
     var currentTool: String?
     var cwd: String?
     var effortLevel: String?
+    var elapsedSec: Double?
     var foldedSessionIds: [String]?
     var groupSize: Double?
     var id: String
     var modelName: String?
+    var options: [ADPromptOption]?
     var pid: Double?
     var port: Double
     var projectName: String
+    var promptType: ADPromptType?
     var question: String?
     var requestId: String?
     var startedAt: String?
@@ -1786,13 +1790,16 @@ struct ADSessionInfo: Codable, Equatable {
         case currentTool = "currentTool"
         case cwd = "cwd"
         case effortLevel = "effortLevel"
+        case elapsedSec = "elapsedSec"
         case foldedSessionIds = "foldedSessionIds"
         case groupSize = "groupSize"
         case id = "id"
         case modelName = "modelName"
+        case options = "options"
         case pid = "pid"
         case port = "port"
         case projectName = "projectName"
+        case promptType = "promptType"
         case question = "question"
         case requestId = "requestId"
         case startedAt = "startedAt"
@@ -1828,13 +1835,16 @@ extension ADSessionInfo {
         currentTool: String?? = nil,
         cwd: String?? = nil,
         effortLevel: String?? = nil,
+        elapsedSec: Double?? = nil,
         foldedSessionIds: [String]?? = nil,
         groupSize: Double?? = nil,
         id: String? = nil,
         modelName: String?? = nil,
+        options: [ADPromptOption]?? = nil,
         pid: Double?? = nil,
         port: Double? = nil,
         projectName: String? = nil,
+        promptType: ADPromptType?? = nil,
         question: String?? = nil,
         requestId: String?? = nil,
         startedAt: String?? = nil,
@@ -1850,13 +1860,16 @@ extension ADSessionInfo {
             currentTool: currentTool ?? self.currentTool,
             cwd: cwd ?? self.cwd,
             effortLevel: effortLevel ?? self.effortLevel,
+            elapsedSec: elapsedSec ?? self.elapsedSec,
             foldedSessionIds: foldedSessionIds ?? self.foldedSessionIds,
             groupSize: groupSize ?? self.groupSize,
             id: id ?? self.id,
             modelName: modelName ?? self.modelName,
+            options: options ?? self.options,
             pid: pid ?? self.pid,
             port: port ?? self.port,
             projectName: projectName ?? self.projectName,
+            promptType: promptType ?? self.promptType,
             question: question ?? self.question,
             requestId: requestId ?? self.requestId,
             startedAt: startedAt ?? self.startedAt,

@@ -384,6 +384,12 @@ final class ApmeStore: @unchecked Sendable {
             "taskCategory": "task_category",
             "notesJson": "notes_json",
             "boundarySignal": "boundary_signal",
+            "modelId": "model_id",
+            "modelConfig": "model_config",
+            "inputTokens": "input_tokens",
+            "outputTokens": "output_tokens",
+            "costUsd": "cost_usd",
+            "latencyMs": "latency_ms",
         ]
         var sets: [String] = []
         var vals: [Any?] = []
@@ -509,6 +515,218 @@ final class ApmeStore: @unchecked Sendable {
         return result
     }
 
+    // MARK: - Sample events (typed trajectory)
+
+    /// Append one typed trajectory event. INSERT OR IGNORE on the UNIQUE
+    /// (task_id, dedup_key) index makes storage-time dedup atomic. Returns true
+    /// if a row was actually inserted. Mirrors bridge/src/apme/store.ts.
+    @discardableResult
+    func insertSampleEvent(taskId: String, runId: String, turnIndex: Int?, seq: Int, ts: Int,
+                           kind: String, model: String?, inputTokens: Int?, outputTokens: Int?,
+                           costUsd: Double?, latencyMs: Int?, toolName: String?, toolStatus: String?,
+                           toolError: String?, payload: String?, dedupKey: String?) -> Bool {
+        guard let db else { return false }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            """
+            INSERT OR IGNORE INTO sample_events
+              (task_id, run_id, turn_index, seq, ts, kind, model, input_tokens, output_tokens,
+               cost_usd, latency_ms, tool_name, tool_status, tool_error, payload, dedup_key)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, taskId)
+        bindText(stmt, 2, runId)
+        if let v = turnIndex { sqlite3_bind_int(stmt, 3, Int32(v)) } else { sqlite3_bind_null(stmt, 3) }
+        sqlite3_bind_int(stmt, 4, Int32(seq))
+        sqlite3_bind_int64(stmt, 5, Int64(ts))
+        bindText(stmt, 6, kind)
+        bindTextOrNull(stmt, 7, model)
+        if let v = inputTokens { sqlite3_bind_int64(stmt, 8, Int64(v)) } else { sqlite3_bind_null(stmt, 8) }
+        if let v = outputTokens { sqlite3_bind_int64(stmt, 9, Int64(v)) } else { sqlite3_bind_null(stmt, 9) }
+        if let v = costUsd { sqlite3_bind_double(stmt, 10, v) } else { sqlite3_bind_null(stmt, 10) }
+        if let v = latencyMs { sqlite3_bind_int64(stmt, 11, Int64(v)) } else { sqlite3_bind_null(stmt, 11) }
+        bindTextOrNull(stmt, 12, toolName)
+        bindTextOrNull(stmt, 13, toolStatus)
+        bindTextOrNull(stmt, 14, toolError)
+        bindTextOrNull(stmt, 15, payload)
+        bindTextOrNull(stmt, 16, dedupKey)
+        sqlite3_step(stmt)
+        return sqlite3_changes(db) > 0
+    }
+
+    /// Next monotonic seq within a task.
+    func nextSampleSeq(_ taskId: String) -> Int {
+        guard let db else { return 0 }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COALESCE(MAX(seq),-1)+1 FROM sample_events WHERE task_id = ?", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, taskId)
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
+
+    /// All trajectory event rows for a task (snake_case column dicts), ordered.
+    func listSampleEventRows(_ taskId: String) -> [[String: Any]] {
+        guard let db else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT * FROM sample_events WHERE task_id = ? ORDER BY seq ASC", -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, taskId)
+        var result: [[String: Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { result.append(rowToDict(stmt)) }
+        return result
+    }
+
+    /// Find a tool event still pending for (task, turn, toolName), to resolve it.
+    func findPendingToolEvent(taskId: String, turnIndex: Int, toolName: String) -> [String: Any]? {
+        guard let db else { return nil }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            """
+            SELECT * FROM sample_events
+            WHERE task_id = ? AND turn_index = ? AND kind = 'tool' AND tool_name = ?
+              AND (tool_status IS NULL OR tool_status = 'pending')
+            ORDER BY seq DESC LIMIT 1
+            """, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, taskId)
+        sqlite3_bind_int(stmt, 2, Int32(turnIndex))
+        bindText(stmt, 3, toolName)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return rowToDict(stmt)
+    }
+
+    /// Update a previously-inserted event (tool pending→resolved) by id.
+    func updateSampleEvent(id: Int, fields: [String: Any?]) {
+        guard let db, !fields.isEmpty else { return }
+        let colMap: [String: String] = [
+            "toolStatus": "tool_status", "toolError": "tool_error", "payload": "payload",
+            "costUsd": "cost_usd", "latencyMs": "latency_ms", "model": "model",
+            "inputTokens": "input_tokens", "outputTokens": "output_tokens", "ts": "ts",
+        ]
+        var sets: [String] = []
+        var vals: [Any?] = []
+        for (key, val) in fields {
+            guard let col = colMap[key] else { continue }
+            sets.append("\(col) = ?")
+            vals.append(val)
+        }
+        guard !sets.isEmpty else { return }
+        vals.append(id)
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "UPDATE sample_events SET \(sets.joined(separator: ", ")) WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        for (i, val) in vals.enumerated() {
+            let idx = Int32(i + 1)
+            switch val {
+            case let s as String: sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            case let n as Int: sqlite3_bind_int64(stmt, idx, Int64(n))
+            case let d as Double: sqlite3_bind_double(stmt, idx, d)
+            default: sqlite3_bind_null(stmt, idx)
+            }
+        }
+        sqlite3_step(stmt)
+    }
+
+    /// Recompute the task's cost aggregate by summing its ModelEvents.
+    func recomputeSampleCost(_ taskId: String) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            """
+            SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+                   COALESCE(SUM(cost_usd),0), COALESCE(SUM(latency_ms),0)
+            FROM sample_events WHERE task_id = ? AND kind = 'model'
+            """, -1, &stmt, nil) == SQLITE_OK else { return }
+        var it = 0, ot = 0, lm = 0
+        var cu = 0.0
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            it = Int(sqlite3_column_int64(stmt, 0)); ot = Int(sqlite3_column_int64(stmt, 1))
+            cu = sqlite3_column_double(stmt, 2); lm = Int(sqlite3_column_int64(stmt, 3))
+        }
+        sqlite3_finalize(stmt)
+        updateTask(id: taskId, fields: ["inputTokens": it, "outputTokens": ot, "costUsd": cu, "latencyMs": lm])
+    }
+
+    /// Sample-granularity scorecard (quality vs cost) — the recommender + Pareto input.
+    func sampleScorecard() -> [[String: Any]] {
+        return query("SELECT * FROM v_sample_scorecard")
+    }
+
+    /// Assemble the SessionSample as a JSON-ready dict (header + cost + events).
+    /// Used by the HTTP /apme/run/:id route and the runner's judge prompt.
+    func getSampleDict(_ taskId: String) -> [String: Any]? {
+        guard let task = getTask(id: taskId) else { return nil }
+        let run = getRun(id: task.runId)
+        let events = listSampleEventRows(taskId).map { Self.sampleEventRowToDict($0) }
+        var modelConfig: [String: Any]? = nil
+        if let mc = task.modelConfig, let data = mc.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            modelConfig = obj
+        }
+        let modelId = task.modelId ?? run?.modelId ?? (modelConfig?["modelId"] as? String) ?? "unknown"
+        return [
+            "id": task.id,
+            "runId": task.runId,
+            "sessionId": run?.sessionId ?? "",
+            "agentType": run?.agentType ?? "claude-code",
+            "index": task.taskIndex,
+            "boundarySignal": task.boundarySignal,
+            "startedAt": task.startedAt,
+            "endedAt": task.endedAt as Any,
+            "model": modelConfig ?? ["modelId": modelId],
+            "projectName": run?.projectName as Any,
+            "projectPath": run?.projectPath as Any,
+            "events": events,
+            "cost": [
+                "inputTokens": task.inputTokens ?? 0,
+                "outputTokens": task.outputTokens ?? 0,
+                "costUsd": task.costUsd ?? 0,
+                "latencyMs": task.latencyMs ?? 0,
+            ],
+            "summary": task.summary as Any,
+            "outcome": task.outcome as Any,
+            "compositeScore": task.compositeScore as Any,
+            "taskCategory": task.taskCategory as Any,
+        ]
+    }
+
+    /// Decode a stored sample_events row into a JSON-ready typed event dict.
+    static func sampleEventRowToDict(_ r: [String: Any]) -> [String: Any] {
+        let kind = r["kind"] as? String ?? "info"
+        let turnIndex = r["turn_index"] as? Int ?? 0
+        let ts = r["ts"] as? Int ?? 0
+        var p: [String: Any] = [:]
+        if let s = r["payload"] as? String, let data = s.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { p = obj }
+        var out: [String: Any] = ["kind": kind, "turnIndex": turnIndex, "ts": ts]
+        switch kind {
+        case "user_message": out["text"] = p["text"] as? String ?? ""
+        case "assistant_message":
+            out["text"] = p["text"] as? String ?? ""
+            out["responseKind"] = p["responseKind"] as? String ?? "text"
+        case "model":
+            out["model"] = r["model"] as? String ?? "unknown"
+            out["inputTokens"] = r["input_tokens"] as? Int ?? 0
+            out["outputTokens"] = r["output_tokens"] as? Int ?? 0
+            out["costUsd"] = r["cost_usd"] as? Double ?? 0
+            out["latencyMs"] = r["latency_ms"] as? Int ?? 0
+        case "tool":
+            out["name"] = r["tool_name"] as? String ?? "tool"
+            if let input = p["input"] { out["input"] = input }
+            if let output = p["output"] { out["output"] = output }
+            if let status = r["tool_status"] as? String { out["status"] = status }
+            if let err = r["tool_error"] as? String { out["error"] = err }
+        case "state":
+            out["from"] = p["from"]
+            out["to"] = p["to"] as? String ?? "unknown"
+        default:
+            out["label"] = p["label"] as? String ?? "info"
+            out["detail"] = p["detail"]
+        }
+        return out
+    }
+
     private static func rowToTask(_ d: [String: Any]) -> ApmeTask {
         return ApmeTask(
             id: d["id"] as? String ?? "",
@@ -523,7 +741,13 @@ final class ApmeStore: @unchecked Sendable {
             outcome: d["outcome"] as? String,
             compositeScore: d["composite_score"] as? Double,
             taskCategory: d["task_category"] as? String,
-            notesJson: d["notes_json"] as? String
+            notesJson: d["notes_json"] as? String,
+            modelId: d["model_id"] as? String,
+            modelConfig: d["model_config"] as? String,
+            inputTokens: d["input_tokens"] as? Int,
+            outputTokens: d["output_tokens"] as? Int,
+            costUsd: d["cost_usd"] as? Double,
+            latencyMs: d["latency_ms"] as? Int
         )
     }
 
@@ -799,6 +1023,18 @@ final class ApmeStore: @unchecked Sendable {
             exec("ALTER TABLE turns ADD COLUMN task_id TEXT")
             exec("CREATE INDEX IF NOT EXISTS idx_turns_task ON turns(task_id)")
         }
+
+        // tasks sample-header columns (model identity + cost) — SessionSample rebuild.
+        let tasksCols = query("PRAGMA table_info(tasks)").compactMap { $0["name"] as? String }
+        let tasksMigrations: [(String, String)] = [
+            ("model_id",      "ALTER TABLE tasks ADD COLUMN model_id TEXT"),
+            ("model_config",  "ALTER TABLE tasks ADD COLUMN model_config TEXT"),
+            ("input_tokens",  "ALTER TABLE tasks ADD COLUMN input_tokens INTEGER"),
+            ("output_tokens", "ALTER TABLE tasks ADD COLUMN output_tokens INTEGER"),
+            ("cost_usd",      "ALTER TABLE tasks ADD COLUMN cost_usd REAL"),
+            ("latency_ms",    "ALTER TABLE tasks ADD COLUMN latency_ms INTEGER"),
+        ]
+        for (col, sql) in tasksMigrations where !tasksCols.contains(col) { exec(sql) }
     }
 
     private func seedDefaultRubric() {
@@ -1139,9 +1375,28 @@ final class ApmeStore: @unchecked Sendable {
       outcome TEXT,
       composite_score REAL,
       task_category TEXT,
-      notes_json TEXT
+      notes_json TEXT,
+      model_id TEXT,
+      model_config TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cost_usd REAL,
+      latency_ms INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
+    -- Typed trajectory events — the SessionSample.events projection (the single
+    -- source of truth for both timeline + eval). Storage-time dedup via the
+    -- UNIQUE index + INSERT OR IGNORE. Mirrors bridge/src/apme/store.ts.
+    CREATE TABLE IF NOT EXISTS sample_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      turn_index INTEGER, seq INTEGER NOT NULL, ts INTEGER NOT NULL, kind TEXT NOT NULL,
+      model TEXT, input_tokens INTEGER, output_tokens INTEGER, cost_usd REAL, latency_ms INTEGER,
+      tool_name TEXT, tool_status TEXT, tool_error TEXT, payload TEXT, dedup_key TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sevents_task ON sample_events(task_id, seq);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sevents_dedup ON sample_events(task_id, dedup_key);
     CREATE TABLE IF NOT EXISTS artifacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -1187,6 +1442,14 @@ final class ApmeStore: @unchecked Sendable {
     FROM runs r LEFT JOIN v_run_metrics m ON m.run_id=r.id
     WHERE r.task_category IS NOT NULL AND r.task_category != 'unknown'
     GROUP BY r.task_category, r.model_id;
+    CREATE VIEW IF NOT EXISTS v_sample_scorecard AS
+    SELECT r.agent_type, COALESCE(t.model_id, r.model_id, 'unknown') AS model_id,
+      t.task_category, COUNT(*) AS samples, AVG(t.composite_score) AS avg_quality,
+      SUM(t.cost_usd) AS total_cost, AVG(t.latency_ms) AS avg_latency_ms,
+      CASE WHEN AVG(t.composite_score)>0 THEN SUM(t.cost_usd)/AVG(t.composite_score) ELSE NULL END AS cost_per_quality
+    FROM tasks t JOIN runs r ON r.id=t.run_id
+    WHERE t.ended_at IS NOT NULL AND t.composite_score IS NOT NULL
+    GROUP BY r.agent_type, COALESCE(t.model_id, r.model_id, 'unknown'), t.task_category;
     """
 }
 
@@ -1258,6 +1521,13 @@ struct ApmeTask {
     var compositeScore: Double?
     var taskCategory: String?
     var notesJson: String?
+    // Sample header: agent identity + cost (req #2 / #7).
+    var modelId: String?
+    var modelConfig: String?
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var costUsd: Double?
+    var latencyMs: Int?
 }
 
 private final class ApmeOpenContinuationGate: @unchecked Sendable {

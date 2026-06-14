@@ -9,7 +9,7 @@ import Foundation
 
 public enum AgentCommand: Equatable {
     case respond(value: String)
-    case selectOption(index: Int)
+    case selectOption(index: Int, sessionId: String?)
     case navigateOption(direction: String)
     case sendPrompt(text: String)
     case switchMode(mode: String?)
@@ -35,9 +35,10 @@ public enum AgentCommand: Equatable {
             var dict: [String: Any] = ["type": "respond"]
             dict["value"] = value
             return dict
-        case .selectOption(let index):
+        case .selectOption(let index, let sessionId):
             var dict: [String: Any] = ["type": "select_option"]
             dict["index"] = index
+            if let sessionId = sessionId { dict["sessionId"] = sessionId }
             return dict
         case .navigateOption(let direction):
             var dict: [String: Any] = ["type": "navigate_option"]

@@ -311,7 +311,12 @@ describe('ApmeRunner task eval', () => {
     const metrics = new Set(evals.map((e) => e.metric));
     expect(metrics.has('overall')).toBe(true);
     expect(metrics.has('completion')).toBe(true);
-    expect(evals.every((e) => e.layer === 'task_judge')).toBe(true);
+    // LLM-judge axes are stored under task_judge; pure trajectory scorers
+    // (tool_efficiency / trajectory_quality) under the 'trajectory' layer.
+    const judgeAxes = evals.filter((e) => e.layer === 'task_judge');
+    expect(judgeAxes.length).toBeGreaterThan(0);
+    expect(judgeAxes.some((e) => e.metric === 'overall')).toBe(true);
+    expect(evals.every((e) => e.layer === 'task_judge' || e.layer === 'trajectory')).toBe(true);
   });
 
   it('skips task eval when all turns are tool_only / empty', async () => {

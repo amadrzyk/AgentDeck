@@ -16,10 +16,26 @@ type EntryAttributor = (entry: TimelineEntry) => TimelineEntry;
 
 const MAX_ENTRIES = 200;
 
+/** Chat/tool entry types that, in projection mode, come from the SessionSample
+ *  projection instead of the adapters' direct emitters. Locally-emitted entries
+ *  of these types are suppressed when projection mode is on so the timeline has
+ *  exactly one source. Task hierarchy + error/scheduled rows are never affected. */
+const PROJECTED_TYPES: ReadonlySet<string> = new Set([
+  'chat_start', 'chat_response', 'chat_end', 'tool_request', 'tool_resolved', 'tool_exec',
+]);
+
 export class BridgeTimelineStore {
   private entries: TimelineEntry[] = [];
   private listeners: EntryListener[] = [];
   private attributor: EntryAttributor | null = null;
+  /** Phase 6 cutover (default OFF). When true, locally-emitted chat/tool rows
+   *  are dropped — the SessionSample projection (added via `bypassSuppression`)
+   *  becomes the single source. Relayed + projected entries bypass this. */
+  private suppressLocalChatTool = false;
+
+  setSuppressLocalChatTool(v: boolean): void {
+    this.suppressLocalChatTool = v;
+  }
 
   /** Install (or replace) the attributor invoked on every addEntry / upsertEntry
    *  before dedup. Wired by `BridgeCore.wireTimeline` so the store and the
@@ -29,7 +45,13 @@ export class BridgeTimelineStore {
     this.attributor = fn;
   }
 
-  addEntry(entry: TimelineEntry): void {
+  addEntry(entry: TimelineEntry, opts?: { bypassSuppression?: boolean }): void {
+    // Phase 6: in projection mode, drop locally-emitted chat/tool rows — they
+    // now come from the SessionSample projection (which bypasses) or are
+    // relayed from another bridge (which bypasses). No-op when mode is off.
+    if (this.suppressLocalChatTool && !opts?.bypassSuppression && PROJECTED_TYPES.has(entry.type)) {
+      return;
+    }
     const enriched = this.attributor ? this.attributor(entry) : entry;
     const result = deduplicateEntry(enriched, this.entries);
 
@@ -96,7 +118,9 @@ export class BridgeTimelineStore {
    *
    *  Insert path (no match): falls through to `addEntry`, which runs the
    *  attributor as usual to capture creation-time attribution. */
-  upsertEntry(entry: TimelineEntry): void {
+  upsertEntry(entry: TimelineEntry, opts?: { bypassSuppression?: boolean }): void {
+    // An upsert that finds no match falls through to addEntry; honor the same
+    // suppression bypass on that insert path (relayed task_end upserts, etc.).
     const tolerance = 1000;
     for (let i = this.entries.length - 1; i >= 0; i--) {
       const e = this.entries[i];
@@ -122,7 +146,7 @@ export class BridgeTimelineStore {
         return;
       }
     }
-    this.addEntry(entry);
+    this.addEntry(entry, opts);
   }
 
   /** Get the most recent entry of a given type */

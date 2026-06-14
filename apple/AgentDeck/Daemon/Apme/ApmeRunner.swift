@@ -353,6 +353,20 @@ actor ApmeRunner {
             store.insertEvalForTask(eval, taskId: taskId)
         }
 
+        // Pure sample-trajectory scorers (tool churn, error rate). Stored under
+        // layer="trajectory" so they don't collide with task_judge axes.
+        // Mirrors bridge/src/apme/runner.ts runSampleScorers.
+        if let sample = store.getSampleDict(taskId),
+           let events = sample["events"] as? [[String: Any]] {
+            for r in ApmeScorers.run(events: events) {
+                store.insertEvalForTask(
+                    ApmeEval(id: 0, runId: runId, layer: "trajectory", metric: r.metric,
+                             score: r.score, raw: r.reasoning, rubricVer: nil,
+                             judgeModel: "scorer:\(r.scorer)", createdAt: now),
+                    taskId: taskId)
+            }
+        }
+
         // Persist the summary + composite score + outcome on the task row so
         // listTasksForRun returns them without a join. Preserve any
         // previously-set outcome — that only happens when the user closed

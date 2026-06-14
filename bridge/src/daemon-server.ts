@@ -44,7 +44,7 @@ import { handlePixooWake } from './pixoo/pixoo-client.js';
 import { triggerMdnsRecovery } from './mdns.js';
 import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
 import { enableDebugLog, debug } from './logger.js';
-import { initApme, loadApmeConfig, type ApmeModule } from './apme/index.js';
+import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule } from './apme/index.js';
 import { handleApmeRequest } from './apme/http.js';
 import {
   initModules,
@@ -1048,11 +1048,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // own connection to the same sqlite file is safe under WAL mode.
   // emitTimeline: forward task hierarchy entries (task_start / task_end) into
   // the daemon's bridgeTimeline so downstream dashboards see task headers.
+  const daemonProjectTimeline = isTimelineProjectionEnabled();
   apme = await initApme(undefined, {
     emitTimeline: (entry) => core.bridgeTimeline.addEntry(entry),
+    projectSampleTimeline: daemonProjectTimeline,
+    emitProjectedTimeline: (entry) => core.bridgeTimeline.addEntry(entry, { bypassSuppression: true }),
   });
   if (apme) {
     core.setApme(apme);
+    if (daemonProjectTimeline) {
+      core.bridgeTimeline.setSuppressLocalChatTool(true);
+      log('[agentdeck] APME timeline projection ENABLED — chat/tool rows derive from SessionSample');
+    }
     log(`[agentdeck] APME enabled — store=${apme.store.dbPath} routes=/apme/*`);
     // Fire-and-forget judge backend probe. Result is cached on
     // apme.runner.lastBackendProbe and surfaced on /health so users discover
@@ -1092,7 +1099,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     // still surfaces within one frame. Key = the Claude session UUID embedded
     // in `observed:claude:<uuid>`.
     const observed = applyAwaitingOverlayToObserved(passiveSessionObserver.collect(sessions));
-    const enrichedSessions = [...sessions, ...observed];
+    // Derive per-session elapsed seconds from startedAt so NTP-less devices
+    // (ESP32 IPS10 mosaic) render an elapsed value per cell without a wall clock.
+    const now = Date.now();
+    const enrichedSessions = [...sessions, ...observed].map((s) => {
+      if (s.elapsedSec != null || !s.startedAt) return s;
+      const sec = Math.round((now - Date.parse(s.startedAt)) / 1000);
+      return Number.isFinite(sec) && sec >= 0 ? { ...s, elapsedSec: sec } : s;
+    });
     const adapterAlive = gatewayAdapter?.isAlive() ?? false;
     if (!adapterAlive && !core.cachedGatewayConnected) return enrichedSessions;
     if (enrichedSessions.some(s => s.agentType === 'openclaw')) return enrichedSessions;
@@ -1468,6 +1482,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       // Small delay to let focus take effect, then route
       setTimeout(() => focusRelay.routeCommand(command), 100);
       return;
+    }
+    // Session-scoped option select from a multi-up panel (IPS10 D1 mosaic):
+    // any awaiting cell can be answered, not just the focused one. Focus the
+    // named session, then route a plain select_option to its bridge.
+    if (cmd.type === 'select_option' && typeof (cmd as any).sessionId === 'string') {
+      const sessionId = (cmd as any).sessionId as string;
+      const target = listActiveSessions().find(s => s.id === sessionId);
+      if (target) {
+        userFocusedSessionId = sessionId;
+        broadcastFocusedState();
+        focusRelay.focus(sessionId);
+        setTimeout(() => focusRelay.routeCommand({ type: 'select_option', index: (cmd as any).index }), 100);
+        return;
+      }
     }
     // Route interactive commands to focused session (if any)
     if (focusRelay.getFocusedSessionId() && focusRelay.routeCommand(cmd)) {

@@ -15,7 +15,7 @@
 import { randomUUID, createHash } from 'crypto';
 import { execSync } from 'child_process';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { debug } from '../logger.js';
 import { resolveProjectName } from '../utils/project-name.js';
@@ -23,7 +23,8 @@ import type { UsageSnapshot } from '../types.js';
 import type { SessionEntry } from '../session-registry.js';
 import type { ApmeStore } from './store.js';
 import type { ApmeRunRow } from './types.js';
-import type { AgentType, TelemetrySpan } from '@agentdeck/shared';
+import type { AgentType, TelemetrySpan, ApmeSampleEventRow, TrajectoryEventKind } from '@agentdeck/shared';
+import { priceUsd, providerFor } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
 import { classifyRunSmart } from './classifier.js';
 
@@ -74,6 +75,19 @@ export type OnTaskClosed = (args: {
   taskCategory: string | null;
 }) => void;
 
+/** Fired after a typed trajectory event is appended to a sample. The timeline
+ *  projection (Phase 3) wires this to emit a single TimelineEntry per event —
+ *  making the timeline a projection of the sample rather than a parallel
+ *  emitter. `event` carries the assembled sample-event facts. */
+export type OnSampleEvent = (args: {
+  taskId: string;
+  runId: string;
+  sessionId: string;
+  agentType: AgentType | null;
+  projectName: string | null;
+  event: ApmeSampleEventRow;
+}) => void;
+
 /** Callback fired after a task is opened. Used by the timeline emitter to
  *  insert a `task_start` row so the dashboard sees task hierarchy. */
 export type OnTaskOpened = (args: {
@@ -92,6 +106,7 @@ export class ApmeCollector {
   private readonly sessionToLastTurnId = new Map<string, string>(); // survives closeTurn()
   private readonly sessionToTask = new Map<string, ActiveTask>(); // sessionId → current task
   private readonly runTaskCount = new Map<string, number>();      // runId → next task_index
+  private readonly sessionToUsage = new Map<string, { in: number; out: number }>(); // last cumulative usage
 
   /** Optional listener fired after `closeTask` persists the row. The runner
    *  wires this to enqueue a task-level judge call. */
@@ -100,6 +115,10 @@ export class ApmeCollector {
   /** Optional listener fired after `openTaskIfNone` inserts a fresh task row.
    *  The dashboard timeline emitter wires this to push a `task_start` entry. */
   public onTaskOpened: OnTaskOpened | null = null;
+
+  /** Optional listener fired after a typed trajectory event is persisted.
+   *  The timeline projection (Phase 3) consumes this. */
+  public onSampleEvent: OnSampleEvent | null = null;
 
   constructor(
     private readonly store: ApmeStore,
@@ -188,6 +207,13 @@ export class ApmeCollector {
           startedAt: turn.startedAt, gitBefore: turn.gitBefore ?? undefined,
         });
       } catch (err) { debug('APME', `insertTurn failed: ${String(err)}`); }
+      // Sample trajectory: the user message opens the turn's typed event log.
+      if (task) {
+        this.appendSampleEvent(
+          { taskId: task.id, runId, turnIndex },
+          { kind: 'user_message', ts: turn.startedAt, dedupCore: hashCore(prompt ?? `turn${turnIndex}`), payloadObj: { text: prompt ?? '' } },
+        );
+      }
       // Also set run's task_prompt from first prompt
       try {
         if (run && !run.taskPrompt && prompt) {
@@ -202,6 +228,56 @@ export class ApmeCollector {
       activeTurn.toolCalls++;
       if (toolName === 'Edit') activeTurn.filesModified++;
       if (toolName === 'Write') activeTurn.filesCreated++;
+      // Sample trajectory: a tool call starts as a pending ToolEvent; its
+      // PostToolUse result resolves the SAME row (one row, not two).
+      const task = this.sessionToTask.get(sessionId);
+      if (task && toolName) {
+        this.appendSampleEvent(
+          { taskId: task.id, runId, turnIndex: activeTurn.index },
+          {
+            kind: 'tool', toolName, toolStatus: 'pending',
+            dedupCore: `${toolName}:${activeTurn.toolCalls}`,
+            payloadObj: { input: extractToolInput(data) },
+          },
+        );
+      }
+    }
+
+    // Sample trajectory: resolve the pending ToolEvent on PostToolUse / tool_result.
+    if ((event === 'PostToolUse' || event === 'tool_result') && toolName) {
+      const task = this.sessionToTask.get(sessionId);
+      const turnIndex = this.sessionToTurn.get(sessionId)?.index;
+      if (task && turnIndex !== undefined) {
+        const isError = Boolean((data as Record<string, unknown>).is_error || (data as Record<string, unknown>).error);
+        const output = extractToolOutput(data);
+        const pending = this.store.findPendingToolEvent(task.id, turnIndex, toolName);
+        if (pending?.id != null) {
+          let payload = pending.payload;
+          try {
+            const obj = pending.payload ? JSON.parse(pending.payload) as Record<string, unknown> : {};
+            if (output !== undefined) obj.output = output;
+            payload = safeStringify(obj);
+          } catch { /* keep existing payload */ }
+          this.store.updateSampleEvent(pending.id, {
+            toolStatus: isError ? 'error' : 'success',
+            toolError: isError ? String((data as Record<string, unknown>).error ?? 'error').slice(0, 500) : null,
+            payload,
+          });
+        } else {
+          // No pending row (PostToolUse without a matching PreToolUse) — record
+          // a resolved tool event directly.
+          this.appendSampleEvent(
+            { taskId: task.id, runId, turnIndex },
+            {
+              kind: 'tool', toolName,
+              toolStatus: isError ? 'error' : 'success',
+              toolError: isError ? String((data as Record<string, unknown>).error ?? 'error').slice(0, 500) : null,
+              dedupCore: `${toolName}:resolved:${turnIndex}:${this.store.nextSampleSeq(task.id)}`,
+              payloadObj: { output },
+            },
+          );
+        }
+      }
     }
 
     // ── Task boundary: TodoWrite all-completed ──
@@ -406,6 +482,95 @@ export class ApmeCollector {
     return this.sessionToRun.get(sessionId) ?? null;
   }
 
+  // ─── SessionSample trajectory (the normalizer's typed event log) ────────────
+
+  /** Resolve the (taskId, runId, turnIndex) a sample event should attach to.
+   *  Prefers the active task/turn; falls back to a turn row in the DB when the
+   *  task already closed (e.g. PTY response captured after session_end). */
+  private sampleCtxForTurn(
+    sessionId: string,
+    turnId?: string,
+  ): { taskId: string; runId: string; turnIndex: number } | null {
+    const active = this.sessionToTask.get(sessionId);
+    if (turnId) {
+      const row = this.store.getTurn(turnId);
+      const taskId = (row?.task_id as string | undefined) ?? active?.id;
+      const runId = (row?.run_id as string | undefined) ?? active?.runId;
+      const turnIndex = (row?.turn_index as number | undefined)
+        ?? this.sessionToTurn.get(sessionId)?.index ?? active?.lastTurnIndex ?? 0;
+      if (taskId && runId) return { taskId, runId, turnIndex };
+    }
+    if (active) {
+      const turnIndex = this.sessionToTurn.get(sessionId)?.index ?? active.lastTurnIndex ?? 0;
+      return { taskId: active.id, runId: active.runId, turnIndex };
+    }
+    return null;
+  }
+
+  /** Append one typed trajectory event to the active sample. Storage-time dedup
+   *  is handled by the UNIQUE (task_id, dedup_key) index. Fires `onSampleEvent`
+   *  only when a row was actually inserted (not a dup), so the timeline
+   *  projection never double-emits. */
+  private appendSampleEvent(
+    ctx: { taskId: string; runId: string; turnIndex: number },
+    ev: {
+      kind: TrajectoryEventKind;
+      dedupCore: string;
+      ts?: number;
+      model?: string | null;
+      inputTokens?: number | null;
+      outputTokens?: number | null;
+      costUsd?: number | null;
+      latencyMs?: number | null;
+      toolName?: string | null;
+      toolStatus?: string | null;
+      toolError?: string | null;
+      payloadObj?: Record<string, unknown>;
+    },
+  ): void {
+    if (!this.store.enabled) return;
+    const dedupKey = createHash('sha1').update(`${ev.kind}|${ctx.turnIndex}|${ev.dedupCore}`).digest('hex').slice(0, 24);
+    const row: ApmeSampleEventRow = {
+      taskId: ctx.taskId,
+      runId: ctx.runId,
+      turnIndex: ctx.turnIndex,
+      seq: this.store.nextSampleSeq(ctx.taskId),
+      ts: ev.ts ?? Date.now(),
+      kind: ev.kind,
+      model: ev.model ?? null,
+      inputTokens: ev.inputTokens ?? null,
+      outputTokens: ev.outputTokens ?? null,
+      costUsd: ev.costUsd ?? null,
+      latencyMs: ev.latencyMs ?? null,
+      toolName: ev.toolName ?? null,
+      toolStatus: ev.toolStatus ?? null,
+      toolError: ev.toolError ?? null,
+      payload: ev.payloadObj ? safeStringify(ev.payloadObj) : null,
+      dedupKey,
+    };
+    let inserted = false;
+    try { inserted = this.store.insertSampleEvent(row); }
+    catch (err) { debug('APME', `appendSampleEvent failed: ${String(err)}`); return; }
+    if (inserted && this.onSampleEvent) {
+      const run = this.store.getRun(ctx.runId);
+      try {
+        this.onSampleEvent({
+          taskId: ctx.taskId, runId: ctx.runId,
+          sessionId: this.runToSessionId(ctx.runId),
+          agentType: (run?.agentType ?? null) as AgentType | null,
+          projectName: run?.projectName ?? null,
+          event: row,
+        });
+      } catch (err) { debug('APME', `onSampleEvent listener threw: ${String(err)}`); }
+    }
+  }
+
+  /** Reverse-lookup sessionId for a runId (best-effort; only the live map). */
+  private runToSessionId(runId: string): string {
+    for (const [sid, rid] of this.sessionToRun) if (rid === runId) return sid;
+    return '';
+  }
+
   /** Store Claude's response text on the current turn.
    *  Falls back to the last closed turn if closeTurn() already ran (race with session exit).
    *  Tags turns.efficiency_json.response_kind so the runner can skip tool-only / empty
@@ -431,6 +596,15 @@ export class ApmeCollector {
         efficiencyJson,
       });
     } catch (err) { debug('APME', `setTurnResponse failed: ${String(err)}`); }
+    // Sample trajectory: the assistant response closes the turn's event arc.
+    const ctx = this.sampleCtxForTurn(sessionId, turnId);
+    if (ctx) {
+      this.appendSampleEvent(ctx, {
+        kind: 'assistant_message',
+        dedupCore: hashCore(response.slice(0, 400)),
+        payloadObj: { text: response.slice(0, 10_000), responseKind: kind },
+      });
+    }
   }
 
   /** Apply response to the last closed turn if it has no response yet.
@@ -453,6 +627,14 @@ export class ApmeCollector {
         efficiencyJson,
       });
     } catch { /* ignore */ }
+    const ctx = this.sampleCtxForTurn(sessionId, turnId);
+    if (ctx) {
+      this.appendSampleEvent(ctx, {
+        kind: 'assistant_message',
+        dedupCore: hashCore(response.slice(0, 400)),
+        payloadObj: { text: response.slice(0, 10_000), responseKind: kind },
+      });
+    }
   }
 
   /** Single-entrypoint ingestion using the shared TelemetrySpan envelope.
@@ -560,7 +742,10 @@ export class ApmeCollector {
     } catch { /* ignore */ }
   }
 
-  /** Update token / cost columns from the bridge's UsageTracker snapshot. */
+  /** Update token / cost columns from the bridge's UsageTracker snapshot.
+   *  Snapshots carry CUMULATIVE session totals, so we emit a priced ModelEvent
+   *  for the delta and attribute it to the active task (the SessionSample cost
+   *  is the sum of its ModelEvents). */
   updateUsage(sessionId: string, snapshot: UsageSnapshot): void {
     if (!this.store.enabled) return;
     const runId = this.sessionToRun.get(sessionId);
@@ -571,6 +756,37 @@ export class ApmeCollector {
         outputTokens: snapshot.outputTokens,
         costUsd: snapshot.estimatedCostUsd ?? snapshot.costSpent ?? null,
       });
+    } catch { /* ignore */ }
+
+    // ── Per-task ModelEvent from the cumulative delta ──
+    const curIn = snapshot.inputTokens ?? 0;
+    const curOut = snapshot.outputTokens ?? 0;
+    const prev = this.sessionToUsage.get(sessionId) ?? { in: 0, out: 0 };
+    const dIn = Math.max(0, curIn - prev.in);
+    const dOut = Math.max(0, curOut - prev.out);
+    this.sessionToUsage.set(sessionId, { in: curIn, out: curOut });
+    if (dIn === 0 && dOut === 0) return;
+
+    const task = this.sessionToTask.get(sessionId);
+    if (!task) return;
+    const run = this.store.getRun(runId);
+    const model = run?.modelId ?? null;
+    const turnIndex = this.sessionToTurn.get(sessionId)?.index ?? task.lastTurnIndex ?? 0;
+    // Prefer the agent-reported marginal cost when available, else price the delta.
+    const cost = priceUsd(model, dIn, dOut);
+    this.appendSampleEvent(
+      { taskId: task.id, runId, turnIndex },
+      {
+        kind: 'model', model: model ?? undefined, inputTokens: dIn, outputTokens: dOut,
+        costUsd: cost, latencyMs: 0, dedupCore: `${curIn}:${curOut}`,
+      },
+    );
+    try {
+      this.store.updateTask(task.id, {
+        modelId: model ?? undefined,
+        modelConfig: JSON.stringify({ modelId: model ?? 'unknown', provider: providerFor(model) }),
+      });
+      this.store.recomputeSampleCost(task.id);
     } catch { /* ignore */ }
   }
 
@@ -621,6 +837,7 @@ export class ApmeCollector {
     this.sessionToRun.delete(sessionId);
     this.sessionToLastTurnId.delete(sessionId);
     this.runTaskCount.delete(runId);
+    this.sessionToUsage.delete(sessionId);
 
     // Mark empty runs so the dashboard can filter them out.
     // Don't delete — FK constraints and concurrent access make deletion risky.
@@ -735,6 +952,38 @@ function extractTodos(data: Record<string, unknown>): TodoItem[] | null {
     });
   }
   return items;
+}
+
+/** Short stable hash for sample-event dedup keys (content-derived). */
+function hashCore(s: string): string {
+  return createHash('sha1').update(s).digest('hex').slice(0, 16);
+}
+
+/** Best-effort tool-input extraction from a hook/span payload. Claude Code
+ *  hooks carry `tool_input`; spans pass the raw payload directly. Capped to
+ *  keep the trajectory row small. */
+function extractToolInput(data: Record<string, unknown>): unknown {
+  const ti = (data.tool_input as unknown) ?? (data.input as unknown) ?? null;
+  return clampPayload(ti);
+}
+
+/** Best-effort tool-output extraction. Claude Code PostToolUse carries
+ *  `tool_response`; other sources use `output` / `result`. */
+function extractToolOutput(data: Record<string, unknown>): unknown {
+  const out = (data.tool_response as unknown) ?? (data.output as unknown) ?? (data.result as unknown);
+  return out === undefined ? undefined : clampPayload(out);
+}
+
+/** Trim large tool payloads so a single event row stays bounded (≤4KB JSON). */
+function clampPayload(v: unknown): unknown {
+  if (v == null) return v;
+  try {
+    const s = typeof v === 'string' ? v : JSON.stringify(v);
+    if (s.length <= 4_000) return v;
+    return (typeof v === 'string' ? v : s).slice(0, 4_000) + '…';
+  } catch {
+    return undefined;
+  }
 }
 
 function readGitHead(cwd?: string): string | null {

@@ -22,6 +22,7 @@ import { ApmeRunner } from './runner.js';
 import { ApmeTuner } from './tuner.js';
 import { ApmeHwSampler } from './hw-sampler.js';
 import { ApmeRecommender } from './recommend.js';
+import { sampleEventToTimeline } from './sample-to-timeline.js';
 import type { TimelineEntry } from '@agentdeck/shared';
 
 export interface ApmeModule {
@@ -38,6 +39,17 @@ export interface InitApmeOptions {
    *  timeline. Optional — when absent, task tracking still works for eval but
    *  the dashboard sees only turn-level rows. */
   emitTimeline?: (entry: TimelineEntry) => void;
+  /** When true, the timeline becomes a *projection* of the canonical
+   *  SessionSample: each typed trajectory event is projected to a single
+   *  TimelineEntry via `sampleEventToTimeline`. Off by default during the
+   *  incremental cutover — adapters still emit chat/tool rows directly until
+   *  every surface (incl. the Swift daemon) is migrated, to avoid double rows.
+   *  When enabled, the caller should also suppress locally-emitted chat/tool
+   *  rows (`BridgeTimelineStore.setSuppressLocalChatTool`). */
+  projectSampleTimeline?: boolean;
+  /** Emit a projected (chat/tool) timeline entry, bypassing the suppression
+   *  filter. Defaults to `emitTimeline` when not provided. */
+  emitProjectedTimeline?: (entry: TimelineEntry) => void;
 }
 
 let singleton: ApmeModule | null = null;
@@ -101,6 +113,17 @@ export async function initApme(
       });
     }
   };
+
+  // Wire the SessionSample → Timeline projection. When enabled, the timeline
+  // is a projection of the canonical sample (one row per typed trajectory
+  // event), replacing display-time grouping + the race-sensitive dedup window.
+  if (emitTimeline && opts.projectSampleTimeline) {
+    const emitProjected = opts.emitProjectedTimeline ?? emitTimeline;
+    collector.onSampleEvent = ({ event, sessionId, runId, taskId, agentType, projectName }) => {
+      const entry = sampleEventToTimeline(event, { sessionId, runId, taskId, agentType, projectName });
+      if (entry) emitProjected(entry);
+    };
+  }
 
   // Wire task-start emission. The runner has no opinion on opens — only the
   // dashboard does — so we keep this strictly local to the timeline path.
@@ -172,6 +195,13 @@ export async function initApme(
 
 export function getApme(): ApmeModule | null {
   return singleton;
+}
+
+/** Phase 6 cutover switch (default OFF). Set `AGENTDECK_TIMELINE_PROJECTION=1`
+ *  to make the timeline a projection of the canonical SessionSample. Read at
+ *  daemon/session-bridge startup so it can be flipped without a recompile. */
+export function isTimelineProjectionEnabled(): boolean {
+  return process.env.AGENTDECK_TIMELINE_PROJECTION === '1';
 }
 
 export { loadApmeConfig, shouldJudge, DEFAULT_APME_CONFIG } from './settings.js';
