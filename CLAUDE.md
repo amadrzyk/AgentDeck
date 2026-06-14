@@ -4,7 +4,7 @@ Stream Deck+ controller for AI coding agents — a bidirectional local control s
 
 ## Monorepo
 
-- **bridge/** — Node.js server: Daemon hub + Session Bridge (PTY, hook HTTP, state machine). `src/apme/` — APME eval module (SQLite store, collector, deterministic+LLM judge runner, category-aware rubrics, turn-level mid-session eval, rubric auto-tuner, recommender, daemon HTTP API). See [docs/apme.md](docs/apme.md)
+- **bridge/** — Node.js server: Daemon hub + Session Bridge (PTY, hook HTTP, state machine). `src/apme/` — APME eval module (SQLite store, collector, deterministic+LLM judge runner, category-aware rubrics, turn-level mid-session eval, rubric auto-tuner, recommender, daemon HTTP API). **Canonical `SessionSample`** (`shared/src/sample.ts` + `sample_events` table) is the SSOT: a bounded unit with a typed trajectory (user/assistant/model/tool/state) that both the timeline and the eval derive from. Per-unit cost via `shared/src/pricing.ts` (override-loadable), Pareto-frontier recommender (`apme/pareto.ts`), trajectory scorers (`apme/scorers/`). Env `AGENTDECK_TIMELINE_PROJECTION=1` (default off) flips the device timeline to the sample projection (suppresses adapters' direct chat/tool rows). See [docs/apme.md](docs/apme.md)
 - **plugin/** — Stream Deck SDK v2 plugin
 - **shared/** — TypeScript types/utils shared between bridge & plugin (protocol, states, timeline, adapter interfaces, session-utils)
 - **hooks/** — Claude Code hook installer for `~/.claude/settings.json` and Codex lifecycle hook installer for `~/.codex/config.toml`
