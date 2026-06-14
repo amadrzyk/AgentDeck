@@ -80,9 +80,20 @@ static inline void decodePixel(uint16_t px, uint8_t& r, uint8_t& g, uint8_t& b) 
 }
 
 #if defined(BOARD_TTGO)
-static constexpr int canvasW = 135;
-static constexpr int canvasH = 160;
-static uint16_t ttgo_canvas_buf[canvasW * canvasH];
+static constexpr int TTGO_PANEL_SHORT_EDGE = 135;  // true panel short edge (canvas HEIGHT in landscape)
+// LVGL requires the canvas draw-buf stride to be 32-byte aligned (LV_DRAW_BUF_STRIDE_ALIGN).
+// The stride is canvasW*2, so the canvas WIDTH must be a multiple of 16 px. In landscape the
+// width is the 160 px long edge (320 B, already aligned), but in portrait the width is the
+// 135 px short edge → 270 B, which is NOT aligned. An unaligned canvas stride renders as a
+// solid black band on LVGL's blit path (the exact "portrait black, landscape fine" symptom).
+// Pad the portrait canvas width up to 144 (next multiple of 16 → 288 B stride); the extra
+// 9 px sit off the right screen edge and are clipped. Whether LVGL honors our explicit stride
+// or recomputes the aligned one, both now equal 288, so there is no pitch mismatch.
+static constexpr int TTGO_PANEL_SHORT_EDGE_W = 144;  // portrait canvas WIDTH, padded for aligned stride
+static constexpr int TTGO_TERRARIUM_LONG_EDGE = 160;
+static uint16_t ttgo_canvas_buf[TTGO_PANEL_SHORT_EDGE_W * TTGO_TERRARIUM_LONG_EDGE];  // 144*160, fits both orientations
+#define canvasW ((g_screenW > g_screenH) ? TTGO_TERRARIUM_LONG_EDGE : TTGO_PANEL_SHORT_EDGE_W)
+#define canvasH ((g_screenW > g_screenH) ? TTGO_PANEL_SHORT_EDGE : TTGO_TERRARIUM_LONG_EDGE)
 #elif defined(BOARD_ESP32_C6_147)
 // Full-screen static canvas. Portrait (172×320) and landscape (320×172) have identical
 // pixel counts, so one fixed buffer serves both orientations; canvasW/H follow g_screen

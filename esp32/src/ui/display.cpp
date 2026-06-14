@@ -551,6 +551,12 @@ static lv_display_t* disp = nullptr;
 
 // Montserrat 12 + Korean fallback (initialized in displayInit)
 lv_font_t font_kr_12;
+#if defined(BOARD_IPS10)
+// Larger Korean-safe faces for the IPS10 D1 detail overlay (Latin at the larger
+// size, Korean glyphs via the 12 px Noto fallback — readable, never tofu).
+lv_font_t font_kr_16;
+lv_font_t font_kr_20;
+#endif
 
 static size_t rgb565StrideBytes(uint32_t width) {
     return ((width * sizeof(uint16_t)) + 31u) & ~31u;
@@ -660,6 +666,34 @@ static void disp_flush(lv_display_t* display, const lv_area_t* area, uint8_t* px
 }
 
 // LVGL touch read callback
+#if defined(BOARD_IPS10)
+// TEMP touch-calibration overlay: a crosshair + "x,y" that jumps to wherever LVGL thinks
+// the finger landed. Lets us see, blind, whether the touch→screen transform is aligned.
+// Remove once the mapping is confirmed.
+static lv_obj_t* g_touchDot = nullptr;
+static lv_obj_t* g_touchLbl = nullptr;
+static void touchDebugEnsure() {
+    if (g_touchDot) return;
+    g_touchDot = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(g_touchDot);
+    lv_obj_set_size(g_touchDot, 28, 28);
+    lv_obj_set_style_radius(g_touchDot, 14, 0);
+    lv_obj_set_style_bg_color(g_touchDot, lv_color_hex(0xFF3B6E), 0);
+    lv_obj_set_style_bg_opa(g_touchDot, (lv_opa_t)200, 0);
+    lv_obj_set_style_border_width(g_touchDot, 2, 0);
+    lv_obj_set_style_border_color(g_touchDot, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_add_flag(g_touchDot, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_clear_flag(g_touchDot, LV_OBJ_FLAG_CLICKABLE);
+    g_touchLbl = lv_label_create(lv_layer_top());
+    lv_obj_set_style_text_color(g_touchLbl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_color(g_touchLbl, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_touchLbl, (lv_opa_t)180, 0);
+    lv_obj_set_style_pad_all(g_touchLbl, 4, 0);
+    lv_obj_align(g_touchLbl, LV_ALIGN_TOP_MID, 0, 4);
+    lv_obj_clear_flag(g_touchLbl, LV_OBJ_FLAG_CLICKABLE);
+}
+#endif
+
 static void touch_read(lv_indev_t* indev, lv_indev_data_t* data) {
     uint16_t x, y;
 #if defined(BOARD_AMOLED)
@@ -674,6 +708,16 @@ static void touch_read(lv_indev_t* indev, lv_indev_data_t* data) {
         uint16_t temp_y = y;
         x = BOARD_NATIVE_H - 1 - temp_y;
         y = temp_x;
+        // TEMP calibration overlay — show raw phys + mapped logical so we can see the offset.
+        touchDebugEnsure();
+        if (g_touchDot) {
+            lv_obj_set_pos(g_touchDot, (int)x - 14, (int)y - 14);
+            lv_obj_clear_flag(g_touchDot, LV_OBJ_FLAG_HIDDEN);
+            char tb[48];
+            snprintf(tb, sizeof(tb), "phys %u,%u  ->  log %u,%u", temp_x, temp_y, x, y);
+            if (g_touchLbl) { lv_label_set_text(g_touchLbl, tb); lv_obj_move_foreground(g_touchLbl); }
+            lv_obj_move_foreground(g_touchDot);
+        }
 #else
     if (tft.getTouch(&x, &y)) {
 #endif
@@ -935,6 +979,10 @@ void displayInit() {
     // Instead, each UI file that needs Korean should use &font_kr_12 from display.h.
     font_kr_12 = lv_font_montserrat_12;  // Copy struct to RAM
     font_kr_12.fallback = &font_noto_kr_12;  // Set Korean fallback
+#if defined(BOARD_IPS10)
+    font_kr_16 = lv_font_montserrat_16; font_kr_16.fallback = &font_noto_kr_12;
+    font_kr_20 = lv_font_montserrat_20; font_kr_20.fallback = &font_noto_kr_12;
+#endif
 
 #if defined(BOARD_IPS10)
     // Create logical landscape display directly (1280x800) and perform software transposition in disp_flush
@@ -979,10 +1027,14 @@ void displayInit() {
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     Serial.printf("[Display] LVGL initialized %dx%d (RGB565 swapped, partial)\n", g_screenW, g_screenH);
 #else
-    // SPI/QSPI panels: partial render with DMA-capable buffers, big-endian RGB565
-    // Larger BUF_LINES → fewer per-frame SPI band-pushes → less tearing/flicker.
-    // TTGO was 10 lines (24 pushes for a 240px screen); 40 lines = 6 pushes.
+    // SPI/QSPI panels: partial render with DMA-capable buffers, big-endian RGB565.
+    // TTGO has no PSRAM and very tight DMA-capable heap, so keep its LVGL
+    // draw buffers smaller than the larger SPI/QSPI panels.
+#if defined(BOARD_TTGO)
+    static constexpr size_t BUF_LINES = 20;
+#else
     static constexpr size_t BUF_LINES = 40;
+#endif
 #if defined(BOARD_IPS10)
     size_t logicalWidth = BOARD_NATIVE_H;
 #else

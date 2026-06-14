@@ -1,6 +1,6 @@
 # ESP32 Firmware
 
-PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, IPS 3.5" 480×320 landscape / 320×480 portrait, Round AMOLED 360×360; ESP32-P4: Guition JC8012P4A1C 10.1" IPS 800×1280 portrait native + ESP32-C6 co-processor) + SPI TFT displays (ESP32 classic: LilyGO TTGO T-Display 1.14" 135×240 landscape native) + WS2812B LED matrix (ESP32 classic: Ulanzi TC001 8×32). Board-specific `#ifdef`, per-board partition tables, FastLED matrix renderer bypasses LVGL entirely. IPS 3.5" supports runtime portrait↔landscape switching via `set_orientation` protocol command or Settings toggle (NVS persistent, `g_screenW`/`g_screenH` runtime globals).
+PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, IPS 3.5" 480×320 landscape / 320×480 portrait, Round AMOLED 360×360; ESP32-P4: Guition JC8012P4A1C 10.1" IPS 800×1280 portrait native + ESP32-C6 co-processor) + SPI TFT displays (ESP32 classic: LilyGO TTGO T-Display 1.14" 135×240 with a 160px terrarium viewport + 80px metric strip) + WS2812B LED matrix (ESP32 classic: Ulanzi TC001 8×32). Board-specific `#ifdef`, per-board partition tables, FastLED matrix renderer bypasses LVGL entirely. IPS 3.5" supports runtime portrait↔landscape switching via `set_orientation` protocol command or Settings toggle (NVS persistent, `g_screenW`/`g_screenH` runtime globals).
 
 ## Flash Safety
 
@@ -14,6 +14,7 @@ PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, I
 - **플래시 전에 반드시 `lsof /dev/cu.*` 로 daemon 시리얼 점유를 확인한다.** Swift daemon(`AgentDeck`)이 시리얼 포트를 점유하면 esptool이 "chip stopped responding" 오류를 낸다. Daemon 중지 후 플래시.
 - **`config.h`의 `MAX_*` 상수는 `constexpr uint8_t`이므로 `#if MAX_OPENCODE > 0` 전처리기 가드를 쓰면 안 된다.** 전처리기는 constexpr을 인식 못해 항상 0으로 평가. 런타임 `if (MAX_OPENCODE > 0)` 또는 가드 없이 for 루프 조건으로 처리.
 - **IPS 3.5" full flash 시 `--flash_size 16MB` (또는 `--flash-size 16MB`)를 명시한다.** esptool이 부트루프 중 flash size를 8MB로 오감지하여 파티션 테이블 검증 실패 유발.
+- **TTGO는 전체 135×240 테라리움 캔버스를 쓰지 않는다.** 이 보드는 PSRAM 없는 ESP32 classic이라 정적 DRAM 여유가 10KB대다. 테라리움은 135×160(세로) 또는 160×135(가로) 정적 버퍼로 제한하고, 남는 80px 영역에만 상태/활동 메트릭을 둔다. 전체 화면 반투명 검정 오버레이를 올리면 테라리움 배경이 검은 화면처럼 보이므로 금지한다.
 
 ## WiFi 독립 운용
 
@@ -39,9 +40,8 @@ agentdeck wifi-setup --ssid "MyNetwork" --password "secret"
 
 | 기기 설명 | PlatformIO Env | 가로/세로 해상도 | 사용 칩셋 | 현재 포트 (2026-06-10) | 상태 |
 |---|---|---|---|---|---|
-| LilyGO TTGO T-Display 1.14" | `ttgo` | 135×240 (가로 오프셋 보정) | ESP32 | `/dev/cu.wchusbserial58A90021441` | ✅ 연결됨 |
+| LilyGO TTGO T-Display 1.14" | `ttgo` | 135×240 (테라리움 135×160 / 160×135 + 80px 메트릭 스트립) | ESP32 | `/dev/cu.wchusbserial58A90021441` | ✅ 연결됨 |
 | IPS 3.5" Display | `ips35` | 480×320 / 320×480 | ESP32-S3 | `/dev/cu.usbmodem834101` (Native USB) | ✅ 연결됨 |
 | Round AMOLED | `amoled` | 360×360 | ESP32-S3 | `/dev/cu.usbmodem2111201` (Native USB) | ✅ 연결됨 |
 | 86 Box | `box_86` | 480×480 | ESP32-S3 | `/dev/cu.wchusbserial2112320` (CH340) | ✅ 연결됨 |
 | 10" IPS Display | `ips10` | 800×1280 | ESP32-P4 | `/dev/cu.wchusbserial211240` (CH340) | ✅ 연결됨 |
-

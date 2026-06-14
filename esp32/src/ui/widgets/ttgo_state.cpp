@@ -22,6 +22,29 @@ static lv_obj_t* lblUsage7d = nullptr;
 
 static bool visible = true;
 
+#if defined(BOARD_TTGO)
+static constexpr int TTGO_TERRARIUM_LONG_EDGE = 160;
+static constexpr uint32_t TTGO_METRIC_BG = 0x2A1F14;
+
+static lv_obj_t* createMetricPanel(lv_obj_t* parent, bool portrait, int screenW, int screenH) {
+    lv_obj_t* panel = lv_obj_create(parent);
+    if (portrait) {
+        lv_obj_set_size(panel, screenW, screenH - TTGO_TERRARIUM_LONG_EDGE);
+        lv_obj_set_pos(panel, 0, TTGO_TERRARIUM_LONG_EDGE);
+    } else {
+        lv_obj_set_size(panel, screenW - TTGO_TERRARIUM_LONG_EDGE, screenH);
+        lv_obj_set_pos(panel, TTGO_TERRARIUM_LONG_EDGE, 0);
+    }
+    lv_obj_set_style_bg_color(panel, lv_color_hex(TTGO_METRIC_BG), 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(panel, 0, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_pad_all(panel, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    return panel;
+}
+#endif
+
 // Helper: get state color for agent state
 static uint32_t stateColor(AgentState st) {
     switch (st) {
@@ -55,73 +78,136 @@ lv_obj_t* create(lv_obj_t* parent) {
     const int screenW = g_screenW;
     const int screenH = g_screenH;
 
-    // Main widget container (semi-transparent background)
+    // Main widget container
     widget = lv_obj_create(parent);
     lv_obj_set_size(widget, screenW, screenH);
     lv_obj_set_pos(widget, 0, 0);
+#if defined(BOARD_TTGO)
+    lv_obj_set_style_bg_opa(widget, LV_OPA_TRANSP, 0);
+#else
     lv_obj_set_style_bg_color(widget, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(widget, LV_OPA_50, 0);
+#endif
     lv_obj_set_style_border_width(widget, 0, 0);
     lv_obj_set_style_pad_all(widget, 0, 0);
     lv_obj_clear_flag(widget, LV_OBJ_FLAG_SCROLLABLE);
 
+#if defined(BOARD_TTGO)
+    lv_obj_t* content = createMetricPanel(widget, portrait, screenW, screenH);
+    const int contentW = portrait ? screenW : (screenW - TTGO_TERRARIUM_LONG_EDGE);
+#else
+    lv_obj_t* content = widget;
+    const int contentW = screenW;
+#endif
+
     if (portrait) {
-        // ===== Portrait layout (135×240) =====
-        // Vertical stack centered horizontally
+        // ===== Portrait layout =====
 
         // Top section: State label
-        lblState = lv_label_create(widget);
+#if defined(BOARD_TTGO)
+        lblState = lv_label_create(content);
+        lv_obj_set_style_text_font(lblState, &lv_font_montserrat_12, 0);
+        lv_obj_align(lblState, LV_ALIGN_TOP_MID, 0, 5);
+#else
+        lblState = lv_label_create(content);
         lv_obj_set_style_text_font(lblState, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(lblState, lv_color_hex(Theme::StatusGreen), 0);
         lv_obj_align(lblState, LV_ALIGN_TOP_MID, 0, 8);
+#endif
+        lv_obj_set_style_text_color(lblState, lv_color_hex(Theme::StatusGreen), 0);
         lv_label_set_text(lblState, "● IDLE");
 
         // Middle section: Project name (large, centered)
-        lblProject = lv_label_create(widget);
+        lblProject = lv_label_create(content);
         lv_obj_set_style_text_font(lblProject, &font_kr_12, 0);
         lv_obj_set_style_text_color(lblProject, lv_color_hex(Theme::HUDText), 0);
-        lv_obj_set_width(lblProject, screenW - 16);
+        lv_obj_set_width(lblProject, contentW - 16);
         lv_obj_set_style_text_align(lblProject, LV_TEXT_ALIGN_CENTER, 0);
+#if defined(BOARD_TTGO)
+        lv_obj_align(lblProject, LV_ALIGN_TOP_MID, 0, 23);
+#else
         lv_obj_align(lblProject, LV_ALIGN_TOP_MID, 0, 32);
+#endif
         lv_label_set_long_mode(lblProject, LV_LABEL_LONG_DOT);
         lv_label_set_text(lblProject, "Connecting...");
 
         // Model name (medium, centered)
-        lblModel = lv_label_create(widget);
+        lblModel = lv_label_create(content);
         lv_obj_set_style_text_font(lblModel, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(lblModel, lv_color_hex(Theme::HUDDim), 0);
         lv_obj_set_style_text_align(lblModel, LV_TEXT_ALIGN_CENTER, 0);
+#if defined(BOARD_TTGO)
+        lv_obj_align(lblModel, LV_ALIGN_TOP_MID, 0, 42);
+#else
         lv_obj_align(lblModel, LV_ALIGN_TOP_MID, 0, 54);
+#endif
         lv_label_set_long_mode(lblModel, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(lblModel, screenW - 16);
+        lv_obj_set_width(lblModel, contentW - 16);
         lv_label_set_text(lblModel, "");
 
         // Bottom section: Mini usage gauges
         // Simple text display: "5h: 47%" and "7d: 32%"
-        lblUsage5h = lv_label_create(widget);
+        lblUsage5h = lv_label_create(content);
         lv_obj_set_style_text_font(lblUsage5h, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(lblUsage5h, lv_color_hex(Theme::HUDDim), 0);
         lv_obj_align(lblUsage5h, LV_ALIGN_BOTTOM_LEFT, 8, -8);
         lv_label_set_text(lblUsage5h, "5h: --");
 
-        lblUsage7d = lv_label_create(widget);
+        lblUsage7d = lv_label_create(content);
         lv_obj_set_style_text_font(lblUsage7d, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(lblUsage7d, lv_color_hex(Theme::HUDDim), 0);
         lv_obj_align(lblUsage7d, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
         lv_label_set_text(lblUsage7d, "7d: --");
 
     } else {
-        // ===== Landscape layout (240×135) =====
-        // Compact horizontal layout
+        // ===== Landscape layout =====
 
+#if defined(BOARD_TTGO)
+        lblState = lv_label_create(content);
+        lv_obj_set_style_text_font(lblState, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(lblState, lv_color_hex(Theme::StatusGreen), 0);
+        lv_obj_set_width(lblState, contentW - 8);
+        lv_obj_align(lblState, LV_ALIGN_TOP_MID, 0, 8);
+        lv_label_set_long_mode(lblState, LV_LABEL_LONG_DOT);
+        lv_label_set_text(lblState, "● IDLE");
+
+        lblProject = lv_label_create(content);
+        lv_obj_set_style_text_font(lblProject, &font_kr_12, 0);
+        lv_obj_set_style_text_color(lblProject, lv_color_hex(Theme::HUDText), 0);
+        lv_obj_set_width(lblProject, contentW - 8);
+        lv_obj_set_style_text_align(lblProject, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(lblProject, LV_ALIGN_TOP_MID, 0, 31);
+        lv_label_set_long_mode(lblProject, LV_LABEL_LONG_DOT);
+        lv_label_set_text(lblProject, "Connecting...");
+
+        lblModel = lv_label_create(content);
+        lv_obj_set_style_text_font(lblModel, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(lblModel, lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_set_style_text_align(lblModel, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(lblModel, LV_ALIGN_TOP_MID, 0, 53);
+        lv_obj_set_width(lblModel, contentW - 8);
+        lv_label_set_long_mode(lblModel, LV_LABEL_LONG_DOT);
+        lv_label_set_text(lblModel, "");
+
+        lblUsage5h = lv_label_create(content);
+        lv_obj_set_style_text_font(lblUsage5h, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(lblUsage5h, lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_align(lblUsage5h, LV_ALIGN_BOTTOM_MID, 0, -22);
+        lv_label_set_text(lblUsage5h, "5h: --");
+
+        lblUsage7d = lv_label_create(content);
+        lv_obj_set_style_text_font(lblUsage7d, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(lblUsage7d, lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_align(lblUsage7d, LV_ALIGN_BOTTOM_MID, 0, -6);
+        lv_label_set_text(lblUsage7d, "7d: --");
+#else
         // State + Project + Model on one line (with top breathing room)
-        lblState = lv_label_create(widget);
+        lblState = lv_label_create(content);
         lv_obj_set_style_text_font(lblState, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(lblState, lv_color_hex(Theme::StatusGreen), 0);
         lv_obj_align(lblState, LV_ALIGN_TOP_LEFT, 8, 12);
         lv_label_set_text(lblState, "● IDLE");
 
-        lblProject = lv_label_create(widget);
+        lblProject = lv_label_create(content);
         lv_obj_set_style_text_font(lblProject, &font_kr_12, 0);
         lv_obj_set_style_text_color(lblProject, lv_color_hex(Theme::HUDText), 0);
         lv_obj_set_width(lblProject, screenW / 2);
@@ -130,7 +216,7 @@ lv_obj_t* create(lv_obj_t* parent) {
         lv_label_set_long_mode(lblProject, LV_LABEL_LONG_DOT);
         lv_label_set_text(lblProject, "Connecting...");
 
-        lblModel = lv_label_create(widget);
+        lblModel = lv_label_create(content);
         lv_obj_set_style_text_font(lblModel, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(lblModel, lv_color_hex(Theme::HUDDim), 0);
         lv_obj_set_style_text_align(lblModel, LV_TEXT_ALIGN_RIGHT, 0);
@@ -140,17 +226,18 @@ lv_obj_t* create(lv_obj_t* parent) {
         lv_label_set_text(lblModel, "");
 
         // Usage gauges at bottom
-        lblUsage5h = lv_label_create(widget);
+        lblUsage5h = lv_label_create(content);
         lv_obj_set_style_text_font(lblUsage5h, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(lblUsage5h, lv_color_hex(Theme::HUDDim), 0);
         lv_obj_align(lblUsage5h, LV_ALIGN_BOTTOM_LEFT, 4, -4);
         lv_label_set_text(lblUsage5h, "5h: --");
 
-        lblUsage7d = lv_label_create(widget);
+        lblUsage7d = lv_label_create(content);
         lv_obj_set_style_text_font(lblUsage7d, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(lblUsage7d, lv_color_hex(Theme::HUDDim), 0);
         lv_obj_align(lblUsage7d, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
         lv_label_set_text(lblUsage7d, "7d: --");
+#endif
     }
 
     return widget;

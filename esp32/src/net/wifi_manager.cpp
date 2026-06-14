@@ -23,6 +23,29 @@ void wifiInit() {
     wm.setConfigPortalTimeout(0);  // Portal stays open until configured
     wm.setTitle("AgentDeck");
 
+#if defined(BOARD_IPS10)
+    // IPS10 (ESP32-P4 + ESP32-C6 via ESP-Hosted) is serial-attached. A continuously
+    // broadcasting SoftAP config portal adds power draw + co-processor WiFi activity
+    // that can cause intermittent resets (no panic — looks like a brownout). So never
+    // start the portal here: connect to saved creds if present, otherwise turn the
+    // radio OFF. WiFi can still be provisioned later via the daemon (wifiConnectWith).
+    wm.setEnableConfigPortal(false);   // never start the SoftAP portal on IPS10
+    if (wm.autoConnect()) {            // tries saved creds only; false if none/unreachable
+        IPAddress ip = WiFi.localIP();
+        snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+        Serial.printf("[WiFi] Connected: %s\n", ipBuf);
+        configTzTime("UTC", "pool.ntp.org", "time.google.com");
+        Serial.println("[WiFi] NTP sync started (UTC)");
+        wifiWasConnected = true;
+        portalActive = false;
+    } else {
+        Serial.println("[WiFi] No saved creds — radio OFF (no AP portal; provision via daemon)");
+        portalActive = false;
+        WiFi.mode(WIFI_OFF);
+    }
+    return;
+#endif
+
     // Try auto-connect with saved credentials
     if (wm.autoConnect(AP_SSID)) {
         IPAddress ip = WiFi.localIP();

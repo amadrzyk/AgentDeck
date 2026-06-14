@@ -130,6 +130,10 @@ static void networkTask(void* param) {
         // Process WebSocket events
         Net::wsLoop();
 
+        // Drain UI-queued outbound commands (approve/deny, option select) on this
+        // network core — UI callbacks must not touch the WS client directly.
+        Net::pumpOutbound();
+
         // Update combined connection status (serial OR wifi)
         bool conn = Net::serialConnected() || Net::wsConnected();
         lockState();
@@ -215,8 +219,11 @@ static void uiTask(void* param) {
     uint32_t splashStartMs = millis();
     bool wasTimelineView = false;
     bool everConnected = false;
-    bool prevConnStatus = false;   // Track connection changes for status overlay
-    bool prevWifiStatus = false;
+    // Connection overlay is LEVEL-triggered: track the last status actually applied
+    // to the scrim, not edges of the inputs. Edge-tracking left the recreated scrim
+    // (on rotation) stuck at its hardcoded default — see the rotation block below,
+    // which resets this to -1 to force a re-apply onto the freshly created scrim.
+    int lastOverlayStatus = -1;    // -1 = none applied yet / force re-apply
     uint32_t lastConnectedMs = 0;  // For reconnect-scrim grace period
 
 #if defined(BOARD_TTGO) || defined(BOARD_ESP32_C6_147)
@@ -277,6 +284,17 @@ static void uiTask(void* param) {
             } else {
                 UI::setOrientation(newLandscape);            // legacy bool (network)
             }
+            // Hold onto the outgoing screens so we can delete them AFTER the new
+            // active screen is loaded. The screen-create helpers do `lv_obj_create(NULL)`
+            // and overwrite their module-static pointer without deleting the previous
+            // screen, so each rotation used to LEAK five whole screen trees. On this
+            // PSRAM-less ESP32 a second rotation then exhausted the heap mid-rebuild
+            // (every JSON parse failing with NoMemory) and the device froze.
+            lv_obj_t* oldSplash = scrSplash;
+            lv_obj_t* oldAquarium = scrAquarium;
+            lv_obj_t* oldTimeline = scrTimeline;
+            lv_obj_t* oldSettings = scrSettings;
+
             // Recreate all screens with new dimensions
             scrSplash = Screens::splashCreate();
             scrAquarium = Screens::aquariumCreate();
@@ -296,6 +314,23 @@ static void uiTask(void* param) {
                 lv_screen_load(scrAquarium);
                 currentView = VIEW_AQUARIUM;
             }
+
+            // Now that a freshly created screen is the active one, the old screens
+            // are detached and safe to delete (LVGL forbids deleting the active
+            // screen — hence the order: create → load new → delete old). Deleting an
+            // aquarium screen also tears down its child permission overlay and its
+            // terrarium canvas object; the canvas's draw-buf is the shared static
+            // buffer (not owned by the object), so the live screen keeps working.
+            if (oldSplash) lv_obj_del(oldSplash);
+            if (oldAquarium) lv_obj_del(oldAquarium);
+            if (oldTimeline) lv_obj_del(oldTimeline);
+            if (oldSettings) lv_obj_del(oldSettings);
+
+            // The recreated aquarium has a brand-new connScrim at its hardcoded
+            // default (HIDDEN). Force the connection-status block below to re-apply
+            // the *actual* current status to it; otherwise the scrim's visibility
+            // silently decouples from the real connection state on every rotation.
+            lastOverlayStatus = -1;
         }
 
         // Read view state
@@ -350,25 +385,30 @@ static void uiTask(void* param) {
         }
         wasTimelineView = wantTimeline;
 
-        // Update connection status overlay on aquarium
-        // connected = serial OR websocket — either path is valid
+        // Update connection status overlay on aquarium (LEVEL-triggered).
+        // connected = serial OR websocket — either path is valid. We compute the
+        // *desired* overlay status every loop and apply it only when it differs
+        // from what's currently on the scrim. This is recreation-safe (rotation
+        // resets lastOverlayStatus) and self-healing (a scrim that ever diverges
+        // from the real state is corrected on the next frame) — unlike the old
+        // edge-triggered logic, which could leave the scrim stuck.
         bool wifiNow = Net::wifiConnected();
         bool serialNow = Net::serialConnected();
-        if (showConnected != prevConnStatus || wifiNow != prevWifiStatus) {
-            prevConnStatus = showConnected;
-            prevWifiStatus = wifiNow;
-            if (currentView == VIEW_AQUARIUM || currentView == VIEW_TIMELINE) {
-                if (showConnected) {
-                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::HIDDEN);
-                } else if (everConnected) {
-                    // Was connected before — daemon went away (regardless of WiFi state)
-                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::RECONNECTING);
-                } else if (!wifiNow && !serialNow) {
-                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::NO_WIFI);
-                } else {
-                    Screens::aquariumSetConnectionStatus(ConnOverlayStatus::SEARCHING);
-                }
-            }
+        ConnOverlayStatus desiredOverlay;
+        if (showConnected) {
+            desiredOverlay = ConnOverlayStatus::HIDDEN;
+        } else if (everConnected) {
+            // Was connected before — daemon went away (regardless of WiFi state)
+            desiredOverlay = ConnOverlayStatus::RECONNECTING;
+        } else if (!wifiNow && !serialNow) {
+            desiredOverlay = ConnOverlayStatus::NO_WIFI;
+        } else {
+            desiredOverlay = ConnOverlayStatus::SEARCHING;
+        }
+        if ((currentView == VIEW_AQUARIUM || currentView == VIEW_TIMELINE) &&
+            (int)desiredOverlay != lastOverlayStatus) {
+            lastOverlayStatus = (int)desiredOverlay;
+            Screens::aquariumSetConnectionStatus(desiredOverlay);
         }
 
         // Update current view

@@ -61,6 +61,7 @@ constexpr uint32_t BubbleWhite = 0xFFFFFF;  // rendered with alpha
 constexpr uint32_t HUDBg       = 0x000000;  // rendered at ~50% alpha
 constexpr uint32_t HUDText     = 0xE2E8F0;
 constexpr uint32_t HUDDim      = 0x94A3B8;
+constexpr uint32_t HUDFaint    = 0x64748B;  // fainter than HUDDim — cell footers (model · elapsed)
 
 // --- Status colors ---
 constexpr uint32_t StatusGreen  = 0x22C55E;

@@ -71,8 +71,14 @@ static void screenTouchEvent(lv_event_t* e) {
             }
         }
     } else if (code == LV_EVENT_SHORT_CLICKED) {
-        // Tap → toggle HUD visibility (only if no swipe detected)
+#if !defined(BOARD_IPS10)
+        // Tap → toggle HUD visibility (only if no swipe detected).
+        // Small round/TTGO panels hide the HUD to reveal the full terrarium.
         HUD::setVisible(!HUD::isVisible());
+#endif
+        // IPS10 tablet layout: the cards pane is a permanent side-by-side surface, not a
+        // toggleable overlay — a tap on the left terrarium must NOT blank the right cards.
+        // (Tapping a card still opens its modal via the cell's own handler.)
     }
 }
 

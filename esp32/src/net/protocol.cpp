@@ -202,7 +202,9 @@ static void handleSessionsList(JsonObject& obj) {
     g_state.dataReceived = true;
 
     JsonArray sessions = obj["sessions"].as<JsonArray>();
-    g_state.sessionCount = min((int)sessions.size(), 6);
+    // Cap 10 — keep in sync with sessions[10] (agent_state.h) and
+    // SERIAL_SESSIONS_CAP (bridge/src/esp32-serial.ts).
+    g_state.sessionCount = min((int)sessions.size(), 10);
     g_state.octopusCount = 0;
     g_state.cloudCount = 0;
     g_state.opencodeCount = 0;
@@ -221,6 +223,23 @@ static void handleSessionsList(JsonObject& obj) {
                 sizeof(g_state.sessions[i].state) - 1);
         g_state.sessions[i].port = s["port"] | 0;
         g_state.sessions[i].alive = s["alive"] | false;
+
+        // Per-session detail for the D1 mosaic (tool/elapsed line + inline
+        // Approve/Deny). Absent keys default to "" / 0 so non-enriched daemons
+        // and idle sessions render cleanly.
+        strncpy(g_state.sessions[i].currentTool, s["currentTool"] | "",
+                sizeof(g_state.sessions[i].currentTool) - 1);
+        g_state.sessions[i].currentTool[sizeof(g_state.sessions[i].currentTool) - 1] = '\0';
+        g_state.sessions[i].elapsedSec = s["elapsedSec"] | 0;
+        strncpy(g_state.sessions[i].question, s["question"] | "",
+                sizeof(g_state.sessions[i].question) - 1);
+        g_state.sessions[i].question[sizeof(g_state.sessions[i].question) - 1] = '\0';
+        strncpy(g_state.sessions[i].promptType, s["promptType"] | "",
+                sizeof(g_state.sessions[i].promptType) - 1);
+        g_state.sessions[i].promptType[sizeof(g_state.sessions[i].promptType) - 1] = '\0';
+        strncpy(g_state.sessions[i].requestId, s["requestId"] | "",
+                sizeof(g_state.sessions[i].requestId) - 1);
+        g_state.sessions[i].requestId[sizeof(g_state.sessions[i].requestId) - 1] = '\0';
 
         if (g_state.sessions[i].alive) {
             if (strcmp(g_state.sessions[i].agentType, "openclaw") == 0) {
@@ -389,6 +408,7 @@ static void handleTimelineEvent(JsonObject& obj) {
         strncpy(entry.detail, e["detail"].as<const char*>(), sizeof(entry.detail) - 1);
     if (e["status"].is<const char*>())
         strncpy(entry.status, e["status"].as<const char*>(), sizeof(entry.status) - 1);
+    strncpy(entry.sessionId, e["sessionId"] | "", sizeof(entry.sessionId) - 1);
 
     lockState();
     // Upsert: check if existing entry matches (same ts + type)
@@ -428,6 +448,7 @@ static void handleTimelineHistory(JsonObject& obj) {
             strncpy(entry.detail, e["detail"].as<const char*>(), sizeof(entry.detail) - 1);
         if (e["status"].is<const char*>())
             strncpy(entry.status, e["status"].as<const char*>(), sizeof(entry.status) - 1);
+        strncpy(entry.sessionId, e["sessionId"] | "", sizeof(entry.sessionId) - 1);
 
         g_state.addTimelineEntry(entry);
     }

@@ -10,6 +10,11 @@
  * Initialized in displayInit().
  */
 extern lv_font_t font_kr_12;
+#if defined(BOARD_IPS10)
+/** Larger Korean-safe faces (Latin at size, Korean via 12 px Noto fallback) for the IPS10 D1 detail overlay. */
+extern lv_font_t font_kr_16;
+extern lv_font_t font_kr_20;
+#endif
 
 namespace UI {
 

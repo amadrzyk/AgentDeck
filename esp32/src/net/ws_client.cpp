@@ -18,6 +18,17 @@ static char savedIp[16] = {0};
 static uint16_t savedPort = 0;
 static char savedToken[40] = {0};
 
+// ── outbound queue (UI core → network core) ──
+// LVGL event callbacks run on CORE_UI; the WebSocket + serial transports are
+// driven from CORE_NETWORK. arduinoWebSockets is not thread-safe, so UI-side
+// senders enqueue here and the network task drains via pumpOutbound().
+static constexpr int OUTBOX_MAX = 6;
+static constexpr int OUTBOX_LEN = 200;
+static char outbox[OUTBOX_MAX][OUTBOX_LEN];
+static int outboxHead = 0;
+static int outboxCount = 0;
+static SemaphoreHandle_t outboxMutex = nullptr;
+
 static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
     switch (type) {
         case WStype_DISCONNECTED:
@@ -73,7 +84,39 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 namespace Net {
 
 void wsInit() {
-    // Nothing to do until connect
+    if (!outboxMutex) outboxMutex = xSemaphoreCreateMutex();
+}
+
+// Enqueue an outbound JSON command from any task (typically CORE_UI). Dropped if
+// the small queue is full — interactive commands are user-paced, not bursty.
+void queueOutbound(const char* json) {
+    if (!json || !json[0] || !outboxMutex) return;
+    xSemaphoreTake(outboxMutex, portMAX_DELAY);
+    if (outboxCount < OUTBOX_MAX) {
+        int idx = (outboxHead + outboxCount) % OUTBOX_MAX;
+        strncpy(outbox[idx], json, OUTBOX_LEN - 1);
+        outbox[idx][OUTBOX_LEN - 1] = '\0';
+        outboxCount++;
+    }
+    xSemaphoreGive(outboxMutex);
+}
+
+// Drain the outbound queue on CORE_NETWORK. Sends over WS when connected, else
+// over the serial bridge. Call once per network-task iteration.
+void pumpOutbound() {
+    if (!outboxMutex) return;
+    while (true) {
+        char line[OUTBOX_LEN];
+        xSemaphoreTake(outboxMutex, portMAX_DELAY);
+        if (outboxCount == 0) { xSemaphoreGive(outboxMutex); break; }
+        strncpy(line, outbox[outboxHead], sizeof(line));
+        line[sizeof(line) - 1] = '\0';
+        outboxHead = (outboxHead + 1) % OUTBOX_MAX;
+        outboxCount--;
+        xSemaphoreGive(outboxMutex);
+        if (connected) ws.sendTXT(line);
+        else Serial.println(line);  // serial bridge consumes line-delimited JSON
+    }
 }
 
 void wsConnect(const char* ip, uint16_t port, const char* token) {

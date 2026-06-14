@@ -54,6 +54,13 @@ struct SessionInfo {
     char state[20];
     uint16_t port;
     bool alive;
+    // Per-session detail for the IPS10 D1 mosaic (cells show tool/elapsed; awaiting
+    // cells render inline Approve/Deny). Populated from the enriched sessions_list.
+    char currentTool[40];   // current tool/command for this session ("" when none)
+    uint32_t elapsedSec;    // seconds since this session started (0 when unknown)
+    char question[160];     // awaiting prompt text for this session ("" when not awaiting)
+    char promptType[20];    // "yes_no" / "multi_select" / "diff_review" / ...
+    char requestId[40];     // gated PreToolUse request id → reply permission_decision
 };
 
 // ===== Timeline entry =====
@@ -63,6 +70,7 @@ struct TimelineEntry {
     char raw[120];      // description
     char detail[200];   // extended detail (optional)
     char status[12];    // "pending"/"approved"/"denied"
+    char sessionId[32]; // owning session — lets the D1 detail overlay filter per session ("" = global)
 };
 
 // ===== Main dashboard state =====
@@ -99,16 +107,19 @@ struct DashboardState {
     PromptOption options[8];
     uint8_t optionCount;
 
-    // Sessions (multi-agent)
-    SessionInfo sessions[6];
+    // Sessions (multi-agent). Cap is 10 — matches SERIAL_SESSIONS_CAP in
+    // bridge/src/esp32-serial.ts and the daemon WS sessions_list. Keep in sync.
+    SessionInfo sessions[10];
     uint8_t sessionCount;
     uint8_t octopusCount;   // derived: claude-code sessions alive
     uint8_t cloudCount;     // derived: Codex CLI/App sessions alive
     uint8_t opencodeCount;  // derived: opencode sessions alive
     uint8_t crayfishCount;  // derived: openclaw sessions alive
-    char sessionNames[6][24]; // display names for octopus instances (matches max MAX_OCTOPUS)
-    char cloudNames[4][24];   // display names for cloud instances (matches max MAX_CLOUD)
-    char opencodeNames[4][24]; // display names for opencode instances
+    // Per-type display names (dedup-numbered). Sized to the session cap so they
+    // safely cover every board's MAX_OCTOPUS/MAX_CLOUD/MAX_OPENCODE (≤8).
+    char sessionNames[10][24]; // display names for octopus instances
+    char cloudNames[10][24];   // display names for cloud instances
+    char opencodeNames[10][24]; // display names for opencode instances
 
     // Crayfish state (derived from sibling)
     CrayfishState crayfishState;

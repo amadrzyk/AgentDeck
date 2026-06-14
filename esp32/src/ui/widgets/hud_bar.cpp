@@ -5,6 +5,8 @@
 #include "../../state/agent_state.h"
 #include "config.h"
 #include "net/serial_client.h"
+#include "net/ws_client.h"
+#include <Arduino.h>
 
 // === Left panel: AgentDeck logo + session list ===
 static lv_obj_t* panelLeft = nullptr;
@@ -18,12 +20,23 @@ static lv_obj_t* lblSessions = nullptr;
 // and shrinks when idle, and shows inline what that agent is doing. Replaces the static
 // session list + separate timeline with a single dynamic surface.
 static lv_obj_t* lblLogoImg = nullptr;
-static constexpr int IPS10_SIDEBAR_W = 372;   // wide enough for a real 2D treemap
-static constexpr int MOSAIC_MAX = 6;          // up to 6 agent cells (matches sessions[6])
+#include "../terrarium/creature_glyphs_generated.h"  // OCTOPUS_A8 / CRAYFISH_BODY_A8 / OPENCODE_A8 masks
+static constexpr int IPS10_SIDEBAR_W_MIN = 372;     // portrait / fallback minimum
+static constexpr int IPS10_TERRARIUM_W = 408;       // keep in sync with terrarium/renderer.cpp
+// Actual treemap-pane width, computed from g_screenW at init so it fills the space
+// right of the terrarium (≈844px landscape / ≈376px portrait) instead of leaving a
+// dead band in the middle on the 1280-wide landscape panel. (D1 ~63/37 split.)
+static int ips10SidebarW = IPS10_SIDEBAR_W_MIN;
+static constexpr int MOSAIC_MAX = 10;         // up to 10 agent cells (matches sessions[10])
 static lv_obj_t* cellsBox = nullptr;          // absolute-positioned container for the treemap
 static lv_obj_t* cell[MOSAIC_MAX] = {nullptr};
-static lv_obj_t* cellName[MOSAIC_MAX] = {nullptr};   // project + state dot (recolor)
-static lv_obj_t* cellAct[MOSAIC_MAX]  = {nullptr};   // "what it's doing" line
+// D1 card sub-widgets (per cell) — flat stacked labels (no nested flex / no wrap, to
+// keep LVGL layout cheap + robust).
+static lv_obj_t* cellName[MOSAIC_MAX] = {nullptr};   // ●agent-name (bold) + colored [STATE]
+static lv_obj_t* cellProj[MOSAIC_MAX] = {nullptr};   // project name (dim)
+static lv_obj_t* cellTool[MOSAIC_MAX] = {nullptr};   // "▸ tool" in a bordered box
+static lv_obj_t* cellBody[MOSAIC_MAX] = {nullptr};   // think / awaiting question (single line, dotted)
+static lv_obj_t* cellMeta[MOSAIC_MAX] = {nullptr};   // model · elapsed footer (hidden on short cells)
 // Animated current rect per cell (lerped toward the treemap target) — fluid boundaries.
 static float cellCurX[MOSAIC_MAX] = {0};
 static float cellCurY[MOSAIC_MAX] = {0};
@@ -31,10 +44,123 @@ static float cellCurW[MOSAIC_MAX] = {0};
 static float cellCurH[MOSAIC_MAX] = {0};
 static bool cellInit[MOSAIC_MAX] = {false};   // snap (no lerp) on a cell's first appearance
 
-// Activity weight by state → drives cell size. Working dominates; idle stays small-but-present.
+// Inline Approve/Deny on awaiting cells (shown only when the cell is tall enough).
+static lv_obj_t* cellYes[MOSAIC_MAX] = {nullptr};
+static lv_obj_t* cellNo[MOSAIC_MAX]  = {nullptr};
+
+// D1 card visual polish: a tinted creature glyph (agent mark) in each card's top-right
+// corner, plus a proper state "pill" chip. The glyph is the canonical creature silhouette
+// (A8 alpha mask) recolored to the agent accent — brings back the creature imagery the flat
+// label cards had lost. Codex has no glyph → its cell hides the image (dot fallback in name).
+static lv_obj_t* cellGlyph[MOSAIC_MAX] = {nullptr};   // creature mark overlay (IGNORE_LAYOUT)
+static lv_obj_t* cellPill[MOSAIC_MAX]  = {nullptr};   // state pill chip (content-sized label)
+
+// Runtime-built A8 image descriptors for the three creature glyphs we have masks for.
+static lv_image_dsc_t glyphOctopus;    // Claude
+static lv_image_dsc_t glyphCrayfish;   // OpenClaw
+static lv_image_dsc_t glyphOpencode;   // OpenCode
+static bool glyphsReady = false;
+static void ips10BuildGlyph(lv_image_dsc_t& g, const uint8_t* data, int w, int h) {
+    g.header.magic  = LV_IMAGE_HEADER_MAGIC;
+    g.header.cf     = LV_COLOR_FORMAT_A8;     // alpha-only mask → filled with image_recolor
+    g.header.flags  = 0;
+    g.header.w      = w;
+    g.header.h      = h;
+    g.header.stride = w;                      // 1 byte/px
+    g.data_size     = (uint32_t)(w * h);
+    g.data          = data;
+}
+static void ips10InitGlyphs() {
+    if (glyphsReady) return;
+    using namespace CreatureGlyphs;
+    ips10BuildGlyph(glyphOctopus,  OCTOPUS_A8,       OCTOPUS_W,       OCTOPUS_H);
+    ips10BuildGlyph(glyphCrayfish, CRAYFISH_BODY_A8, CRAYFISH_BODY_W, CRAYFISH_BODY_H);
+    ips10BuildGlyph(glyphOpencode, OPENCODE_A8,      OPENCODE_W,      OPENCODE_H);
+    glyphsReady = true;
+}
+// Map an agent type to its glyph descriptor (null → no glyph, e.g. Codex).
+static const lv_image_dsc_t* ips10AgentGlyph(const char* agentType) {
+    if (!agentType) return nullptr;
+    if (strstr(agentType, "openclaw"))  return &glyphCrayfish;
+    if (strstr(agentType, "opencode"))  return &glyphOpencode;
+    if (strstr(agentType, "claude"))    return &glyphOctopus;
+    return nullptr;   // codex / unknown → dot fallback in the name line
+}
+
+// Per-cell snapshot used by the tap handler + detail overlay (no g_state access on tap).
+struct CellMeta {
+    char sid[32];
+    char requestId[40];
+    char state[20];
+    char question[160];
+    char agent[16];
+    char model[32];
+    char name[40];
+    char tool[40];
+    uint32_t elapsed;
+    uint32_t accent;
+};
+static CellMeta cellMetaData[MOSAIC_MAX];
+
+// Tap-to-focus: cells matching this sid get the linked accent border (D1 focus link).
+static char focusSid[32] = "";
+
+// Detail overlay (floats on lv_layer_top, above terrarium + sidebar).
+static lv_obj_t* detailBack  = nullptr;   // dimmed backdrop (tap to close)
+static lv_obj_t* detailPanel = nullptr;
+static lv_obj_t* detailTitle = nullptr;
+static lv_obj_t* detailSub   = nullptr;   // agent · model · elapsed
+static lv_obj_t* detailAction = nullptr;  // current tool / question
+static lv_obj_t* detailLog   = nullptr;   // per-session activity log
+static lv_obj_t* detailFoot  = nullptr;   // button row
+static lv_obj_t* detailBtnA  = nullptr;   // primary (Approve / Interrupt)
+static lv_obj_t* detailBtnALabel = nullptr;
+static lv_obj_t* detailBtnB  = nullptr;   // secondary (Deny / Close)
+static lv_obj_t* detailBtnBLabel = nullptr;
+static int detailCellIdx = -1;            // which cell the overlay is showing (-1 = closed)
+
+// ── outbound (UI core → network core via the thread-safe queue) ──
+static void hudSendJson(const char* json) {
+    Net::queueOutbound(json);
+}
+static void hudSendPermissionDecision(const char* requestId, const char* decision) {
+    if (!requestId || !requestId[0]) return;
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "{\"type\":\"permission_decision\",\"requestId\":\"%s\",\"decision\":\"%s\"}",
+             requestId, decision);
+    hudSendJson(buf);
+}
+static void hudSendSelectOption(const char* sid, int index) {
+    char buf[96];
+    if (sid && sid[0])
+        snprintf(buf, sizeof(buf), "{\"type\":\"select_option\",\"index\":%d,\"sessionId\":\"%s\"}", index, sid);
+    else
+        snprintf(buf, sizeof(buf), "{\"type\":\"select_option\",\"index\":%d}", index);
+    hudSendJson(buf);
+}
+// Approve/Deny that works against both daemons: a Node observed gate carries a
+// requestId (resolve the held PreToolUse), while a managed PTY session (Node or
+// the App-Store Swift daemon, which has no requestId gate) takes a session-scoped
+// respond y/n.
+static void hudSendApprove(const char* requestId, const char* sid, bool approve) {
+    if (requestId && requestId[0]) {
+        hudSendPermissionDecision(requestId, approve ? "allow" : "deny");
+    } else if (sid && sid[0]) {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"respond\",\"value\":\"%s\"}}",
+                 sid, approve ? "y" : "n");
+        hudSendJson(buf);
+    }
+}
+
+// Activity weight by state → drives cell size. D1: awaiting needs you, so it
+// SWELLS biggest (room for the prompt + Approve/Deny); working next; idle collapses
+// to a glanceable sliver.
 static float ips10StateWeight(const char* state) {
+    if (strstr(state, "awaiting") != nullptr) return 1.7f;  // pulls the brightest signal
     if (strcmp(state, "processing") == 0) return 1.0f;
-    if (strstr(state, "awaiting") != nullptr) return 0.72f;
     return 0.40f;  // idle / unknown
 }
 // Human phrase for the in-cell activity line.
@@ -58,6 +184,32 @@ static uint32_t ips10StateColor(const char* state) {
     if (strcmp(state, "processing") == 0) return Theme::StatusBlue;
     if (strstr(state, "awaiting") != nullptr) return Theme::StatusAmber;
     return Theme::HUDDim;
+}
+// Compact elapsed for the cell footer: "45s" / "18m" / "2h" / "3d" (NTP-less device,
+// value arrives pre-derived as seconds from the daemon's startedAt).
+static void ips10FormatElapsed(uint32_t sec, char* out, size_t n) {
+    if (sec == 0)            { out[0] = '\0'; }
+    else if (sec < 60)       snprintf(out, n, "%lus", (unsigned long)sec);
+    else if (sec < 3600)     snprintf(out, n, "%lum", (unsigned long)(sec / 60));
+    else if (sec < 86400)    snprintf(out, n, "%luh", (unsigned long)(sec / 3600));
+    else                     snprintf(out, n, "%lud", (unsigned long)(sec / 86400));
+}
+// Bold agent label for the card header (the project name goes on its own dim line).
+static const char* ips10AgentLabel(const char* agentType) {
+    if (strstr(agentType, "openclaw") != nullptr) return "OpenClaw";
+    if (strstr(agentType, "codex") != nullptr)    return "Codex";
+    if (strstr(agentType, "opencode") != nullptr) return "OpenCode";
+    if (strstr(agentType, "claude") != nullptr)   return "Claude";
+    return "Agent";
+}
+// Short uppercase pill text (D1 state pill).
+static const char* ips10StatePill(const char* state) {
+    if (strcmp(state, "processing") == 0)      return "WORKING";
+    if (strcmp(state, "awaiting_option") == 0) return "CHOOSE";
+    if (strcmp(state, "awaiting_diff") == 0)   return "DIFF";
+    if (strstr(state, "awaiting") != nullptr)  return "AWAITING";
+    if (strcmp(state, "idle") == 0)            return "IDLE";
+    return state;
 }
 #endif
 
@@ -188,16 +340,227 @@ static void createGauge(lv_obj_t* parent,
     lv_label_set_text(resetLabel, "");
 }
 
+#if defined(BOARD_IPS10)
+// ───────── D1 detail overlay (tap a cell → header · activity log · actions) ─────────
+static void detailClose() {
+    detailCellIdx = -1;
+    focusSid[0] = '\0';
+    if (detailBack) lv_obj_add_flag(detailBack, LV_OBJ_FLAG_HIDDEN);
+}
+static void detailBackCb(lv_event_t* e) {
+    if (lv_event_get_target(e) == detailBack) detailClose();  // tap outside the panel
+}
+static void detailBtnACb(lv_event_t* e) {
+    (void)e;
+    if (detailCellIdx < 0) return;
+    CellMeta& m = cellMetaData[detailCellIdx];
+    if (strstr(m.state, "awaiting") != nullptr) {
+        hudSendApprove(m.requestId, m.sid, true);
+    } else if (strcmp(m.state, "processing") == 0 && m.sid[0]) {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"interrupt\"}}", m.sid);
+        hudSendJson(buf);
+    }
+    detailClose();
+}
+static void detailBtnBCb(lv_event_t* e) {
+    (void)e;
+    if (detailCellIdx >= 0) {
+        CellMeta& m = cellMetaData[detailCellIdx];
+        if (strstr(m.state, "awaiting") != nullptr) hudSendApprove(m.requestId, m.sid, false);
+    }
+    detailClose();
+}
+static void detailEnsure() {
+    if (detailBack) return;
+    detailBack = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(detailBack, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(detailBack, lv_color_hex(0x05140F), 0);
+    // Lighter scrim (~47%) so the terrarium + cards stay visibly dimmed behind the
+    // modal instead of being blacked out — reads as a floating layer, not a takeover.
+    lv_obj_set_style_bg_opa(detailBack, (lv_opa_t)120, 0);
+    lv_obj_set_style_border_width(detailBack, 0, 0);
+    lv_obj_set_style_radius(detailBack, 0, 0);
+    lv_obj_set_style_pad_all(detailBack, 0, 0);
+    lv_obj_clear_flag(detailBack, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(detailBack, detailBackCb, LV_EVENT_CLICKED, NULL);
+
+    detailPanel = lv_obj_create(detailBack);
+    // Floating modal card: wide-but-short on the 1280×800 panel so there are clear
+    // margins on every side (≈300px L/R, ≈120px T/B). The old 560×720 was 90% of the
+    // screen height → read as a full-screen cover rather than a modal layer.
+    lv_obj_set_size(detailPanel, 680, 560);
+    lv_obj_center(detailPanel);
+    // Soft drop shadow lifts the card off the dimmed backdrop (modal depth cue).
+    lv_obj_set_style_shadow_width(detailPanel, 48, 0);
+    lv_obj_set_style_shadow_spread(detailPanel, 2, 0);
+    lv_obj_set_style_shadow_color(detailPanel, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_shadow_opa(detailPanel, (lv_opa_t)160, 0);
+    lv_obj_set_style_bg_color(detailPanel, lv_color_hex(0x0D2723), 0);
+    lv_obj_set_style_bg_opa(detailPanel, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(detailPanel, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_border_width(detailPanel, 1, 0);
+    lv_obj_set_style_radius(detailPanel, 16, 0);
+    lv_obj_set_style_pad_all(detailPanel, 18, 0);
+    lv_obj_set_style_pad_row(detailPanel, 10, 0);
+    lv_obj_clear_flag(detailPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(detailPanel, LV_FLEX_FLOW_COLUMN);
+
+    detailTitle = lv_label_create(detailPanel);
+    lv_obj_set_style_text_color(detailTitle, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_set_style_text_font(detailTitle, &font_kr_20, 0);
+    lv_label_set_long_mode(detailTitle, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(detailTitle, LV_PCT(100));
+
+    detailSub = lv_label_create(detailPanel);
+    lv_obj_set_style_text_color(detailSub, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_font(detailSub, &font_kr_12, 0);
+    lv_label_set_recolor(detailSub, true);
+    lv_obj_set_width(detailSub, LV_PCT(100));
+
+    detailAction = lv_label_create(detailPanel);
+    lv_obj_set_style_text_color(detailAction, lv_color_hex(Theme::HUDText), 0);
+    lv_obj_set_style_text_font(detailAction, &font_kr_12, 0);
+    lv_label_set_long_mode(detailAction, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(detailAction, LV_PCT(100));
+
+    detailLog = lv_label_create(detailPanel);
+    lv_obj_set_style_text_color(detailLog, lv_color_hex(Theme::HUDDim), 0);
+    lv_obj_set_style_text_font(detailLog, &font_kr_12, 0);
+    lv_obj_set_style_bg_color(detailLog, lv_color_hex(0x07140F), 0);
+    lv_obj_set_style_bg_opa(detailLog, (lv_opa_t)150, 0);
+    lv_obj_set_style_pad_all(detailLog, 10, 0);
+    lv_obj_set_style_radius(detailLog, 9, 0);
+    lv_label_set_recolor(detailLog, true);
+    lv_label_set_long_mode(detailLog, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(detailLog, LV_PCT(100));
+    lv_obj_set_flex_grow(detailLog, 1);
+
+    detailFoot = lv_obj_create(detailPanel);
+    lv_obj_set_size(detailFoot, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(detailFoot, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(detailFoot, 0, 0);
+    lv_obj_set_style_pad_all(detailFoot, 0, 0);
+    lv_obj_set_style_pad_column(detailFoot, 10, 0);
+    lv_obj_clear_flag(detailFoot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(detailFoot, LV_FLEX_FLOW_ROW);
+
+    detailBtnA = lv_button_create(detailFoot);
+    lv_obj_set_flex_grow(detailBtnA, 1);
+    lv_obj_set_height(detailBtnA, 48);
+    lv_obj_add_event_cb(detailBtnA, detailBtnACb, LV_EVENT_CLICKED, NULL);
+    detailBtnALabel = lv_label_create(detailBtnA);
+    lv_obj_center(detailBtnALabel);
+
+    detailBtnB = lv_button_create(detailFoot);
+    lv_obj_set_flex_grow(detailBtnB, 1);
+    lv_obj_set_height(detailBtnB, 48);
+    lv_obj_add_event_cb(detailBtnB, detailBtnBCb, LV_EVENT_CLICKED, NULL);
+    detailBtnBLabel = lv_label_create(detailBtnB);
+    lv_obj_center(detailBtnBLabel);
+}
+static void detailRefresh() {
+    if (detailCellIdx < 0 || !detailBack) return;
+    CellMeta& m = cellMetaData[detailCellIdx];
+    lv_label_set_text(detailTitle, m.name[0] ? m.name : "Session");
+
+    char sub[96];
+    snprintf(sub, sizeof(sub), "#%06lX %s# \xC2\xB7 %s", (unsigned long)m.accent,
+             m.agent[0] ? m.agent : "agent", m.model[0] ? m.model : "");
+    lv_label_set_text(detailSub, sub);
+
+    bool awaiting = (strstr(m.state, "awaiting") != nullptr);
+    if (awaiting && m.question[0]) {
+        lv_label_set_text(detailAction, m.question);
+    } else if (m.tool[0]) {
+        char t[64]; snprintf(t, sizeof(t), LV_SYMBOL_PLAY " %s", m.tool);
+        lv_label_set_text(detailAction, t);
+    } else {
+        lv_label_set_text(detailAction, ips10StatePhrase(m.state));
+    }
+
+    // Activity log — this session's timeline entries (oldest → newest).
+    char logbuf[640]; int lp = 0; logbuf[0] = '\0';
+    lockState();
+    for (uint8_t i = 0; i < g_state.timelineCount; i++) {
+        uint8_t idx = (g_state.timelineHead + i) % TIMELINE_MAX_ENTRIES;
+        const TimelineEntry& te = g_state.timeline[idx];
+        if (m.sid[0] && te.sessionId[0] && strcmp(te.sessionId, m.sid) != 0) continue;
+        int hh = te.ts / 3600, mm = (te.ts % 3600) / 60;
+        lp += snprintf(logbuf + lp, sizeof(logbuf) - lp, "%02d:%02d  %s\n", hh, mm, te.raw);
+        if ((size_t)lp >= sizeof(logbuf) - 80) break;
+    }
+    unlockState();
+    if (lp == 0) snprintf(logbuf, sizeof(logbuf), "No activity recorded for this session yet.");
+    else if (logbuf[lp - 1] == '\n') logbuf[lp - 1] = '\0';
+    for (char* c = logbuf; *c; c++) if (*c == '#') *c = ' ';
+    lv_label_set_text(detailLog, logbuf);
+
+    // Footer buttons by state.
+    if (awaiting) {
+        lv_obj_set_style_bg_color(detailBtnA, lv_color_hex(Theme::StatusAmber), 0);
+        lv_label_set_text(detailBtnALabel, "Approve");
+        lv_obj_set_style_text_color(detailBtnALabel, lv_color_hex(0x1A1205), 0);
+        lv_obj_clear_flag(detailBtnB, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(detailBtnB, lv_color_hex(Theme::StatusRed), 0);
+        lv_label_set_text(detailBtnBLabel, "Deny");
+        lv_obj_set_style_text_color(detailBtnBLabel, lv_color_hex(0x2A0C0C), 0);
+    } else if (strcmp(m.state, "processing") == 0) {
+        lv_obj_set_style_bg_color(detailBtnA, lv_color_hex(Theme::HUDDim), 0);
+        lv_label_set_text(detailBtnALabel, "Interrupt");
+        lv_obj_set_style_text_color(detailBtnALabel, lv_color_hex(0x07140F), 0);
+        lv_obj_clear_flag(detailBtnB, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(detailBtnB, lv_color_hex(0x16413C), 0);
+        lv_label_set_text(detailBtnBLabel, "Close");
+        lv_obj_set_style_text_color(detailBtnBLabel, lv_color_hex(Theme::HUDText), 0);
+    } else {
+        lv_obj_set_style_bg_color(detailBtnA, lv_color_hex(0x16413C), 0);
+        lv_label_set_text(detailBtnALabel, "Close");
+        lv_obj_set_style_text_color(detailBtnALabel, lv_color_hex(Theme::HUDText), 0);
+        lv_obj_add_flag(detailBtnB, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+static void detailOpen(int idx) {
+    if (idx < 0 || idx >= MOSAIC_MAX) return;
+    detailEnsure();
+    detailCellIdx = idx;
+    strncpy(focusSid, cellMetaData[idx].sid, sizeof(focusSid) - 1);
+    focusSid[sizeof(focusSid) - 1] = '\0';
+    lv_obj_clear_flag(detailBack, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(detailBack);
+    detailRefresh();
+}
+static void cellTapCb(lv_event_t* e) {
+    detailOpen((int)(intptr_t)lv_event_get_user_data(e));
+}
+static void cellYesCb(lv_event_t* e) {
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx >= 0 && idx < MOSAIC_MAX) hudSendApprove(cellMetaData[idx].requestId, cellMetaData[idx].sid, true);
+}
+static void cellNoCb(lv_event_t* e) {
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx >= 0 && idx < MOSAIC_MAX) hudSendApprove(cellMetaData[idx].requestId, cellMetaData[idx].sid, false);
+}
+#endif // BOARD_IPS10
+
 void init(lv_obj_t* parent) {
 #if defined(BOARD_IPS10)
-    // === IPS10 tablet layout: full-height right sidebar (logo + sessions + usage + timeline) ===
-    // The terrarium renders full-screen behind; creatures are biased left (theme.h Layout)
-    // so they clear the sidebar. Mirrors the Android/iOS tablet "terrarium + timeline" split.
+    // === IPS10 tablet layout: terrarium on the left, treemap pane fills the rest ===
+    // The terrarium renders in the left ~408px (creatures biased left); the treemap
+    // pane takes everything to its right so the 1280-wide landscape panel has no dead
+    // middle band. Recomputed here each init (orientation changes rebuild the UI).
+    // Anchor the cards region's LEFT edge at the terrarium boundary and let it run to
+    // the right screen edge (explicit pos, not right-align — which was making it look
+    // centered). Left-aligned children so cards start at the terrarium boundary.
+    const int cardsX = IPS10_TERRARIUM_W + 8;
+    ips10SidebarW = (g_screenW > 0 ? g_screenW : 800) - cardsX - 8;
+    if (ips10SidebarW < IPS10_SIDEBAR_W_MIN) ips10SidebarW = IPS10_SIDEBAR_W_MIN;
     panelLeft = lv_obj_create(parent);
-    lv_obj_set_size(panelLeft, IPS10_SIDEBAR_W, g_screenH - 16);
-    lv_obj_align(panelLeft, LV_ALIGN_TOP_RIGHT, -8, 8);
-    lv_obj_set_style_bg_color(panelLeft, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(panelLeft, LV_OPA_60, 0);
+    lv_obj_set_size(panelLeft, ips10SidebarW, g_screenH - 16);
+    lv_obj_align(panelLeft, LV_ALIGN_TOP_LEFT, cardsX, 8);   // explicit top-left anchor (set_pos can inherit a non-TL align)
+    // Transparent container (D1): cards float on the dark ground, no gray box over the terrarium.
+    lv_obj_set_style_bg_opa(panelLeft, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(panelLeft, 0, 0);
     lv_obj_set_style_radius(panelLeft, 14, 0);
     lv_obj_set_style_pad_top(panelLeft, 16, 0);
@@ -207,7 +570,7 @@ void init(lv_obj_t* parent) {
     lv_obj_set_style_pad_row(panelLeft, 8, 0);
     lv_obj_clear_flag(panelLeft, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(panelLeft, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(panelLeft, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(panelLeft, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
     // Logo image + wordmark
     lblLogoImg = lv_image_create(panelLeft);
@@ -219,7 +582,7 @@ void init(lv_obj_t* parent) {
     lv_label_set_text(lblLogo, "AgentDeck");
 
     logoLine = lv_obj_create(panelLeft);
-    lv_obj_set_size(logoLine, IPS10_SIDEBAR_W - 60, 2);
+    lv_obj_set_size(logoLine, ips10SidebarW - 60, 2);
     lv_obj_set_style_bg_color(logoLine, lv_color_hex(Theme::StatusBlue), 0);
     lv_obj_set_style_bg_opa(logoLine, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(logoLine, 0, 0);
@@ -233,49 +596,145 @@ void init(lv_obj_t* parent) {
 
     // === Agent treemap — absolute-positioned cells tile the whole region in 2D ===
     cellsBox = lv_obj_create(panelLeft);
-    lv_obj_set_width(cellsBox, IPS10_SIDEBAR_W - 28);
+    lv_obj_set_width(cellsBox, ips10SidebarW - 28);
     lv_obj_set_flex_grow(cellsBox, 1);          // eat all leftover vertical space
-    lv_obj_set_style_bg_opa(cellsBox, LV_OPA_TRANSP, 0);
+    // Solid "deck" backdrop (NOT transparent). The cells tile this region with a 6px
+    // GAP and lerp toward new sizes when the live session count changes — during that
+    // settle (and on any transient empty list) the un-tiled area would otherwise show
+    // the screen's pure-black root (0x000000), reading as "the right side flickers to
+    // black". A solid deep ink-green deck makes the inter-cell gutters and transition
+    // gaps an intentional surface instead of black, and reads as cards-on-a-deck (D1).
+    lv_obj_set_style_bg_color(cellsBox, lv_color_hex(0x0B1A17), 0);
+    lv_obj_set_style_bg_opa(cellsBox, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(cellsBox, 12, 0);
     lv_obj_set_style_border_width(cellsBox, 0, 0);
     lv_obj_set_style_pad_all(cellsBox, 0, 0);
     lv_obj_clear_flag(cellsBox, LV_OBJ_FLAG_SCROLLABLE);
     // No flex layout → children are placed by absolute lv_obj_set_pos (the treemap).
 
+    ips10InitGlyphs();   // build the A8 creature-mark descriptors once before the cells use them
+
     for (int i = 0; i < MOSAIC_MAX; i++) {
         cell[i] = lv_obj_create(cellsBox);
         lv_obj_set_size(cell[i], 80, 60);
         lv_obj_set_pos(cell[i], 0, 0);
-        lv_obj_set_style_bg_color(cell[i], lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_bg_opa(cell[i], (lv_opa_t)20, 0);
-        lv_obj_set_style_radius(cell[i], 8, 0);
-        // Agent-type color accent down the left edge.
+        // D1 card: dark teal fill, rounded, agent-color accent rail on the left edge.
+        lv_obj_set_style_bg_color(cell[i], lv_color_hex(0x123430), 0);
+        lv_obj_set_style_bg_opa(cell[i], (lv_opa_t)205, 0);
+        lv_obj_set_style_radius(cell[i], 12, 0);
         lv_obj_set_style_border_side(cell[i], LV_BORDER_SIDE_LEFT, 0);
         lv_obj_set_style_border_width(cell[i], 3, 0);
         lv_obj_set_style_border_color(cell[i], lv_color_hex(Theme::HUDDim), 0);
-        lv_obj_set_style_pad_left(cell[i], 8, 0);
-        lv_obj_set_style_pad_right(cell[i], 6, 0);
-        lv_obj_set_style_pad_top(cell[i], 6, 0);
-        lv_obj_set_style_pad_bottom(cell[i], 6, 0);
-        lv_obj_set_style_pad_row(cell[i], 2, 0);
+        lv_obj_set_style_pad_left(cell[i], 11, 0);
+        lv_obj_set_style_pad_right(cell[i], 10, 0);
+        lv_obj_set_style_pad_top(cell[i], 9, 0);
+        lv_obj_set_style_pad_bottom(cell[i], 9, 0);
+        lv_obj_set_style_pad_row(cell[i], 5, 0);
         lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(cell[i], LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell[i], LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        // Tap a cell → detail overlay (D1 "tap a cell for the log").
+        lv_obj_add_flag(cell[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(cell[i], cellTapCb, LV_EVENT_SHORT_CLICKED, (void*)(intptr_t)i);
 
+        // Creature mark — top-right overlay, OUTSIDE the flex flow (IGNORE_LAYOUT) so it
+        // never perturbs the text column's layout (nested layout churn is what black-
+        // screened earlier builds). Tinted to the agent accent at render time.
+        cellGlyph[i] = lv_image_create(cell[i]);
+        lv_obj_add_flag(cellGlyph[i], LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_add_flag(cellGlyph[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_image_recolor_opa(cellGlyph[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_image_opa(cellGlyph[i], (lv_opa_t)235, 0);
+        lv_obj_clear_flag(cellGlyph[i], LV_OBJ_FLAG_CLICKABLE);  // taps fall through to the cell
+
+        // Name line: ●agent-name (bold) + colored [STATE] (one recolor label, no flex).
         cellName[i] = lv_label_create(cell[i]);
         lv_obj_set_style_text_color(cellName[i], lv_color_hex(Theme::HUDText), 0);
-        lv_obj_set_style_text_font(cellName[i], &font_kr_12, 0);
+        lv_obj_set_style_text_font(cellName[i], &font_kr_16, 0);   // larger for legibility (D1)
         lv_label_set_recolor(cellName[i], true);
         lv_label_set_long_mode(cellName[i], LV_LABEL_LONG_DOT);
         lv_obj_set_width(cellName[i], 60);
         lv_label_set_text(cellName[i], "");
 
-        cellAct[i] = lv_label_create(cell[i]);
-        lv_obj_set_style_text_color(cellAct[i], lv_color_hex(Theme::HUDDim), 0);
-        lv_obj_set_style_text_font(cellAct[i], &lv_font_montserrat_10, 0);
-        lv_label_set_recolor(cellAct[i], true);
-        lv_label_set_long_mode(cellAct[i], LV_LABEL_LONG_DOT);
-        lv_obj_set_width(cellAct[i], 60);
-        lv_label_set_text(cellAct[i], "");
+        // State pill chip — short content-sized rounded label (NOT a nested flex row, so it
+        // stays layout-cheap). bg/text colored per state at render time.
+        cellPill[i] = lv_label_create(cell[i]);
+        lv_obj_set_style_text_font(cellPill[i], &font_kr_12, 0);
+        lv_obj_set_style_text_color(cellPill[i], lv_color_hex(0x05140F), 0);
+        lv_obj_set_style_bg_opa(cellPill[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(cellPill[i], 8, 0);
+        lv_obj_set_style_pad_left(cellPill[i], 8, 0);
+        lv_obj_set_style_pad_right(cellPill[i], 8, 0);
+        lv_obj_set_style_pad_top(cellPill[i], 2, 0);
+        lv_obj_set_style_pad_bottom(cellPill[i], 2, 0);
+        lv_label_set_long_mode(cellPill[i], LV_LABEL_LONG_CLIP);
+        lv_label_set_text(cellPill[i], "");
+
+        cellProj[i] = lv_label_create(cell[i]);
+        lv_obj_set_style_text_color(cellProj[i], lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_set_style_text_font(cellProj[i], &font_kr_12, 0);
+        lv_label_set_long_mode(cellProj[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_width(cellProj[i], 60);
+        lv_label_set_text(cellProj[i], "");
+
+        // Tool box: "▸ tool" in a bordered/filled box.
+        cellTool[i] = lv_label_create(cell[i]);
+        lv_obj_set_style_text_color(cellTool[i], lv_color_hex(Theme::HUDText), 0);
+        lv_obj_set_style_text_font(cellTool[i], &font_kr_12, 0);
+        lv_obj_set_style_bg_color(cellTool[i], lv_color_hex(0x07140F), 0);
+        lv_obj_set_style_bg_opa(cellTool[i], (lv_opa_t)150, 0);
+        lv_obj_set_style_border_width(cellTool[i], 1, 0);
+        lv_obj_set_style_border_color(cellTool[i], lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_set_style_border_opa(cellTool[i], (lv_opa_t)90, 0);
+        lv_obj_set_style_radius(cellTool[i], 6, 0);
+        lv_obj_set_style_pad_left(cellTool[i], 7, 0);
+        lv_obj_set_style_pad_right(cellTool[i], 7, 0);
+        lv_obj_set_style_pad_top(cellTool[i], 4, 0);
+        lv_obj_set_style_pad_bottom(cellTool[i], 4, 0);
+        lv_label_set_long_mode(cellTool[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_width(cellTool[i], 60);
+        lv_label_set_text(cellTool[i], "");
+
+        cellBody[i] = lv_label_create(cell[i]);
+        lv_obj_set_style_text_color(cellBody[i], lv_color_hex(Theme::HUDDim), 0);
+        lv_obj_set_style_text_font(cellBody[i], &font_kr_12, 0);
+        lv_label_set_long_mode(cellBody[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_width(cellBody[i], 60);
+        lv_label_set_text(cellBody[i], "");
+
+        // Footer: model · elapsed (faint).
+        cellMeta[i] = lv_label_create(cell[i]);
+        lv_obj_set_width(cellMeta[i], 60);
+        lv_obj_set_style_text_color(cellMeta[i], lv_color_hex(Theme::HUDFaint), 0);
+        lv_obj_set_style_text_font(cellMeta[i], &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_opa(cellMeta[i], (lv_opa_t)180, 0);
+        lv_label_set_long_mode(cellMeta[i], LV_LABEL_LONG_DOT);
+        lv_label_set_text(cellMeta[i], "");
+
+        // Inline Approve/Deny — shown only on awaiting cells that are tall enough.
+        cellYes[i] = lv_button_create(cell[i]);
+        lv_obj_set_height(cellYes[i], 32);
+        lv_obj_set_width(cellYes[i], LV_PCT(100));
+        lv_obj_set_style_bg_color(cellYes[i], lv_color_hex(Theme::StatusAmber), 0);
+        lv_obj_set_style_radius(cellYes[i], 7, 0);
+        lv_obj_add_event_cb(cellYes[i], cellYesCb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+        lv_obj_t* yesLbl = lv_label_create(cellYes[i]);
+        lv_label_set_text(yesLbl, "Approve");
+        lv_obj_set_style_text_color(yesLbl, lv_color_hex(0x1A1205), 0);
+        lv_obj_center(yesLbl);
+        lv_obj_add_flag(cellYes[i], LV_OBJ_FLAG_HIDDEN);
+
+        cellNo[i] = lv_button_create(cell[i]);
+        lv_obj_set_height(cellNo[i], 32);
+        lv_obj_set_width(cellNo[i], LV_PCT(100));
+        lv_obj_set_style_bg_color(cellNo[i], lv_color_hex(0x16413C), 0);
+        lv_obj_set_style_radius(cellNo[i], 7, 0);
+        lv_obj_add_event_cb(cellNo[i], cellNoCb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+        lv_obj_t* noLbl = lv_label_create(cellNo[i]);
+        lv_label_set_text(noLbl, "Deny");
+        lv_obj_set_style_text_color(noLbl, lv_color_hex(Theme::HUDText), 0);
+        lv_obj_center(noLbl);
+        lv_obj_add_flag(cellNo[i], LV_OBJ_FLAG_HIDDEN);
 
         lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
     }
@@ -572,7 +1031,7 @@ void update() {
 
     // Copy session list
     uint8_t sessionCount = hasData ? g_state.sessionCount : (uint8_t)0;
-    SessionInfo sessions[6];
+    SessionInfo sessions[10];
     memcpy(sessions, g_state.sessions, sizeof(sessions));
 
     // Fallback: if no sessions, use primary state
@@ -595,7 +1054,7 @@ void update() {
 
     if (sessionCount > 0) {
         // Show real session list from bridge
-        for (uint8_t i = 0; i < sessionCount && i < 6; i++) {
+        for (uint8_t i = 0; i < sessionCount && i < 10; i++) {
             if (!sessions[i].alive) continue;
 
             // Pick color by agent type
@@ -667,7 +1126,9 @@ void update() {
     // === Living agent mosaic — one cell per agent, height fluidly tracks activity,
     //     each cell narrates inline what that agent is doing. ===
     if (cellsBox) {
-        struct MCell { uint32_t accent; uint32_t stateCol; char name[40]; char agent[16]; char state[20]; char model[32]; };
+        struct MCell { uint32_t accent; uint32_t stateCol; char name[40]; char agent[16]; char state[20];
+                       char model[32]; char tool[40]; uint32_t elapsed;
+                       char sid[32]; char requestId[40]; char question[160]; };
         MCell mc[MOSAIC_MAX];
         int n = 0;
         char latestAction[48] = "";
@@ -688,6 +1149,11 @@ void update() {
             strncpy(mc[n].agent, si.agentType, sizeof(mc[n].agent) - 1); mc[n].agent[sizeof(mc[n].agent) - 1] = '\0';
             strncpy(mc[n].state, si.state, sizeof(mc[n].state) - 1); mc[n].state[sizeof(mc[n].state) - 1] = '\0';
             strncpy(mc[n].model, si.modelName, sizeof(mc[n].model) - 1); mc[n].model[sizeof(mc[n].model) - 1] = '\0';
+            strncpy(mc[n].tool, si.currentTool, sizeof(mc[n].tool) - 1); mc[n].tool[sizeof(mc[n].tool) - 1] = '\0';
+            mc[n].elapsed = si.elapsedSec;
+            strncpy(mc[n].sid, si.id, sizeof(mc[n].sid) - 1); mc[n].sid[sizeof(mc[n].sid) - 1] = '\0';
+            strncpy(mc[n].requestId, si.requestId, sizeof(mc[n].requestId) - 1); mc[n].requestId[sizeof(mc[n].requestId) - 1] = '\0';
+            strncpy(mc[n].question, si.question, sizeof(mc[n].question) - 1); mc[n].question[sizeof(mc[n].question) - 1] = '\0';
             n++;
         }
         bool hasOC = false;
@@ -695,7 +1161,8 @@ void update() {
         if (g_state.gatewayConnected && !hasOC && n < MOSAIC_MAX) {
             mc[n].accent = Theme::CrayfishShell; mc[n].stateCol = Theme::StatusGreen;
             strcpy(mc[n].name, "OpenClaw"); strcpy(mc[n].agent, "openclaw");
-            strcpy(mc[n].state, "idle"); mc[n].model[0] = '\0'; n++;
+            strcpy(mc[n].state, "idle"); mc[n].model[0] = '\0'; mc[n].tool[0] = '\0'; mc[n].elapsed = 0;
+            mc[n].sid[0] = '\0'; mc[n].requestId[0] = '\0'; mc[n].question[0] = '\0'; n++;
         }
         if (n == 0 && hasData) {  // single-session fallback (no sessions_list yet)
             mc[0].accent = ips10AgentColor(g_state.agentType);
@@ -707,18 +1174,26 @@ void update() {
             mc[0].name[sizeof(mc[0].name) - 1] = '\0';
             strncpy(mc[0].agent, primaryAgent, sizeof(mc[0].agent) - 1); mc[0].agent[sizeof(mc[0].agent) - 1] = '\0';
             strncpy(mc[0].state, ps, sizeof(mc[0].state) - 1); mc[0].state[sizeof(mc[0].state) - 1] = '\0';
-            mc[0].model[0] = '\0'; n = 1;
+            strncpy(mc[0].tool, g_state.currentTool, sizeof(mc[0].tool) - 1); mc[0].tool[sizeof(mc[0].tool) - 1] = '\0';
+            mc[0].model[0] = '\0'; mc[0].elapsed = g_state.sessionDurationSec;
+            mc[0].sid[0] = '\0'; mc[0].requestId[0] = '\0';
+            strncpy(mc[0].question, g_state.question, sizeof(mc[0].question) - 1); mc[0].question[sizeof(mc[0].question) - 1] = '\0';
+            n = 1;
         }
         unlockState();
 
-        for (int i = 0; i < n; i++)  // protect recolor markup
+        for (int i = 0; i < n; i++) {  // protect recolor markup
             for (char* c = mc[i].name; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
+            for (char* c = mc[i].tool; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
+        }
         for (char* c = latestAction; *c; c++) if (*c == '#' || *c == '\n') *c = ' ';
 
-        int availW = lv_obj_get_content_width(cellsBox);
+        // Use the KNOWN panel geometry, not lv_obj_get_content_width/height — those
+        // return stale/partial values depending on layout timing, which made the
+        // treemap fill only a small top-left corner of the (correctly-sized) region.
+        int availW = ips10SidebarW - 30;                 // panel content width (− border/pad)
         int availH = lv_obj_get_content_height(cellsBox);
-        if (availW < 40) availW = IPS10_SIDEBAR_W - 28;   // floors when layout not ready yet
-        if (availH < 40) availH = 640;
+        if (availH < 320) availH = (g_screenH - 16) - 150;  // robust fallback (logo + usage bands)
 
         // Activity weights + descending order (bigger weight → placed first / larger tile).
         float weights[MOSAIC_MAX]; int order[MOSAIC_MAX]; float wsum = 0;
@@ -728,60 +1203,216 @@ void update() {
             for (int b = a + 1; b < n; b++)
                 if (weights[order[b]] > weights[order[a]]) { int tmp = order[a]; order[a] = order[b]; order[b] = tmp; }
 
-        // Slice-and-dice treemap: split the longer side each step so tiles stay squarish,
-        // each agent's AREA ∝ its activity. Always fills the whole region in 2D.
-        float tx = 0, ty = 0, tw = availW, th = availH, rem = wsum;
+        // Squarified treemap (matches the D1 mockup): pack tiles so each stays as
+        // close to square as possible — far better for the in-cell text than the old
+        // slice-and-dice, which made full-height slivers in a wide pane.
         float tgtX[MOSAIC_MAX], tgtY[MOSAIC_MAX], tgtW[MOSAIC_MAX], tgtH[MOSAIC_MAX];
-        for (int k = 0; k < n; k++) {
-            int gi = order[k];
-            if (k == n - 1) { tgtX[gi] = tx; tgtY[gi] = ty; tgtW[gi] = tw; tgtH[gi] = th; break; }
-            float frac = weights[gi] / rem;
-            if (tw >= th) { float cw = tw * frac; tgtX[gi] = tx; tgtY[gi] = ty; tgtW[gi] = cw; tgtH[gi] = th; tx += cw; tw -= cw; }
-            else          { float ch = th * frac; tgtX[gi] = tx; tgtY[gi] = ty; tgtW[gi] = tw; tgtH[gi] = ch; ty += ch; th -= ch; }
-            rem -= weights[gi];
+        float area[MOSAIC_MAX];
+        for (int i = 0; i < n; i++) area[i] = (weights[i] / wsum) * (float)availW * (float)availH;
+
+        float rx = 0, ry = 0, rw = (float)availW, rh = (float)availH;
+        int rowStart = 0, k = 0;
+        // Lay out order[a..b-1] as one row along the shorter side of the remaining rect.
+        auto layoutRow = [&](int a, int b) {
+            float s = 0; for (int j = a; j < b; j++) s += area[order[j]];
+            if (s <= 0) return;
+            if (rw >= rh) {                    // remaining rect is wide → stack row vertically in a left column
+                float cw = s / (rh > 0 ? rh : 1); float cy = ry;
+                for (int j = a; j < b; j++) { int gi = order[j]; float ch = area[gi] / (cw > 0 ? cw : 1);
+                    tgtX[gi] = rx; tgtY[gi] = cy; tgtW[gi] = cw; tgtH[gi] = ch; cy += ch; }
+                rx += cw; rw -= cw;
+            } else {                           // remaining rect is tall → lay row horizontally along the top
+                float ch = s / (rw > 0 ? rw : 1); float cx = rx;
+                for (int j = a; j < b; j++) { int gi = order[j]; float cw = area[gi] / (ch > 0 ? ch : 1);
+                    tgtX[gi] = cx; tgtY[gi] = ry; tgtW[gi] = cw; tgtH[gi] = ch; cx += cw; }
+                ry += ch; rh -= ch;
+            }
+        };
+        // Worst (largest) aspect ratio of order[a..b-1] laid along `side`.
+        auto rowWorst = [&](int a, int b, float side) -> float {
+            float s = 0, mn = 1e30f, mx = 0;
+            for (int j = a; j < b; j++) { float v = area[order[j]]; s += v; if (v < mn) mn = v; if (v > mx) mx = v; }
+            if (s <= 0 || side <= 0) return 1e30f;
+            float s2 = s * s, sd2 = side * side;
+            float r1 = sd2 * mx / s2, r2 = s2 / (sd2 * mn);
+            return r1 > r2 ? r1 : r2;
+        };
+        while (k < n) {
+            float side = (rw < rh) ? rw : rh;
+            if (k > rowStart && rowWorst(rowStart, k, side) < rowWorst(rowStart, k + 1, side)) {
+                layoutRow(rowStart, k);        // adding order[k] would worsen aspect → close row
+                rowStart = k;
+            } else {
+                k++;                           // keep growing the row
+            }
         }
+        if (rowStart < n) layoutRow(rowStart, n);
 
         bool actionUsed = false;
-        const float GAP = 4.0f;
+        const float GAP = 6.0f;
+        // Per-cell change signature: when a settled cell's content is unchanged we
+        // skip ALL LVGL label/style churn, so the wide card region stops invalidating
+        // every frame (that invalidation is what forces the costly per-frame flush).
+        static uint32_t cellSig[MOSAIC_MAX] = {0};
         for (int i = 0; i < MOSAIC_MAX; i++) {
-            if (i >= n) { lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN); cellInit[i] = false; continue; }
-            // Snap on first appearance, then fluidly lerp the rect toward its treemap target.
+            if (i >= n) {
+                if (!lv_obj_has_flag(cell[i], LV_OBJ_FLAG_HIDDEN)) lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
+                cellInit[i] = false; cellSig[i] = 0; continue;
+            }
+            // Snap on first appearance; lerp toward target; settle (stop sub-pixel drift
+            // so a static grid stops re-positioning → no invalidation).
             if (!cellInit[i]) {
                 cellCurX[i] = tgtX[i]; cellCurY[i] = tgtY[i]; cellCurW[i] = tgtW[i]; cellCurH[i] = tgtH[i];
                 cellInit[i] = true;
             } else {
-                cellCurX[i] += (tgtX[i] - cellCurX[i]) * 0.22f;
-                cellCurY[i] += (tgtY[i] - cellCurY[i]) * 0.22f;
-                cellCurW[i] += (tgtW[i] - cellCurW[i]) * 0.22f;
-                cellCurH[i] += (tgtH[i] - cellCurH[i]) * 0.22f;
+                float dx = tgtX[i] - cellCurX[i], dy = tgtY[i] - cellCurY[i];
+                float dw = tgtW[i] - cellCurW[i], dh = tgtH[i] - cellCurH[i];
+                if (fabsf(dx) < 0.6f && fabsf(dy) < 0.6f && fabsf(dw) < 0.6f && fabsf(dh) < 0.6f) {
+                    cellCurX[i] = tgtX[i]; cellCurY[i] = tgtY[i]; cellCurW[i] = tgtW[i]; cellCurH[i] = tgtH[i];
+                } else {
+                    cellCurX[i] += dx * 0.22f; cellCurY[i] += dy * 0.22f;
+                    cellCurW[i] += dw * 0.22f; cellCurH[i] += dh * 0.22f;
+                }
             }
-            int px = (int)(cellCurX[i] + 0.5f);
-            int py = (int)(cellCurY[i] + 0.5f);
+            int px = (int)(cellCurX[i] + 0.5f), py = (int)(cellCurY[i] + 0.5f);
             int pw = (int)(cellCurW[i] - GAP + 0.5f); if (pw < 10) pw = 10;
             int ph = (int)(cellCurH[i] - GAP + 0.5f); if (ph < 10) ph = 10;
-            lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(cell[i], px, py);
-            lv_obj_set_size(cell[i], pw, ph);
-            lv_obj_set_style_border_color(cell[i], lv_color_hex(mc[i].accent), 0);
-            lv_obj_set_width(cellName[i], pw - 18);
-            lv_obj_set_width(cellAct[i], pw - 18);
 
-            char nb[96];
-            snprintf(nb, sizeof(nb), "#%06lX " LV_SYMBOL_BULLET "# %s", (unsigned long)mc[i].stateCol, mc[i].name);
+            // Persist cell data for the tap handler / detail overlay.
+            CellMeta& cm = cellMetaData[i];
+            strncpy(cm.sid, mc[i].sid, sizeof(cm.sid) - 1); cm.sid[sizeof(cm.sid) - 1] = '\0';
+            strncpy(cm.requestId, mc[i].requestId, sizeof(cm.requestId) - 1); cm.requestId[sizeof(cm.requestId) - 1] = '\0';
+            strncpy(cm.state, mc[i].state, sizeof(cm.state) - 1); cm.state[sizeof(cm.state) - 1] = '\0';
+            strncpy(cm.question, mc[i].question, sizeof(cm.question) - 1); cm.question[sizeof(cm.question) - 1] = '\0';
+            strncpy(cm.agent, mc[i].agent, sizeof(cm.agent) - 1); cm.agent[sizeof(cm.agent) - 1] = '\0';
+            strncpy(cm.model, mc[i].model, sizeof(cm.model) - 1); cm.model[sizeof(cm.model) - 1] = '\0';
+            strncpy(cm.name, mc[i].name, sizeof(cm.name) - 1); cm.name[sizeof(cm.name) - 1] = '\0';
+            strncpy(cm.tool, mc[i].tool, sizeof(cm.tool) - 1); cm.tool[sizeof(cm.tool) - 1] = '\0';
+            cm.elapsed = mc[i].elapsed; cm.accent = mc[i].accent;
+
+            bool awaiting = (strstr(mc[i].state, "awaiting") != nullptr);
+            bool working  = (strcmp(mc[i].state, "processing") == 0);
+            bool idle     = (!awaiting && !working);
+            bool linked   = (focusSid[0] && mc[i].sid[0] && strcmp(focusSid, mc[i].sid) == 0);
+
+            lv_obj_clear_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(cell[i], px, py);     // LVGL no-ops these when unchanged (settled)
+            lv_obj_set_size(cell[i], pw, ph);
+
+            // Change signature (content + size + focus). Skip label churn when unchanged.
+            uint32_t sig = 2166136261u;
+            for (const char* s = mc[i].state;    *s; s++) sig = sig * 31u + (uint8_t)*s;
+            for (const char* s = mc[i].name;     *s; s++) sig = sig * 31u + (uint8_t)*s;
+            for (const char* s = mc[i].tool;     *s; s++) sig = sig * 31u + (uint8_t)*s;
+            for (const char* s = mc[i].model;    *s; s++) sig = sig * 31u + (uint8_t)*s;
+            for (const char* s = mc[i].question; *s; s++) sig = sig * 31u + (uint8_t)*s;
+            sig ^= (uint32_t)mc[i].elapsed + (uint32_t)(pw * 131) + (uint32_t)(ph * 17) + (linked ? 7u : 0u);
+            if (sig == cellSig[i]) continue;     // settled + unchanged → no LVGL work
+            cellSig[i] = sig;
+
+            // accent rail + focus link
+            lv_obj_set_style_border_width(cell[i], linked ? 4 : 3, 0);
+            lv_obj_set_style_border_color(cell[i], lv_color_hex(linked ? mc[i].stateCol : mc[i].accent), 0);
+
+            int innerW = pw - 24; if (innerW < 24) innerW = 24;
+
+            // Creature mark — top-right overlay, tinted to the agent accent, sized to the
+            // cell (32–60px). Skipped on tiny cells and for agents with no mask (Codex).
+            const lv_image_dsc_t* gdsc = ips10AgentGlyph(mc[i].agent);
+            int glyphSz = 0;
+            if (gdsc && pw >= 92 && ph >= 52) {
+                glyphSz = (pw < ph ? pw : ph) * 42 / 100;
+                if (glyphSz < 32) glyphSz = 32;
+                if (glyphSz > 60) glyphSz = 60;
+                lv_image_set_src(cellGlyph[i], gdsc);
+                lv_obj_set_style_image_recolor(cellGlyph[i], lv_color_hex(mc[i].accent), 0);
+                lv_image_set_scale(cellGlyph[i], 256 * glyphSz / 64);   // 64px mask → glyphSz px
+                lv_obj_align(cellGlyph[i], LV_ALIGN_TOP_RIGHT, -8, 6);
+                lv_obj_clear_flag(cellGlyph[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(cellGlyph[i], LV_OBJ_FLAG_HIDDEN);
+            }
+
+            int nameW = innerW - (glyphSz ? glyphSz + 8 : 0); if (nameW < 24) nameW = 24;
+            lv_obj_set_width(cellName[i], nameW);
+            lv_obj_set_width(cellProj[i], innerW);
+            lv_obj_set_width(cellTool[i], innerW);
+            lv_obj_set_width(cellBody[i], innerW);
+            lv_obj_set_width(cellMeta[i], innerW);
+
+            // name line: ●agent-name — state now lives in the pill chip below.
+            char nb[64];
+            snprintf(nb, sizeof(nb), "#%06lX " LV_SYMBOL_BULLET "# %s",
+                     (unsigned long)mc[i].accent, ips10AgentLabel(mc[i].agent));
             lv_label_set_text(cellName[i], nb);
 
-            char ab[96];
-            bool working = (strcmp(mc[i].state, "processing") == 0);
-            if (working && latestAction[0] && !actionUsed) {
-                snprintf(ab, sizeof(ab), LV_SYMBOL_PLAY " %s", latestAction);
-                actionUsed = true;
-            } else if (mc[i].model[0]) {
-                snprintf(ab, sizeof(ab), "%s \xC2\xB7 %s", ips10StatePhrase(mc[i].state), mc[i].model);
+            // state pill chip — bright states get dark text; the dim idle bg gets light text.
+            if (ph >= 44) {
+                lv_label_set_text(cellPill[i], ips10StatePill(mc[i].state));
+                lv_obj_set_style_bg_color(cellPill[i], lv_color_hex(mc[i].stateCol), 0);
+                lv_obj_set_style_text_color(cellPill[i],
+                    lv_color_hex(idle ? Theme::HUDText : 0x05140F), 0);
+                lv_obj_set_style_bg_opa(cellPill[i], idle ? (lv_opa_t)90 : LV_OPA_COVER, 0);
+                lv_obj_clear_flag(cellPill[i], LV_OBJ_FLAG_HIDDEN);
             } else {
-                snprintf(ab, sizeof(ab), "%s", ips10StatePhrase(mc[i].state));
+                lv_obj_add_flag(cellPill[i], LV_OBJ_FLAG_HIDDEN);
             }
-            lv_label_set_text(cellAct[i], ab);
+
+            // project (dim) — its own line under the name
+            if (ph >= 56 && mc[i].name[0]) {
+                lv_label_set_text(cellProj[i], mc[i].name);
+                lv_obj_clear_flag(cellProj[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(cellProj[i], LV_OBJ_FLAG_HIDDEN);
+            }
+
+            // tool box (working/awaiting, when there's room)
+            if (!idle && mc[i].tool[0] && ph >= 80) {
+                char tb[64]; snprintf(tb, sizeof(tb), LV_SYMBOL_PLAY " %s", mc[i].tool);
+                lv_label_set_text(cellTool[i], tb);
+                lv_obj_clear_flag(cellTool[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(cellTool[i], LV_OBJ_FLAG_HIDDEN);
+            }
+
+            // body: awaiting → prompt; working → latest reasoning/timeline line
+            const char* body = "";
+            if (awaiting && mc[i].question[0]) body = mc[i].question;
+            else if (working && latestAction[0] && !actionUsed) { body = latestAction; actionUsed = true; }
+            if (!idle && body[0] && ph >= 104) {
+                lv_label_set_text(cellBody[i], body);
+                lv_obj_clear_flag(cellBody[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(cellBody[i], LV_OBJ_FLAG_HIDDEN);
+            }
+
+            // inline Approve/Deny (awaiting permission/diff with room)
+            bool showButtons = awaiting && strcmp(mc[i].state, "awaiting_option") != 0 && ph >= 132 && pw >= 130;
+            if (showButtons) {
+                lv_obj_clear_flag(cellYes[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(cellNo[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(cellYes[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(cellNo[i], LV_OBJ_FLAG_HIDDEN);
+            }
+
+            // footer: model · elapsed (idle cards show just header + this). Hidden when
+            // the inline buttons own the space.
+            char el[12]; ips10FormatElapsed(mc[i].elapsed, el, sizeof(el));
+            if (!showButtons && ph >= 64 && (mc[i].model[0] || el[0])) {
+                char fb[56];
+                if (mc[i].model[0] && el[0]) snprintf(fb, sizeof(fb), "%s \xC2\xB7 %s", mc[i].model, el);
+                else if (mc[i].model[0])     snprintf(fb, sizeof(fb), "%s", mc[i].model);
+                else                         snprintf(fb, sizeof(fb), "%s", el);
+                lv_label_set_text(cellMeta[i], fb);
+                lv_obj_clear_flag(cellMeta[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(cellMeta[i], LV_OBJ_FLAG_HIDDEN);
+            }
         }
+        // Keep an open detail overlay in sync with live state (it may have been
+        // approved elsewhere, or the session may have changed state).
+        if (detailCellIdx >= 0) detailRefresh();
     }
 #endif
 
@@ -795,7 +1426,7 @@ void update() {
             if (panelRight && visible) {
                 lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
             }
-#if !IS_ROUND
+#if !IS_ROUND && !defined(BOARD_IPS10)   // IPS10 has a fixed D1 cards position (set in init); don't re-align
             if (UI::isLandscape()) {
 #if defined(BOARD_TTGO)
                 lv_obj_align(panelLeft, LV_ALIGN_TOP_LEFT, 6, 6);
@@ -808,7 +1439,7 @@ void update() {
             if (panelRight) {
                 lv_obj_add_flag(panelRight, LV_OBJ_FLAG_HIDDEN);
             }
-#if !IS_ROUND
+#if !IS_ROUND && !defined(BOARD_IPS10)   // IPS10 keeps its fixed D1 cards position
             if (UI::isLandscape()) {
 #if defined(BOARD_TTGO)
                 lv_obj_align(panelLeft, LV_ALIGN_TOP_MID, 0, 6);

@@ -44,6 +44,18 @@ bool wsConnecting();
 void wsSend(const char* json);
 
 /**
+ * Thread-safe: enqueue an outbound JSON command from any task (e.g. CORE_UI LVGL
+ * callbacks). Drained on CORE_NETWORK by pumpOutbound(). Use this instead of
+ * wsSend() from the UI task — arduinoWebSockets is not thread-safe.
+ */
+void queueOutbound(const char* json);
+
+/**
+ * Drain the outbound queue (WS if connected, else serial). Call from the network task loop.
+ */
+void pumpOutbound();
+
+/**
  * Send a typed command with no extra fields.
  */
 void wsSendCommand(const char* type);
