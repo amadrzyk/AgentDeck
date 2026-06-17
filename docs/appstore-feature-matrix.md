@@ -33,7 +33,7 @@
 |---|:---:|:---:|---|---|
 | **Ulanzi D200H Deck Dock** | ✅ | ✅ | Built-in USB | **주경로: Ulanzi Studio 플러그인**(`plugin-ulanzi`, 공식 SDK, Studio 안에서 WS — AgentDeck.app 에 미번들이라 불변식 무관). **폴백: direct-HID**(IOKit, `com.apple.security.device.usb`). `ulanzi-plugin` 등록 시 데몬이 direct-HID stand-down(Node+Swift) → 동시 구동 충돌 없음 |
 | **Divoom Pixoo64** | ✅ | ✅ | Network LED | HTTP, entitlement 불필요 |
-| **iDotMatrix LED 디스플레이** | ✅ | ✅ | Bluetooth LE | App Store: 네이티브 CoreBluetooth (`com.apple.security.device.bluetooth`). CLI: Python `idotmatrix`(bleak). Node 데몬은 iDotMatrix BLE 를 네이티브로 구동 못 함 → Swift 모듈이 **hub·client 모드 모두에서** BLE 구동(client 모드는 `DaemonService.clientModeIDotMatrix`, 외부 데몬 broadcast 를 `ingestExternalBroadcast` 로 수신). BLE 단일 연결이라 `agentdeck idotmatrix sync`(sync.py)와는 둘 중 하나만 |
+| **iDotMatrix LED 디스플레이** | ✅ | ✅ | Bluetooth LE | App Store 단독 Swift 앱: 네이티브 CoreBluetooth (`com.apple.security.device.bluetooth`, hub 모듈). CLI(Node) 데몬: BLE 네이티브 불가 → 데몬이 Python `idotmatrix`(bleak) `sync.py`를 **자동 spawn**(`startIDotMatrixSync`)해 구동 → CLI 데몬만으로 동작. 둘 다 뜨면 CLI 데몬 소유, Swift client-mode stand down(BLE 단일연결) |
 | **ESP32 상태 디스플레이 (모니터링)** | ✅ | ✅ | ESP32 Display | `com.apple.security.device.serial`. 보드: `rgb48` / `amoled` / `ips35` |
 | **ESP32 Wi-Fi 프로비저닝** | ✅ | ✅ | ESP32 Display | 직접 serial write, subprocess 없음 |
 | **ESP32 firmware flash** | ❌ | ✅ | ESP32 Display | `esptool.py` 필요 |

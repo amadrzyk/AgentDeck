@@ -15,6 +15,7 @@ import { createServer, type Server } from 'http';
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import { BridgeCore } from './bridge-core.js';
+import { buildDisplayStateEvent } from './display-dim.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
 import { BridgeLogStream } from './log-stream.js';
 import { PassiveSessionObserver } from './passive-observer.js';
@@ -40,6 +41,7 @@ import {
 import { fetchUsageFromApi, hasOAuthToken, resetConsecutiveFailures, type ApiUsageData } from './usage-api.js';
 import { isLocalConnection, validateToken } from './auth.js';
 import { getLastFrame, renderPreviewFrame, onFrameRendered, offFrameRendered } from './pixoo/pixoo-bridge.js';
+import { startIDotMatrixSync, stopIDotMatrixSync } from './idotmatrix/idotmatrix-daemon-sync.js';
 import { handlePixooWake } from './pixoo/pixoo-client.js';
 import { triggerMdnsRecovery } from './mdns.js';
 import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
@@ -999,6 +1001,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   moduleHealthProvider = () => buildNodeModuleHealth(startedModules);
   core.setModuleHealthProvider(moduleHealthProvider);
 
+  // iDotMatrix BLE: the daemon can't speak BLE in-process, so auto-spawn the
+  // Python sync client when a device is configured. This is what makes the
+  // panel run with only the CLI daemon up (no Swift app, no manual `idotmatrix
+  // sync`). No-op when nothing is configured or the Python venv is absent.
+  startIDotMatrixSync(port);
+
   // Serial module state provider (heartbeat needs cached state)
   const serialModule = startedModules.find(m => m.name === 'serial') as SerialModule | undefined;
   if (serialModule) {
@@ -1009,7 +1017,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       const events: BridgeEvent[] = [];
       if (lastStateEvent) events.push(lastStateEvent);
       events.push(core.buildUsage());
-      events.push({ type: 'display_state', displayOn: core.displayMonitor.isDisplayOn() } as BridgeEvent);
+      events.push(buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent);
       // Sessions list (async enrichment runs synchronously from cache here)
       core.broadcastSessionsList().catch(() => {});
       return events;
@@ -1832,6 +1840,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     voiceAssistant?.stop();
     voiceManager?.disconnectFromServer();
     bridgeLogStream.stop();
+    stopIDotMatrixSync();
     await Promise.all([
       gatewayAdapter ? gatewayAdapter.shutdown().catch(() => {}) : Promise.resolve(),
       stopModules(startedModules)

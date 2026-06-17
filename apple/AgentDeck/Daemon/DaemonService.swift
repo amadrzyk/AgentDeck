@@ -252,37 +252,16 @@ final class DaemonService: ObservableObject {
 
     // MARK: - Client-mode device modules
 
-    /// Idempotent reconciler driven by `isUsingExternalDaemon.didSet`. Brings up
-    /// the local iDotMatrix module in client mode and tears it down otherwise.
+    /// Idempotent reconciler driven by `isUsingExternalDaemon.didSet`.
+    ///
+    /// iDotMatrix is driven by whoever owns the hub: in hub mode DaemonServer's
+    /// own module drives it; when an external CLI daemon owns port 9120 THAT
+    /// daemon now drives iDotMatrix (it auto-spawns the Python BLE sync client),
+    /// so the app must NOT also open the single-connection BLE link or the two
+    /// fight for it. Therefore we never drive from client mode — just ensure any
+    /// previously-spun-up client-mode module is torn down on every transition.
     private func syncClientModeDevices() {
-        if isUsingExternalDaemon {
-            guard clientModeIDotMatrix == nil else { return }
-            let module = IDotMatrixModule()
-            clientModeIDotMatrix = module
-            // Mirror the hub-mode settings-change wiring so device edits in
-            // Settings reload without waiting for the 5s settings poll.
-            clientIDMSettingsObserver = NotificationCenter.default.addObserver(
-                forName: .idotmatrixSettingsChanged, object: nil, queue: .main
-            ) { _ in
-                Task { await module.reloadFromSettingsExternal() }
-            }
-            // Pull frames from the external daemon's purpose-built 32px endpoint
-            // (set BEFORE start so the first tick uses it) — the panel-sized
-            // creature + smooth animation the Python sync client showed, rather
-            // than a box-downscaled 64px scene. `port` is the external daemon's
-            // port (set just above in connectToExternalDaemon before this fires).
-            let frameURL = URL(string: "http://127.0.0.1:\(port)/pixoo/frame?size=32")
-            // The module is harmless without a configured device (it just
-            // watches settings.json and never opens BLE / prompts), matching
-            // hub mode where it's always started regardless of config.
-            Task {
-                await module.setFrameFetchURL(frameURL)
-                await module.start()
-            }
-            DaemonLogger.shared.info("Client mode: started local iDotMatrix module (external daemon can't drive its BLE)")
-        } else {
-            teardownClientModeDevices()
-        }
+        teardownClientModeDevices()
     }
 
     private func teardownClientModeDevices() {

@@ -12,7 +12,7 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 | OpenClaw Gateway 인증 (Keychain 토큰) | **Swift app** | Shared Keychain Access Group 설계 상 in-process 필요 |
 | D200H HID 통신 | **Swift app** | `com.apple.security.device.usb` entitlement 은 sandbox 안에서 열림 |
 | Pixoo HTTP 스트리밍 | Swift app **또는** CLI | 둘 다 가능. 현재 Swift 에서. |
-| iDotMatrix BLE | **Swift app (항상)** | Node 데몬은 BLE 네이티브 미지원(별도 `idotmatrix sync` Python 필요). hub·client 모드 모두 Swift 가 CoreBluetooth 로 구동 |
+| iDotMatrix BLE | **포트 소유자** | CLI(Node) 데몬이 포트를 쥐면 데몬이 `sync.py`(Python bleak)를 **자동 spawn**해 구동(Node는 BLE 네이티브 불가). 단독 Swift 앱(CLI 없음)이면 Swift 가 CoreBluetooth(hub 모듈)로 구동. 둘 다 뜨면 CLI 데몬이 소유, Swift 는 stand down |
 | ESP32 serial | Swift app **또는** CLI | 둘 다 가능 |
 | iPad/Web WS 허브 | 먼저 바인드한 쪽 | CLI 우선 (PTY 가 있으니 세션 있음), 없으면 Swift |
 | mDNS 광고 | 먼저 바인드한 쪽 | 동일 |
@@ -22,7 +22,7 @@ AgentDeck runs two daemon implementations that are **not competitors but collabo
 
 **외부 CLI daemon 이 이미 실행 중인 경우**: `DaemonService.alreadyRunning` → `connectToExternalDaemon`. Swift 앱은 죽지 않고 CLI daemon 의 WS 클라이언트가 된다 (`isUsingExternalDaemon = true`). 이 모드는 사용자가 터미널에서 별도 daemon 을 이미 운영하는 고급 경로이며, App Store 앱 자체는 외부 실행 파일 설치/기동을 요구하지 않는다. 하드웨어 상태는 CLI daemon 이 `state_update.moduleHealth` 로 브로드캐스트한 범위만 UI 에 표시한다.
 
-이 client 모드에서도 **iDotMatrix BLE 만은 Swift 앱이 직접 구동**한다 — Node 데몬이 iDotMatrix 를 네이티브로 그릴 수 없기 때문이다(그래서 둘 다 안 그리는 공백이 생겼었다). `DaemonService.isUsingExternalDaemon` 의 `didSet` 이 `clientModeIDotMatrix` 모듈을 생성/해제하고, `BridgeConnection.onRawMessage` → `DaemonService.ingestExternalBroadcast` 가 외부 데몬의 broadcast(state/usage/sessions/display) 를 그 모듈에 그대로 먹인다. Pixoo/D200H/ESP32 는 CLI 가 소유하므로 client 모드에서 Swift 가 중복 구동하지 않는다(이중 I/O 충돌 방지). hub↔client 전환 시 두 iDotMatrix 모듈은 상호배타적으로 단 하나만 산다.
+**iDotMatrix BLE 구동 주체**: CLI(Node) 데몬이 포트를 소유하면 데몬이 부팅 시 `startIDotMatrixSync(port)`로 `bridge/src/idotmatrix/sync.py`(bleak)를 **자식 프로세스로 자동 spawn**한다(라이프사이클 관리: 크래시 시 backoff 재spawn, 데몬 종료 시 kill). 설정된 `idotmatrixDevices`가 없거나 `.venv`가 없으면 no-op. 이로써 **CLI 데몬만 떠 있어도**(Swift 앱·수동 `idotmatrix sync` 불필요) 기기가 구동된다. sync.py 는 `/pixoo/frame?size=32`를 폴링해 BLE push. — 단독 Swift 앱(CLI 데몬 없음)일 때만 Swift 가 hub 모듈로 직접 구동하고, **CLI 데몬이 있으면 Swift client-mode 는 stand down**(`DaemonService.syncClientModeDevices`가 client 모드 BLE 구동을 띄우지 않음) → BLE 단일연결 충돌 방지. Pixoo/D200H/ESP32 도 CLI 가 소유.
 
 ## Gateway 플래그 의미
 
