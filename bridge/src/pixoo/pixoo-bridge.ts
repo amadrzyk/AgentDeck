@@ -42,14 +42,20 @@ let lastSessions: SessionInfo[] | null = null;
 
 // Display sleep state — when Mac display is off, dim Pixoo and pause stream
 let displayDimmed = false;
+let lastDisplayDimSignature = '';
 
 // Frame listeners for SSE streaming
 let frameListeners: Array<(frame: Uint8Array) => void> = [];
 let previewTimer: ReturnType<typeof setInterval> | null = null;
 let previewFps = 10; // Adjustable 1–10 FPS for /pixoo live preview
 
-const HTTP_STREAM_INTERVAL_MS = 250;     // 4 FPS hardware push (near hardware limit of Pixoo64)
-const STATE_CHECK_INTERVAL_MS = 500;     // check state changes every 500ms
+// Push cadence. The Pixoo64 misbehaves (dropped/garbled frames) when pushed
+// near its HTTP ceiling, so we cap at 2 FPS. STATE_CHECK_INTERVAL_MS is the
+// stream timer period AND the effective max push rate (one frame per tick);
+// MIN_PUSH_INTERVAL_MS is a hard floor so event-driven pushes (connection /
+// display-wake) can't burst faster than 2 FPS between ticks.
+const STATE_CHECK_INTERVAL_MS = 500;     // 2 FPS push cadence
+const MIN_PUSH_INTERVAL_MS = 500;        // hard floor — never push faster than 2 FPS
 const FORCE_REFRESH_INTERVAL_MS = 1500;  // force single frame push every 1.5s as a heartbeat (0.67 FPS background rate)
 const CHANNEL_REASSERT_MS = 30_000;     // Re-assert custom channel every 30s (fast recovery after reboots)
 const DEFAULT_BRIGHTNESS = 100;
@@ -105,7 +111,7 @@ export function startPixooBridge(pixooDevices?: PixooDevice[]): void {
   if (streamTimer) clearInterval(streamTimer);
   streamTimer = setInterval(doStateCheckAndPush, STATE_CHECK_INTERVAL_MS);
 
-  debug(TAG, 'Bridge started (Continuous 3 FPS stream)');
+  debug(TAG, 'Bridge started (2 FPS stream)');
 }
 
 export function broadcastPixoo(event: BridgeEvent): void {
@@ -130,17 +136,39 @@ export function broadcastPixoo(event: BridgeEvent): void {
       break;
     case 'display_state': {
       const displayOn = (event as any).displayOn as boolean;
-      if (!displayOn && !displayDimmed) {
+      const dim = (event as any).dim as Record<string, unknown> | undefined;
+      const rawEnabled = dim?.enabled;
+      const dimEnabled = typeof rawEnabled === 'boolean' ? rawEnabled : true;
+      const dimMode = dim?.mode === 'min' ? 'min' : 'off';
+      const rawLevel = dim?.level;
+      const dimLevel = Math.max(1, Math.min(100, Math.round(typeof rawLevel === 'number' ? rawLevel : 10)));
+      const signature = `${dimEnabled}|${dimMode}|${dimLevel}`;
+
+      if (!displayOn && !dimEnabled) {
+        if (displayDimmed) {
+          displayDimmed = false;
+          for (const dev of devices) {
+            setBrightness(dev.ip, dev.brightness ?? DEFAULT_BRIGHTNESS).catch(() => {});
+          }
+          lastStateHash = '';
+          if (!streamTimer && devices.length > 0) {
+            streamTimer = setInterval(doStateCheckAndPush, STATE_CHECK_INTERVAL_MS);
+            doStateCheckAndPush();
+          }
+        }
+        debug(TAG, 'Display sleep — dim disabled, leaving Pixoo lit');
+      } else if (!displayOn && (!displayDimmed || signature !== lastDisplayDimSignature)) {
         // Mac display off → dim Pixoo and pause stream
+        const target = dimMode === 'min' ? dimLevel : 0;
         displayDimmed = true;
         for (const dev of devices) {
-          setBrightness(dev.ip, 0).catch(() => {});
+          setBrightness(dev.ip, target).catch(() => {});
         }
         if (streamTimer) {
           clearInterval(streamTimer);
           streamTimer = null;
         }
-        debug(TAG, 'Display sleep — brightness 0, stream paused');
+        debug(TAG, `Display sleep — brightness ${target}, stream paused`);
       } else if (displayOn && displayDimmed) {
         // Mac display on → restore brightness and resume stream
         displayDimmed = false;
@@ -157,6 +185,7 @@ export function broadcastPixoo(event: BridgeEvent): void {
         }, 100);
         debug(TAG, 'Display wake — brightness restored, stream resumed');
       }
+      lastDisplayDimSignature = signature;
       break;
     }
   }
@@ -196,6 +225,7 @@ export async function stopPixooBridge(): Promise<void> {
   lastUsageEvent = null;
   lastSessions = null;
   displayDimmed = false;
+  lastDisplayDimSignature = '';
   broadcastFn = null;
   frameListeners = [];
   debug(TAG, 'Bridge stopped');
@@ -291,6 +321,12 @@ function doStateCheckAndPush(): void {
   const currentHash = calculateStateHash();
   const timeSinceLastPush = Date.now() - lastSequencePushTime;
   const stateChanged = currentHash !== lastStateHash;
+
+  // Hard 2 FPS floor — event-driven calls (connection / display-wake) must not
+  // burst the device faster than the stream cadence, even on a state change.
+  if (timeSinceLastPush < MIN_PUSH_INTERVAL_MS) {
+    return;
+  }
 
   if (!stateChanged && timeSinceLastPush < FORCE_REFRESH_INTERVAL_MS) {
     return; // No change and no force refresh due
