@@ -37,12 +37,7 @@ import IOKit
 @MainActor
 final class DaemonService: ObservableObject {
     @Published private(set) var isRunning = false
-    @Published private(set) var isUsingExternalDaemon = false {
-        didSet {
-            guard oldValue != isUsingExternalDaemon else { return }
-            syncClientModeDevices()
-        }
-    }
+    @Published private(set) var isUsingExternalDaemon = false
 
     /// `true` when the in-process Swift daemon is the one bound to port
     /// 9120 (not an external Node daemon). Drives Setup Card messaging —
@@ -72,21 +67,6 @@ final class DaemonService: ObservableObject {
     }
 
     private var server: DaemonServer?
-
-    /// In **client mode** (an external daemon owns port 9120) no `DaemonServer`
-    /// is created, so its device modules never start. The Node daemon natively
-    /// drives Pixoo/D200H/ESP32/ADB — the Swift app must NOT also drive those
-    /// (double I/O on the same IP/USB/serial). iDotMatrix is the exception: no
-    /// external daemon can drive its BLE transport natively (the Node path needs
-    /// a separate `agentdeck idotmatrix sync` Python client). So we run a local
-    /// iDotMatrix module even in client mode, fed by the external daemon's
-    /// broadcast stream (`ingestExternalBroadcast`). Lifecycle is toggled from
-    /// `isUsingExternalDaemon.didSet` so every mode transition is handled in one
-    /// place; the hub-mode module (owned by DaemonServer) and this one are
-    /// mutually exclusive because hub mode has `server != nil` and client mode
-    /// has `server == nil`.
-    private var clientModeIDotMatrix: IDotMatrixModule?
-    private var clientIDMSettingsObserver: NSObjectProtocol?
 
     private var isStarting = false
     private var readyUrl: String?
@@ -242,49 +222,9 @@ final class DaemonService: ObservableObject {
         await server?.shutdown()
         server = nil
         isRunning = false
-        isUsingExternalDaemon = false   // didSet → syncClientModeDevices tears down the client module
+        isUsingExternalDaemon = false
         port = 0
         readyUrl = nil
-        // Ensure the client-mode iDotMatrix link is released even if the
-        // value was already false (didSet only fires on change).
-        teardownClientModeDevices()
-    }
-
-    // MARK: - Client-mode device modules
-
-    /// Idempotent reconciler driven by `isUsingExternalDaemon.didSet`.
-    ///
-    /// iDotMatrix is driven by whoever owns the hub: in hub mode DaemonServer's
-    /// own module drives it; when an external CLI daemon owns port 9120 THAT
-    /// daemon now drives iDotMatrix (it auto-spawns the Python BLE sync client),
-    /// so the app must NOT also open the single-connection BLE link or the two
-    /// fight for it. Therefore we never drive from client mode — just ensure any
-    /// previously-spun-up client-mode module is torn down on every transition.
-    private func syncClientModeDevices() {
-        teardownClientModeDevices()
-    }
-
-    private func teardownClientModeDevices() {
-        if let observer = clientIDMSettingsObserver {
-            NotificationCenter.default.removeObserver(observer)
-            clientIDMSettingsObserver = nil
-        }
-        guard let module = clientModeIDotMatrix else { return }
-        clientModeIDotMatrix = nil
-        // stop() paints the OFFLINE frame and releases the single BLE central
-        // before a hub-mode module (or nothing) takes over.
-        Task { await module.stop() }
-        DaemonLogger.shared.info("Client mode: stopped local iDotMatrix module")
-    }
-
-    /// Forward a raw broadcast dict (state_update / usage_update / sessions_list
-    /// / display_state) from the external daemon to the client-mode iDotMatrix
-    /// module. No-op in hub mode or when no device module is live. Takes a
-    /// `SendableDict` so the non-Sendable `[String: Any]` can cross the actor
-    /// hop into the module (mirrors the hub-mode `wsServer.onBroadcast` boxing).
-    func ingestExternalBroadcast(_ box: SendableDict) {
-        guard let module = clientModeIDotMatrix else { return }
-        Task { await module.handleEvent(box.value) }
     }
 
     private func connectToExternalDaemon(port knownPort: Int? = nil) async {

@@ -82,14 +82,6 @@ actor IDotMatrixModule: DeviceModule {
     private let settingsReloadIntervalSec: TimeInterval = 5
     private var isPushing = false
 
-    /// When set (client mode), the module pulls the daemon's purpose-built 32×32
-    /// frame from this URL instead of locally rendering the 64×64 scene and
-    /// box-downscaling it. The daemon's `/pixoo/frame?size=32` renders the
-    /// creature sized for the panel (what the reference Python sync client shows);
-    /// the local 64→32 path squashes a full terrarium and reads small/mushy. nil
-    /// in hub mode (no sibling daemon to pull from) → local render fallback.
-    private var frameFetchURL: URL?
-
     private var onStateChanged: (@Sendable () -> Void)?
     private var lastBroadcastDigest: String?
 
@@ -102,12 +94,6 @@ actor IDotMatrixModule: DeviceModule {
 
     func setOnStateChanged(_ handler: @escaping @Sendable () -> Void) {
         self.onStateChanged = handler
-    }
-
-    /// Point the module at the daemon's 32px frame endpoint (client mode). Pass
-    /// nil to use the local renderer (hub mode).
-    func setFrameFetchURL(_ url: URL?) {
-        self.frameFetchURL = url
     }
 
     // MARK: - Lifecycle
@@ -235,27 +221,18 @@ actor IDotMatrixModule: DeviceModule {
             guard await ensureConnected(device) else { return }
         }
 
-        // Obtain a 32×32 RGB frame. Prefer the daemon's purpose-built 32px frame
-        // (client mode) for a panel-sized creature and smooth animation; else
-        // render the 64×64 scene locally and box-downscale (hub mode).
-        var rgb32: [UInt8]
-        if let url = frameFetchURL {
-            // Pull the daemon's 32px frame. On any fetch/decode miss, skip this
-            // tick (keep the last frame) rather than flip to the local layout.
-            guard let data = await Self.fetchFrame(url), let decoded = Self.decodeToRGB32(data) else { return }
-            rgb32 = decoded
-        } else {
-            let state = currentDashboardState()
-            let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
-            // Render EVERY tick. PixooRenderer's creature animation is wall-clock
-            // driven (Date()), so re-rendering each tick advances the animation;
-            // we dedup on pixels below so static frames cost no BLE write.
-            let rgb64 = isDisconnectedPlaceholder ? renderer.renderDisconnectedFrame() : renderer.render(dashboardState: state)
-            rgb32 = Self.downscale64to32([UInt8](rgb64))
-        }
-        // Match the reference idotmatrix sync client's software brightness/contrast
-        // boost (sync.py: ImageEnhance.Brightness → Contrast); without it the panel
-        // reads dim/washed-out next to the Python path.
+        // Render the 64×64 scene locally and box-downscale to 32×32 (this is the
+        // standalone/hub path — when a CLI daemon is present IT drives iDotMatrix
+        // via its Python sync client and this module isn't started). Render EVERY
+        // tick: PixooRenderer's creature animation is wall-clock driven (Date()),
+        // so re-rendering advances it; we dedup on pixels below so a static frame
+        // costs no BLE write.
+        let state = currentDashboardState()
+        let isDisconnectedPlaceholder = state.state == .disconnected && cachedAgentType == nil && cachedSessions.isEmpty
+        let rgb64 = isDisconnectedPlaceholder ? renderer.renderDisconnectedFrame() : renderer.render(dashboardState: state)
+        var rgb32 = Self.downscale64to32([UInt8](rgb64))
+        // Software brightness/contrast boost (mirrors the reference sync client's
+        // ImageEnhance.Brightness → Contrast); without it the panel reads dim.
         rgb32 = Self.boostBrightnessContrast(rgb32, brightness: 1.3, contrast: 1.2)
         if rgb32 == lastPushedRGB { return }
         guard let png = Self.rgb32ToPNG(rgb32) else { return }
@@ -526,47 +503,6 @@ actor IDotMatrixModule: DeviceModule {
             out[i] = clamp((Double(out[i]) - meanL) * contrast + meanL)
         }
         return out
-    }
-
-    /// Fetch the daemon's current frame (localhost HTTP, bounded timeout). The
-    /// daemon serves `/pixoo/frame?size=32` as a 32×32 BMP. Returns nil on any
-    /// non-200 / timeout / transport error so the caller can simply skip the tick.
-    static func fetchFrame(_ url: URL) async -> Data? {
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 2.0
-        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse, http.statusCode == 200, !data.isEmpty else { return nil }
-            return data
-        } catch {
-            return nil
-        }
-    }
-
-    /// Decode arbitrary image bytes (the daemon's BMP) into a 32×32×3 RGB buffer
-    /// in top-to-bottom row order (matching `rgb32ToPNG`/`downscale64to32`).
-    /// `cgImage` is already top-down and `CGContext.draw` into a fresh context
-    /// lands row 0 at the image top here — do NOT y-flip (that renders the panel
-    /// upside down, confirmed on device).
-    static func decodeToRGB32(_ data: Data) -> [UInt8]? {
-        guard let rep = NSBitmapImageRep(data: data), let cg = rep.cgImage else { return nil }
-        let w = 32, h = 32
-        var rgba = [UInt8](repeating: 0, count: w * h * 4)
-        guard let ctx = CGContext(
-            data: &rgba, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return nil }
-        ctx.interpolationQuality = .none
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
-        var rgb = [UInt8](repeating: 0, count: w * h * 3)
-        for i in 0..<(w * h) {
-            rgb[i * 3] = rgba[i * 4]
-            rgb[i * 3 + 1] = rgba[i * 4 + 1]
-            rgb[i * 3 + 2] = rgba[i * 4 + 2]
-        }
-        return rgb
     }
 
     /// Encode a 32×32×3 RGB buffer as PNG.

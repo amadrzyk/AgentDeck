@@ -39,14 +39,6 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
 
     var onEvent: ((BridgeEvent) -> Void)?
 
-    /// Called with the raw decoded JSON dict of every inbound broadcast frame,
-    /// alongside the typed `onEvent`. This mirrors the daemon hub's
-    /// `wsServer.onBroadcast { json in … }` fan-out: in client mode (an external
-    /// daemon owns port 9120) it lets local device modules — currently the
-    /// iDotMatrix BLE module, which no external daemon can drive natively — be
-    /// fed the same raw events they would receive in hub mode. Fired on main.
-    var onRawMessage: (([String: Any]) -> Void)?
-
     /// Called when WebSocket disconnects (before reconnect attempts)
     var onDisconnect: (() -> Void)?
 
@@ -310,20 +302,12 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Decode one inbound text frame and fan it out: the typed `BridgeEvent`
-    /// to `onEvent` (UI state), and — only when a consumer is attached — the
-    /// raw JSON dict to `onRawMessage` (client-mode device modules). Both are
-    /// delivered on the main queue. The raw dict is parsed lazily so the
-    /// JSONSerialization pass is skipped entirely when nobody is listening.
+    /// Decode one inbound text frame to a typed `BridgeEvent` and deliver it to
+    /// `onEvent` on the main queue.
     private func dispatchInbound(_ text: String) {
         if let event = BridgeEventParser.parse(text) {
             DispatchQueue.main.async { self.onEvent?(event) }
         }
-        guard onRawMessage != nil,
-              let data = text.data(using: .utf8),
-              let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        else { return }
-        DispatchQueue.main.async { self.onRawMessage?(dict) }
     }
 
     // MARK: - Ping
