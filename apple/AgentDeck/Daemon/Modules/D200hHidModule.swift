@@ -147,6 +147,12 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     /// final OFFLINE frame. Reset in `start()` to support wake recovery.
     private var tearingDown = false
 
+    /// True when the Ulanzi Studio plugin owns the D200H (registered over WS).
+    /// Direct-HID then stands down — releases the device and does not reacquire —
+    /// so the two never drive the same hardware at once. App-Store-safe: this only
+    /// AVOIDS opening the device; no new entitlement or subprocess.
+    private var externalOwner = false
+
     private var pollTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
@@ -193,6 +199,11 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     // MARK: - DeviceModule
 
     func start() async {
+        // Don't open the device while the Ulanzi Studio plugin owns it.
+        if externalOwner {
+            DaemonLogger.shared.info("D200H start skipped — Ulanzi plugin owns the device")
+            return
+        }
         tearingDown = false
         DaemonLogger.shared.info("D200H HID module starting")
         if sandboxEnabled && !usbEntitlementPresent {
@@ -322,6 +333,34 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
             try? await Task.sleep(for: .seconds(3))
             await start()
             DaemonLogger.shared.info("D200H wake retry result: connected=\(connected)")
+        }
+    }
+
+    /// Arbitrate device ownership with the Ulanzi Studio plugin. When it
+    /// registers over the daemon WS, release the D200H (so Studio drives it);
+    /// when it disconnects, reacquire. Mirrors the Node bridge's setExternalOwner.
+    func setExternalOwner(_ owner: Bool) async {
+        if externalOwner == owner { return }
+        externalOwner = owner
+        if owner {
+            DaemonLogger.shared.info("D200H: Ulanzi plugin active — releasing device to Ulanzi Studio")
+            // Release WITHOUT painting OFFLINE (Ulanzi Studio takes over the
+            // screen). Block writes, cancel tasks, close devices + manager.
+            tearingDown = true
+            pollTask?.cancel()
+            heartbeatTask?.cancel()
+            animationTask?.cancel()
+            pressDispatchTasks.values.forEach { $0.cancel() }
+            pressDispatchTasks.removeAll()
+            disconnect()
+            if let manager = hidManager {
+                IOHIDManagerUnscheduleFromRunLoop(manager, HIDRunLoopThread.shared.runLoop, CFRunLoopMode.defaultMode.rawValue)
+                IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+            }
+            hidManager = nil
+        } else {
+            DaemonLogger.shared.info("D200H: Ulanzi plugin gone — resuming direct-HID")
+            await start() // recreate manager → re-matches + opens the device
         }
     }
 
@@ -504,6 +543,8 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
     }
 
     private func handleDeviceAttached(_ device: IOHIDDevice) {
+        // Ulanzi Studio owns the device — don't open it from direct-HID.
+        if externalOwner { return }
         let usagePage = hidDeviceProperty(device, kIOHIDPrimaryUsagePageKey) ?? 0
 
         if usagePage == CONSUMER_USAGE_PAGE {
@@ -768,7 +809,7 @@ final class D200hHidModule: DeviceModule, @unchecked Sendable {
                 updateDisplay()
 
                 if session.navigable {
-                    return .command(AgentCommand.selectOption(index: optIdx).dictionary)
+                    return .command(AgentCommand.selectOption(index: optIdx, sessionId: nil).dictionary)
                 } else {
                     let key = shortcut.isEmpty ? String(label.prefix(1)).lowercased() : shortcut
                     return .command(AgentCommand.respond(value: key).dictionary)

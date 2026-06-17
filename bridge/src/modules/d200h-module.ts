@@ -78,6 +78,15 @@ export class D200hModule implements DeviceModule {
     currentTool: '',
   };
   private lastSessions: any[] = [];
+  private hostDisplayOn = true;
+  private dimEnabled = true;
+  private dimMode: 'off' | 'min' = 'off';
+  private dimLevel = 10;
+  private lastDimSignature = '';
+  private displaySuppressed = false;
+  // When true, the Ulanzi Studio plugin owns the D200H — direct-HID stands down
+  // (releases the device, suspends reconnect) so the two don't fight over it.
+  private externalOwner = false;
   // Physical-key index → command for the currently displayed frame. Rebuilt
   // from the render layout on every updateDisplay so input matches the pixels.
   private currentCommandMap: Map<number, ButtonCommand> = new Map();
@@ -126,13 +135,20 @@ export class D200hModule implements DeviceModule {
         if (this.lastState) {
           this.updateDisplay({ ...this.lastState, allSessions: this.lastSessions }).catch(() => {});
         }
+      } else if (evt?.type === 'display_state') {
+        this.applyDisplayState(evt);
       }
     });
+
+    // Stand down direct-HID whenever the Ulanzi Studio plugin is connected, so
+    // the daemon and Ulanzi Studio never drive the same device at once. Fires
+    // immediately with the current state.
+    ctx.wsServer.onUlanziPluginPresence((present) => this.setExternalOwner(present));
 
     // Start device detection polling
     this.tryConnect();
     this.pollTimer = setInterval(() => {
-      if (!this.connected) {
+      if (!this.connected && !this.externalOwner) {
         this.tryConnect();
       }
     }, POLL_INTERVAL);
@@ -158,6 +174,7 @@ export class D200hModule implements DeviceModule {
   statusSnapshot(): Record<string, unknown> {
     return {
       connected: this.connected,
+      externalOwner: this.externalOwner,
       managerOpened: this.hidModule !== null,
       resvgLoaded: isResvgLoaded(),
       writeOK: this.writeOK,
@@ -206,7 +223,31 @@ export class D200hModule implements DeviceModule {
     return null;
   }
 
+  /**
+   * Arbitrate device ownership with the Ulanzi Studio plugin. When it connects,
+   * release the D200H and suspend reconnect so Ulanzi Studio drives it; when it
+   * disconnects, resume direct-HID.
+   */
+  setExternalOwner(owner: boolean): void {
+    if (this.externalOwner === owner) return;
+    this.externalOwner = owner;
+    if (owner) {
+      debug(TAG, 'Ulanzi plugin active — releasing D200H to Ulanzi Studio');
+      if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+      this.disconnect();
+    } else {
+      debug(TAG, 'Ulanzi plugin gone — resuming direct-HID');
+      if (!this.pollTimer) {
+        this.pollTimer = setInterval(() => {
+          if (!this.connected && !this.externalOwner) this.tryConnect();
+        }, POLL_INTERVAL);
+      }
+      this.tryConnect();
+    }
+  }
+
   private tryConnect(): void {
+    if (this.externalOwner) return;
     if (!this.hidModule) return;
 
     const info = this.findDevice();
@@ -249,8 +290,9 @@ export class D200hModule implements DeviceModule {
       // Start keep-alive
       this.keepAliveTimer = setInterval(() => this.sendKeepAlive(), KEEPALIVE_INTERVAL);
 
-      // Set initial brightness
-      this.writeToDevice(buildBrightnessPacket(100));
+      // Set initial brightness, honoring a cached display_state if the host
+      // was already asleep when the D200H reconnected.
+      this.applyDisplayBrightness();
 
       // Send initial display update (render offline/idle layout immediately)
       this.updateDisplay(this.lastState).catch((err) => {
@@ -393,6 +435,36 @@ export class D200hModule implements DeviceModule {
     const timeStr = now.toTimeString().slice(0, 8);
     const packet = buildSmallWindowPacket(1, 0, 0, timeStr, 0);
     this.writeToDevice(packet);
+  }
+
+  private applyDisplayState(evt: any): void {
+    const dim = evt?.dim as Record<string, unknown> | undefined;
+    this.hostDisplayOn = evt?.displayOn ?? true;
+    const rawEnabled = dim?.enabled;
+    this.dimEnabled = typeof rawEnabled === 'boolean' ? rawEnabled : true;
+    this.dimMode = dim?.mode === 'min' ? 'min' : 'off';
+    const rawLevel = dim?.level;
+    const level = typeof rawLevel === 'number' && Number.isFinite(rawLevel) ? Math.round(rawLevel) : 10;
+    this.dimLevel = Math.max(1, Math.min(100, level));
+
+    const signature = `${this.hostDisplayOn}|${this.dimEnabled}|${this.dimMode}|${this.dimLevel}`;
+    if (signature === this.lastDimSignature) return;
+    this.lastDimSignature = signature;
+    this.applyDisplayBrightness();
+  }
+
+  private applyDisplayBrightness(): void {
+    if (!this.connected) return;
+    const shouldSuppress = !this.hostDisplayOn && this.dimEnabled;
+    const target = shouldSuppress ? (this.dimMode === 'min' ? this.dimLevel : 0) : 100;
+    const wasSuppressed = this.displaySuppressed;
+    this.displaySuppressed = shouldSuppress;
+    this.writeToDevice(buildBrightnessPacket(target));
+    debug(TAG, `Display ${this.hostDisplayOn ? 'wake' : 'sleep'} — brightness ${target}`);
+    if (wasSuppressed && !shouldSuppress) {
+      this.lastStateHash = '';
+      this.updateDisplay({ ...this.lastState, allSessions: this.lastSessions }).catch(() => {});
+    }
   }
 
   private writeToDevice(packet: Buffer): boolean {

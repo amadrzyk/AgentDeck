@@ -1,0 +1,27 @@
+{
+  "name": "@agentdeck/plugin-ulanzi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentDeck plugin for Ulanzi Studio (D200H Deck Dock) — official UlanziDeckPlugin-SDK",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/plugin",
+    "typecheck": "tsc --noEmit",
+    "sim": "AGENTDECK_DEBUG=1 node com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/plugin/app.js 127.0.0.1 39069 en",
+    "package": "bash ../scripts/package-ulanzi-plugin.sh",
+    "package:install": "bash ../scripts/package-ulanzi-plugin.sh --install"
+  },
+  "dependencies": {
+    "@agentdeck/shared": "workspace:*",
+    "@resvg/resvg-js": "^2.6.2",
+    "gifenc": "^1.0.3",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
+  }
+}

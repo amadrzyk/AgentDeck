@@ -84,6 +84,12 @@ scratch_usb.txt
 # Vendored TC002 emulator working copy (has its own .git, 83MB build artifacts)
 tools/tc002-emulator/
 
+# Cloned Ulanzi Deck Plugin SDK + simulator (dev tool; re-clone, not committed)
+tools/ulanzi-sdk/
+
+# plugin-ulanzi build output (tsc emits into the .ulanziPlugin/plugin folder)
+plugin-ulanzi/com.ulanzi.ulanzistudio.agentdeck.ulanziPlugin/plugin/
+
 # zkswe hardware recon — cross-compiled ARM/Mach-O binaries rebuilt via build.sh
 zkswe/agent-archive/*
 !zkswe/agent-archive/build.sh

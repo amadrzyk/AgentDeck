@@ -93,6 +93,7 @@ private final class SerialEventSnapshot: @unchecked Sendable {
     private var stateEvent: [String: Any]?
     private var usageEvent: [String: Any]?
     private var displayOn = true
+    private var displayDim: [String: Any] = ["enabled": true, "mode": "off", "level": 10]
 
     func setStateEvent(_ event: [String: Any]?) {
         lock.lock()
@@ -109,6 +110,12 @@ private final class SerialEventSnapshot: @unchecked Sendable {
     func setDisplayOn(_ value: Bool) {
         lock.lock()
         displayOn = value
+        lock.unlock()
+    }
+
+    func setDisplayDim(_ value: [String: Any]) {
+        lock.lock()
+        displayDim = value
         lock.unlock()
     }
 
@@ -129,12 +136,13 @@ private final class SerialEventSnapshot: @unchecked Sendable {
         let state = stateEvent
         let usage = usageEvent
         let display = displayOn
+        let dim = displayDim
         lock.unlock()
 
         var events: [[String: Any]] = []
         if let state { events.append(state) }
         if let usage { events.append(usage) }
-        events.append(["type": "display_state", "displayOn": display])
+        events.append(["type": "display_state", "displayOn": display, "dim": dim])
         return events
     }
 }
@@ -387,6 +395,9 @@ final class DaemonServer {
         var updatedAt: Date
     }
     private var cachedStreamDeck: StreamDeckRegistration?
+    /// Connection that registered as the Ulanzi Studio plugin. While present,
+    /// the in-process D200H module stands down (Ulanzi Studio drives the device).
+    private var ulanziPluginConnectionId: UUID?
     private var activeWSConnectionIds = Set<UUID>()
     private static let streamDeckStaleTTL: TimeInterval = 120
     private var cachedMlxModels: [String] = []
@@ -752,12 +763,14 @@ final class DaemonServer {
 
         // 6. Start display monitor
         loadDisplaySleepDimFromSettings()
+        serialEventSnapshot.setDisplayDim(currentDimDict())
         await displayMonitor.start()
         await displayMonitor.setOnStateChanged { [weak self] displayOn in
             Task { @MainActor in
                 guard let self else { return }
                 self.cachedDisplayOn = displayOn
                 self.serialEventSnapshot.setDisplayOn(displayOn)
+                self.serialEventSnapshot.setDisplayDim(self.currentDimDict())
                 self.broadcastRaw([
                     "type": "display_state",
                     "displayOn": displayOn,
@@ -1083,6 +1096,7 @@ final class DaemonServer {
             Task { @MainActor in
                 guard let self else { return }
                 self.loadDisplaySleepDimFromSettings()
+                self.serialEventSnapshot.setDisplayDim(self.currentDimDict())
                 if !self.cachedDisplayOn {
                     self.broadcastRaw([
                         "type": "display_state",
@@ -1721,6 +1735,20 @@ final class DaemonServer {
             ])
         }
 
+        if let idotMatrixModule {
+            let idotMatrix = idotMatrixModule.statusSnapshot()
+            devices.append([
+                "type": "idotmatrix",
+                "configuredDeviceCount": idotMatrix["configuredDeviceCount"] as Any,
+                "connected": idotMatrix["connected"] as Any,
+                "deviceName": idotMatrix["deviceName"] as Any,
+                "lastError": idotMatrix["lastError"] as Any,
+                "displayDimmed": idotMatrix["displayDimmed"] as Any,
+                "hasFrame": idotMatrix["hasFrame"] as Any,
+                "lastPushAtMs": idotMatrix["lastPushAtMs"] as Any,
+            ])
+        }
+
         if let d200hModule {
             let d200h = d200hModule.statusSnapshot()
             devices.append([
@@ -1849,6 +1877,13 @@ final class DaemonServer {
             cachedStreamDeck = nil
             DaemonLogger.shared.debug("Daemon", "Evicted streamdeck registration: WS closed")
             broadcastStateUpdate()
+        }
+        if ulanziPluginConnectionId == conn.id {
+            ulanziPluginConnectionId = nil
+            DaemonLogger.shared.debug("Daemon", "Ulanzi plugin disconnected — D200H may resume")
+            if let d200hModule {
+                Task { await d200hModule.setExternalOwner(false) }
+            }
         }
     }
 
@@ -2557,6 +2592,14 @@ final class DaemonServer {
             )
             DaemonLogger.shared.debug("Daemon", "client_register streamdeck-plugin devices=\(devices.count)")
             broadcastStateUpdate()
+        case "ulanzi-plugin":
+            // Ulanzi Studio drives the D200H — stand down direct-HID so the two
+            // don't fight over the device. Reacquired on disconnect.
+            ulanziPluginConnectionId = conn.id
+            DaemonLogger.shared.debug("Daemon", "client_register ulanzi-plugin — D200H standing down")
+            if let d200hModule {
+                Task { await d200hModule.setExternalOwner(true) }
+            }
         default:
             DaemonLogger.shared.debug("Daemon", "client_register ignored clientType=\(clientType)")
         }
@@ -4065,6 +4108,9 @@ final class DaemonServer {
         if let pixooModule {
             modules["pixoo"] = pixooModule.statusSnapshot()
         }
+        if let idotMatrixModule {
+            modules["idotmatrix"] = idotMatrixModule.statusSnapshot()
+        }
         if serialModule != nil {
             // HTTP /health is used by tiny hook scripts and must answer even
             // while the serial actor is busy pushing frames to physical boards.
@@ -4176,6 +4222,7 @@ final class DaemonServer {
         if let adb = adbModule { modules["adb"] = adb.statusSnapshot() }
         if let d200h = d200hModule { modules["d200h"] = d200h.statusSnapshot() }
         if let pixoo = pixooModule { modules["pixoo"] = pixoo.statusSnapshot() }
+        if let idotMatrix = idotMatrixModule { modules["idotmatrix"] = idotMatrix.statusSnapshot() }
         // SerialModule.statusSnapshot() is async — read the 5s-polled
         // cache so Dashboard USB serial section sees connected boards
         // without us having to awaitly-pre-fetch on every broadcast.

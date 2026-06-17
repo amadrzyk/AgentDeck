@@ -11,20 +11,19 @@ import { deflateSync } from 'zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
+// Layout/command engine is shared with the Ulanzi Studio plugin (single source
+// of truth for the reflowing 5×3 grid). Rasterization + ZIP packing stay here.
 import {
-  renderSessionSlot,
-  renderEmptySlot,
-  renderBackButton,
-  renderEscButton,
-  renderStopButton,
-  renderOptionButton,
-  renderDetailInfo,
-  svgFrame,
-  stateColor,
+  computeLayout,
+  parseState,
+  buildButtonCommandMap,
+  renderUsageWideSlot,
 } from '@agentdeck/shared';
-import type { SessionInfo, PromptOption } from '@agentdeck/shared';
-import { State } from '@agentdeck/shared';
 import { debug } from '../logger.js';
+
+// Re-export the engine bits the D200H module + tests import from here.
+export { parseState, buildButtonCommandMap };
+export type { DashState, ButtonCommand, KeySlot } from '@agentdeck/shared';
 import { validateZipBoundaries } from './hid-protocol.js';
 
 const TAG = 'd200h-render';
@@ -127,281 +126,6 @@ function svgToPngWide(svg: string, width: number, height: number): Buffer {
     debug(TAG, `Wide SVG rasterization failed: ${err}`);
     return fallbackSolidPng(20, 20, 25);
   }
-}
-
-// --- Layout: Key definitions ---
-
-// The D200H has 14 physical keys (5×3 grid, slot 13 is 2-col merged at col3+col4, row2)
-// In single-session bridge mode, we show one session with its details/options.
-
-/** Command dispatched when a key is pressed. `null` = inert tile (info/empty). */
-export type ButtonCommand = { type: string; [k: string]: unknown };
-
-interface KeySlot {
-  col: number;
-  row: number;
-  svg: string;
-  label: string;
-  /** What pressing this physical key does. Single source of truth for input. */
-  command?: ButtonCommand | null;
-}
-
-// D200H physical key index == row * GRID_COLS + col (row-major). The firmware
-// reports presses with this index in byte 9 of the IN_BUTTON report, and the
-// manifest keys are `${col}_${row}` — both agree on this mapping.
-const GRID_COLS = 5;
-
-// --- State parsing ---
-
-export interface DashState {
-  state: string;
-  projectName: string;
-  modelName: string;
-  mode: string;
-  agentType: string;
-  fiveHourPercent: number;
-  sevenDayPercent: number;
-  totalTokens: number;
-  totalCost: number;
-  options: PromptOption[];
-  currentTool: string;
-  allSessions: SessionInfo[];
-}
-
-export function parseState(evt: any): DashState {
-  return {
-    state: evt?.state ?? 'DISCONNECTED',
-    projectName: evt?.projectName ?? '',
-    modelName: evt?.modelName ?? '',
-    mode: evt?.mode ?? 'default',
-    agentType: evt?.agentType ?? 'claude-code',
-    fiveHourPercent: evt?.fiveHourPercent ?? 0,
-    sevenDayPercent: evt?.sevenDayPercent ?? 0,
-    totalTokens: evt?.totalTokens ?? 0,
-    totalCost: evt?.totalCost ?? 0,
-    options: (evt?.options ?? []).map((o: any) =>
-      typeof o === 'string' ? { label: o } : { label: o?.label ?? '', shortcut: o?.shortcut ?? '' }
-    ),
-    currentTool: evt?.currentTool ?? '',
-    allSessions: Array.isArray(evt?.allSessions) ? evt.allSessions : [],
-  };
-}
-
-// --- SVG helpers for info/usage buttons ---
-
-function escXml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function gaugeBar(pct: number, width = 8): string {
-  const filled = Math.round(Math.min(pct, 100) / 100 * width);
-  return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled);
-}
-
-function gaugeColor(pct: number): string {
-  return pct > 80 ? '#ef4444' : pct > 50 ? '#eab308' : '#22c55e';
-}
-
-function renderUsageButton(label: string, percent: number, color: string): string {
-  const pctColor = gaugeColor(percent);
-  const gBar = gaugeBar(percent, 8);
-  const elements = [
-    // Header label
-    `<text x="72" y="36" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="#94a3b8">${escXml(label)}</text>`,
-    // Unicode gauge bar
-    `<text x="72" y="60" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="14" fill="${color}">${escXml(gBar)}</text>`,
-    // Percentage (larger, 28px bold)
-    `<text x="72" y="90" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="#ffffff">${Math.round(percent)}%</text>`,
-    // Bottom accent bar (2px)
-    `<rect x="16" y="110" width="112" height="2" rx="1" fill="#1e293b"/>`,
-    `<rect x="16" y="110" width="${Math.round(112 * Math.min(percent, 100) / 100)}" height="2" rx="1" fill="${color}"/>`,
-  ].join('');
-  return svgFrame('#0f172a', elements);
-}
-
-/** Wide merged slot (3_2) — 288×144 SVG. Two columns: 5H | 7D with gauges and %. */
-function renderUsageWideSlot(fiveHourPct: number, sevenDayPct: number): string {
-  const c5 = gaugeColor(fiveHourPct);
-  const c7 = gaugeColor(sevenDayPct);
-  const pct5 = Math.round(fiveHourPct);
-  const pct7 = Math.round(sevenDayPct);
-
-  // Build SVG with simple structure (safer for resvg)
-  const elements = [
-    // Background: split left/right
-    `<rect x="0" y="0" width="144" height="144" fill="#0f172a"/>`,
-    `<rect x="144" y="0" width="144" height="144" fill="#0f172a"/>`,
-    // Panel backgrounds
-    `<rect x="8" y="8" width="128" height="128" rx="8" fill="#1e293b" opacity="0.3"/>`,
-    `<rect x="152" y="8" width="128" height="128" rx="8" fill="#1e293b" opacity="0.3"/>`,
-    // Header
-    `<text x="72" y="26" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#94a3b8">5H</text>`,
-    `<text x="216" y="26" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#94a3b8">7D</text>`,
-    // Percentage (large)
-    `<text x="72" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="32" font-weight="bold" fill="#ffffff">${pct5}%</text>`,
-    `<text x="216" y="70" text-anchor="middle" font-family="Arial,sans-serif" font-size="32" font-weight="bold" fill="#ffffff">${pct7}%</text>`,
-    // Accent bars at bottom
-    `<rect x="12" y="132" width="120" height="2" rx="1" fill="#1e293b"/>`,
-    `<rect x="156" y="132" width="120" height="2" rx="1" fill="#1e293b"/>`,
-    `<rect x="12" y="132" width="${Math.round(120 * Math.min(fiveHourPct, 100) / 100)}" height="2" rx="1" fill="${c5}"/>`,
-    `<rect x="156" y="132" width="${Math.round(120 * Math.min(sevenDayPct, 100) / 100)}" height="2" rx="1" fill="${c7}"/>`,
-  ].join('');
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="144" viewBox="0 0 288 144">${elements}</svg>`;
-}
-
-function renderInfoButton(title: string, value: string, titleColor = '#94a3b8', valueColor = '#ffffff'): string {
-  const valueFontSize = value.length > 8 ? 16 : value.length > 5 ? 20 : 24;
-  const elements = [
-    `<text x="72" y="52" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="${titleColor}">${escXml(title)}</text>`,
-    `<text x="72" y="${86 + (valueFontSize < 20 ? 2 : 0)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${valueFontSize}" font-weight="bold" fill="${valueColor}">${escXml(value)}</text>`,
-  ].join('');
-  return svgFrame('#1C1C1E', elements);
-}
-
-function renderModeButton(mode: string): string {
-  const elements = [
-    `<text x="72" y="52" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#94a3b8">MODE</text>`,
-    `<text x="72" y="88" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="bold" fill="#a78bfa">${escXml(mode.toUpperCase())}</text>`,
-  ].join('');
-  return svgFrame('#1C1C1E', elements);
-}
-
-/** Renders a uniform "dimmed" offline placeholder for a single key slot. */
-function renderOfflineSlot(hero = false): string {
-  if (hero) {
-    // Central hero card: large OFFLINE + Open AgentDeck (action tone, matches Stream Deck)
-    const colors = { bg: '#07170f', panel: '#12331f', icon: '#bbf7d0', accent: '#22c55e', text: '#dcfce7', sub: '#86efac' };
-    const elements = [
-      `<text x="72" y="54" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="${colors.text}">OFFLINE</text>`,
-      `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="${colors.sub}">Open AgentDeck</text>`,
-    ].join('');
-    return svgFrame(colors.bg, elements);
-  }
-  // Regular key: uniform dark dim
-  return svgFrame('#0a0a0a', `<text x="72" y="80" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" fill="#1f2937">--</text>`);
-}
-
-// --- Main layout computation ---
-
-function computeLayout(state: DashState): KeySlot[] {
-  // ============================
-  // DISCONNECTED (daemon stopped) — all keys dimmed, hero shows OFFLINE
-  // ============================
-  const isDisconnected = state.state === 'DISCONNECTED' || state.state === 'disconnected';
-  if (isDisconnected) {
-    const slots: KeySlot[] = [];
-    // 5×3 grid: position the hero card at col1+col2, row0+row1 (wide center)
-    const heroCol = 2, heroRow = 1; // center of the grid
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 5; col++) {
-        const isHero = col === heroCol && row === heroRow;
-        slots.push({ col, row, svg: renderOfflineSlot(isHero), label: '' });
-      }
-    }
-    return slots;
-  }
-
-  const slots: KeySlot[] = [];
-  const isAwaiting = state.state.startsWith('AWAITING') || state.state.startsWith('awaiting');
-  const isProcessing = state.state === 'PROCESSING' || state.state === 'processing';
-
-  // Build a SessionInfo-like object for the active (focused) state
-  const activeSession: SessionInfo = {
-    id: 'local',
-    agentType: state.agentType as any,
-    projectName: state.projectName,
-    modelName: state.modelName,
-    state: state.state.toLowerCase(),
-    alive: true,
-    port: 0,
-  };
-
-  const sessionsToDisplay = state.allSessions.length > 0 ? state.allSessions.slice(0, 4) : [activeSession];
-  const isMultiSession = sessionsToDisplay.length > 1;
-
-  if (isMultiSession) {
-    // ============================
-    // MULTI-SESSION OVERVIEW LAYOUT
-    // ============================
-
-    // Row 0: Mode, Session 1..4
-    slots.push({ col: 0, row: 0, svg: renderModeButton(state.mode), label: '', command: { type: 'mode_toggle' } });
-    for (let i = 0; i < 4; i++) {
-      const col = i + 1;
-      const sess = sessionsToDisplay[i];
-      if (sess) {
-        const isActive = sess.projectName === activeSession.projectName && sess.agentType === activeSession.agentType;
-        slots.push({ col, row: 0, svg: renderSessionSlot(sess, isActive, 0, undefined, { animated: false }), label: '', command: { type: 'focus_session', sessionId: sess.id } });
-      } else {
-        slots.push({ col, row: 0, svg: renderEmptySlot(), label: '', command: null });
-      }
-    }
-
-    // Row 1: Options 1..4, Model Info
-    for (let i = 0; i < 4; i++) {
-      const col = i;
-      const opt = state.options[i];
-      if (opt && isAwaiting) {
-        slots.push({ col, row: 1, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } });
-      } else {
-        slots.push({ col, row: 1, svg: renderEmptySlot(), label: '', command: null });
-      }
-    }
-    slots.push({ col: 4, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '', command: null });
-  } else {
-    // ============================
-    // SINGLE-SESSION DETAIL LAYOUT
-    // ============================
-
-    // Row 0: Mode, Hero Session, Extended Detail
-    // Focus is only actionable when a real (controllable) session backs the hero
-    // tile; with no sessions the hero is a synthetic placeholder → inert.
-    const heroSession = state.allSessions.length > 0 ? sessionsToDisplay[0] : null;
-    slots.push({ col: 0, row: 0, svg: renderModeButton(state.mode), label: '', command: { type: 'mode_toggle' } });
-    slots.push({ col: 1, row: 0, svg: renderSessionSlot(sessionsToDisplay[0], true, 0, undefined, { animated: false }), label: '', command: heroSession ? { type: 'focus_session', sessionId: heroSession.id } : null });
-    slots.push({ col: 2, row: 0, svg: renderDetailInfo(sessionsToDisplay[0], state.state.toLowerCase() as State, state.currentTool, state.modelName, state.mode), label: '', command: null });
-
-    // Options mapping identically to old 13-slot original design
-    // Slots 3_0, 4_0, 0_1, 1_1
-    for (let i = 0; i < 4; i++) {
-      const col = (i + 3) % 5;
-      const row = Math.floor((i + 3) / 5);
-      const opt = state.options[i];
-      if (opt && isAwaiting) {
-        slots.push({ col, row, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } });
-      } else {
-        slots.push({ col, row, svg: renderEmptySlot(), label: '', command: null });
-      }
-    }
-
-    // Row 1 remaining stats: 2_1, 3_1, 4_1
-    slots.push({ col: 2, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '', command: null });
-    slots.push({ col: 3, row: 1, svg: renderUsageButton('5H', state.fiveHourPercent, '#28a0b4'), label: '', command: { type: 'usage_toggle' } });
-    slots.push({ col: 4, row: 1, svg: renderUsageButton('7D', state.sevenDayPercent, '#2850a0'), label: '', command: { type: 'usage_toggle' } });
-  }
-
-  // ============================
-  // ROW 2: SHARED ACTIONS (STOP, TOKENS, COST)
-  // ============================
-
-  // Slot 0_2: STOP/ESC → interrupt (cancel the current turn / dismiss prompt)
-  if (isProcessing) {
-    slots.push({ col: 0, row: 2, svg: renderStopButton(true), label: '', command: { type: 'interrupt' } });
-  } else if (isAwaiting) {
-    slots.push({ col: 0, row: 2, svg: renderEscButton(true), label: '', command: { type: 'interrupt' } });
-  } else {
-    slots.push({ col: 0, row: 2, svg: renderStopButton(false), label: '', command: { type: 'interrupt' } });
-  }
-
-  // Slot 1_2: Tokens (info tile, inert)
-  const tk = state.totalTokens > 1000 ? `${(state.totalTokens / 1000).toFixed(0)}K` : `${state.totalTokens}`;
-  slots.push({ col: 1, row: 2, svg: renderInfoButton('TOKENS', tk), label: '', command: null });
-
-  // Slot 2_2: Cost (info tile, inert)
-  slots.push({ col: 2, row: 2, svg: renderInfoButton('COST', `$${state.totalCost.toFixed(2)}`), label: '', command: null });
-
-  return slots;
 }
 
 // --- ZIP creation (reused from original, with boundary validation) ---
@@ -627,26 +351,6 @@ export function renderDashboardZip(stateEvt: any): Buffer {
   const fallback = createZipInMemory(new Map(orderedEntries), extraLengths).zip;
   debug(TAG, `WARNING: ZIP boundary validation failed after search; stillValid=${validateZipBoundaries(fallback)}`);
   return fallback;
-}
-
-/**
- * Build the physical-key → command map for the current state, derived from the
- * SAME layout used to render the tiles. This is the single source of truth for
- * button input: a key at (col,row) does exactly what its rendered tile implies,
- * so the two can never drift. Inert tiles (info/empty) are simply absent.
- *
- * Key index == row * GRID_COLS + col (matches the device IN_BUTTON report).
- */
-export function buildButtonCommandMap(stateEvt: any): Map<number, ButtonCommand> {
-  const state = parseState(stateEvt);
-  const layout = computeLayout(state);
-  const map = new Map<number, ButtonCommand>();
-  for (const slot of layout) {
-    if (slot.command) {
-      map.set(slot.row * GRID_COLS + slot.col, slot.command);
-    }
-  }
-  return map;
 }
 
 /**

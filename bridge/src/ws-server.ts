@@ -12,6 +12,11 @@ export class WsServer {
   private onConnectCallback: ((ws: WebSocket) => void) | null = null;
   private onDisconnectCallback: (() => void) | null = null;
   private clientAlive = new Map<WebSocket, boolean>();
+  // Clients that registered as the Ulanzi Studio plugin. While any are present,
+  // the daemon's direct-HID D200H module stands down so the two don't fight over
+  // the device (Ulanzi Studio drives it through the official plugin instead).
+  private ulanziClients = new Set<WebSocket>();
+  private ulanziPresenceCallback: ((present: boolean) => void) | null = null;
   private pingTimer: ReturnType<typeof setInterval>;
 
   constructor(server: Server) {
@@ -73,6 +78,15 @@ export class WsServer {
         try {
           const msg = JSON.parse(data.toString()) as Record<string, unknown>;
           debug('WS', `recv cmd: ${msg.type}`);
+          // Track Ulanzi plugin presence (device-ownership arbitration).
+          if (msg.type === 'client_register' && msg.clientType === 'ulanzi-plugin') {
+            const was = this.ulanziClients.size > 0;
+            this.ulanziClients.add(ws);
+            if (!was) {
+              debug('WS', 'Ulanzi plugin registered — direct-HID D200H stands down');
+              this.ulanziPresenceCallback?.(true);
+            }
+          }
           // Allow raw message callback to intercept relay events (e.g. deck_slot_map)
           if (this.rawMessageCallback && this.rawMessageCallback(msg, ws)) {
             return; // handled
@@ -88,6 +102,10 @@ export class WsServer {
       ws.on('close', () => {
         debug('WS', 'Plugin disconnected');
         this.clientAlive.delete(ws);
+        if (this.ulanziClients.delete(ws) && this.ulanziClients.size === 0) {
+          debug('WS', 'Ulanzi plugin gone — direct-HID D200H may resume');
+          this.ulanziPresenceCallback?.(false);
+        }
         if (this.onDisconnectCallback) {
           this.onDisconnectCallback();
         }
@@ -123,6 +141,14 @@ export class WsServer {
 
   onCommand(callback: (cmd: PluginCommand) => void): void {
     this.commandCallback = callback;
+  }
+
+  /** Register a callback invoked when the Ulanzi-plugin presence flips (true =
+   *  at least one connected, false = none). Fires once immediately with the
+   *  current state so the consumer can sync on startup. */
+  onUlanziPluginPresence(callback: (present: boolean) => void): void {
+    this.ulanziPresenceCallback = callback;
+    callback(this.ulanziClients.size > 0);
   }
 
   /** Inject a command from a non-WS source (e.g., D200H agent via stdout/stdin pipe). */
