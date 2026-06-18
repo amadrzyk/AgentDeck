@@ -52,6 +52,10 @@ export interface DashState {
   options: PromptOption[];
   currentTool: string;
   allSessions: SessionInfo[];
+  /** Gated PreToolUse request id (observed/no-PTY session) → Allow/Deny via permission_decision. */
+  requestId?: string;
+  /** Live PTY option cursor is navigable (❯) — drives select_option vs respond. */
+  navigable?: boolean;
 }
 
 export function parseState(evt: any): DashState {
@@ -70,6 +74,8 @@ export function parseState(evt: any): DashState {
     ),
     currentTool: evt?.currentTool ?? '',
     allSessions: Array.isArray(evt?.allSessions) ? evt.allSessions : [],
+    requestId: typeof evt?.requestId === 'string' ? evt.requestId : undefined,
+    navigable: Boolean(evt?.navigable),
   };
 }
 
@@ -160,6 +166,27 @@ function renderOfflineSlot(hero = false): string {
  * `animFrame` advances the shared renderer's session-tile animation; pass a
  * fixed value (e.g. 0) for a static frame.
  */
+/**
+ * One row-of-actions key for the legacy single-page D200H layout. Renders the
+ * i-th real option when the focused/PTY session reported options; otherwise, for
+ * an observed gated PreToolUse session (no PTY options but a `requestId`), shows
+ * Allow/Deny in slots 0/1 wired to `permission_decision`. Falls back to an empty
+ * slot — never a hardcoded Yes/No/Always that can't drive the agent.
+ */
+function awaitingActionSlot(state: DashState, isAwaiting: boolean, i: number, col: number, row: number): KeySlot {
+  if (isAwaiting) {
+    const opt = state.options[i];
+    if (opt) {
+      return { col, row, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } };
+    }
+    if (state.options.length === 0 && state.requestId) {
+      if (i === 0) return { col, row, svg: renderOptionButton({ index: 0, label: 'Allow' }, 0), label: '', command: { type: 'permission_decision', requestId: state.requestId, decision: 'allow' } };
+      if (i === 1) return { col, row, svg: renderOptionButton({ index: 1, label: 'Deny' }, 1), label: '', command: { type: 'permission_decision', requestId: state.requestId, decision: 'deny' } };
+    }
+  }
+  return { col, row, svg: renderEmptySlot(), label: '', command: null };
+}
+
 export function computeLayout(state: DashState, animFrame = 0, animated = false): KeySlot[] {
   const isDisconnected = state.state === 'DISCONNECTED' || state.state === 'disconnected';
   if (isDisconnected) {
@@ -204,12 +231,7 @@ export function computeLayout(state: DashState, animFrame = 0, animated = false)
     }
     for (let i = 0; i < 4; i++) {
       const col = i;
-      const opt = state.options[i];
-      if (opt && isAwaiting) {
-        slots.push({ col, row: 1, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } });
-      } else {
-        slots.push({ col, row: 1, svg: renderEmptySlot(), label: '', command: null });
-      }
+      slots.push(awaitingActionSlot(state, isAwaiting, i, col, 1));
     }
     slots.push({ col: 4, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '', command: null });
   } else {
@@ -221,12 +243,7 @@ export function computeLayout(state: DashState, animFrame = 0, animated = false)
     for (let i = 0; i < 4; i++) {
       const col = (i + 3) % 5;
       const row = Math.floor((i + 3) / 5);
-      const opt = state.options[i];
-      if (opt && isAwaiting) {
-        slots.push({ col, row, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } });
-      } else {
-        slots.push({ col, row, svg: renderEmptySlot(), label: '', command: null });
-      }
+      slots.push(awaitingActionSlot(state, isAwaiting, i, col, row));
     }
     slots.push({ col: 2, row: 1, svg: renderInfoButton('MODEL', state.modelName.slice(0, 12) || 'N/A'), label: '', command: null });
     slots.push({ col: 3, row: 1, svg: renderUsageButton('5H', state.fiveHourPercent, '#28a0b4'), label: '', command: { type: 'usage_toggle' } });
@@ -416,7 +433,6 @@ function buildDetail(
   const sState = (focused ? state.state : (sess?.state ?? 'idle')).toLowerCase();
   const options = (focused ? state.options : (sess?.options ?? [])) ?? [];
   const requestId = (focused ? stateEvt?.requestId : sess?.requestId) as string | undefined;
-  const promptType = (focused ? stateEvt?.promptType : sess?.promptType) as string | undefined;
   const tool = focused ? state.currentTool : sess?.currentTool;
   const model = sess?.modelName ?? state.modelName;
 
@@ -445,19 +461,31 @@ function buildDetail(
   const cells: SessionDeckCell[] = [];
 
   if (awaitingState(sState)) {
-    const isPermission = requestId != null || promptType === 'yes_no' || promptType === 'yes_no_always';
-    if (options.length > 0 && promptType !== 'yes_no' && promptType !== 'yes_no_always') {
-      options.forEach((opt, i) => cells.push({
-        svg: renderOptionButton(opt, i),
-        action: { kind: 'command', command: { type: 'select_option', index: i, sessionId: sid } },
-      }));
-    } else if (isPermission && requestId != null) {
+    // A focused PTY session reports `navigable` on the live state_update; a
+    // non-focused SessionInfo never carries it (and rarely carries options).
+    const navigable = Boolean(focused ? stateEvt?.navigable : false);
+    if (options.length > 0) {
+      // Render the REAL option set (permission OR multi-select) regardless of
+      // promptType — the parser already extracted the actual labels (e.g.
+      // "Yes" / "Yes, and don't ask again" / "No, tell Claude"). Navigable TUI
+      // (❯ cursor) → select_option so the daemon drives arrows+Enter;
+      // non-navigable inline prompts → respond with the option's shortcut.
+      options.forEach((opt, i) => {
+        const command: ButtonCommand = navigable
+          ? { type: 'select_option', index: i, sessionId: sid }
+          : { type: 'respond', value: opt.shortcut || opt.label?.charAt(0)?.toLowerCase() || String(i + 1) };
+        cells.push({ svg: renderOptionButton(opt, i), action: { kind: 'command', command } });
+      });
+    } else if (requestId != null) {
+      // Observed gated PreToolUse (no PTY): the hook only supports allow/deny,
+      // so present exactly those — never a fake "Always".
       cells.push({ svg: actionTile('Allow', '#22c55e'), action: { kind: 'command', command: { type: 'permission_decision', requestId, decision: 'allow' } } });
       cells.push({ svg: actionTile('Deny', '#ef4444'), action: { kind: 'command', command: { type: 'permission_decision', requestId, decision: 'deny' } } });
     } else {
-      cells.push({ svg: actionTile('Yes', '#22c55e'), action: { kind: 'command', command: { type: 'respond', value: 'y' } } });
-      cells.push({ svg: actionTile('No', '#ef4444'), action: { kind: 'command', command: { type: 'respond', value: 'n' } } });
-      if (promptType === 'yes_no_always') cells.push({ svg: actionTile('Always', '#a78bfa'), action: { kind: 'command', command: { type: 'respond', value: 'a' } } });
+      // Awaiting but not remotely answerable (Notification-only signal, or a
+      // multi-option prompt on a no-PTY session). Don't fabricate Yes/No/Always
+      // buttons that go nowhere — guide the user to the terminal instead.
+      cells.push({ svg: renderInfoSlot('AWAITING', 'answer in terminal', 'activity', 'action'), action: null });
     }
   } else if (processingState(sState)) {
     cells.push({ svg: renderInfoSlot('RUNNING', tool || 'working', 'activity', 'action'), action: null });

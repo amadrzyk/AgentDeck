@@ -62,6 +62,30 @@ describe('D200H buildButtonCommandMap', () => {
     expect(m.get(10)).toEqual({ type: 'interrupt' });              // (0,2)
   });
 
+  it('observed gated PreToolUse (requestId, no options): Allow/Deny via permission_decision', () => {
+    const m = buildButtonCommandMap({
+      state: 'AWAITING_PERMISSION',
+      mode: 'default',
+      modelName: 'claude-opus-4-8',
+      options: [],
+      requestId: 'req-123',
+      allSessions: [session('s1')],
+    });
+    // single-session option slots: i=0→(3,0)=idx3, i=1→(4,0)=idx4
+    expect(m.get(3)).toEqual({ type: 'permission_decision', requestId: 'req-123', decision: 'allow' });
+    expect(m.get(4)).toEqual({ type: 'permission_decision', requestId: 'req-123', decision: 'deny' });
+    expect(m.get(5)).toBeUndefined(); // no third "Always" — hook only does allow/deny
+  });
+
+  it('awaiting with no options and no requestId: no fake Yes/No/Always keys', () => {
+    const m = buildButtonCommandMap({
+      state: 'AWAITING_PERMISSION', mode: 'default', options: [], allSessions: [session('s1')],
+    });
+    expect(m.get(3)).toBeUndefined();
+    expect(m.get(4)).toBeUndefined();
+    expect(m.get(10)).toEqual({ type: 'interrupt' }); // ESC still works
+  });
+
   it('options are inert unless AWAITING', () => {
     const m = buildButtonCommandMap({
       state: 'PROCESSING',

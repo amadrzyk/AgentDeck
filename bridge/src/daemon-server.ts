@@ -125,7 +125,10 @@ function getDeviceApprovalsConfig(): DeviceApprovalsConfig {
   if (cachedApprovals && now - cachedApprovals.at < 3000) return cachedApprovals.cfg;
   const raw = (loadDaemonSettings().deviceApprovals ?? {}) as Record<string, unknown>;
   const cfg: DeviceApprovalsConfig = {
-    enabled: raw.enabled === true,
+    // Default ON: observed-session approval is the only way a device popup can
+    // actually drive a no-PTY session forward, so absent config opts in. Only
+    // an explicit `enabled: false` keeps the gate off.
+    enabled: raw.enabled !== false,
     gatedTools: Array.isArray(raw.gatedTools)
       ? raw.gatedTools.filter((t): t is string => typeof t === 'string')
       : DEFAULT_GATED_TOOLS,

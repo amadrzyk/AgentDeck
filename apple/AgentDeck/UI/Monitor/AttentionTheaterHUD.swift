@@ -43,17 +43,12 @@ struct AttentionTheaterHUD: View {
         }
     }
 
-    /// Effective options to render. If the parser delivered an empty array
-    /// (e.g. AWAITING_PERMISSION with no labels extracted), fall back to the
-    /// legacy yes/no/always trio so the card never appears blank.
-    private var effectiveOptions: [PromptOption] {
-        if !options.isEmpty { return options }
-        return [
-            PromptOption(index: 0, label: "Yes",    shortcut: "y", recommended: nil, selected: nil),
-            PromptOption(index: 1, label: "No",     shortcut: "n", recommended: nil, selected: nil),
-            PromptOption(index: 2, label: "Always", shortcut: "a", recommended: nil, selected: nil),
-        ]
-    }
+    /// Options to render — exactly what the bridge/daemon delivered. When empty
+    /// the prompt isn't remotely answerable (a no-PTY session with no gated
+    /// requestId, or a Notification-only awaiting signal), so we DON'T fabricate
+    /// a yes/no/always trio that would silently go nowhere — `optionsContent`
+    /// shows a "respond in the terminal" hint instead.
+    private var effectiveOptions: [PromptOption] { options }
 
     /// Use the compact horizontal row layout when we have ≤3 options and
     /// every label is short. This preserves the familiar tool-approval
@@ -129,7 +124,22 @@ struct AttentionTheaterHUD: View {
     @ViewBuilder
     private var optionsContent: some View {
         let opts = effectiveOptions
-        if useHorizontalLayout {
+        if opts.isEmpty {
+            // Not remotely answerable — guide the user to the terminal rather
+            // than showing dead buttons.
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 11))
+                Text("Respond in the terminal to continue")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .lineLimit(2)
+            }
+            .foregroundStyle(TerrariumHUD.subtext)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
+        } else if useHorizontalLayout {
             HStack(spacing: 6) {
                 ForEach(opts) { option in
                     theaterButton(option: option, vertical: false)

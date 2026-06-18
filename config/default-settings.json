@@ -7,7 +7,7 @@
   "stuckTimeoutMs": 300000,
   "reconnectIntervalMs": 3000,
   "deviceApprovals": {
-    "enabled": false,
+    "enabled": true,
     "gatedTools": ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"],
     "timeoutMs": 45000
   },

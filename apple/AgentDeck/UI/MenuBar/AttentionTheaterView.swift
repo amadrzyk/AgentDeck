@@ -51,14 +51,11 @@ struct AttentionTheaterView: View {
     private var brandColor: Color { SessionBrand.color(for: agentType) }
     private var agentLabel: String { displayAgentLabel(agentType) }
 
-    private var effectiveOptions: [PromptOption] {
-        if !options.isEmpty { return options }
-        return [
-            PromptOption(index: 0, label: "Yes",    shortcut: "y", recommended: nil, selected: nil),
-            PromptOption(index: 1, label: "No",     shortcut: "n", recommended: nil, selected: nil),
-            PromptOption(index: 2, label: "Always", shortcut: "a", recommended: nil, selected: nil),
-        ]
-    }
+    /// Options to render — exactly what the daemon delivered. Empty means the
+    /// prompt isn't remotely answerable (no-PTY session without a gated
+    /// requestId, or a Notification-only signal); `optionsContent` then shows a
+    /// terminal hint rather than fabricating dead Yes/No/Always buttons.
+    private var effectiveOptions: [PromptOption] { options }
 
     private var useHorizontalLayout: Bool {
         let opts = effectiveOptions
@@ -135,7 +132,22 @@ struct AttentionTheaterView: View {
     @ViewBuilder
     private var optionsContent: some View {
         let opts = effectiveOptions
-        if useHorizontalLayout {
+        if opts.isEmpty {
+            // Not remotely answerable — point the user to the terminal instead
+            // of showing buttons that can't drive the agent.
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 11))
+                Text("Respond in the terminal to continue")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .lineLimit(2)
+            }
+            .foregroundColor(Color(red: 0.416, green: 0.353, blue: 0.188))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.5)))
+        } else if useHorizontalLayout {
             HStack(spacing: 6) {
                 ForEach(opts) { option in
                     theaterButton(option: option, vertical: false)

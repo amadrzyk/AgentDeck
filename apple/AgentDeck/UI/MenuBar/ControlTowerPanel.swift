@@ -57,7 +57,7 @@ struct ControlTowerPanel: View {
                     AttentionTheaterView(
                         session: awaiting,
                         question: questionFor(awaiting),
-                        options: isFocused ? stateHolder.state.options : [],
+                        options: attentionOptions(for: awaiting, isFocused: isFocused),
                         promptType: isFocused ? stateHolder.state.promptType : nil,
                         cursorIndex: isFocused ? stateHolder.state.cursorIndex : 0,
                         navigable: isFocused ? stateHolder.state.navigable : false,
@@ -185,10 +185,28 @@ struct ControlTowerPanel: View {
         stateHolder.state.focusedSessionId ?? stateHolder.state.sessionId
     }
 
+    /// Options to render in the menubar theater. Observed gated PreToolUse
+    /// (carries a requestId but no PTY) → a fixed Allow/Deny pair; otherwise
+    /// mirror the focused session's live options. Mirrors `MonitorScreen`.
+    private func attentionOptions(for session: SessionInfo, isFocused: Bool) -> [PromptOption] {
+        if session.requestId != nil {
+            return [
+                PromptOption(index: 0, label: "Allow", shortcut: "y", recommended: true, selected: nil),
+                PromptOption(index: 1, label: "Deny", shortcut: "n", recommended: nil, selected: nil),
+            ]
+        }
+        return isFocused ? stateHolder.state.options : []
+    }
+
     private func respondToAwaiting(_ optionIndex: Int, session: SessionInfo) {
-        // Route via the daemon focus relay first, then send the option
-        // selection. `selectOption` is the canonical command path — same
-        // one used by D200H buttons and Cmd+Y/N/A keyboard shortcuts.
+        // Gated PreToolUse (observed, no PTY): resolve the held hook response via
+        // permission_decision — there's no PTY to drive. index 0 = Allow, 1 = Deny.
+        if let requestId = session.requestId {
+            stateHolder.sendCommand(.permissionDecision(requestId: requestId, decision: optionIndex == 0 ? "allow" : "deny"))
+            return
+        }
+        // Otherwise route via the daemon focus relay, then send the selection —
+        // `selectOption` is the canonical path (same as D200H + Cmd+Y/N/A).
         stateHolder.sendCommand(.focusSession(sessionId: session.id))
         stateHolder.sendCommand(.selectOption(index: optionIndex))
     }
