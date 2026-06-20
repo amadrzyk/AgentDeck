@@ -250,6 +250,70 @@ describe('shouldJudge gating', () => {
   });
 });
 
+describe('ApmeRunner duplicate guard', () => {
+  it('does not enqueue the same run while it is already queued or running', async () => {
+    const evals: Array<Record<string, unknown>> = [];
+    const run: ApmeRunRow = {
+      id: 'run-dupe',
+      sessionId: 's-dupe',
+      agentType: 'claude-code',
+      modelId: null,
+      projectName: 'proj',
+      projectPath: null,
+      taskPrompt: 'do work',
+      startedAt: 1,
+      endedAt: 2,
+      gitBefore: null,
+      gitAfter: null,
+      exitCode: null,
+      inputTokens: null,
+      outputTokens: null,
+      costUsd: null,
+      taskSignals: null,
+      taskCategory: 'general',
+      taskCategorySource: 'rule',
+      outcome: null,
+      outcomeConfidence: null,
+      efficiencyJson: null,
+      compositeScore: null,
+    };
+    const fakeStore = {
+      enabled: true,
+      getRun: () => run,
+      listEvalsForRun: () => evals as never[],
+      getCurrentRubric: () => ({ version: 1, prompt: 'score it' }),
+      insertEval: (row: Record<string, unknown>) => { evals.push(row); },
+    } as unknown as ApmeStore;
+
+    const runner = new ApmeRunner(fakeStore);
+    runner._setConfig({
+      ...DEFAULT_APME_CONFIG,
+      deterministic: { enabled: false, timeoutSec: 30, commands: {} },
+      judge: { ...DEFAULT_APME_CONFIG.judge, sampleRate: 1, onlyWhenDisagreement: false },
+    });
+
+    let releaseJudge!: () => void;
+    const judgeBlocker = new Promise<void>((resolve) => { releaseJudge = resolve; });
+    let judgeCalls = 0;
+    runner._setJudgeFn(async () => {
+      judgeCalls += 1;
+      await judgeBlocker;
+      return '{"overall":0.8,"accuracy":0.8}';
+    });
+
+    runner.enqueue({ runId: run.id });
+    await new Promise((resolve) => setImmediate(resolve));
+    runner.enqueue({ runId: run.id });
+    runner.enqueue({ runId: run.id });
+
+    releaseJudge();
+    await runner.drain();
+
+    expect(judgeCalls).toBe(1);
+    expect(evals.filter((e) => e.layer === 'llm_judge' && e.metric === 'overall')).toHaveLength(1);
+  });
+});
+
 // ─── End-to-end runner (mocked det + judge) ───────────────────────────────────
 
 describe('ApmeRunner.runOne', () => {
