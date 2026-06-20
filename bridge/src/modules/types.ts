@@ -41,4 +41,5 @@ export interface ModuleConfigs {
   serial?: 'auto' | boolean;
   pixoo?: 'auto' | boolean;
   d200h?: 'auto' | boolean;
+  trmnl?: 'auto' | boolean;
 }

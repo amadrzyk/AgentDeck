@@ -4,6 +4,7 @@ import { AdbModule } from './adb-module.js';
 import { SerialModule } from './serial-module.js';
 import { PixooModule } from './pixoo-module.js';
 import { D200hModule } from './d200h-module.js';
+import { TrmnlModule } from './trmnl-module.js';
 import type { AgentType } from '../types.js';
 import { debug } from '../logger.js';
 
@@ -13,6 +14,7 @@ export { AdbModule } from './adb-module.js';
 export { SerialModule } from './serial-module.js';
 export { PixooModule } from './pixoo-module.js';
 export { D200hModule } from './d200h-module.js';
+export { TrmnlModule } from './trmnl-module.js';
 
 /**
  * Create default module instances for a given agent type.
@@ -24,6 +26,7 @@ export function createDefaultModules(agentType: AgentType): DeviceModule[] {
     new SerialModule(),
     new PixooModule(),
     new D200hModule(),
+    new TrmnlModule(),
   ];
 }
 

@@ -21,6 +21,10 @@ import {
   isRetryableSerialIoError,
   ESP32_PORT_PATTERNS,
   EXCLUDE_PATTERNS,
+  isUnidentifiedForeign,
+  recordForeignProbeFailure,
+  isForeignPortDenylisted,
+  __resetForeignPortState,
   type SerialConnection,
 } from '../esp32-serial.js';
 
@@ -460,5 +464,57 @@ describe('serial buffer management', () => {
       readBuf = '';
     }
     expect(readBuf).toBe('');
+  });
+});
+
+// ─── Foreign (non-AgentDeck) port denylist ──────────────────────────
+// A USB-serial device that opens but never speaks the AgentDeck protocol (e.g. a
+// TRMNL e-ink panel) must be denylisted so the scanner stops reopening — and
+// DTR/RTS-resetting — it every poll. A real board that ever sent a valid JSON
+// message must NEVER be classified as foreign.
+
+const foreignConn = (over: Partial<SerialConnection> = {}): SerialConnection =>
+  ({
+    port: '/dev/cu.usbmodem201301',
+    deviceInfo: null,
+    lastReadAt: 0,
+    ...over,
+  }) as SerialConnection;
+
+describe('foreign port detection', () => {
+  it('flags a port that opened but never sent valid JSON', () => {
+    expect(isUnidentifiedForeign(foreignConn())).toBe(true);
+  });
+
+  it('does NOT flag a connection that ever read a valid AgentDeck message', () => {
+    expect(isUnidentifiedForeign(foreignConn({ lastReadAt: Date.now() }))).toBe(false);
+  });
+
+  it('does NOT flag a connection that already identified its board', () => {
+    expect(isUnidentifiedForeign(foreignConn({ deviceInfo: { board: 'ips_10' } }))).toBe(false);
+  });
+});
+
+describe('foreign port denylist threshold', () => {
+  it('denylists a port only after repeated failed probes', () => {
+    __resetForeignPortState();
+    const port = '/dev/cu.usbmodem999';
+    recordForeignProbeFailure(port);
+    expect(isForeignPortDenylisted(port)).toBe(false); // 1
+    recordForeignProbeFailure(port);
+    expect(isForeignPortDenylisted(port)).toBe(false); // 2
+    recordForeignProbeFailure(port);
+    expect(isForeignPortDenylisted(port)).toBe(true); // 3 → denylisted
+    __resetForeignPortState();
+  });
+
+  it('treats an elapsed cooldown as no longer denylisted', () => {
+    __resetForeignPortState();
+    const port = '/dev/cu.usbmodemAAA';
+    for (let i = 0; i < 3; i++) recordForeignProbeFailure(port);
+    expect(isForeignPortDenylisted(port)).toBe(true);
+    // Far-future "now" — past the 10-minute cooldown window.
+    expect(isForeignPortDenylisted(port, Date.now() + 20 * 60_000)).toBe(false);
+    __resetForeignPortState();
   });
 });

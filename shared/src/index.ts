@@ -15,6 +15,7 @@ export * from './state-colors.js';
 export * from './design-tokens.js';
 export * from './svg-renderers/index.js';
 export * from './d200h-layout.js';
+export * from './trmnl-layout.js';
 export * from './llm-settings.js';
 export * from './eval-schema.js';
 export * from './sample.js';
