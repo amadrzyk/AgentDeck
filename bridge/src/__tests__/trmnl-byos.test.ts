@@ -108,16 +108,34 @@ describe('TRMNL BYOS handlers', () => {
     expect(captured.body.image_url).toContain(`/trmnl/image/${captured.body.filename}.png`);
   });
 
-  it('/api/display rejects a mismatched Access-Token', () => {
+  it('/api/display still serves a screen with a mismatched Access-Token (soft auth)', () => {
+    // Real devices carry an api_key issued by a previous/cloud server; we must
+    // not hard-reject on token mismatch (it would brick same-LAN hardware).
     handleTrmnlSetup(fakeReq({ ID: MAC }), fakeRes().res);
     const { res, captured } = fakeRes();
     handleTrmnlDisplay(fakeReq({ ID: MAC, 'Access-Token': 'deadbeef' }), res);
-    expect(captured.status).toBe(401);
+    expect(captured.status).toBe(200);
+    expect(captured.body.status).toBe(0);
   });
 
-  it('/api/display asks an unenrolled device to set up', () => {
+  it('/api/display auto-enrolls an unknown device and serves a real screen (autoRegister on)', () => {
+    // Devices that skip /api/setup (kept a prior api_key) poll display directly —
+    // they must get status 0, not be stuck on "not registered".
     const { res, captured } = fakeRes();
     handleTrmnlDisplay(fakeReq({ ID: 'FF:FF:FF:FF:FF:FF' }), res);
+    expect(captured.status).toBe(200);
+    expect(captured.body.status).toBe(0);
+    expect(captured.body.image_url).toContain(`/trmnl/image/${captured.body.filename}.png`);
+    expect(findDeviceByMac('FF:FF:FF:FF:FF:FF')).toBeTruthy();
+  });
+
+  it('/api/display returns 202 for an unknown device when autoRegister is off', () => {
+    writeFileSync(
+      join(process.env.AGENTDECK_DATA_DIR!, 'settings.json'),
+      JSON.stringify({ trmnl: { autoRegister: false, devices: [] } }),
+    );
+    const { res, captured } = fakeRes();
+    handleTrmnlDisplay(fakeReq({ ID: 'AB:CD:EF:00:11:22' }), res);
     expect(captured.status).toBe(200);
     expect(captured.body.status).toBe(202);
     expect(captured.body.filename).toBe('setup');

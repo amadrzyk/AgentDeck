@@ -79,31 +79,40 @@ export function handleTrmnlSetup(req: IncomingMessage, res: ServerResponse): voi
 export function handleTrmnlDisplay(req: IncomingMessage, res: ServerResponse): void {
   const mac = header(req, 'ID');
   const cfg = loadTrmnlConfig();
-  const device = mac ? findDeviceByMac(mac) : undefined;
+  let device = mac ? findDeviceByMac(mac) : undefined;
 
   if (!device) {
-    // Not enrolled — tell the firmware to (re)run setup by reporting reset.
-    debug(TAG, `display from unenrolled ${normalizeMac(mac)} — requesting setup`);
-    sendJson(res, 200, {
-      status: 202,
-      image_url: `${imageBase(req)}/trmnl/image/setup.png`,
-      filename: 'setup',
-      refresh_rate: String(cfg.refreshRate),
-      reset_firmware: false,
-      update_firmware: false,
-      firmware_url: null,
-    });
-    return;
+    // Real devices often carry an api_key from a prior (cloud) setup and never
+    // call /api/setup again — they poll /api/display straight away. If we answer
+    // "not registered" (status 202) they just sleep/retry forever and never show
+    // a screen. So auto-enroll on first poll (when autoRegister is on) and serve
+    // a real dashboard (status 0). Only fall back to 202 when autoRegister is off.
+    if (mac && cfg.autoRegister) {
+      const r = ensureDevice(mac);
+      device = r.device;
+      if (r.created) {
+        debug(TAG, `auto-enrolled ${normalizeMac(mac)} on display poll`);
+        forceRenderTrmnlFrame();
+      }
+    }
+    if (!device) {
+      debug(TAG, `display from unenrolled ${normalizeMac(mac)} (autoRegister off) — requesting setup`);
+      sendJson(res, 200, {
+        status: 202,
+        image_url: `${imageBase(req)}/trmnl/image/setup.png`,
+        filename: 'setup',
+        refresh_rate: String(cfg.refreshRate),
+        reset_firmware: false,
+        update_firmware: false,
+        firmware_url: null,
+      });
+      return;
+    }
   }
 
-  // Soft auth: if the device presents an Access-Token, it must match.
-  const token = header(req, 'Access-Token');
-  if (token && token !== device.apiKey) {
-    debug(TAG, `display token mismatch for ${device.mac}`);
-    sendJson(res, 401, { status: 401, message: 'Invalid Access-Token' });
-    return;
-  }
-
+  // Soft auth only: the MAC (ID header) identifies the device. The api_key it
+  // presents may have been issued by a previous/cloud server, so we don't
+  // hard-reject on mismatch — this is same-LAN hardware.
   const frame = getTrmnlFrame();
   sendJson(res, 200, {
     status: 0,
