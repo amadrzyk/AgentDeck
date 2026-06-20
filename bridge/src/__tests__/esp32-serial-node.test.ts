@@ -298,15 +298,42 @@ describe('prepareForSerial (source)', () => {
     expect(prepared.sessions[0].extra).toBeUndefined();
   });
 
+  it('forwards per-session D1 mosaic fields (tool/elapsed/awaiting prompt) and trims oversized strings', () => {
+    const prepared = prepareForSerial({
+      type: 'sessions_list',
+      sessions: [{
+        id: 's1', projectName: 'AgentDeck', modelName: 'opus-4-6',
+        agentType: 'claude-code', state: 'awaiting_permission', port: 9122, alive: true,
+        currentTool: 'Write · ' + 'x'.repeat(80),
+        question: 'q'.repeat(200),
+        requestId: 'r'.repeat(80),
+        promptType: 'yes_no',
+        elapsedSec: 1083.7,
+        options: Array.from({ length: 12 }, (_, i) => ({ label: 'L'.repeat(120), index: i, recommended: i === 0 })),
+        extra: 'not-for-firmware',
+      }],
+    } as any) as any;
+
+    const s = prepared.sessions[0];
+    expect(s.currentTool).toHaveLength(39);
+    expect(s.question).toHaveLength(159);
+    expect(s.requestId).toHaveLength(39);
+    expect(s.promptType).toBe('yes_no');
+    expect(s.elapsedSec).toBe(1084); // rounded
+    expect(s.options).toHaveLength(8); // sanitizeOptions caps at 8
+    expect(s.options[0].label).toHaveLength(79);
+    expect(s.extra).toBeUndefined();
+  });
+
   it('round-robins sessions_list by agent type so non-Claude agents survive the cap', () => {
-    // 6 alive Claude sessions ahead of Codex + OpenClaw — the real-world layout
-    // that previously dropped Codex (index 6) via a plain slice(0, 6).
+    // More alive Claude sessions than the cap, ahead of Codex + OpenClaw — the
+    // real-world layout that a plain slice(0, cap) would drop the tail of.
     const sessions = [
-      ...Array.from({ length: 5 }, (_, i) => ({
+      ...Array.from({ length: 11 }, (_, i) => ({
         id: `cc-${i}`, agentType: 'claude-code', state: 'idle', alive: true, port: 9120 + i,
       })),
-      { id: 'cc-busy', agentType: 'claude-code', state: 'processing', alive: true, port: 9130 },
-      { id: 'cx', agentType: 'codex-cli', state: 'idle', alive: true, port: 9140 },
+      { id: 'cc-busy', agentType: 'claude-code', state: 'processing', alive: true, port: 9140 },
+      { id: 'cx', agentType: 'codex-cli', state: 'idle', alive: true, port: 9150 },
       { id: 'oc', agentType: 'openclaw', state: 'processing', alive: true, port: 18789 },
     ];
 

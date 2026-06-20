@@ -145,16 +145,17 @@ function persistDeviceInfoCache(): void {
  * - Strip fields the ESP32 firmware doesn't parse (reduce size for small RX buffers)
  */
 /** @internal Exported for testing only */
-// Firmware (handleSessionsList) only stores the first 6 sessions; both sides
-// must agree on the same cap. Keep in sync with esp32/src/net/protocol.cpp.
-export const SERIAL_SESSIONS_CAP = 6;
+// Firmware (handleSessionsList) only stores the first N sessions; both sides
+// must agree on the same cap. Keep in sync with esp32/src/net/protocol.cpp
+// (sessions[10] / MOSAIC_MAX / min(...,10)).
+export const SERIAL_SESSIONS_CAP = 10;
 
 /**
- * Pick which sessions survive the 6-slot serial cap.
+ * Pick which sessions survive the serial session cap.
  *
- * A naive `slice(0, 6)` lets a single agent type (e.g. several idle Claude Code
+ * A naive `slice(0, cap)` lets a single agent type (e.g. several idle Claude Code
  * sessions) fill every slot and starve other agents — a running Codex/OpenClaw
- * session that lands at index 6+ never reaches the firmware's creature renderer.
+ * session that lands past the cap never reaches the firmware's creature renderer.
  *
  * Instead we round-robin across agent types so each present type claims at least
  * one slot before any type takes a second. Within a type, live + active
@@ -246,6 +247,14 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
         state: limitString(s.state, 19),
         port: Number.isFinite(s.port) ? s.port : 0,
         alive: Boolean(s.alive),
+        // Per-session detail for the IPS10 D1 mosaic (cells show tool/elapsed,
+        // and awaiting cells render inline Approve/Deny + option buttons).
+        currentTool: limitString(s.currentTool, 39),
+        promptType: limitString(s.promptType, 19),
+        question: limitString(s.question, 159),
+        requestId: limitString(s.requestId, 39),
+        elapsedSec: Number.isFinite(s.elapsedSec) ? Math.round(s.elapsedSec) : undefined,
+        options: sanitizeOptions(s.options),
       })),
     } as BridgeEvent;
   }
