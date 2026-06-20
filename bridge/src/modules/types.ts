@@ -42,4 +42,5 @@ export interface ModuleConfigs {
   pixoo?: 'auto' | boolean;
   timebox?: 'auto' | boolean;
   d200h?: 'auto' | boolean;
+  trmnl?: 'auto' | boolean;
 }

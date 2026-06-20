@@ -49,6 +49,13 @@ import { enableDebugLog, debug } from './logger.js';
 import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule } from './apme/index.js';
 import { handleApmeRequest } from './apme/http.js';
 import {
+  handleTrmnlSetup,
+  handleTrmnlDisplay,
+  handleTrmnlImage,
+  handleTrmnlLog,
+  isTrmnlImagePath,
+} from './trmnl/byos-server.js';
+import {
   initModules,
   stopModules,
   createDefaultModules,
@@ -654,6 +661,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       res.end(pixooLiveHtml({ projectName: 'AgentDeck' }));
       return;
     }
+    // --- TRMNL BYOS (e-ink panel pulls rendered dashboard over WiFi) ---
+    if (req.method === 'GET' && pathname === '/api/setup') {
+      handleTrmnlSetup(req, res);
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/api/display') {
+      handleTrmnlDisplay(req, res);
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/api/log') {
+      handleTrmnlLog(req, res);
+      return;
+    }
+    if (req.method === 'GET' && isTrmnlImagePath(pathname)) {
+      handleTrmnlImage(req, res);
+      return;
+    }
     if (req.method === 'GET' && pathname === '/sse') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
       res.on('error', () => {}); // Prevent unhandled stream error on client disconnect
@@ -1029,7 +1053,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   const deviceModules = createDefaultModules('daemon' as any);
   const startedModules = await initModules(
     deviceModules,
-    { mdns: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', d200h: 'auto' },
+    // TRMNL stays on so its frame cache tracks live state and a freshly-enrolled
+    // panel works without a daemon restart; rendering is internally gated on a
+    // device being registered, so it's cheap when no panel is present.
+    { mdns: true, adb: 'auto', serial: 'auto', pixoo: 'auto', timebox: 'auto', d200h: 'auto', trmnl: true },
     { port, authToken: core.authToken, projectName: 'AgentDeck', wsServer: core.wsServer },
   );
 

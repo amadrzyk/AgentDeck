@@ -53,6 +53,14 @@ const INITIAL_READ_TIMEOUT_MS = 20000;
 const DEVICE_INFO_RETRY_MS = 5000;
 const DEVICE_INFO_READ_RETRY_MS = 5000;
 const DEVICE_INFO_MAX_REQUESTS = 10;
+// A serial port that opens fine but never speaks the AgentDeck protocol (e.g. a
+// TRMNL e-ink panel, or any third-party USB-serial device) would otherwise be
+// reopened every poll — and opening a port toggles DTR/RTS, which resets an
+// ESP32. After this many failed identification cycles we denylist the port for a
+// cooldown so we stop holding/resetting foreign hardware.
+const FOREIGN_MAX_PROBE_FAILURES = 3;
+const FOREIGN_DENYLIST_COOLDOWN_MS = 10 * 60_000; // 10 minutes, then re-probe once
+const FOREIGN_CDC_GRACE_MS = 90_000; // a held-open CDC port gets this long to identify
 const SERIAL_OPEN_PROBE_TIMEOUT_MS = 1500;
 const SERIAL_WRITE_INTERVAL_MS = 120;
 const SERIAL_MAX_QUEUE = 24;
@@ -100,6 +108,9 @@ let pollInProgress = false;
 const openingPorts = new Set<string>();
 const lastKnownDeviceInfoByPort = new Map<string, NonNullable<SerialConnection['deviceInfo']>>();
 const lastErrorByPort = new Map<string, string>();
+// Foreign (non-AgentDeck) serial ports: failure count + denylist-until timestamp.
+const foreignProbeFailures = new Map<string, number>();
+const foreignDenylistUntil = new Map<string, number>();
 let deviceInfoCacheLoaded = false;
 let stateProvider: (() => BridgeEvent | null) | null = null;
 let usageProvider: (() => BridgeEvent | null) | null = null;
@@ -748,6 +759,45 @@ function sendHeartbeat(): void {
 }
 
 /**
+ * A connection that opened cleanly but has never spoken the AgentDeck protocol:
+ * no device_info, no cached board for this port, and not a single valid JSON
+ * line read. Strong evidence it's a foreign device (e.g. a TRMNL panel) we
+ * should stop holding/resetting rather than an AgentDeck board that's just slow.
+ */
+/** @internal Exported for testing only */
+export function isUnidentifiedForeign(conn: SerialConnection): boolean {
+  return !conn.deviceInfo?.board && !lastKnownDeviceInfoByPort.has(conn.port) && conn.lastReadAt === 0;
+}
+
+function denylistForeignPort(port: string, reason: string): void {
+  foreignDenylistUntil.set(port, Date.now() + FOREIGN_DENYLIST_COOLDOWN_MS);
+  foreignProbeFailures.delete(port);
+  debug('ESP32', `Denylisting non-AgentDeck port ${port} for ${Math.round(FOREIGN_DENYLIST_COOLDOWN_MS / 60000)}min (${reason})`);
+}
+
+/** @internal Exported for testing only. True if the port is in active cooldown. */
+export function isForeignPortDenylisted(port: string, now = Date.now()): boolean {
+  const until = foreignDenylistUntil.get(port);
+  return until != null && until > now;
+}
+
+/** @internal Exported for testing only. Clear all foreign-port tracking state. */
+export function __resetForeignPortState(): void {
+  foreignProbeFailures.clear();
+  foreignDenylistUntil.clear();
+}
+
+/** @internal Exported for testing only.
+ *  Count a failed identification cycle; denylist once it crosses the threshold. */
+export function recordForeignProbeFailure(port: string): void {
+  const next = (foreignProbeFailures.get(port) ?? 0) + 1;
+  foreignProbeFailures.set(port, next);
+  if (next >= FOREIGN_MAX_PROBE_FAILURES) {
+    denylistForeignPort(port, `${next} failed probes`);
+  }
+}
+
+/**
  * Check for stale connections (no read for >60s) and close them.
  * This allows re-poll to automatically reconnect devices that stopped responding.
  */
@@ -765,6 +815,14 @@ function checkStaleConnections(): void {
 
     // For CDC ports, do not close due to lack of read traffic if write is active and healthy.
     if (isCDC) {
+      // A held-open CDC port that never identifies is a foreign device; denylist
+      // it so we stop occupying it (CDC ports aren't otherwise reaped on silence).
+      if (isUnidentifiedForeign(conn) && (now - conn.connectedAt) > FOREIGN_CDC_GRACE_MS) {
+        denylistForeignPort(conn.port, 'CDC never identified');
+        closeConnection(conn);
+        staleCount++;
+        continue;
+      }
       if (writeAge > STALE_THRESHOLD_MS) {
         debug('ESP32', `Stale CDC connection (no write for >60s): ${conn.port}`);
         closeConnection(conn);
@@ -776,6 +834,9 @@ function checkStaleConnections(): void {
     if ((!hasRead && readAge > INITIAL_READ_TIMEOUT_MS) ||
         (hasRead && readAge > STALE_THRESHOLD_MS && writeAge > STALE_THRESHOLD_MS)) {
       debug('ESP32', `Stale connection detected: ${conn.port} (${Math.floor(readAge / 1000)}s ${hasRead ? 'since last read' : 'without initial read'}, ${Math.floor(writeAge / 1000)}s since write)`);
+      // A UART port closed before ever identifying counts as a foreign probe
+      // failure; enough failures denylist it so we stop reopening (and resetting) it.
+      if (isUnidentifiedForeign(conn)) recordForeignProbeFailure(conn.port);
       closeConnection(conn);
       staleCount++;
     }
@@ -829,6 +890,25 @@ async function pollForDevices(): Promise<void> {
 
     const portSet = new Set(ports);
 
+    // Forget foreign-port state for ports that are gone (a replug re-probes
+    // fresh) or whose cooldown has elapsed. Then skip ports still in cooldown so
+    // we don't reopen — and reset — a non-AgentDeck device every poll.
+    const nowTs = Date.now();
+    for (const [p, until] of [...foreignDenylistUntil]) {
+      if (until <= nowTs || !portSet.has(p)) foreignDenylistUntil.delete(p);
+    }
+    for (const p of [...foreignProbeFailures.keys()]) {
+      if (!portSet.has(p)) foreignProbeFailures.delete(p);
+    }
+    const allowedPorts = ports.filter((p) => {
+      const until = foreignDenylistUntil.get(p);
+      if (until && until > nowTs) {
+        debug('ESP32', `Skipping denylisted non-AgentDeck port ${p} (${Math.ceil((until - nowTs) / 1000)}s left)`);
+        return false;
+      }
+      return true;
+    });
+
     // Remove disconnected or unplugged ports. Read silence alone is handled
     // separately so half-duplex-but-rendering boards are not reset every minute.
     connections = connections.filter(c => {
@@ -844,8 +924,8 @@ async function pollForDevices(): Promise<void> {
       return true;
     });
 
-    // Add new ports
-    for (const port of ports) {
+    // Add new ports (denylisted foreign ports are excluded via allowedPorts)
+    for (const port of allowedPorts) {
       if (connections.some(c => c.port === port) || openingPorts.has(port)) continue;
 
       openingPorts.add(port);
