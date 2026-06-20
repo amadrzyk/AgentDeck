@@ -6,6 +6,7 @@
  */
 
 import { BridgeCore } from './bridge-core.js';
+import { buildDisplayStateEvent } from './display-dim.js';
 import { initApme, isTimelineProjectionEnabled } from './apme/index.js';
 import { readLastTurn as readClaudeTranscriptLastTurn } from './apme/claude-transcript-reader.js';
 import { claudeHookToSpans } from './apme/adapters/claude-hook.js';
@@ -417,7 +418,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       const events: BridgeEvent[] = [];
       if (lastStateEvent) events.push(lastStateEvent);
       events.push(core.buildUsage());
-      events.push({ type: 'display_state', displayOn: core.displayMonitor.isDisplayOn() } as BridgeEvent);
+      events.push(buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent);
       core.broadcastSessionsList().catch(() => {});
       return events;
     });
