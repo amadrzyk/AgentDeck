@@ -24,9 +24,9 @@
 
 **Stop Chatting. Start Steering.**
 
-AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **13 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, HID decks, and terminals.
+AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **14 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, HID decks, and terminals.
 
-> One bridge. 13 surfaces. Steer your AI — without leaving your keyboard flow.
+> One bridge. 14 surfaces. Steer your AI — without leaving your keyboard flow.
 
 > Independent project. Not affiliated with Anthropic, OpenAI, Google, Elgato, DIVOOM, or other third parties referenced. All trademarks are property of their respective owners. See [ATTRIBUTION.md](ATTRIBUTION.md) for full notices.
 
@@ -70,6 +70,7 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 - [ESP32 Display](#esp32-display)
 - [Ulanzi TC001 LED Matrix](#ulanzi-tc001-led-matrix)
 - [Pixoo64 LED Matrix](#pixoo64-led-matrix)
+- [Divoom Timebox Mini](#divoom-timebox-mini)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Uninstall](#uninstall)
@@ -117,7 +118,7 @@ A **control surface** — like an audio mixing console, but for AI coding agents
 - **System utilities** — volume, mic, media, timer from the Utility encoder
 - **Terminal sessions** — iTerm dial switches sessions, auto-attaches tmux
 - **Multiple coding agents** — Claude Code, Codex CLI, OpenCode, and OpenClaw in one multi-agent daemon view
-- **Works from anywhere** — all 13 surfaces can monitor the agent; interactive surfaces (Stream Deck, D200H, Android, Apple) can also control it
+- **Works from anywhere** — all 14 surfaces can monitor the agent; interactive surfaces (Stream Deck, D200H, Android, Apple) can also control it
 
 The bridge is transparent: if it's off, Claude Code works exactly as before.
 
@@ -130,7 +131,9 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 | **OpenCode** | Supported — PTY + SSE hybrid bridge, timeline integration |
 | **OpenClaw** | Experimental — Gateway WebSocket, timeline panel, log stream |
 
-### Supported Surfaces — 13 Types
+### Supported Surfaces
+
+> Full hardware/OS inventory (SoC, resolution, transport, App Store tier) is the canonical matrix in **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)**.
 
 | # | Surface | Description |
 |---|---------|-------------|
@@ -146,7 +149,11 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 | 10 | **ESP32 B86 Box** | 4" wall-mount touch panel 480×480 |
 | 11 | **Ulanzi TC001** | 8×32 RGB LED matrix — compact HUD pages and creature sprites |
 | 12 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium |
-| 13 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
+| 13 | **iDotMatrix 32×32** | 32×32 RGB AMOLED pixel display — BLE |
+| 14 | **Divoom Timebox Mini** | 11×11 RGB LED — BLE (App Store + CLI) |
+| 15 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
+
+> Full hardware/OS spec sheet (SoC, resolution, flash, SDK, deployment targets) for every surface: **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)** (visual view: [docs/hardware/index.html](docs/hardware/index.html)).
 
 <p align="center">
   <img src="docs/media/ipad-iphone-closeup.jpg" width="360" alt="iPad and iPhone showing terrarium with pixel art creatures">
@@ -170,7 +177,7 @@ Stream Deck Plugin ◄── WS ──►│                                   �
 D200H Deck Dock    ◄ USB HID►│                                   │
 Android Dashboard  ◄── WS ──►│  WS Server + mDNS + Device Mods   │
 Apple Dashboard    ◄── WS ──►│  Gateway Proxy + Usage Relay      │
-TUI Dashboard      ◄── WS ──►│  Pixoo + ESP32 Serial + SSE       │
+TUI Dashboard      ◄── WS ──►│  Pixoo + ESP32 + Timebox + SSE    │
 ESP32 Display      ◄ Serial ►│                                   │
 Pixoo64 LED        ◄ HTTP ──►└───────────────┬───────────────────┘
                                              │ aggregates
@@ -181,7 +188,7 @@ Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    �
                               └──────────────────────────────────┘
 ```
 
-The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 13 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, TUI, ESP32) display state.
+The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 14 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Containers/bound.serendipity.agentdeck.dashboard/Data/Library/Application Support/AgentDeck/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, Timebox, TUI, ESP32) display state.
 
 On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (47 files, ~20,500 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/D200H), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
 
@@ -332,7 +339,7 @@ The CLI command is `agentdeck`.
 | Command | Description |
 |---------|-------------|
 | `agentdeck dashboard` | TUI monitoring dashboard (alias: `dash`) |
-| `agentdeck devices` | Connected devices (WS, ESP32, Pixoo, ADB) |
+| `agentdeck devices` | Connected devices (WS, ESP32, Pixoo, Timebox, ADB) |
 | `agentdeck qr` | Pairing QR code + URL |
 | `agentdeck diag` | Diagnostic dump (`-a` for AI analysis) |
 
@@ -360,6 +367,12 @@ The CLI command is `agentdeck`.
 | `agentdeck pixoo list` | List configured devices |
 | `agentdeck pixoo remove <ip>` | Remove a device |
 | `agentdeck pixoo test [ip]` | Send test pattern |
+| `agentdeck timebox scan` | Discover BLE `TimeBox-mini-light` peripherals |
+| `agentdeck timebox add <address>` | Add a Timebox Mini by BLE address |
+| `agentdeck timebox list` | List configured Timebox devices |
+| `agentdeck timebox remove <address>` | Remove a Timebox device |
+| `agentdeck timebox test [target]` | Send one frame (BLE) |
+| `agentdeck timebox sync [target]` | Run foreground Timebox frame sync (BLE) |
 | `agentdeck wifi-setup` | ESP32 WiFi provisioning (serial) |
 
 ---
@@ -745,6 +758,18 @@ The Pixoo module renders dot-art creatures, water zone colors reflecting agent s
 Manage devices with `agentdeck pixoo {scan|add|list|remove|test}` — see [CLI Reference](#cli-reference).
 
 > **Note:** The Pixoo's built-in HTTP server can crash under frequent requests. AgentDeck throttles updates automatically. Use `--no-pixoo` to disable if needed.
+
+---
+
+## Divoom Timebox Mini
+
+11×11 RGB LED mirror of the AgentDeck dashboard on a Divoom Timebox Mini. Unlike Pixoo64, this device does not expose the Pixoo HTTP API; it is driven over **BLE**:
+
+- **BLE** — advertises as `TimeBox-mini-light` over BLE GATT (ISSC transparent-UART). Driven by `bridge/src/timebox/sync_ble.py` (bleak) on the CLI daemon, **and natively by the App Store macOS app over CoreBluetooth** (no subprocess). (The legacy Bluetooth Classic SPP variant was removed — poor macOS compatibility and no App Store path.)
+
+It renders the dedicated **micro** layout (`/pixoo/frame?size=11&layout=micro`) — one dominant creature on a status field, legible at 121 LEDs — and writes the Divoom static-image protocol packet.
+
+Manage devices with `agentdeck timebox {scan|add|list|remove|test|sync}`. `scan` discovers BLE peripherals; `add <address>` registers one. After adding a device, restart the CLI daemon; the Timebox module auto-starts sync for configured devices.
 
 ---
 

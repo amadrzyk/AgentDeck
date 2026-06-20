@@ -559,11 +559,15 @@ struct TopologyRail: View {
         }
     }
 
-    /// LED matrix / pixel displays — Pixoo (Wi-Fi HTTP) and Ulanzi TC001
-    /// (USB-bridged via ADB reverse). Grouped together because they're
-    /// both "pixel art" outputs, not general-purpose displays. The user
-    /// thinks of them as the same family even though one goes over Wi-Fi
-    /// and the other rides ADB.
+    /// LED matrix / pixel displays — Pixoo (Wi-Fi HTTP) and Ulanzi TC001.
+    /// Grouped together because they're both "pixel art" outputs, not
+    /// general-purpose displays.
+    ///
+    /// NOTE: TC001 is an ESP32 board (USB serial / WiFi WS), NOT ADB. The
+    /// `health.adb` / `AdbDeviceClass.ulanziTc001` lookup below is legacy dead
+    /// code — no producer emits that wire class, so this branch never renders;
+    /// the live TC001 row comes through the USB-serial section instead. Kept
+    /// pending removal; do not treat TC001 as an ADB device.
     @ViewBuilder
     private func pixelDisplaySection(health: ModuleHealthState) -> some View {
         let pixooActive = (health.pixoo?.configuredDeviceCount ?? 0) > 0

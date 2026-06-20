@@ -256,9 +256,11 @@ struct ClassifiedDevice: Sendable, Hashable {
 /// - `.eInkCrema` / `.eInkPantone` / `.eInkKobo`: e-ink devices that need
 ///   slow, low-contrast UI and avoid animation. Wrong refresh strategy =
 ///   ghosting + flicker.
-/// - `.ulanziTc001`: the LED matrix wall clock — rendered as a 32×8 grid
-///   over ADB reverse, not as a real Android device. Belongs next to
-///   Pixoo in the topology.
+/// - `.ulanziTc001`: LEGACY/DEAD — the Ulanzi TC001 8×32 LED matrix is an
+///   ESP32 board (env `led8x32`) driven over USB serial / WiFi WS, NOT an ADB
+///   device. No producer emits the `"ulanzi.tc001"` wire class anymore; the
+///   board now surfaces through the serial pipeline (`esp32DisplayName`).
+///   Kept only so old wire data round-trips; safe to remove on cleanup.
 /// - `.androidTablet`: everything else (Lenovo, dev phones, generic).
 ///   Full-colour UI, normal refresh.
 ///

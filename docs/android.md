@@ -6,12 +6,7 @@ Detailed reference for the AgentDeck Android app — build, device support, and 
 
 ## Supported Devices
 
-| Device | Chip | EPD API |
-|--------|------|---------|
-| **Crema S** | Rockchip RK3566 | `android.os.EinkManager` — `setMode()` + `sendOneFullFrame()` |
-| **Onyx Boox** | — | `BaseDevice.setViewDefaultUpdateMode()` |
-| **Kobo** (via Android) | — | Fallback `invalidate()` |
-| **General tablets** | — | Standard Android rendering (color, 60fps) |
+e-ink 리더(Crema S, Onyx Boox, MOAAN Pantone 6, Bigme, Kobo)와 컬러 태블릿(Lenovo 등)을 지원한다. **벤더별 EPD API · 칩셋 · 디스플레이 타입 · 리프레시 모드 · App Store tier 의 전체 디바이스 매트릭스는 [hardware-compatibility.md § D](hardware-compatibility.md#d-모바일--데스크톱-소프트웨어-플랫폼) 가 SSOT** 다. 이 문서는 빌드/서명/크리처 렌더링 등 Android 앱 고유 내용을 다룬다.
 
 ---
 

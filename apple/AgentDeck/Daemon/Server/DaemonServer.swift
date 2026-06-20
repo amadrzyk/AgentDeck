@@ -35,6 +35,9 @@ extension Notification.Name {
     /// Posted by IDotMatrixSheet after the user adds/removes/edits an iDotMatrix
     /// device so the BLE module hot-reloads without waiting for the 5s poll.
     static let idotmatrixSettingsChanged = Notification.Name("dev.agentdeck.idotmatrixSettingsChanged")
+    /// Posted by TimeboxSheet after the user adds/removes/edits a BLE Timebox
+    /// device so the BLE module hot-reloads without waiting for the 5s poll.
+    static let timeboxSettingsChanged = Notification.Name("dev.agentdeck.timeboxSettingsChanged")
     /// Posted by AppPreferences after the user changes the display-sleep dim
     /// setting. DaemonServer refreshes `cachedDimConfig` and, if the display
     /// is already asleep, re-broadcasts so devices re-dim to the new level live.
@@ -183,6 +186,8 @@ final class DaemonServer {
     private var pixooSettingsObserver: NSObjectProtocol?
     private var idotMatrixModule: IDotMatrixModule?
     private var idotmatrixSettingsObserver: NSObjectProtocol?
+    private var timeboxModule: TimeboxModule?
+    private var timeboxSettingsObserver: NSObjectProtocol?
     private var displaySettingsObserver: NSObjectProtocol?
     private var adbModule: AdbModule?
     private var d200hModule: D200hHidModule?
@@ -1102,6 +1107,21 @@ final class DaemonServer {
         ) { _ in
             Task { await idotmatrix.reloadFromSettingsExternal() }
         }
+
+        // Timebox Mini (BLE — native CoreBluetooth, App Store legal).
+        let timebox = TimeboxModule()
+        self.timeboxModule = timebox
+        moduleManager.register(timebox)
+        await timebox.setOnStateChanged { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.broadcastStateUpdate()
+            }
+        }
+        timeboxSettingsObserver = NotificationCenter.default.addObserver(
+            forName: .timeboxSettingsChanged, object: nil, queue: .main
+        ) { _ in
+            Task { await timebox.reloadFromSettingsExternal() }
+        }
         // Display-sleep dim setting changed: refresh cache and, if the display
         // is already asleep, re-broadcast the current state so devices re-dim
         // to the new level/mode without waiting for a wake/sleep cycle.
@@ -1136,6 +1156,7 @@ final class DaemonServer {
         let serialRef = serial
         let pixooRef = pixoo
         let idotmatrixRef = idotmatrix
+        let timeboxRef = timebox
         let d200hRef = d200h
         await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -1170,6 +1191,9 @@ final class DaemonServer {
             // iDotMatrix module is also an actor — same SendableDict boxing.
             let idmEventBox = SendableDict(json)
             Task { await idotmatrixRef.handleEvent(idmEventBox.value) }
+            // Timebox (BLE) module is also an actor — same SendableDict boxing.
+            let timeboxEventBox = SendableDict(json)
+            Task { await timeboxRef.handleEvent(timeboxEventBox.value) }
             d200hRef.handleBroadcast(json)
         }
         DaemonLogger.shared.info("startDeviceModules: wsServer.onBroadcast done")
@@ -1758,6 +1782,20 @@ final class DaemonServer {
                 "displayDimmed": idotMatrix["displayDimmed"] as Any,
                 "hasFrame": idotMatrix["hasFrame"] as Any,
                 "lastPushAtMs": idotMatrix["lastPushAtMs"] as Any,
+            ])
+        }
+
+        if let timeboxModule {
+            let timebox = timeboxModule.statusSnapshot()
+            devices.append([
+                "type": "timebox",
+                "configuredDeviceCount": timebox["configuredDeviceCount"] as Any,
+                "connected": timebox["connected"] as Any,
+                "deviceName": timebox["deviceName"] as Any,
+                "lastError": timebox["lastError"] as Any,
+                "displayDimmed": timebox["displayDimmed"] as Any,
+                "hasFrame": timebox["hasFrame"] as Any,
+                "lastPushAtMs": timebox["lastPushAtMs"] as Any,
             ])
         }
 
@@ -4308,6 +4346,9 @@ final class DaemonServer {
         if let idotMatrixModule {
             modules["idotmatrix"] = idotMatrixModule.statusSnapshot()
         }
+        if let timeboxModule {
+            modules["timebox"] = timeboxModule.statusSnapshot()
+        }
         if serialModule != nil {
             // HTTP /health is used by tiny hook scripts and must answer even
             // while the serial actor is busy pushing frames to physical boards.
@@ -4434,6 +4475,7 @@ final class DaemonServer {
         if let d200h = d200hModule { modules["d200h"] = d200h.statusSnapshot() }
         if let pixoo = pixooModule { modules["pixoo"] = pixoo.statusSnapshot() }
         if let idotMatrix = idotMatrixModule { modules["idotmatrix"] = idotMatrix.statusSnapshot() }
+        if let timebox = timeboxModule { modules["timebox"] = timebox.statusSnapshot() }
         // SerialModule.statusSnapshot() is async — read the 5s-polled
         // cache so Dashboard USB serial section sees connected boards
         // without us having to awaitly-pre-fetch on every broadcast.
@@ -5536,13 +5578,14 @@ final class DaemonServer {
         let toolInput = json["tool_input"] ?? json["input"] ?? json["arguments"] ?? json["args"]
         let inputSummary = Self.compactDebugValue(toolInput, max: 600)
         let status = completed ? "complete" : (json["status"] as? String)
+        let rowSummary = Self.codexToolTimelineSummary(tool: tool, inputSummary: inputSummary, completed: completed)
         var detailParts: [String] = []
         if let status { detailParts.append("status: \(status)") }
         if let inputSummary, !inputSummary.isEmpty { detailParts.append(inputSummary) }
         var entry = DaemonTimelineEntry(
             ts: Date().timeIntervalSince1970 * 1000,
             type: "tool_exec",
-            raw: completed ? "\(tool) completed" : tool,
+            raw: rowSummary,
             detail: detailParts.isEmpty ? nil : detailParts.joined(separator: "\n"),
             approvalId: nil,
             status: status,
@@ -5803,6 +5846,21 @@ final class DaemonServer {
         if let sid = sessionId {
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
         }
+    }
+
+    private static func codexToolTimelineSummary(tool: String, inputSummary: String?, completed: Bool) -> String {
+        let suffix = completed ? " completed" : ""
+        guard let inputSummary, !inputSummary.isEmpty else {
+            return "\(tool)\(suffix)"
+        }
+        let compact = inputSummary
+            .replacingOccurrences(of: #"^\{"command":"([^"]+)".*$"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"^\{"file_path":"([^"]+)".*$"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"^\{"path":"([^"]+)".*$"#, with: "$1", options: .regularExpression)
+        let trimmed = compact.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "\(tool)\(suffix)" }
+        let capped = trimmed.count > 120 ? String(trimmed.prefix(119)) + "…" : trimmed
+        return "\(tool)\(suffix): \(capped)"
     }
 
     /// Pull the user's prompt from either Claude Code's legacy `prompt` field

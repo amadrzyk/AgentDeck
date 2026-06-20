@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { execSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -96,6 +96,17 @@ async function isDaemonPort(port: number): Promise<boolean> {
   }
 }
 
+function resolveTimeboxSyncPaths(): { python: string; bleScript: string; scanScript: string } {
+  const distPath = dirname(fileURLToPath(import.meta.url));
+  const projectRoot = join(distPath, '..', '..');
+  const timeboxDir = join(projectRoot, 'bridge', 'src', 'timebox');
+  return {
+    python: join(projectRoot, '.venv', 'bin', 'python'),
+    bleScript: join(timeboxDir, 'sync_ble.py'),
+    scanScript: join(timeboxDir, 'scan_ble.py'),
+  };
+}
+
 // ===== Program =====
 
 const program = new Command();
@@ -129,11 +140,12 @@ program
       noUpdateCheck: opts.updateCheck === false,
       postit: opts.postit !== false,
       wakeWord: !!opts.wakeWord,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, d200h: false } : {
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : {
         mdns: false,   // daemon-only — session bridges never advertise mDNS
         adb: opts.adb !== false ? 'auto' : false,
         serial: false, // daemon-only — session bridges never talk to ESP32
         pixoo: false,  // daemon-only — session bridges never talk to Pixoo
+        timebox: false, // daemon-only — session bridges never talk to Timebox
         d200h: false,  // daemon-only — session bridges never talk to D200H
       },
     });
@@ -176,11 +188,12 @@ program
       command: opts.command,
       debug: opts.debug,
       postit: opts.postit !== false,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, d200h: false } : {
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : {
         mdns: false,   // daemon-only
         adb: opts.adb !== false ? 'auto' : false,
         serial: false, // daemon-only
         pixoo: false,  // daemon-only
+        timebox: false, // daemon-only
         d200h: false,  // daemon-only
       },
     });
@@ -203,11 +216,12 @@ program
       command: opts.command,
       debug: opts.debug,
       postit: opts.postit !== false,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, d200h: false } : {
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : {
         mdns: false,
         adb: opts.adb !== false ? 'auto' : false,
         serial: false,
         pixoo: false,
+        timebox: false,
         d200h: false,
       },
     });
@@ -228,7 +242,7 @@ program
       agentType: 'monitor',
       port,
       debug: opts.debug,
-      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, d200h: false } : undefined,
+      modules: opts.local ? { mdns: false, adb: false, serial: false, pixoo: false, timebox: false, d200h: false } : undefined,
     });
   });
 
@@ -455,7 +469,7 @@ program
 
 program
   .command('devices')
-  .description('Show connected devices (WebSocket, ESP32, Pixoo, ADB)')
+  .description('Show connected devices (WebSocket, ESP32, Pixoo, Timebox, ADB)')
   .option('-p, --port <port>', 'Bridge server port')
   .action(async (opts) => {
     const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
@@ -504,6 +518,12 @@ program
               total++;
             }
           }
+        } else if (d.type === 'timebox') {
+          for (const tb of (d.devices ?? []) as any[]) {
+            const brightnessInfo = tb.brightness !== undefined ? ` brightness=${tb.brightness}%` : '';
+            lines.push(`  Timebox     ${tb.address} (${tb.name || 'Timebox Mini Light'})${brightnessInfo}`);
+            total++;
+          }
         } else if (d.type === 'adb') {
           const count = d.count ?? (d.devices as any[])?.length ?? 0;
           if (count > 0) {
@@ -526,11 +546,17 @@ program
       }
     } catch {
       const { loadPixooDevices } = await import('./pixoo/pixoo-settings.js');
+      const { loadTimeboxDevices } = await import('./timebox/timebox-settings.js');
       const pixoo = loadPixooDevices();
-      if (pixoo.length > 0) {
-        log('Bridge is not running.\nConfigured Pixoo devices:');
+      const timebox = loadTimeboxDevices();
+      if (pixoo.length > 0 || timebox.length > 0) {
+        log('Bridge is not running.\nConfigured devices:');
         for (const d of pixoo) {
-          log(`  ${d.ip} (${d.name || 'Pixoo64'})`);
+          log(`  Pixoo64     ${d.ip} (${d.name || 'Pixoo64'})`);
+        }
+        for (const d of timebox) {
+          const brightnessInfo = d.brightness !== undefined ? ` brightness=${d.brightness}%` : '';
+          log(`  Timebox     ${d.address} (${d.name || 'Timebox Mini Light'})${brightnessInfo}`);
         }
       } else {
         log('Bridge is not running.');
@@ -872,6 +898,163 @@ idotmatrix
       log(`Sync process exited with code ${code}`);
     });
   });
+
+// ===== Divoom Timebox Mini Light commands =====
+
+const timebox = program.command('timebox').description('Manage Divoom Timebox Mini devices (Bluetooth LE)');
+
+timebox
+  .command('scan')
+  .description('Discover BLE TimeBox-mini-light peripherals')
+  .action(async () => {
+    const paths = resolveTimeboxSyncPaths();
+    log('Scanning for BLE devices (5 seconds)...');
+    const py = spawn(paths.python, [paths.scanScript]);
+    let stdoutData = '';
+    py.stdout.on('data', (data) => {
+      stdoutData += data.toString();
+    });
+    py.on('close', (code) => {
+      if (code !== 0) {
+        log('BLE scan failed (is bleak installed in .venv?).');
+        return;
+      }
+      try {
+        const devices = JSON.parse(stdoutData.trim());
+        if (devices.error) {
+          log(`BLE scan error: ${devices.error}`);
+          return;
+        }
+        if (!Array.isArray(devices) || devices.length === 0) {
+          log('No BLE devices found.');
+          return;
+        }
+        log('\nFound BLE devices:');
+        for (const d of devices) {
+          const prefix = d.is_timebox ? '★ [TimeBox-mini-light] ' : '  ';
+          const rssi = typeof d.rssi === 'number' ? ` ${d.rssi}dBm` : '';
+          log(`${prefix}${d.name} (${d.address})${rssi}`);
+        }
+        log('\nAdd the starred BLE device with: agentdeck timebox add <address>');
+      } catch {
+        log(`Failed to parse BLE scan output: ${stdoutData}`);
+      }
+    });
+  });
+
+timebox
+  .command('add <address>')
+  .description('Add a Timebox device by its BLE address')
+  .option('-n, --name <name>', 'Device name', 'Timebox Mini')
+  .option('-b, --brightness <value>', 'Brightness 0-100', '80')
+  .action(async (address: string, opts) => {
+    const { addTimeboxDevice } = await import('./timebox/timebox-settings.js');
+    const parsed = parseInt(opts.brightness, 10);
+    const brightness = Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 80;
+    if (addTimeboxDevice({ address, name: opts.name, brightness })) {
+      log(`Added ${opts.name} (BLE ${address}) with brightness ${brightness}% to settings.`);
+      log('Restart the daemon to start automatic Timebox sync.');
+    } else {
+      log(`Device ${address} already exists (or has no valid address).`);
+    }
+  });
+
+timebox
+  .command('list')
+  .description('List configured Timebox devices')
+  .action(async () => {
+    const { loadTimeboxDevices, deviceId } = await import('./timebox/timebox-settings.js');
+    const devices = loadTimeboxDevices();
+    if (devices.length === 0) {
+      log('No Timebox devices configured. Run `agentdeck timebox scan`, then `agentdeck timebox add <address>`.');
+      return;
+    }
+    log(`${devices.length} device(s):`);
+    for (const d of devices) {
+      const brightnessInfo = d.brightness !== undefined ? ` brightness=${d.brightness}%` : '';
+      log(`  [BLE] ${d.name || 'Timebox Mini'} (${deviceId(d)})${brightnessInfo}`);
+    }
+  });
+
+timebox
+  .command('remove <address>')
+  .description('Remove a Timebox device by BLE address')
+  .action(async (target: string) => {
+    const { removeTimeboxDevice } = await import('./timebox/timebox-settings.js');
+    if (removeTimeboxDevice(target)) {
+      log(`Removed ${target}.`);
+    } else {
+      log(`Device ${target} not found.`);
+    }
+  });
+
+/**
+ * Spawn the BLE sync writer for a one-shot test or a continuous sync,
+ * resolving the target device from CLI args / configured devices.
+ */
+async function runTimeboxSync(targetOpt: string | undefined, opts: { bridgePort?: string; brightness?: string }, once: boolean): Promise<void> {
+  const { loadTimeboxDevices, deviceId } = await import('./timebox/timebox-settings.js');
+  const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
+
+  const devices = loadTimeboxDevices();
+  let device = targetOpt
+    ? devices.find((d) => deviceId(d).toLowerCase() === targetOpt.toLowerCase())
+    : devices[0];
+
+  // Allow an ad-hoc BLE address that isn't in settings.
+  if (!device && targetOpt) {
+    device = { address: targetOpt };
+  }
+  if (!device) {
+    log('No device specified and none configured. Use `agentdeck timebox scan` and `agentdeck timebox add <address>`.');
+    process.exit(1);
+  }
+
+  const id = deviceId(device);
+  if (!targetOpt) log(`Using first configured device: ${id} (BLE)`);
+
+  const defaultBrightness = device.brightness ?? 80;
+  const parsedBrightness = opts.brightness ? parseInt(opts.brightness, 10) : defaultBrightness;
+  const brightness = Number.isFinite(parsedBrightness) ? Math.max(0, Math.min(100, parsedBrightness)) : defaultBrightness;
+
+  const info = readDaemonInfo();
+  const bridgePort = opts.bridgePort != null
+    ? parseInt(opts.bridgePort, 10)
+    : (info?.httpPort ?? info?.port ?? findDaemonPort() ?? BRIDGE_WS_PORT);
+  const url = `http://127.0.0.1:${bridgePort}`;
+  const paths = resolveTimeboxSyncPaths();
+
+  const args = [paths.bleScript, '--address', id, '--url', url, '--brightness', String(brightness), ...(once ? ['--once'] : [])];
+
+  log(`${once ? 'Sending one Timebox frame' : 'Starting Timebox sync'} via BLE ${id} from ${url} (brightness ${brightness}%)...`);
+  const py = spawn(paths.python, args, { stdio: 'inherit' });
+  py.on('close', (code) => {
+    if (once) {
+      if (code === 0) {
+        log('Timebox test frame sent.');
+      } else {
+        log(`Timebox test exited with code ${code}`);
+        process.exit(code ?? 1);
+      }
+    } else {
+      log(`Timebox sync process exited with code ${code}`);
+    }
+  });
+}
+
+timebox
+  .command('test [target]')
+  .description('Send one AgentDeck frame to a Timebox Mini (BLE)')
+  .option('-p, --bridge-port <port>', 'Bridge server port')
+  .option('-b, --brightness <value>', 'Override brightness 0-100')
+  .action((targetOpt: string | undefined, opts) => runTimeboxSync(targetOpt, opts, true));
+
+timebox
+  .command('sync [target]')
+  .description('Sync AgentDeck dashboard frames to a Timebox Mini (BLE)')
+  .option('-p, --bridge-port <port>', 'Bridge server port')
+  .option('-b, --brightness <value>', 'Override brightness 0-100')
+  .action((targetOpt: string | undefined, opts) => runTimeboxSync(targetOpt, opts, false));
 
 // ===== Pixoo commands =====
 
