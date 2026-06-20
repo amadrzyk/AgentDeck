@@ -375,6 +375,76 @@ function observedDetailParts(session?: SessionRenderInfo): string[] {
   return parts;
 }
 
+type ModuleMap = Record<string, unknown>;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function moduleStatusIcon(ok: boolean, warning = false): string {
+  if (!terminalCaps.unicode) return ok ? 'o' : warning ? '!' : 'x';
+  return ok ? '\u25CF' : warning ? '\u25C6' : '\u25CB';
+}
+
+function renderModuleHealthLines(moduleHealth: ModuleMap, width: number): string[] {
+  const lines: string[] = [];
+  const push = (label: string, detail: string, ok: boolean, warning = false) => {
+    const color = ok ? colors.idle : warning ? colors.awaiting : colors.dim;
+    lines.push(` ${color}${moduleStatusIcon(ok, warning)}${RESET} ${truncText(`${label} ${detail}`.trim(), width - 4)}`);
+  };
+
+  const serial = asRecord(moduleHealth.serial);
+  if (serial) {
+    const connections = asArray(serial.connections).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+    const connected = connections.filter((c) => c.connected === true || c.transportOpen === true);
+    const boards = connected
+      .map((c) => asRecord(c.deviceInfo)?.board)
+      .filter((b): b is string => typeof b === 'string' && b.length > 0);
+    const count = asNumber(serial.connectionCount) ?? connected.length;
+    const shown = boards.slice(0, 3).join(', ');
+    const more = boards.length > 3 ? ` +${boards.length - 3}` : '';
+    const detail = count > 0 ? `${count}${shown ? `: ${shown}${more}` : ''}` : 'none';
+    push('Serial', detail, count > 0, Boolean(serial.lastError));
+  }
+
+  const pixoo = asRecord(moduleHealth.pixoo);
+  if (pixoo) {
+    const devices = asArray(pixoo.devices).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+    const configured = asNumber(pixoo.configuredDeviceCount) ?? devices.length;
+    const online = devices.filter((d) => d.online === true && d.backedOff !== true).length;
+    const dimmed = pixoo.displayDimmed === true ? ' dim' : '';
+    push('Pixoo', `${online}/${configured}${dimmed}`, configured > 0 && online > 0, configured > 0);
+  }
+
+  const d200h = asRecord(moduleHealth.d200h);
+  if (d200h) {
+    const connected = d200h.connected === true || d200h.managerOpened === true;
+    const owner = d200h.externalOwner === true ? ' plugin' : '';
+    const detail = connected ? `ready${owner}` : 'offline';
+    push('D200H', detail, connected, Boolean(d200h.lastOpenError || d200h.lastWriteError));
+  }
+
+  const adb = asRecord(moduleHealth.adb);
+  if (adb) {
+    const devices = asArray(adb.devices);
+    const reverse = asNumber(adb.reverseReadyCount) ?? devices.length;
+    const available = adb.available === true;
+    push('ADB', available ? `${reverse} reverse` : 'missing', available && reverse > 0, available);
+  }
+
+  return lines;
+}
+
 // ===== Panel Renderers =====
 
 function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: boolean): string[] {
@@ -426,6 +496,13 @@ function renderAgentLines(state: DashboardState, maxWidth: number, useLogo: bool
   // Gateway error warning
   if (state.gatewayHasError) {
     lines.push(`${colors.error} \u26A0 Gateway Error${RESET}`);
+  }
+
+  const moduleLines = renderModuleHealthLines(state.moduleHealth, maxWidth);
+  if (moduleLines.length > 0) {
+    lines.push('');
+    lines.push(`${colors.header} DOWNSTREAM${RESET}`);
+    lines.push(...moduleLines);
   }
 
   // Voice assistant indicator
@@ -523,7 +600,7 @@ function renderOauthCatalogLines(
   const models = modelCatalog.filter((m) => m.available).map((m) => m.name);
 
   if (models.length > 0) {
-    return wrapCommaList(' OAuth: ', models, width);
+    return wrapCommaList(' OAuth: ', models, width, 4);
   }
   if (oauthConnected === true) {
     lines.push(`${colors.dim}${truncText(' OAuth: connected', width)}${RESET}`);
@@ -533,25 +610,39 @@ function renderOauthCatalogLines(
   return lines;
 }
 
-function wrapCommaList(prefix: string, items: string[], width: number): string[] {
+function wrapCommaList(prefix: string, items: string[], width: number, maxLines = Number.POSITIVE_INFINITY): string[] {
   const lines: string[] = [];
   const indent = ' '.repeat(prefix.length);
   let current = prefix;
+  let consumed = 0;
 
   for (let i = 0; i < items.length; i++) {
     const chunk = i === 0 ? items[i] : `, ${items[i]}`;
     if (visLen(current) + visLen(chunk) <= width) {
       current += chunk;
+      consumed = i + 1;
       continue;
     }
 
     if (visLen(current) > visLen(prefix)) {
       lines.push(`${colors.dim}${padRight(current, width)}${RESET}`.trimEnd());
+      if (lines.length >= maxLines) {
+        const hidden = items.length - consumed;
+        if (hidden > 0) lines.push(`${colors.dim}${truncText(` ${hidden} more models`, width)}${RESET}`);
+        return lines;
+      }
       current = indent + items[i];
+      consumed = i + 1;
       continue;
     }
 
     lines.push(`${colors.dim}${truncText(current + chunk, width)}${RESET}`);
+    consumed = i + 1;
+    if (lines.length >= maxLines) {
+      const hidden = items.length - consumed;
+      if (hidden > 0) lines.push(`${colors.dim}${truncText(` ${hidden} more models`, width)}${RESET}`);
+      return lines;
+    }
     current = indent;
   }
 
@@ -867,6 +958,11 @@ function renderAgentCompactLines(state: DashboardState, width: number): string[]
   // Gateway error warning
   if (state.gatewayHasError) {
     lines.push(`${colors.error} \u26A0 Gateway Error${RESET}`);
+  }
+  const moduleLines = renderModuleHealthLines(state.moduleHealth, width);
+  if (moduleLines.length > 0) {
+    lines.push(`${colors.header} DOWNSTREAM${RESET}`);
+    lines.push(...moduleLines);
   }
   // Voice assistant indicator (compact)
   if (state.voiceAssistantState && state.voiceAssistantState !== 'disabled' && state.voiceAssistantState !== 'idle') {

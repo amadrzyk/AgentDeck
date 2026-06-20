@@ -13,6 +13,7 @@ let initTerrarium: TerrariumModule['initTerrarium'];
 let setOctopi: TerrariumModule['setOctopi'];
 let setCrayfish: TerrariumModule['setCrayfish'];
 let setJellyfish: TerrariumModule['setJellyfish'];
+let setOpenCode: TerrariumModule['setOpenCode'];
 let updateTerrarium: TerrariumModule['updateTerrarium'];
 let renderTerrariumFrame: TerrariumModule['renderTerrariumFrame'];
 
@@ -47,6 +48,7 @@ beforeAll(async () => {
   setOctopi = terrarium.setOctopi;
   setCrayfish = terrarium.setCrayfish;
   setJellyfish = terrarium.setJellyfish;
+  setOpenCode = terrarium.setOpenCode;
   updateTerrarium = terrarium.updateTerrarium;
   renderTerrariumFrame = terrarium.renderTerrariumFrame;
 });
@@ -154,6 +156,19 @@ describe('TUI terrarium snapshots', () => {
     updateTerrarium(ctx, 0);
     const lines = renderTerrariumFrame(ctx, 80, 20, 0);
     expect(lines).toMatchSnapshot();
+  });
+
+  it('renderTerrariumFrame with OpenCode hollow ring', () => {
+    const ctx = initTerrarium();
+    setOpenCode(ctx, [{ id: 'oc1', state: 'idle', name: 'OpenCode', agentType: 'opencode' }]);
+    updateTerrarium(ctx, 0);
+    const plain = renderTerrariumFrame(ctx, 80, 20, 0)
+      .join('\n')
+      .replace(/\x1b\[[0-9;]*m/g, '');
+
+    expect(plain).toContain('┌───┐');
+    expect(plain).toContain('│   │');
+    expect(plain).not.toContain('│┌─┐│');
   });
 
   it('renderTerrariumFrame too small returns empty', () => {

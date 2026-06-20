@@ -15,6 +15,7 @@ function makeState(overrides: Partial<DashboardState> = {}): DashboardState {
     sessions: [],
     usage: null,
     modelCatalog: [],
+    moduleHealth: {},
     timeline: [],
     helpVisible: false,
     currentPort: 9120,
@@ -106,6 +107,39 @@ describe('TUI dashboard models', () => {
 
     expect(output).toContain('OAuth: disconnected');
     expect(output).toContain('Ollama: stopped');
+  });
+
+  it('renders downstream module health compactly', () => {
+    const output = stripAnsi(renderDashboard(
+      makeState({
+        moduleHealth: {
+          serial: {
+            connectionCount: 2,
+            connections: [
+              { connected: true, deviceInfo: { board: 'ips_35' } },
+              { connected: true, deviceInfo: { board: 'ulanzi_tc001' } },
+            ],
+          },
+          pixoo: {
+            configuredDeviceCount: 1,
+            devices: [{ online: true, backedOff: false }],
+          },
+          d200h: { managerOpened: true, externalOwner: true },
+          adb: { available: true, devices: ['CREMA'], reverseReadyCount: 1 },
+        },
+      }),
+      180,
+      32,
+      [],
+      0,
+      0,
+    ));
+
+    expect(output).toContain('DOWNSTREAM');
+    expect(output).toContain('Serial 2: ips_35, ulanzi_tc001');
+    expect(output).toContain('Pixoo 1/1');
+    expect(output).toContain('D200H ready plugin');
+    expect(output).toContain('ADB 1 reverse');
   });
 
   it('shows current session summary and control hints', () => {

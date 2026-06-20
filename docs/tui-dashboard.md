@@ -25,6 +25,7 @@ Three responsive layouts: wide (120+), standard (80-119), narrow (60-79).
 - Crayfish: small 16×8→8×2, large 32×16→16×4, xlarge 48×24→24×6
 - Neon tetra: small 3ch, large 5ch, xlarge 7ch
 - Jellyfish/Codex CLI: small 10×8→5×2, large 20×16→10×4, xlarge 30×24→15×6; 6-lobe cloud shape matching Codex icon, indigo #6366F1, glow #A5B4FC
+- OpenCode: single-color hollow vertical ring matching the canonical evenodd logo geometry; no nested inner square or shaded fill
 
 ### Crayfish ROUTING
 
@@ -43,5 +44,6 @@ Processing octopus > processing jellyfish > routing crayfish > none.
 - Session list from daemon `sessions_list`; virtual OpenClaw entry when `gatewayAvailable`
 - Half-block pixel font logo (4×6→4×3)
 - Status split: LIMITS|MODELS (E-ink style)
+- Downstream summary from daemon `moduleHealth` (Serial/ESP32, Pixoo, D200H, ADB)
 - Local timeline generation from `state_update` events (`receivingBridgeTimeline` flag for bridge event dedup)
 - 10fps terrarium, 4fps panels
