@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<!--
+  AgentDeck — Dashboard Hardware / OS Compatibility (visual view)
+  SSOT for the data below is docs/hardware-compatibility.md — keep numbers in sync.
+  Self-contained: the :root block below mirrors the warm-palette subset of the
+  canonical design/tokens.css so this single file renders anywhere (GitHub Pages
+  /hardware/, local file://) with no external request. tokens.css stays canonical
+  — sync this mirror in the same commit when those tokens change (DESIGN.md §0).
+  Listed as a token-defining file in design/lint.sh (like apme-dashboard.html).
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentDeck — Dashboard Hardware / OS 사양</title>
+<style>
+  /* === Aquarium-tide tokens (warm-palette subset, mirror of design/tokens.css) === */
+  :root {
+    --tide-50:#f5f3ec; --tide-100:#ebe6d6; --tide-200:#d8cfb6; --tide-300:#a8b09a;
+    --ink-900:#0e1f1f; --ink-800:#15302f; --ink-700:#1f4544; --ink-500:#426664; --ink-300:#7c9694;
+    --kelp-700:#1f6157; --kelp-500:#2f8a7c; --kelp-300:#6fb6a8;
+    --coral-500:#c0573a; --coral-700:#8c3a23;
+    --amber-500:#c8923a;
+    --font-sans:"IBM Plex Sans","IBM Plex Sans KR","IBM Plex Sans JP",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    --font-mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;
+    --t-kicker:12px; --t-h2:44px; --t-h3:26px; --t-h3-lg:32px; --t-card-title:19px;
+    --t-lede:18px; --t-small:14.5px; --t-caption:13px; --t-mono-badge:11.5px;
+    --tr-h2:-0.02em; --tr-h3:-0.015em; --tr-card:-0.01em; --tr-kicker:0.18em; --tr-chip:0.08em;
+    --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+    --s-8:32px; --s-10:40px; --s-12:48px; --s-16:64px; --s-20:80px;
+    --container-max:1240px; --container-pad:32px;
+    --r-md:8px; --r-xl:12px; --r-2xl:14px; --r-pill:999px;
+    --sh-card:0 6px 20px -8px rgba(14,31,31,0.45);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--ink-900);
+    background: var(--tide-50);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--container-max); margin: 0 auto; padding: var(--s-12) var(--container-pad) var(--s-20); }
+  code, .mono { font-family: var(--font-mono); }
+
+  /* Header */
+  .kicker {
+    font-family: var(--font-mono); font-size: var(--t-kicker);
+    letter-spacing: var(--tr-kicker); text-transform: uppercase;
+    color: var(--kelp-700); margin: 0 0 var(--s-3);
+  }
+  h1 { font-size: var(--t-h2); letter-spacing: var(--tr-h2); margin: 0 0 var(--s-4); line-height: 1.1; }
+  .lede { font-size: var(--t-lede); color: var(--ink-700); max-width: 78ch; margin: 0 0 var(--s-4); }
+  .meta { font-size: var(--t-small); color: var(--ink-500); margin: 0 0 var(--s-2); }
+  .meta a { color: var(--kelp-700); }
+
+  h2 {
+    font-size: var(--t-h3-lg); letter-spacing: var(--tr-h3); margin: var(--s-16) 0 var(--s-2);
+    padding-bottom: var(--s-3); border-bottom: 2px solid var(--tide-200);
+  }
+  h3 { font-size: var(--t-h3); letter-spacing: var(--tr-h3); margin: var(--s-10) 0 var(--s-4); }
+  .section-note { font-size: var(--t-small); color: var(--ink-500); margin: var(--s-2) 0 var(--s-6); }
+  .section-note code { color: var(--ink-800); }
+
+  /* Tables */
+  .scroll { overflow-x: auto; border-radius: var(--r-xl); box-shadow: var(--sh-card); }
+  table { width: 100%; border-collapse: collapse; background: var(--tide-100); font-size: var(--t-small); }
+  th, td { text-align: left; padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--tide-200); vertical-align: top; white-space: nowrap; }
+  thead th { background: var(--ink-800); color: var(--tide-50); font-weight: 600; letter-spacing: var(--tr-chip); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: var(--tide-200); }
+  td.wrap-cell, th.wrap-cell { white-space: normal; min-width: 16ch; }
+  .device-name { font-weight: 600; color: var(--ink-900); }
+  .res { font-family: var(--font-mono); color: var(--coral-700); }
+
+  /* Badges */
+  .badge {
+    display: inline-block; font-family: var(--font-mono); font-size: var(--t-mono-badge);
+    letter-spacing: var(--tr-chip); padding: 2px var(--s-2); border-radius: var(--r-pill);
+    border: 1px solid transparent; line-height: 1.6;
+  }
+  .b-hw   { background: var(--tide-200); color: var(--ink-800); border-color: var(--tide-300); }
+  .b-sw   { background: var(--ink-700); color: var(--tide-50); }
+  .b-tui  { background: var(--ink-900); color: var(--kelp-300); }
+  .b-yes  { background: var(--kelp-500); color: var(--tide-50); }
+  .b-no   { background: var(--tide-100); color: var(--coral-700); border-color: var(--coral-500); }
+  .b-warn { background: var(--amber-500); color: var(--ink-900); }
+
+  /* Card grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s-4); margin: var(--s-4) 0 var(--s-2); }
+  .card {
+    background: var(--tide-100); border: 1px solid var(--tide-200);
+    border-radius: var(--r-2xl); padding: var(--s-5); box-shadow: var(--sh-card);
+  }
+  .card h4 { margin: 0 0 var(--s-1); font-size: var(--t-card-title); letter-spacing: var(--tr-card); }
+  .card .sub { font-family: var(--font-mono); font-size: var(--t-caption); color: var(--ink-500); margin: 0 0 var(--s-3); }
+  .spec { display: flex; justify-content: space-between; gap: var(--s-3); padding: var(--s-1) 0; border-top: 1px dashed var(--tide-200); font-size: var(--t-caption); }
+  .spec:first-of-type { border-top: 0; }
+  .spec .k { color: var(--ink-500); }
+  .spec .v { color: var(--ink-900); font-family: var(--font-mono); text-align: right; }
+
+  footer { margin-top: var(--s-16); padding-top: var(--s-6); border-top: 2px solid var(--tide-200); font-size: var(--t-caption); color: var(--ink-500); }
+  footer li { margin-bottom: var(--s-2); }
+  footer code { color: var(--ink-800); }
+
+  /* Diagonal-hatch placeholder for "no illustration" rule (DESIGN.md §10 r7) */
+  .hatch {
+    height: var(--s-10); border-radius: var(--r-md); margin-bottom: var(--s-3);
+    background: repeating-linear-gradient(45deg, var(--tide-200), var(--tide-200) 6px, var(--tide-100) 6px, var(--tide-100) 12px);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="kicker">AgentDeck · Dashboard Surfaces</p>
+  <h1>지원 Dashboard 하드웨어 / OS 사양</h1>
+  <p class="lede">
+    daemon hub(port 9120)에 붙어 에이전트 상태를 보여주거나 제어하는 모든 surface — 하드웨어 디스플레이/입력 디바이스 11종 +
+    소프트웨어 플랫폼(Apple 3 · Android 다수) + 터미널 TUI = <strong>14 surface</strong>. 동시 구동 가능.
+  </p>
+  <p class="meta">Host: macOS 15+ (Sequoia) · Node.js ≥ 22 · iTerm2 — Windows/Linux 미지원</p>
+  <p class="meta">SSOT: <a href="../hardware-compatibility.md">docs/hardware-compatibility.md</a> · 전송 매트릭스: <a href="../devices.md">docs/devices.md</a> · 기능 tier: <a href="../appstore-feature-matrix.md">appstore-feature-matrix.md</a></p>
+
+  <h2>종합 매트릭스</h2>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Surface</th><th>종류</th><th>SoC · 플랫폼</th><th class="wrap-cell">디스플레이 / 해상도</th>
+          <th class="wrap-cell">전송</th><th class="wrap-cell">연결성</th><th>App Store</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="device-name">IPS 3.5"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-S3</td><td>AXS15231B IPS · <span class="res">480×320</span></td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Round AMOLED 1.8"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-S3</td><td>ST77916 AMOLED · <span class="res">360×360</span></td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">86 Box 4"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-S3</td><td>ST7701 IPS · <span class="res">480×480</span></td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">TTGO T-Display 1.14"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32 (classic)</td><td>ST7789 TFT · <span class="res">135×240</span></td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">ESP32-C6 1.47"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-C6 (RISC-V)</td><td>ST7789 TFT · <span class="res">172×320</span></td><td>USB Serial / WiFi WS</td><td>USB-CDC + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">IPS 10.1"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-P4 + C6</td><td>JD9365 IPS MIPI-DSI · <span class="res">800×1280</span></td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Divoom Pixoo64</td><td><span class="badge b-hw">상용 LED</span></td><td>Divoom (비-ESP32)</td><td>RGB LED · <span class="res">64×64</span></td><td>HTTP REST :80</td><td>WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">iDotMatrix 32×32</td><td><span class="badge b-hw">상용 BLE</span></td><td>BLE SoC (비-ESP32)</td><td>RGB AMOLED · <span class="res">32×32</span></td><td>BLE GATT</td><td>Bluetooth LE</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Divoom Timebox Mini</td><td><span class="badge b-hw">상용 BLE</span></td><td>BLE SoC (비-ESP32)</td><td>RGB LED · <span class="res">11×11</span></td><td>BLE GATT (ISSC)</td><td>Bluetooth LE</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Ulanzi TC001</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32 (classic)</td><td>WS2812B · <span class="res">8×32</span> (256 LED)</td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-warn">GAP<sup>1</sup></span></td></tr>
+        <tr><td class="device-name">Ulanzi D200H</td><td><span class="badge b-hw">HID deck</span></td><td>SigmaStar SSD210</td><td>nv3052c LCD · <span class="res">960×540</span> (14 keys)</td><td>USB HID</td><td>USB</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Elgato Stream Deck+</td><td><span class="badge b-hw">HID deck</span></td><td>Elgato (내장)</td><td>LCD keys + dials + touch strip</td><td>WebSocket :9120</td><td>USB → 네트워크</td><td><span class="badge b-yes">YES<sup>3</sup></span></td></tr>
+        <tr><td class="device-name">Apple — macOS</td><td><span class="badge b-sw">SW</span></td><td>Apple Silicon / Intel</td><td>호스트 디스플레이</td><td>내장 Swift daemon / WS</td><td>—</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Apple — iOS / iPadOS</td><td><span class="badge b-sw">SW</span></td><td>A / M-series</td><td>디바이스 디스플레이</td><td>WebSocket :9120</td><td>WiFi (same-LAN)</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Android — e-ink</td><td><span class="badge b-sw">SW</span></td><td>벤더별 (RK3566 등)</td><td>e-ink 디스플레이</td><td>WebSocket (ADB localhost)</td><td>USB / ADB</td><td><span class="badge b-no">CLI<sup>2</sup></span></td></tr>
+        <tr><td class="device-name">Android — 태블릿</td><td><span class="badge b-sw">SW</span></td><td>ARM / x86</td><td>컬러 LCD</td><td>WebSocket + mDNS</td><td>WiFi (same-LAN)</td><td><span class="badge b-warn">LAN<sup>2</sup></span></td></tr>
+        <tr><td class="device-name">SSE 스트림</td><td><span class="badge b-tui">프로토콜</span></td><td>호스트</td><td>브라우저 / 스크립트</td><td>HTTP SSE :9120 <code>/sse</code></td><td>로컬 / LAN</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">TUI Dashboard</td><td><span class="badge b-tui">터미널</span></td><td>호스트 CPU</td><td>터미널 (truecolor)</td><td>WebSocket :9120</td><td>로컬</td><td><span class="badge b-yes">YES</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="section-note">
+    <sup>1</sup> <strong>GAP</strong> = TC001 ⚠는 <em>샌드박스 제약이 아니라 구현 갭</em>. 다른 ESP32 보드와 동일한 serial/WiFi state-JSON으로 자기 UI를 렌더하며 serial entitlement로 이미 커버됨(테스트가 serial board로 보고). Swift 데몬에 <code>led8x32</code> 경로 미검증이라 CLI-tier. <strong>"ADB" 표기는 전부 legacy/dead code</strong> — <code>AdbDeviceClass.ulanziTc001</code> 와이어 클래스 producer가 없어 ADB 분기는 죽어 있고 라이브 경로는 serial. 관련 표기는 정정됨(dead-code 제거는 후속). HW 검증 후 ✅ 승격 가능.
+    <sup>2</sup> Android 앱은 mDNS LAN(iOS와 동일) + ADB localhost 양쪽 지원. USB-테더 <strong>e-ink</strong>는 Mac 앱이 <code>adb reverse</code>를 못 띄워 CLI 전용(진짜 제약). 같은 LAN의 <strong>태블릿</strong>은 mDNS로 App Store Mac 데몬에 직접 접속 가능(<strong>LAN</strong>).
+    <sup>3</sup> Elgato Stream Deck 앱 별도 설치(플러그인 호스트). · <strong>포트는 가변</strong> — ESP32는 <code>device_info_request</code>로 식별.
+  </p>
+
+  <h2>A. ESP32 펌웨어 디스플레이 보드</h2>
+  <p class="section-note">공통: PlatformIO + Arduino, <code>LVGL 9.2.0</code>(TC001 제외), 115200 baud, flash mode DIO, 이중 경로(USB Serial 기본 + WiFi WebSocket 독립). 출처: <code>esp32/platformio.ini</code> · <code>esp32/boards/board_*.h</code>.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>보드</th><th>env</th><th class="wrap-cell">모델 (제조사)</th><th>SoC</th><th>해상도</th><th>디스플레이 IC</th><th>터치 IC</th><th>Flash</th><th>PSRAM</th><th>USB-UART</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="device-name">IPS 3.5"</td><td><code>ips35</code></td><td>JC3248W535 (Guition)</td><td>ESP32-S3</td><td class="res">480×320</td><td>AXS15231B (QSPI)</td><td>통합</td><td>16MB</td><td>YES</td><td>Native USB JTAG</td></tr>
+        <tr><td class="device-name">Round AMOLED 1.8"</td><td><code>amoled</code></td><td>JC3636W518 (Guition)</td><td>ESP32-S3</td><td class="res">360×360</td><td>ST77916 (QSPI)</td><td>CST816S (I2C)</td><td>8MB</td><td>YES</td><td>Native USB JTAG</td></tr>
+        <tr><td class="device-name">86 Box 4"</td><td><code>box_86</code> / <code>rgb48</code></td><td>ESP32-S3-4848S040 (Guition)</td><td>ESP32-S3</td><td class="res">480×480</td><td>ST7701 (RGB 16-bit)</td><td>GT911 (I2C)</td><td>16MB</td><td>YES</td><td>CH340</td></tr>
+        <tr><td class="device-name">TTGO T-Display 1.14"</td><td><code>ttgo</code></td><td>LilyGO T-Display</td><td>ESP32-D0WDQ6</td><td class="res">135×240</td><td>ST7789 (SPI)</td><td>없음 (버튼 2)</td><td>16MB</td><td>NO</td><td>CH340<sup>4</sup></td></tr>
+        <tr><td class="device-name">ESP32-C6 1.47"</td><td><code>esp32_c6_147</code></td><td>Waveshare ESP32-C6-LCD-1.47"</td><td>ESP32-C6</td><td class="res">172×320</td><td>ST7789 (SPI)</td><td>없음 (BOOT)</td><td>4MB</td><td>NO</td><td>Native USB CDC</td></tr>
+        <tr><td class="device-name">IPS 10.1"</td><td><code>ips10</code></td><td>JC8012P4A1C (Guition)</td><td>ESP32-P4NRW32 (400MHz)</td><td class="res">800×1280</td><td>JD9365 (MIPI-DSI)</td><td>GSL3680 (I2C)</td><td>4MB<sup>5</sup></td><td>32MB</td><td>CH340</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="section-note">
+    <sup>4</sup> TTGO 플래시는 57600 baud + <code>--no-stub</code>(~5분). PSRAM 없는 classic이라 정적 DRAM ~10KB → 테라리움 축소 버퍼.
+    <sup>5</sup> P4NRW32 모듈은 16MB Flash + 32MB PSRAM 통합이나 빌드는 4MB 파티션. WiFi는 co-processor <strong>ESP32-C6-MINI-1U-N4</strong>(esp-hosted), TX 20dBm.
+  </p>
+
+  <h2>B. LED 매트릭스 디바이스</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="hatch"></div>
+      <h4>Divoom Pixoo64</h4>
+      <p class="sub">상용 LED 액자 · 비-ESP32</p>
+      <div class="spec"><span class="k">해상도</span><span class="v">64×64 RGB</span></div>
+      <div class="spec"><span class="k">전송</span><span class="v">HTTP REST :80</span></div>
+      <div class="spec"><span class="k">연결</span><span class="v">WiFi 2.4G</span></div>
+      <div class="spec"><span class="k">드라이버</span><span class="v">pixoo/ · Swift</span></div>
+      <div class="spec"><span class="k">특이</span><span class="v">PicID 단조증가</span></div>
+    </div>
+    <div class="card">
+      <div class="hatch"></div>
+      <h4>iDotMatrix 32×32</h4>
+      <p class="sub">상용 BLE 픽셀 · BLE SoC</p>
+      <div class="spec"><span class="k">해상도</span><span class="v">32×32 AMOLED</span></div>
+      <div class="spec"><span class="k">전송</span><span class="v">BLE GATT</span></div>
+      <div class="spec"><span class="k">연결</span><span class="v">Bluetooth LE</span></div>
+      <div class="spec"><span class="k">드라이버</span><span class="v">sync.py · CoreBT</span></div>
+      <div class="spec"><span class="k">특이</span><span class="v">USB=전원전용</span></div>
+    </div>
+    <div class="card">
+      <div class="hatch"></div>
+      <h4>Divoom Timebox Mini</h4>
+      <p class="sub">상용 BLE 픽셀 · BLE SoC</p>
+      <div class="spec"><span class="k">해상도</span><span class="v">11×11 RGB</span></div>
+      <div class="spec"><span class="k">전송</span><span class="v">BLE GATT (ISSC)</span></div>
+      <div class="spec"><span class="k">연결</span><span class="v">Bluetooth LE</span></div>
+      <div class="spec"><span class="k">드라이버</span><span class="v">TimeboxBLE.swift · sync_ble.py</span></div>
+      <div class="spec"><span class="k">특이</span><span class="v">BLE 단일연결</span></div>
+    </div>
+    <div class="card">
+      <div class="hatch"></div>
+      <h4>Ulanzi TC001</h4>
+      <p class="sub">ESP32 펌웨어 · env <code>led8x32</code></p>
+      <div class="spec"><span class="k">해상도</span><span class="v">8×32 (256 LED)</span></div>
+      <div class="spec"><span class="k">SoC</span><span class="v">ESP32 D0WD</span></div>
+      <div class="spec"><span class="k">렌더</span><span class="v">FastLED 3.7</span></div>
+      <div class="spec"><span class="k">Flash</span><span class="v">8MB · no PSRAM</span></div>
+      <div class="spec"><span class="k">App Store</span><span class="v">⚠ 구현 갭(각주3)</span></div>
+    </div>
+  </div>
+
+  <h2>C. 입력 / 제어 하드웨어 (HID 데크)</h2>
+  <h3>Ulanzi D200H "Deck Dock"</h3>
+  <p class="section-note">stock HID 프로토콜(ADB/펌웨어 변조 없음), daemon-only. 출처: <code>docs/plugin-conventions.md</code> §D200H.</p>
+  <div class="scroll">
+    <table>
+      <tbody>
+        <tr><th>SoC</th><td>SigmaStar SSD210 — dual ARM Cortex-A7 @ 1GHz, 64MB DDR2 SIP</td></tr>
+        <tr><th>RAM</th><td>33MB total (~16MB free)</td></tr>
+        <tr><th>패널</th><td>nv3052c LCD, 물리 540×960 (6BIT, 59fps) → <span class="res">960×540</span> 가로(<code>rotateScreen:90</code>), BGRA32</td></tr>
+        <tr><th>키</th><td>14 keys (3행×5열, Row2 col3+col4 합체), ~192×180px</td></tr>
+        <tr><th>OS</th><td>FlythingsOS V2.1 (<code>Zkswe_SSD21X_SPINOR</code>)</td></tr>
+        <tr><th>연결</th><td>USB HID — VID <code>0x2207</code> / PID <code>0x0019</code>, 1024B 패킷, 헤더 <code>0x7C7C</code>, ZIP 청킹 (WiFi 없음)</td></tr>
+        <tr><th>드라이버</th><td>Swift <code>D200hHidModule.swift</code>(IOKit) / Node <code>bridge/src/d200h/</code>(node-hid)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Elgato Stream Deck+</h3>
+  <div class="scroll">
+    <table>
+      <tbody>
+        <tr><th>하드웨어</th><td>LCD 키 8개(2×4) + 로터리 인코더 4개 + LCD 터치 스트립</td></tr>
+        <tr><th>연결</th><td>호스트 USB → Elgato Stream Deck 앱 플러그인 → daemon WebSocket(:9120)</td></tr>
+        <tr><th>플러그인</th><td>Stream Deck SDK v2 · UUID <code>bound.serendipity.agentdeck</code> · 프로파일 <code>agentdeck-sdplus</code>(DeviceType 7) / <code>agentdeck-sd</code>(DeviceType 0)</td></tr>
+        <tr><th>인코더</th><td>E1 유틸리티 · E2 액션 · E3 터미널 · E4 음성 (음성 takeover 시 E2–E4 wide-canvas)</td></tr>
+        <tr><th>이벤트</th><td>양방향 · BridgeEvent 13종 전부</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>D. 모바일 / 데스크톱 소프트웨어 플랫폼</h2>
+  <h3>Apple (iOS · iPadOS · macOS)</h3>
+  <p class="section-note">SwiftUI Multiplatform 단일 코드베이스, App Store(<code>bound.serendipity.agentdeck.dashboard</code>). 출처: <code>apple/project.yml</code>.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>항목</th><th>macOS</th><th>iOS / iPadOS</th></tr></thead>
+      <tbody>
+        <tr><td class="k">최소 OS</td><td><strong>macOS 15.0</strong> (Sequoia)</td><td><strong>iOS / iPadOS 17.0</strong></td></tr>
+        <tr><td class="k">빌드</td><td>Xcode 26.4 · Swift 6.0</td><td>Xcode 26.4 · Swift 6.0</td></tr>
+        <tr><td class="k">아키텍처</td><td>Apple Silicon + Intel universal</td><td>A-series / M-series</td></tr>
+        <tr><td class="k">데몬</td><td>in-process Swift daemon (:9120)</td><td>WS client → 외부 daemon</td></tr>
+        <tr><td class="k">샌드박스</td><td>App Store, 서브프로세스 0 (<code>AGENTDECK_APP_STORE</code>)</td><td>App Store sandbox</td></tr>
+        <tr><td class="k">엔타이틀먼트</td><td>audio · bluetooth · serial · usb · network · files</td><td>없음 (WS only)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="section-note">macOS만 하드웨어 모듈(ESP32 serial / D200H USB / Pixoo·iDotMatrix·Timebox BLE) 직접 구동. iOS/iPadOS는 same-LAN WebSocket 뷰어.</p>
+
+  <h3>Android (e-ink 리더 · 태블릿)</h3>
+  <p class="section-note">Jetpack Compose 런처(<code>dev.agentdeck</code>) · minSdk 29 / target·compile 34 / JDK 17. 출처: <code>android/app/build.gradle.kts</code>.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>디바이스</th><th>칩 / 벤더</th><th>디스플레이</th><th class="wrap-cell">EPD API</th></tr></thead>
+      <tbody>
+        <tr><td class="device-name">Crema S</td><td>Rockchip RK3566</td><td>B&amp;W e-ink (16-level)</td><td class="wrap-cell"><code>EinkManager</code> setMode/sendOneFullFrame</td></tr>
+        <tr><td class="device-name">Onyx Boox</td><td>Onyx</td><td>B&amp;W / 컬러(Kaleido 3)</td><td class="wrap-cell"><code>BaseDevice.setViewDefaultUpdateMode()</code></td></tr>
+        <tr><td class="device-name">MOAAN Pantone 6</td><td>Rockchip (rebrand)</td><td>컬러 e-ink (Kaleido 3, 4096색)</td><td class="wrap-cell"><code>EinkManager</code> (moaan)</td></tr>
+        <tr><td class="device-name">Bigme (Galy / inkNote)</td><td>Bigme</td><td>컬러 e-ink (Gallery 3/4)</td><td class="wrap-cell">컬러 <code>einkPick()</code></td></tr>
+        <tr><td class="device-name">Kobo (Android)</td><td>Kobo</td><td>B&amp;W e-ink</td><td class="wrap-cell">fallback <code>invalidate()</code></td></tr>
+        <tr><td class="device-name">일반 태블릿 (Lenovo 등)</td><td>ARM / x86</td><td>컬러 LCD 60fps</td><td class="wrap-cell">표준 Android 렌더</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="section-note">e-ink 리프레시: GC16(표준) · DU(dither) · A2(fast). 컬러 e-ink는 1/4 해상도 컬러 / full B&amp;W. <strong>연결</strong>: Android 앱은 mDNS LAN(iOS와 동일) + ADB localhost 양쪽 지원 — USB-테더 e-ink는 <code>adb reverse</code> 필요(CLI 전용), 같은 LAN 태블릿은 mDNS로 App Store Mac 데몬 직접 접속(각주⁴).</p>
+
+  <h2>E. 터미널 Surface</h2>
+  <h3>TUI Dashboard <code>agentdeck dashboard</code></h3>
+  <div class="scroll">
+    <table>
+      <tbody>
+        <tr><th>요건</th><td>truecolor 지원 터미널 (의존성 0)</td></tr>
+        <tr><th>연결</th><td>WS client → daemon (<code>findDaemonPort()</code>: daemon.json → sessions.json fallback)</td></tr>
+        <tr><th>렌더</th><td>raw ANSI escape · braille 테라리움 · 3단 반응형 (wide 120+ / standard 80–119 / narrow 60–79)</td></tr>
+        <tr><th>이벤트</th><td>BridgeEvent 13종 (push-only 뷰)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>평가 노트 — App Store 게이팅이 최선인가</h2>
+  <p class="section-note">매트릭스의 ❌/⚠ 가 <strong>샌드박스 근본 제약</strong>인지 <strong>구현/분류 갭</strong>인지 구분 (코드 근거).</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>항목</th><th>표기</th><th class="wrap-cell">실제 사유</th><th class="wrap-cell">최선 여부 / 개선안</th></tr></thead>
+      <tbody>
+        <tr><td class="device-name">TC001</td><td><span class="badge b-warn">GAP</span></td><td class="wrap-cell">구현 갭. serial entitlement로 커버되는 self-rendering ESP32(테스트가 serial board로 보고). "ADB" 표기는 producer 없는 <strong>dead code</strong>(<code>AdbDeviceClass.ulanziTc001</code>)</td><td class="wrap-cell">표기 정정 <strong>완료</strong>(matrix·Swift 주석). 후속: dead-code 제거 + HW 검증 후 ✅ 승격</td></tr>
+        <tr><td class="device-name">Android 태블릿</td><td><span class="badge b-warn">LAN</span></td><td class="wrap-cell">과분류. mDNS로 App Store Mac 데몬 직접 접속이 코드상 가능</td><td class="wrap-cell"><strong>개선 권장</strong>: e-ink(USB/adb)와 태블릿(LAN/mDNS) tier 분리</td></tr>
+        <tr><td class="device-name">Android e-ink</td><td><span class="badge b-no">CLI</span></td><td class="wrap-cell"><strong>진짜 제약</strong>. USB-테더 + <code>adb reverse</code> 서브프로세스 필요 → sandbox 불가</td><td class="wrap-cell">현 구조 합리적(e-ink WiFi 불안정·USB 전제). 변경 불요</td></tr>
+        <tr><td class="device-name">Timebox / iDotMatrix</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">CoreBluetooth 네이티브</td><td class="wrap-cell">최선. 단 <strong>데몬당 BLE 단일 연결</strong> — 동시 1대만. (구 Timebox-SPP serial 변종은 제거됨)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="section-note">요약: 진짜 sandbox 제약은 <strong>e-ink(adb)</strong> 경로뿐이며 CLI 대체 경로가 정당하다. <strong>TC001·Android 태블릿의 ❌ 는 구현/분류 갭</strong>이라 ⚠로 정정 — upstream <code>appstore-feature-matrix.md</code>·<code>AdbModule.swift</code>·<code>AgentState.swift</code>·<code>TopologyRail.swift</code> 주석의 ADB 오기도 함께 정정함(legacy dead-code 제거는 후속).</p>
+
+  <footer>
+    <ul>
+      <li>수치 출처: SoC·해상도·Flash·SDK·VID/PID·deployment target은 모두 리포 빌드 설정/보드 헤더에서 직접 추출.</li>
+      <li>외부/상용 디바이스(Pixoo64 · iDotMatrix · Timebox · Stream Deck+ · D200H)의 내부 실리콘 일부는 제조사 비공개/역공학 — 확정 값만 기재.</li>
+      <li>이벤트 카운트: WS 클라이언트 13종 · ESP32 serial 6종 · Pixoo/iDotMatrix 4종 (<code>docs/devices.md</code>).</li>
+      <li>SSOT는 <a href="../hardware-compatibility.md">docs/hardware-compatibility.md</a> — 수치 변경 시 이 HTML도 함께 갱신.</li>
+      <li>공개 링크: <a href="https://puritysb.github.io/AgentDeck/hardware/">puritysb.github.io/AgentDeck/hardware/</a> (GitHub Pages).</li>
+    </ul>
+  </footer>
+
+</div>
+</body>
+</html>

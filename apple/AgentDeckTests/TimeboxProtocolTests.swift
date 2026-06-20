@@ -1,6 +1,6 @@
 // TimeboxProtocolTests.swift — byte-level verification of the Divoom Timebox Mini
 // static-image protocol reimplemented in Swift (TimeboxDivoomPacket), checked against
-// golden vectors generated from bridge/src/timebox/sync.py. If these drift, the panel
+// golden vectors generated from bridge/src/timebox/sync_ble.py. If these drift, the panel
 // silently shows garbage or nothing.
 
 #if os(macOS)

@@ -1,11 +1,18 @@
 #if os(macOS)
 // AdbModule.swift — In-process ADB stub.
 //
-// Android dashboards (CremaS, Pantone, Kobo, Lenovo tablets, Ulanzi TC001)
-// connect through a desktop bridge that runs separately from this app and
-// drives `adb reverse` itself. The in-process daemon never spawns adb, so
-// this module is a status-only placeholder that reports "disabled" and
-// keeps the snapshot shape stable for downstream parsers.
+// Android dashboards (CremaS, Pantone, Kobo, Lenovo tablets) connect through
+// a desktop bridge that runs separately from this app and drives `adb reverse`
+// itself. The in-process daemon never spawns adb, so this module is a
+// status-only placeholder that reports "disabled" and keeps the snapshot
+// shape stable for downstream parsers.
+//
+// NOTE: Ulanzi TC001 is NOT an ADB device — it is an ESP32 board (env
+// `led8x32`) that connects over USB serial / WiFi WS like the other ESP32
+// displays and surfaces through the serial pipeline. The `AdbDeviceClass
+// .ulanziTc001` case + `TopologyRail.pixelDisplaySection` ADB path are legacy
+// dead code (no producer emits the `ulanzi.tc001` wire class). Remove on a
+// future cleanup; do not reintroduce TC001 into the ADB tier.
 
 import Foundation
 

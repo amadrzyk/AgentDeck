@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { writeFileSync, unlinkSync, existsSync, readdirSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { execSync, spawn } from 'child_process';
@@ -96,32 +96,15 @@ async function isDaemonPort(port: number): Promise<boolean> {
   }
 }
 
-function likelyTimeboxPorts(): string[] {
-  try {
-    return readdirSync('/dev')
-      .filter(name => /^(cu|tty)\..*(TimeBox|Timebox|Divoom|SPP)/i.test(name))
-      .map(name => `/dev/${name}`)
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-function resolveTimeboxSyncPaths(): { python: string; sppScript: string; bleScript: string; scanScript: string } {
+function resolveTimeboxSyncPaths(): { python: string; bleScript: string; scanScript: string } {
   const distPath = dirname(fileURLToPath(import.meta.url));
   const projectRoot = join(distPath, '..', '..');
   const timeboxDir = join(projectRoot, 'bridge', 'src', 'timebox');
   return {
     python: join(projectRoot, '.venv', 'bin', 'python'),
-    sppScript: join(timeboxDir, 'sync.py'),
     bleScript: join(timeboxDir, 'sync_ble.py'),
     scanScript: join(timeboxDir, 'scan_ble.py'),
   };
-}
-
-/** Heuristic: a serial path (`/dev/…`, `cu.`/`tty.`) is SPP; anything else is a BLE address/UUID. */
-function looksLikeSerialPort(target: string): boolean {
-  return target.startsWith('/dev/') || /^(cu|tty)\./i.test(target);
 }
 
 // ===== Program =====
@@ -538,7 +521,7 @@ program
         } else if (d.type === 'timebox') {
           for (const tb of (d.devices ?? []) as any[]) {
             const brightnessInfo = tb.brightness !== undefined ? ` brightness=${tb.brightness}%` : '';
-            lines.push(`  Timebox     ${tb.port} (${tb.name || 'Timebox Mini Light'})${brightnessInfo}`);
+            lines.push(`  Timebox     ${tb.address} (${tb.name || 'Timebox Mini Light'})${brightnessInfo}`);
             total++;
           }
         } else if (d.type === 'adb') {
@@ -573,7 +556,7 @@ program
         }
         for (const d of timebox) {
           const brightnessInfo = d.brightness !== undefined ? ` brightness=${d.brightness}%` : '';
-          log(`  Timebox     ${d.port} (${d.name || 'Timebox Mini Light'})${brightnessInfo}`);
+          log(`  Timebox     ${d.address} (${d.name || 'Timebox Mini Light'})${brightnessInfo}`);
         }
       } else {
         log('Bridge is not running.');
@@ -918,22 +901,14 @@ idotmatrix
 
 // ===== Divoom Timebox Mini Light commands =====
 
-const timebox = program.command('timebox').description('Manage Divoom Timebox Mini devices (Bluetooth SPP or BLE)');
+const timebox = program.command('timebox').description('Manage Divoom Timebox Mini devices (Bluetooth LE)');
 
 timebox
   .command('scan')
-  .description('List paired SPP serial ports and discover BLE TimeBox-mini-light peripherals')
+  .description('Discover BLE TimeBox-mini-light peripherals')
   .action(async () => {
-    const ports = likelyTimeboxPorts();
-    if (ports.length > 0) {
-      log('Likely Timebox SPP serial ports:');
-      for (const port of ports) log(`  ${port}`);
-    } else {
-      log('No likely Timebox SPP serial ports found.');
-    }
-
     const paths = resolveTimeboxSyncPaths();
-    log('\nScanning for BLE devices (5 seconds)...');
+    log('Scanning for BLE devices (5 seconds)...');
     const py = spawn(paths.python, [paths.scanScript]);
     let stdoutData = '';
     py.stdout.on('data', (data) => {
@@ -960,7 +935,7 @@ timebox
           const rssi = typeof d.rssi === 'number' ? ` ${d.rssi}dBm` : '';
           log(`${prefix}${d.name} (${d.address})${rssi}`);
         }
-        log('\nAdd the starred BLE device with: agentdeck timebox add <address> --ble');
+        log('\nAdd the starred BLE device with: agentdeck timebox add <address>');
       } catch {
         log(`Failed to parse BLE scan output: ${stdoutData}`);
       }
@@ -968,26 +943,19 @@ timebox
   });
 
 timebox
-  .command('add <target>')
-  .description('Add a Timebox device (SPP serial port or BLE address)')
+  .command('add <address>')
+  .description('Add a Timebox device by its BLE address')
   .option('-n, --name <name>', 'Device name', 'Timebox Mini')
   .option('-b, --brightness <value>', 'Brightness 0-100', '80')
-  .option('--ble', 'Treat <target> as a BLE address')
-  .option('--serial', 'Treat <target> as an SPP serial port')
-  .action(async (target: string, opts) => {
+  .action(async (address: string, opts) => {
     const { addTimeboxDevice } = await import('./timebox/timebox-settings.js');
     const parsed = parseInt(opts.brightness, 10);
     const brightness = Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 80;
-    // Explicit flags win; otherwise auto-detect by path shape.
-    const isBle = opts.ble ? true : opts.serial ? false : !looksLikeSerialPort(target);
-    const device = isBle
-      ? { address: target, name: opts.name, brightness }
-      : { port: target, name: opts.name, brightness };
-    if (addTimeboxDevice(device)) {
-      log(`Added ${opts.name} (${isBle ? 'BLE' : 'SPP'} ${target}) with brightness ${brightness}% to settings.`);
+    if (addTimeboxDevice({ address, name: opts.name, brightness })) {
+      log(`Added ${opts.name} (BLE ${address}) with brightness ${brightness}% to settings.`);
       log('Restart the daemon to start automatic Timebox sync.');
     } else {
-      log(`Device ${target} already exists (or has no valid transport).`);
+      log(`Device ${address} already exists (or has no valid address).`);
     }
   });
 
@@ -995,22 +963,22 @@ timebox
   .command('list')
   .description('List configured Timebox devices')
   .action(async () => {
-    const { loadTimeboxDevices, deviceTransport, deviceId } = await import('./timebox/timebox-settings.js');
+    const { loadTimeboxDevices, deviceId } = await import('./timebox/timebox-settings.js');
     const devices = loadTimeboxDevices();
     if (devices.length === 0) {
-      log('No Timebox devices configured. Run `agentdeck timebox scan`, then `agentdeck timebox add <port|address>`.');
+      log('No Timebox devices configured. Run `agentdeck timebox scan`, then `agentdeck timebox add <address>`.');
       return;
     }
     log(`${devices.length} device(s):`);
     for (const d of devices) {
       const brightnessInfo = d.brightness !== undefined ? ` brightness=${d.brightness}%` : '';
-      log(`  [${deviceTransport(d).toUpperCase()}] ${d.name || 'Timebox Mini'} (${deviceId(d)})${brightnessInfo}`);
+      log(`  [BLE] ${d.name || 'Timebox Mini'} (${deviceId(d)})${brightnessInfo}`);
     }
   });
 
 timebox
-  .command('remove <target>')
-  .description('Remove a Timebox device by SPP port or BLE address')
+  .command('remove <address>')
+  .description('Remove a Timebox device by BLE address')
   .action(async (target: string) => {
     const { removeTimeboxDevice } = await import('./timebox/timebox-settings.js');
     if (removeTimeboxDevice(target)) {
@@ -1021,11 +989,11 @@ timebox
   });
 
 /**
- * Spawn the SPP or BLE sync writer for a one-shot test or a continuous sync,
- * resolving the target device + transport from CLI args / configured devices.
+ * Spawn the BLE sync writer for a one-shot test or a continuous sync,
+ * resolving the target device from CLI args / configured devices.
  */
 async function runTimeboxSync(targetOpt: string | undefined, opts: { bridgePort?: string; brightness?: string }, once: boolean): Promise<void> {
-  const { loadTimeboxDevices, deviceTransport, deviceId } = await import('./timebox/timebox-settings.js');
+  const { loadTimeboxDevices, deviceId } = await import('./timebox/timebox-settings.js');
   const { readDaemonInfo, findDaemonPort } = await import('./session-registry.js');
 
   const devices = loadTimeboxDevices();
@@ -1033,18 +1001,17 @@ async function runTimeboxSync(targetOpt: string | undefined, opts: { bridgePort?
     ? devices.find((d) => deviceId(d).toLowerCase() === targetOpt.toLowerCase())
     : devices[0];
 
-  // Allow an ad-hoc target that isn't in settings (auto-detect transport).
+  // Allow an ad-hoc BLE address that isn't in settings.
   if (!device && targetOpt) {
-    device = looksLikeSerialPort(targetOpt) ? { port: targetOpt } : { address: targetOpt };
+    device = { address: targetOpt };
   }
   if (!device) {
-    log('No device specified and none configured. Use `agentdeck timebox scan` and `agentdeck timebox add <target>`.');
+    log('No device specified and none configured. Use `agentdeck timebox scan` and `agentdeck timebox add <address>`.');
     process.exit(1);
   }
 
   const id = deviceId(device);
-  const transport = deviceTransport(device);
-  if (!targetOpt) log(`Using first configured device: ${id} (${transport})`);
+  if (!targetOpt) log(`Using first configured device: ${id} (BLE)`);
 
   const defaultBrightness = device.brightness ?? 80;
   const parsedBrightness = opts.brightness ? parseInt(opts.brightness, 10) : defaultBrightness;
@@ -1057,13 +1024,9 @@ async function runTimeboxSync(targetOpt: string | undefined, opts: { bridgePort?
   const url = `http://127.0.0.1:${bridgePort}`;
   const paths = resolveTimeboxSyncPaths();
 
-  const script = transport === 'ble' ? paths.bleScript : paths.sppScript;
-  const transportArgs = transport === 'ble'
-    ? ['--address', id]
-    : ['--port-path', id];
-  const args = [script, ...transportArgs, '--url', url, '--brightness', String(brightness), ...(once ? ['--once'] : [])];
+  const args = [paths.bleScript, '--address', id, '--url', url, '--brightness', String(brightness), ...(once ? ['--once'] : [])];
 
-  log(`${once ? 'Sending one Timebox frame' : 'Starting Timebox sync'} via ${transport} ${id} from ${url} (brightness ${brightness}%)...`);
+  log(`${once ? 'Sending one Timebox frame' : 'Starting Timebox sync'} via BLE ${id} from ${url} (brightness ${brightness}%)...`);
   const py = spawn(paths.python, args, { stdio: 'inherit' });
   py.on('close', (code) => {
     if (once) {
@@ -1081,14 +1044,14 @@ async function runTimeboxSync(targetOpt: string | undefined, opts: { bridgePort?
 
 timebox
   .command('test [target]')
-  .description('Send one AgentDeck frame to a Timebox Mini (SPP or BLE)')
+  .description('Send one AgentDeck frame to a Timebox Mini (BLE)')
   .option('-p, --bridge-port <port>', 'Bridge server port')
   .option('-b, --brightness <value>', 'Override brightness 0-100')
   .action((targetOpt: string | undefined, opts) => runTimeboxSync(targetOpt, opts, true));
 
 timebox
   .command('sync [target]')
-  .description('Sync AgentDeck dashboard frames to a Timebox Mini (SPP or BLE)')
+  .description('Sync AgentDeck dashboard frames to a Timebox Mini (BLE)')
   .option('-p, --bridge-port <port>', 'Bridge server port')
   .option('-b, --brightness <value>', 'Override brightness 0-100')
   .action((targetOpt: string | undefined, opts) => runTimeboxSync(targetOpt, opts, false));

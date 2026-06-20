@@ -35,7 +35,7 @@ Core bridge architecture, adapter hierarchy, and module system. See [daemon.md](
 
 ## Device module system
 
-`bridge/src/modules/` — Pluggable `DeviceModule` interface with auto-detect. Modules: mdns/serial/pixoo (daemon-only), adb (`'auto'` — detect at startup). D200H removed from Node.js bridge — **Swift daemon is sole D200H controller**. Session bridges never activate serial/pixoo — all dashboard devices connect via daemon only. CLI flags: `--local` (all off), `--no-{module}` (daemon).
+`bridge/src/modules/` — Pluggable `DeviceModule` interface with auto-detect. Modules: mdns/serial/pixoo/timebox (daemon-only), adb (`'auto'` — detect at startup). Timebox Mini Light is BLE (ISSC transparent-UART) — CLI daemon spawns `sync_ble.py`, App Store Swift daemon drives it natively over CoreBluetooth. D200H removed from Node.js bridge — **Swift daemon is sole D200H controller**. Session bridges never activate serial/pixoo/timebox — all dashboard devices connect via daemon only. CLI flags: `--local` (all off), `--no-{module}` (daemon).
 
 ## AgentAdapter abstraction (Phase 1-2 complete)
 

@@ -1,28 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { deviceTransport, deviceId, type TimeboxDevice } from '../timebox/timebox-settings.js';
+import { deviceId, type TimeboxDevice } from '../timebox/timebox-settings.js';
 import { renderFrame } from '../pixoo/pixoo-renderer.js';
 import { State } from '../types.js';
 import type { SessionInfo } from '@agentdeck/shared/protocol';
 
-describe('Timebox transport helpers', () => {
-  // deviceTransport is what timebox-daemon-sync.ts branches on to pick
-  // sync_ble.py (BLE) vs sync.py (SPP), so it must reflect which field is set.
-  it('classifies a BLE device (address) as ble', () => {
+describe('Timebox device identity', () => {
+  // Timebox Mini is BLE-only (the legacy SPP variant was removed); deviceId is
+  // the BLE address used as the stable key for sync_ble.py.
+  it('uses the BLE address as the device id', () => {
     const d: TimeboxDevice = { address: '7CF31CA8-84EE-36BB-52AB-CC5515910C34', name: 'x' };
-    expect(deviceTransport(d)).toBe('ble');
     expect(deviceId(d)).toBe('7CF31CA8-84EE-36BB-52AB-CC5515910C34');
-  });
-
-  it('classifies an SPP device (port) as spp', () => {
-    const d: TimeboxDevice = { port: '/dev/cu.TimeBox-Light-SPPDev' };
-    expect(deviceTransport(d)).toBe('spp');
-    expect(deviceId(d)).toBe('/dev/cu.TimeBox-Light-SPPDev');
-  });
-
-  it('prefers the BLE address when (defensively) both are present', () => {
-    const d: TimeboxDevice = { address: 'AA', port: '/dev/cu.x' };
-    expect(deviceTransport(d)).toBe('ble');
-    expect(deviceId(d)).toBe('AA');
   });
 });
 

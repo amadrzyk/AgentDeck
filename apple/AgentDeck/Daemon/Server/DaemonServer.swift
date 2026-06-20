@@ -1108,8 +1108,7 @@ final class DaemonServer {
             Task { await idotmatrix.reloadFromSettingsExternal() }
         }
 
-        // Timebox Mini (BLE variant — native CoreBluetooth, App Store legal).
-        // SPP-variant Timebox entries are CLI-daemon only; this drives BLE entries.
+        // Timebox Mini (BLE — native CoreBluetooth, App Store legal).
         let timebox = TimeboxModule()
         self.timeboxModule = timebox
         moduleManager.register(timebox)
@@ -5579,13 +5578,14 @@ final class DaemonServer {
         let toolInput = json["tool_input"] ?? json["input"] ?? json["arguments"] ?? json["args"]
         let inputSummary = Self.compactDebugValue(toolInput, max: 600)
         let status = completed ? "complete" : (json["status"] as? String)
+        let rowSummary = Self.codexToolTimelineSummary(tool: tool, inputSummary: inputSummary, completed: completed)
         var detailParts: [String] = []
         if let status { detailParts.append("status: \(status)") }
         if let inputSummary, !inputSummary.isEmpty { detailParts.append(inputSummary) }
         var entry = DaemonTimelineEntry(
             ts: Date().timeIntervalSince1970 * 1000,
             type: "tool_exec",
-            raw: completed ? "\(tool) completed" : tool,
+            raw: rowSummary,
             detail: detailParts.isEmpty ? nil : detailParts.joined(separator: "\n"),
             approvalId: nil,
             status: status,
@@ -5846,6 +5846,21 @@ final class DaemonServer {
         if let sid = sessionId {
             claudeLastPromptTopicBySession.removeValue(forKey: sid)
         }
+    }
+
+    private static func codexToolTimelineSummary(tool: String, inputSummary: String?, completed: Bool) -> String {
+        let suffix = completed ? " completed" : ""
+        guard let inputSummary, !inputSummary.isEmpty else {
+            return "\(tool)\(suffix)"
+        }
+        let compact = inputSummary
+            .replacingOccurrences(of: #"^\{"command":"([^"]+)".*$"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"^\{"file_path":"([^"]+)".*$"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"^\{"path":"([^"]+)".*$"#, with: "$1", options: .regularExpression)
+        let trimmed = compact.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "\(tool)\(suffix)" }
+        let capped = trimmed.count > 120 ? String(trimmed.prefix(119)) + "…" : trimmed
+        return "\(tool)\(suffix): \(capped)"
     }
 
     /// Pull the user's prompt from either Claude Code's legacy `prompt` field

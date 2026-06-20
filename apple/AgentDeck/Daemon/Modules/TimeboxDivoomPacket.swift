@@ -1,7 +1,7 @@
 #if os(macOS)
 // TimeboxDivoomPacket.swift — Divoom Timebox Mini static-image protocol encoder.
 //
-// Ports bridge/src/timebox/sync.py's packet construction to Swift so the App Store
+// Ports bridge/src/timebox/sync_ble.py's packet construction to Swift so the App Store
 // macOS build can drive a BLE Timebox Mini with NO subprocess (App Review 2.5.2).
 // This has NO iDotMatrix analog — iDotMatrix sends PNG-chunked frames, whereas the
 // Timebox speaks a 4-bit-per-channel nibble image inside a `0x44` static-image

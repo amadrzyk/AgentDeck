@@ -384,7 +384,7 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
     modules.timebox = {
       configuredDeviceCount: configuredTimebox.length,
       devices: configuredTimebox.map((d) => ({
-        port: d.port,
+        address: d.address,
         name: d.name ?? 'Timebox Mini',
         brightness: d.brightness ?? 100,
       })),
@@ -569,6 +569,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         ],
         modules: moduleHealthProvider(),
       }));
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/display-state') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(JSON.stringify(buildDisplayStateEvent(core.displayMonitor.isDisplayOn())));
       return;
     }
     if (req.method === 'GET' && pathname === '/diag') {

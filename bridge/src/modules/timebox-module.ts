@@ -1,5 +1,5 @@
 import type { BridgeContext, DeviceModule } from './types.js';
-import { loadTimeboxDevices, deviceTransport, deviceId } from '../timebox/timebox-settings.js';
+import { loadTimeboxDevices, deviceId } from '../timebox/timebox-settings.js';
 import { startTimeboxSync, stopTimeboxSync } from '../timebox/timebox-daemon-sync.js';
 
 export class TimeboxModule implements DeviceModule {
@@ -25,8 +25,7 @@ export class TimeboxModule implements DeviceModule {
       configuredDeviceCount: devices.length,
       devices: devices.map((d) => ({
         id: deviceId(d),
-        transport: deviceTransport(d),
-        port: d.port,
+        transport: 'ble',
         address: d.address,
         name: d.name ?? 'Timebox Mini',
         brightness: d.brightness ?? 100,

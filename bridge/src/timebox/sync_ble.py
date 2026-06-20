@@ -6,9 +6,9 @@ ISSC transparent-UART service (49535343-...), NOT Bluetooth Classic SPP. The
 device appears in macOS as "TimeBox-mini-light" (a BLE peripheral) and shares
 its BD_ADDR with the Classic audio endpoint under "TimeBox-mini-audio".
 
-This writer sends the SAME Divoom static-image protocol packet that sync.py
-builds for the Classic SPP path, but tunnels it through BLE GATT writes to the
-transparent-UART TX characteristic. Requires the `bleak` package in the venv.
+This writer builds the Divoom static-image protocol packet and tunnels it
+through BLE GATT writes to the transparent-UART TX characteristic. Requires the
+`bleak` package in the venv.
 """
 
 import argparse
@@ -17,18 +17,54 @@ import hashlib
 import io
 import signal
 import sys
+from typing import Iterable
 
 from PIL import Image as PilImage, ImageEnhance
-
-import sync as tb  # reuse encode helpers + packet builder from sync.py
 
 DEFAULT_URL = "http://127.0.0.1:9120"
 POLL_INTERVAL = 1.5
 RECONNECT_DELAY = 3.0
 
+TIMEBOX_W = 11
+TIMEBOX_H = 11
+STATIC_IMAGE_CMD_LEN = 0x00BD
+
 # ISSC transparent-UART service characteristics (discovered on Timebox Mini BLE)
 WRITE_CHAR = "49535343-8841-43f4-a8d4-ecbe34729bb3"  # write + write-without-response
 CHUNK_SIZE = 20  # safe ATT payload for write-without-response
+
+
+def clamp_nibble(value: int) -> int:
+    return max(0, min(15, value))
+
+
+def escape_message(data: Iterable[int]) -> bytes:
+    out = bytearray()
+    out.append(0x01)
+    for b in data:
+        if b in (0x01, 0x02, 0x03):
+            out.append(0x03)
+            out.append(b + 0x03)
+        else:
+            out.append(b)
+    out.append(0x02)
+    return bytes(out)
+
+
+def build_static_image_packet(image_bytes: bytes) -> bytes:
+    cmd = bytes([
+        STATIC_IMAGE_CMD_LEN & 0xFF,
+        (STATIC_IMAGE_CMD_LEN >> 8) & 0xFF,
+        0x44,
+        0x00,
+        0x0A,
+        0x0A,
+        0x04,
+    ]) + image_bytes
+    if len(cmd) != STATIC_IMAGE_CMD_LEN:
+        raise ValueError(f"command length {len(cmd)} != {STATIC_IMAGE_CMD_LEN}")
+    checksum = sum(cmd) & 0xFFFF
+    return escape_message(cmd + bytes([checksum & 0xFF, (checksum >> 8) & 0xFF]))
 
 
 def encode_image_bright(img: PilImage.Image, brightness: int, gamma: float, sat: float, contrast: float) -> bytes:
@@ -40,7 +76,7 @@ def encode_image_bright(img: PilImage.Image, brightness: int, gamma: float, sat:
     software `brightness` dim is applied, then 4-bit quantization. The gamma/sat/
     contrast args remain for manual tuning, but default to identity.
     """
-    img = img.convert("RGB").resize((tb.TIMEBOX_W, tb.TIMEBOX_H), PilImage.Resampling.BOX)
+    img = img.convert("RGB").resize((TIMEBOX_W, TIMEBOX_H), PilImage.Resampling.BOX)
     if brightness <= 0:
         return bytes(182)
 
@@ -58,13 +94,13 @@ def encode_image_bright(img: PilImage.Image, brightness: int, gamma: float, sat:
 
     nibbles: list[int] = []
     px = img.load()
-    for y in range(tb.TIMEBOX_H):
-        for x in range(tb.TIMEBOX_W):
+    for y in range(TIMEBOX_H):
+        for x in range(TIMEBOX_W):
             r, g, b = px[x, y]
             nibbles.extend([
-                tb.clamp_nibble(round(r / 17)),
-                tb.clamp_nibble(round(g / 17)),
-                tb.clamp_nibble(round(b / 17)),
+                clamp_nibble(round(r / 17)),
+                clamp_nibble(round(g / 17)),
+                clamp_nibble(round(b / 17)),
             ])
 
     out = bytearray()
@@ -120,7 +156,7 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                         if frame_hash != last_hash:
                             img = PilImage.open(io.BytesIO(frame_data))
                             payload = encode_image_bright(img, brightness, gamma, sat, contrast)
-                            packet = tb.build_static_image_packet(payload)
+                            packet = build_static_image_packet(payload)
                             await write_packet(client, packet)
                             last_hash = frame_hash
                             print(f"Frame sent ({frame_hash[:8]})")

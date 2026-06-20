@@ -1,6 +1,6 @@
 # AgentDeck Dashboard Devices
 
-7종 대시보드 디바이스 + 프로토콜 종합 레퍼런스.
+대시보드 디바이스 + 프로토콜 종합 레퍼런스 (전송/디스커버리/이벤트 중심). 하드웨어/OS 사양 전체 인벤토리는 [hardware-compatibility.md](hardware-compatibility.md) 가 SSOT.
 
 ## Device Matrix
 
@@ -11,8 +11,7 @@
 | **Apple** | WebSocket + HTTP | Daemon (9120) | Token | mDNS / QR | Bidirectional | All 13 |
 | **ESP32** | USB Serial JSON | CDC/UART 115200 | None | Port scan 10s | Push only | 6 |
 | **Pixoo64** | HTTP REST (Divoom) | LAN:80 | None | Cloud API / manual | Push only | 4 |
-| **Timebox Mini (SPP)** | Bluetooth Classic SPP serial | `/dev/cu.*` | Bluetooth pairing | `TimeBox-Light` paired port scan / manual | Push only | 4 |
-| **Timebox Mini (BLE)** | BLE GATT (ISSC transparent-UART) | `49535343-…` | Bluetooth pairing | `TimeBox-mini-light` BLE scan | Push only | 4 |
+| **Timebox Mini** | BLE GATT (ISSC transparent-UART) | `49535343-…` | Bluetooth pairing | `TimeBox-mini-light` BLE scan | Push only | 4 |
 | **SSE** | HTTP SSE | Daemon (9120) | Token | Manual URL | Push only | All 13 |
 | **Gateway** | WebSocket Custom | 18789 | Ed25519 | Hardcoded | Bidirectional | N/A (adapter) |
 
@@ -34,7 +33,6 @@ WsServer.broadcast(event)  ──→  WebSocket clients (Plugin, Android, Apple)
   │   └── broadcastPixoo()  ──→  HTTP REST push
   │
   ├── frame pollers:
-  │   ├── Timebox sync.py      ──→  Bluetooth SPP frames
   │   └── Timebox sync_ble.py  ──→  BLE GATT frames (micro layout)
   │
   └── explicit calls:
@@ -119,16 +117,15 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 
 ### Divoom Timebox Mini
 
-The Timebox Mini ships in **two transport variants** that drive the same 11×11 LED screen. A `timeboxDevices` entry carries exactly one of `port` (SPP) or `address` (BLE); `agentdeck timebox scan` lists both and `add` auto-detects (a `/dev/…` path → SPP, anything else → BLE; override with `--ble`/`--serial`).
+The Timebox Mini drives an 11×11 LED screen over **BLE**. A `timeboxDevices` entry carries the BLE `address`; `agentdeck timebox scan` discovers `TimeBox-mini-light` peripherals and `add <address>` registers one.
 
-- **SPP variant** — Bluetooth Classic RFCOMM/SPP, paired as `TimeBox-Light`, exposed by macOS as `/dev/cu.*`. Driven by `sync.py`. **CLI daemon only** (needs a serial port; not available in the App Store sandbox).
-- **BLE variant** — BLE GATT over the ISSC transparent-UART service `49535343-fe7d-…` (write char `49535343-8841-…`, write-without-response, 20-byte chunks). Advertises as `TimeBox-mini-light` (sharing its BD_ADDR with the Classic audio endpoint `TimeBox-mini-audio`). Driven by `sync_ble.py` (bleak) on the CLI daemon **and natively by the App Store Swift daemon over CoreBluetooth** (no subprocess).
+- **BLE** — BLE GATT over the ISSC transparent-UART service `49535343-fe7d-…` (write char `49535343-8841-…`, write-without-response, 20-byte chunks). Advertises as `TimeBox-mini-light` (sharing its BD_ADDR with the Classic audio endpoint `TimeBox-mini-audio`). Driven by `sync_ble.py` (bleak) on the CLI daemon **and natively by the App Store Swift daemon over CoreBluetooth** (no subprocess). (The legacy Bluetooth Classic SPP variant was removed — poor macOS compatibility, no App Store path.)
 
-- **Rendering**: dedicated **micro** layout (`/pixoo/frame?size=11&layout=micro`) — a bold, hand-authored **native 11×11 creature glyph** (octopus/codex/opencode/crayfish, with the brand identity marks) on a semantic status field, drawn pixel-for-pixel at the device resolution (no downscale — that bottoms out at a fuzzy silhouette at 121 LEDs). Glyph tables are the SSOT in `bridge/src/pixoo/micro-glyphs.ts`, mirrored byte-for-byte in `apple/.../Modules/MicroGlyphs.swift`. The 11×11 RGB → Divoom static-image packet (4-bit nibbles, `0x44` command, escaped `0x01…0x02` frame); the Swift packet encoder is `TimeboxDivoomPacket` (byte-verified against `sync.py` by `TimeboxProtocolTests`).
-- **Heartbeat**: polls the frame endpoint (~1.5s BLE / 2s SPP) and sends only changed frames.
-- **Config**: `~/.agentdeck/settings.json` — `{ timeboxDevices: [{ port? | address?, name?, brightness? }] }`
-- **Source**: `bridge/src/timebox/` (settings, daemon sync manager, `sync.py`/`sync_ble.py`/`scan_ble.py`); App Store: `apple/AgentDeck/Daemon/Modules/Timebox{BLE,Module,DivoomPacket}.swift`
-- **Tier**: SPP = CLI daemon only. BLE = both CLI daemon and App Store Swift daemon.
+- **Rendering**: dedicated **micro** layout (`/pixoo/frame?size=11&layout=micro`) — a bold, hand-authored **native 11×11 creature glyph** (octopus/codex/opencode/crayfish, with the brand identity marks) on a semantic status field, drawn pixel-for-pixel at the device resolution (no downscale — that bottoms out at a fuzzy silhouette at 121 LEDs). Glyph tables are the SSOT in `bridge/src/pixoo/micro-glyphs.ts`, mirrored byte-for-byte in `apple/.../Modules/MicroGlyphs.swift`. The 11×11 RGB → Divoom static-image packet (4-bit nibbles, `0x44` command, escaped `0x01…0x02` frame); the Swift packet encoder is `TimeboxDivoomPacket` (byte-verified against `sync_ble.py` by `TimeboxProtocolTests`).
+- **Heartbeat**: polls the frame endpoint (~1.5s) and sends only changed frames.
+- **Config**: `~/.agentdeck/settings.json` — `{ timeboxDevices: [{ address, name?, brightness? }] }`
+- **Source**: `bridge/src/timebox/` (settings, daemon sync manager, `sync_ble.py`/`scan_ble.py`); App Store: `apple/AgentDeck/Daemon/Modules/Timebox{BLE,Module,DivoomPacket}.swift`
+- **Tier**: both CLI daemon and App Store Swift daemon (BLE).
 
 ### SSE (Server-Sent Events)
 
@@ -155,7 +152,7 @@ The Timebox Mini ships in **two transport variants** that drive the same 11×11 
 | WebSocket | `ws.ping()` | 15s |
 | ESP32 | Full state JSON re-push | 5s |
 | Pixoo64 | Current frame re-render | 10s |
-| Timebox Mini (SPP / BLE) | Current frame poll + changed-frame push | 2s / 1.5s |
+| Timebox Mini (BLE) | Current frame poll + changed-frame push | 1.5s |
 | ADB tunnel | `adb devices` poll + re-setup | 30s |
 | SSE | No heartbeat (HTTP keep-alive) | — |
 

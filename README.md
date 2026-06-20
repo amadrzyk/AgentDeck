@@ -24,9 +24,9 @@
 
 **Stop Chatting. Start Steering.**
 
-AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **13 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, HID decks, and terminals.
+AgentDeck is a physical control surface for AI coding agents. It started with an Elgato Stream Deck+ and now runs on **14 display surfaces simultaneously** — tablets, e-ink readers, phones, ESP32 modules, LED matrices, HID decks, and terminals.
 
-> One bridge. 13 surfaces. Steer your AI — without leaving your keyboard flow.
+> One bridge. 14 surfaces. Steer your AI — without leaving your keyboard flow.
 
 > Independent project. Not affiliated with Anthropic, OpenAI, Google, Elgato, DIVOOM, or other third parties referenced. All trademarks are property of their respective owners. See [ATTRIBUTION.md](ATTRIBUTION.md) for full notices.
 
@@ -118,7 +118,7 @@ A **control surface** — like an audio mixing console, but for AI coding agents
 - **System utilities** — volume, mic, media, timer from the Utility encoder
 - **Terminal sessions** — iTerm dial switches sessions, auto-attaches tmux
 - **Multiple coding agents** — Claude Code, Codex CLI, OpenCode, and OpenClaw in one multi-agent daemon view
-- **Works from anywhere** — all 13 surfaces can monitor the agent; interactive surfaces (Stream Deck, D200H, Android, Apple) can also control it
+- **Works from anywhere** — all 14 surfaces can monitor the agent; interactive surfaces (Stream Deck, D200H, Android, Apple) can also control it
 
 The bridge is transparent: if it's off, Claude Code works exactly as before.
 
@@ -131,7 +131,9 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 | **OpenCode** | Supported — PTY + SSE hybrid bridge, timeline integration |
 | **OpenClaw** | Experimental — Gateway WebSocket, timeline panel, log stream |
 
-### Supported Surfaces — 13 Types
+### Supported Surfaces
+
+> Full hardware/OS inventory (SoC, resolution, transport, App Store tier) is the canonical matrix in **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)**.
 
 | # | Surface | Description |
 |---|---------|-------------|
@@ -148,7 +150,7 @@ The bridge is transparent: if it's off, Claude Code works exactly as before.
 | 11 | **Ulanzi TC001** | 8×32 RGB LED matrix — compact HUD pages and creature sprites |
 | 12 | **Pixoo64 LED** | 64×64 RGB LED pixel art terrarium |
 | 13 | **iDotMatrix 32×32** | 32×32 RGB AMOLED pixel display — BLE |
-| 14 | **Divoom Timebox Mini** | 11×11 RGB LED — BLE (App Store) + Bluetooth SPP (CLI) variants |
+| 14 | **Divoom Timebox Mini** | 11×11 RGB LED — BLE (App Store + CLI) |
 | 15 | **TUI Terminal** | Unicode braille terrarium + ANSI dashboard — SSH/remote |
 
 > Full hardware/OS spec sheet (SoC, resolution, flash, SDK, deployment targets) for every surface: **[docs/hardware-compatibility.md](docs/hardware-compatibility.md)** (visual view: [docs/hardware/index.html](docs/hardware/index.html)).
@@ -365,12 +367,12 @@ The CLI command is `agentdeck`.
 | `agentdeck pixoo list` | List configured devices |
 | `agentdeck pixoo remove <ip>` | Remove a device |
 | `agentdeck pixoo test [ip]` | Send test pattern |
-| `agentdeck timebox scan` | List SPP serial ports + BLE `TimeBox-mini-light` peripherals |
-| `agentdeck timebox add <port\|address>` | Add a Timebox Mini (SPP or BLE; auto-detected, `--ble`/`--serial` to force) |
+| `agentdeck timebox scan` | Discover BLE `TimeBox-mini-light` peripherals |
+| `agentdeck timebox add <address>` | Add a Timebox Mini by BLE address |
 | `agentdeck timebox list` | List configured Timebox devices |
-| `agentdeck timebox remove <port\|address>` | Remove a Timebox device |
-| `agentdeck timebox test [target]` | Send one frame (SPP or BLE) |
-| `agentdeck timebox sync [target]` | Run foreground Timebox frame sync (SPP or BLE) |
+| `agentdeck timebox remove <address>` | Remove a Timebox device |
+| `agentdeck timebox test [target]` | Send one frame (BLE) |
+| `agentdeck timebox sync [target]` | Run foreground Timebox frame sync (BLE) |
 | `agentdeck wifi-setup` | ESP32 WiFi provisioning (serial) |
 
 ---
@@ -761,14 +763,13 @@ Manage devices with `agentdeck pixoo {scan|add|list|remove|test}` — see [CLI R
 
 ## Divoom Timebox Mini
 
-11×11 RGB LED mirror of the AgentDeck dashboard on a Divoom Timebox Mini. Unlike Pixoo64, this device does not expose the Pixoo HTTP API. It ships in **two transport variants** that drive the same screen, and AgentDeck supports both:
+11×11 RGB LED mirror of the AgentDeck dashboard on a Divoom Timebox Mini. Unlike Pixoo64, this device does not expose the Pixoo HTTP API; it is driven over **BLE**:
 
-- **SPP variant** — pair the LED endpoint in macOS Bluetooth settings as `TimeBox-Light`; macOS exposes it as a Bluetooth Classic SPP serial path (`/dev/cu.TimeBox-Light*`). Driven by `bridge/src/timebox/sync.py`. **CLI daemon only** (no serial access in the App Store sandbox).
-- **BLE variant** — advertises as `TimeBox-mini-light` over BLE GATT (ISSC transparent-UART). Driven by `bridge/src/timebox/sync_ble.py` (bleak) on the CLI daemon, **and natively by the App Store macOS app over CoreBluetooth** (no subprocess).
+- **BLE** — advertises as `TimeBox-mini-light` over BLE GATT (ISSC transparent-UART). Driven by `bridge/src/timebox/sync_ble.py` (bleak) on the CLI daemon, **and natively by the App Store macOS app over CoreBluetooth** (no subprocess). (The legacy Bluetooth Classic SPP variant was removed — poor macOS compatibility and no App Store path.)
 
-Both render the dedicated **micro** layout (`/pixoo/frame?size=32&layout=micro`) — one dominant creature on a status field, legible at 121 LEDs — down to 11×11 and write the Divoom static-image protocol packet.
+It renders the dedicated **micro** layout (`/pixoo/frame?size=11&layout=micro`) — one dominant creature on a status field, legible at 121 LEDs — and writes the Divoom static-image protocol packet.
 
-Manage devices with `agentdeck timebox {scan|add|list|remove|test|sync}`. `scan` lists both serial ports and BLE peripherals; `add` auto-detects the transport (`/dev/…` → SPP, otherwise BLE; force with `--ble`/`--serial`). After adding a device, restart the CLI daemon; the Timebox module auto-starts sync for configured devices.
+Manage devices with `agentdeck timebox {scan|add|list|remove|test|sync}`. `scan` discovers BLE peripherals; `add <address>` registers one. After adding a device, restart the CLI daemon; the Timebox module auto-starts sync for configured devices.
 
 ---
 

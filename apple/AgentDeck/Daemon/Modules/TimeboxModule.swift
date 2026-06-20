@@ -7,9 +7,9 @@
 // transport is TimeboxBLE (ISSC transparent-UART GATT) and the wire format is the Divoom
 // static-image packet (TimeboxDivoomPacket), NOT iDotMatrix's PNG chunks.
 //
-// Only the BLE variant is handled here: `timeboxDevices` entries carry either `port` (SPP,
-// CLI-daemon only — no serial access in the sandbox) or `address` (BLE). This module drives
-// the first entry that has an `address`; SPP entries are ignored.
+// Timebox Mini is BLE-only: `timeboxDevices` entries carry a BLE `address`. This module
+// drives the first entry that has an `address`. (The legacy Bluetooth Classic SPP variant
+// was removed — poor macOS compatibility and no App Store path.)
 //
 // Frames come from the same in-process PixooRenderer as Pixoo/iDotMatrix, but via the
 // dedicated `renderMicro` layout (one dominant creature on a status field) so the 11×11
@@ -176,8 +176,7 @@ actor TimeboxModule: DeviceModule {
         refreshShadow()
     }
 
-    /// Load only BLE-variant Timebox devices (those with an `address`). SPP `port`
-    /// entries are CLI-daemon only and ignored by the App Store build.
+    /// Load configured Timebox devices (those with a BLE `address`).
     static func loadDevices() -> [TimeboxBLEDevice] {
         let box = TimeboxSettingsDataBox()
         let semaphore = DispatchSemaphore(value: 0)
