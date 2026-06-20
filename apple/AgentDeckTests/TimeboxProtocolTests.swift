@@ -74,8 +74,8 @@ final class TimeboxProtocolTests: XCTestCase {
         var buf = [UInt8](repeating: 0, count: 11 * 11 * 3)
         MicroGlyphs.paint(&buf, creature: .octopus, state: .idle, animFrame: 0)
         XCTAssertEqual(pixel(buf, 5, 3), [235, 130, 90])   // terracotta body
-        XCTAssertEqual(pixel(buf, 3, 4), [16, 9, 9])       // eye
-        XCTAssertEqual(pixel(buf, 0, 5), [200, 100, 72])   // left arm
+        XCTAssertEqual(pixel(buf, 3, 3), [16, 9, 9])       // eye
+        XCTAssertEqual(pixel(buf, 0, 4), [200, 100, 72])   // left arm
         XCTAssertEqual(pixel(buf, 0, 0), [0, 0, 0])        // transparent → untouched
     }
 
