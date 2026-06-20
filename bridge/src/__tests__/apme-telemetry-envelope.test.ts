@@ -63,6 +63,15 @@ describe('claudeHookToSpans', () => {
     expect(spans.find(s => s.kind === 'turn_start')).toBeUndefined();
   });
 
+  it('drops Claude task notification payloads from UserPromptSubmit', () => {
+    const spans = claudeHookToSpans(ctx(), 'UserPromptSubmit', {
+      message: {
+        content: '<task-notification>\n<summary>Background command completed</summary>',
+      },
+    });
+    expect(spans).toEqual([]);
+  });
+
   it('emits tool_call for PreToolUse with gen_ai.tool.name', () => {
     const spans = claudeHookToSpans(ctx(), 'PreToolUse', {
       tool_name: 'Edit',

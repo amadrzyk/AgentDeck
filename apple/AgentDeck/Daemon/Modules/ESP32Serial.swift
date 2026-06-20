@@ -862,18 +862,33 @@ actor ESP32Serial {
             e.removeValue(forKey: "voiceAssistantResponseText")
             // Keep gatewayAvailable and gatewayHasError — ESP32 needs them for crayfish rendering
         } else if type == "sessions_list" {
-            // Keep only essential session info and exclude dead sessions to avoid hitting serial limits
+            // Per-session fields the device needs, with serial-size caps. Mirrors the Node
+            // bridge's prepareForSerial map (bridge/src/esp32-serial.ts) so the App-Store Swift
+            // daemon drives the same IPS10 D1 cards + pixel-office (project pods, desks, inline
+            // Approve/Deny) even when no CLI daemon is running. Dead sessions excluded.
+            func lim(_ v: Any?, _ n: Int) -> String {
+                guard let s = v as? String else { return "" }
+                return s.count > n ? String(s.prefix(n)) : s
+            }
             if let sessions = e["sessions"] as? [[String: Any]] {
                 e["sessions"] = sessions
                     .filter { s in (s["alive"] as? Bool) ?? true }
-                    .map { s in
-                        [
-                            "id": s["id"] ?? "",
-                            "projectName": s["projectName"] ?? "",
-                            "agentType": s["agentType"] ?? "",
-                            "state": s["state"] ?? "",
-                            "alive": s["alive"] ?? true
+                    .map { s -> [String: Any] in
+                        var o: [String: Any] = [
+                            "id": lim(s["id"], 31),
+                            "projectName": lim(s["projectName"], 39),
+                            "modelName": lim(s["modelName"], 31),
+                            "agentType": lim(s["agentType"], 15),
+                            "state": lim(s["state"], 19),
+                            "alive": s["alive"] ?? true,
+                            "currentTool": lim(s["currentTool"], 39),
+                            "promptType": lim(s["promptType"], 19),
+                            "question": lim(s["question"], 159),
+                            "requestId": lim(s["requestId"], 39)
                         ]
+                        if let es = s["elapsedSec"] { o["elapsedSec"] = es }
+                        if let op = s["options"] { o["options"] = op }
+                        return o
                     }
             }
         }

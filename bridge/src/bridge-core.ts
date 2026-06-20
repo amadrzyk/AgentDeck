@@ -12,6 +12,7 @@ import { readAntigravityLocalStatus } from './antigravity-local.js';
 import { buildSubscriptions, buildUsageEvent } from './usage-event.js';
 import { readCodexAuthStatus } from './codex-auth.js';
 import { fetchMlxModels } from './mlx-probe.js';
+import { buildDisplayStateEvent } from './display-dim.js';
 import { loadMlxSettings } from '@agentdeck/shared';
 import { probeGateway, checkGatewayHealth } from './gateway-probe.js';
 import { fetchUsageFromApi, hasOAuthToken, getTokenStatus, type ApiUsageData } from './usage-api.js';
@@ -218,7 +219,7 @@ export class BridgeCore {
         this._wakeHandler?.();
       }
       this._previousDisplayOn = displayOn;
-      const evt: BridgeEvent = { type: 'display_state', displayOn };
+      const evt: BridgeEvent = buildDisplayStateEvent(displayOn) as BridgeEvent;
       this.broadcast(evt);
     });
 
@@ -613,10 +614,7 @@ export class BridgeCore {
     } as BridgeEvent);
 
     // Display state
-    this.wsServer.sendTo(ws, {
-      type: 'display_state',
-      displayOn: this.displayMonitor.isDisplayOn(),
-    } as BridgeEvent);
+    this.wsServer.sendTo(ws, buildDisplayStateEvent(this.displayMonitor.isDisplayOn()) as BridgeEvent);
 
     // Timeline history — entries were already attributed at storage time by
     // the attributor installed in `wireTimeline`, so they ship with taskId /

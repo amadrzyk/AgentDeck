@@ -121,6 +121,10 @@ const DEFAULT_COMMANDS: Record<Lang, { lint?: string; build?: string; test?: str
 export class ApmeRunner {
   private queue: EvalJob[] = [];
   private drainPromise: Promise<void> | null = null;
+  private readonly queuedRunIds = new Set<string>();
+  private readonly runningRunIds = new Set<string>();
+  private readonly runningTurnIds = new Set<string>();
+  private readonly runningTaskIds = new Set<string>();
   private readonly listeners = new Set<(r: EvalJobResult) => void>();
   private readonly taskListeners = new Set<(e: TaskEvaluatedEvent) => void>();
   private configOverride: ApmeConfig | null = null;
@@ -165,6 +169,11 @@ export class ApmeRunner {
 
   enqueue(job: EvalJob): void {
     if (!this.store.enabled) return;
+    if (this.queuedRunIds.has(job.runId) || this.runningRunIds.has(job.runId)) {
+      debug('APME', `skip duplicate eval enqueue runId=${job.runId}`);
+      return;
+    }
+    this.queuedRunIds.add(job.runId);
     this.queue.push(job);
     debug('APME', `enqueue eval runId=${job.runId} (queue=${this.queue.length})`);
     void this.drain();
@@ -175,7 +184,14 @@ export class ApmeRunner {
    *  Fires-and-forgets; result is stored and notified via onResult listeners. */
   enqueueTurn(job: { runId: string; turnId: string; category?: string }): void {
     if (!this.store.enabled) return;
-    void this.runTurnEval(job);
+    if (this.runningTurnIds.has(job.turnId)) {
+      debug('APME', `skip duplicate turn eval turnId=${job.turnId}`);
+      return;
+    }
+    this.runningTurnIds.add(job.turnId);
+    void this.runTurnEval(job).finally(() => {
+      this.runningTurnIds.delete(job.turnId);
+    });
   }
 
   /** Judge a closed task (group of turns between boundary signals —
@@ -183,7 +199,14 @@ export class ApmeRunner {
    *  task-level summary and axis scores are persisted in tasks + evals. */
   enqueueTask(job: { runId: string; taskId: string; category?: string; boundarySignal?: string }): void {
     if (!this.store.enabled) return;
-    void this.runTaskEval(job);
+    if (this.runningTaskIds.has(job.taskId)) {
+      debug('APME', `skip duplicate task eval taskId=${job.taskId}`);
+      return;
+    }
+    this.runningTaskIds.add(job.taskId);
+    void this.runTaskEval(job).finally(() => {
+      this.runningTaskIds.delete(job.taskId);
+    });
   }
 
   private async runTaskEval({ runId, taskId, category, boundarySignal }: { runId: string; taskId: string; category?: string; boundarySignal?: string }): Promise<void> {
@@ -448,6 +471,8 @@ export class ApmeRunner {
   private async doDrain(): Promise<void> {
     while (this.queue.length > 0) {
       const job = this.queue.shift()!;
+      this.queuedRunIds.delete(job.runId);
+      this.runningRunIds.add(job.runId);
       try {
         const result = await this.runOne(job);
         if (!result.layer1Ran && !result.layer2Ran && result.overall === undefined) {
@@ -459,6 +484,8 @@ export class ApmeRunner {
         }
       } catch (err) {
         debug('APME', `runner error runId=${job.runId}: ${String(err)}`);
+      } finally {
+        this.runningRunIds.delete(job.runId);
       }
     }
   }
@@ -468,6 +495,10 @@ export class ApmeRunner {
     const run = this.store.getRun(job.runId);
     if (!run) {
       debug('APME', `runOne: run ${job.runId} not found`);
+      return { runId: job.runId, layer1Ran: false, layer2Ran: false };
+    }
+    if (this.store.listEvalsForRun(run.id).length > 0) {
+      debug('APME', `runOne: run ${run.id} already has eval rows; skip duplicate`);
       return { runId: job.runId, layer1Ran: false, layer2Ran: false };
     }
 

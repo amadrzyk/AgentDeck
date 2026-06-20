@@ -104,6 +104,9 @@ actor ApmeRunner {
     /// registers one to upsert the original `task_end` timeline row with the
     /// score + outcome metadata so dashboard task headers render the badge.
     private var taskEvaluatedListeners: [@Sendable (ApmeTaskEvaluatedEvent) -> Void] = []
+    private var runningRunIds: Set<String> = []
+    private var runningTurnIds: Set<String> = []
+    private var runningTaskIds: Set<String> = []
 
     /// Coarse outcome class derived from `compositeScore`. Parity with
     /// `bridge/src/apme/runner.ts::deriveTaskOutcome`.
@@ -173,8 +176,18 @@ actor ApmeRunner {
     /// mid-session response handler) don't block.
     nonisolated func enqueueTurn(runId: String, turnId: String, category: String) {
         Task.detached { [weak self] in
-            await self?.runTurnEval(runId: runId, turnId: turnId, category: category)
+            await self?.runTurnEvalIfNeeded(runId: runId, turnId: turnId, category: category)
         }
+    }
+
+    private func runTurnEvalIfNeeded(runId: String, turnId: String, category: String) async {
+        if runningTurnIds.contains(turnId) {
+            DaemonLogger.shared.debug("APME", "skip duplicate turn eval turn=\(turnId.prefix(8))")
+            return
+        }
+        runningTurnIds.insert(turnId)
+        defer { runningTurnIds.remove(turnId) }
+        await runTurnEval(runId: runId, turnId: turnId, category: category)
     }
 
     private func runTurnEval(runId: String, turnId: String, category: String) async {
@@ -274,8 +287,18 @@ actor ApmeRunner {
     /// Mirrors bridge/src/apme/runner.ts enqueueTask.
     nonisolated func enqueueTask(runId: String, taskId: String, category: String? = nil, boundarySignal: String? = nil) {
         Task.detached { [weak self] in
-            await self?.runTaskEval(runId: runId, taskId: taskId, category: category, boundarySignal: boundarySignal)
+            await self?.runTaskEvalIfNeeded(runId: runId, taskId: taskId, category: category, boundarySignal: boundarySignal)
         }
+    }
+
+    private func runTaskEvalIfNeeded(runId: String, taskId: String, category: String?, boundarySignal: String?) async {
+        if runningTaskIds.contains(taskId) {
+            DaemonLogger.shared.debug("APME", "skip duplicate task eval task=\(taskId.prefix(8))")
+            return
+        }
+        runningTaskIds.insert(taskId)
+        defer { runningTaskIds.remove(taskId) }
+        await runTaskEval(runId: runId, taskId: taskId, category: category, boundarySignal: boundarySignal)
     }
 
     private func runTaskEval(runId: String, taskId: String, category: String?, boundarySignal: String?) async {
@@ -436,13 +459,27 @@ actor ApmeRunner {
     /// no deterministic results).
     nonisolated func enqueue(runId: String) {
         Task.detached { [weak self] in
-            await self?.runOne(runId: runId)
+            await self?.runOneIfNeeded(runId: runId)
         }
+    }
+
+    private func runOneIfNeeded(runId: String) async {
+        if runningRunIds.contains(runId) {
+            DaemonLogger.shared.debug("APME", "skip duplicate run eval run=\(runId.prefix(8))")
+            return
+        }
+        runningRunIds.insert(runId)
+        defer { runningRunIds.remove(runId) }
+        await runOne(runId: runId)
     }
 
     private func runOne(runId: String) async {
         guard config.enabled else { return }
         guard let run = store.getRun(id: runId) else { return }
+        if !store.listEvalsForRun(runId).isEmpty {
+            DaemonLogger.shared.debug("APME", "run eval skip run=\(runId.prefix(8)) — eval rows already exist")
+            return
+        }
 
         // Phase 0: Layer 1 graceful-disabled (see `isLayer1Available` above —
         // subprocess spawn blocked by App Sandbox). Gate Layer 2 on the

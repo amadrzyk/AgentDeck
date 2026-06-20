@@ -34,6 +34,7 @@ export interface DashboardState {
   sessions: SessionInfo[];
   usage: UsageEvent | null;
   modelCatalog: ModelCatalogEntry[];
+  moduleHealth: Record<string, unknown>;
   timeline: TimelineEntry[];
   helpVisible: boolean;
   currentPort: number | null;
@@ -59,6 +60,9 @@ export function applyStateUpdate(state: DashboardState, e: StateUpdateEvent): vo
   state.agentType = e.agentType || state.agentType;
   if (e.modelCatalog !== undefined) {
     state.modelCatalog = e.modelCatalog;
+  }
+  if (e.moduleHealth !== undefined) {
+    state.moduleHealth = e.moduleHealth;
   }
   state.gatewayAvailable = e.gatewayAvailable || false;
   state.gatewayHasError = e.gatewayHasError || false;
@@ -111,6 +115,7 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     sessions: [],
     usage: null,
     modelCatalog: [],
+    moduleHealth: {},
     timeline: [],
     helpVisible: false,
     currentPort: targetPort,

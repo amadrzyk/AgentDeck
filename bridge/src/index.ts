@@ -6,6 +6,7 @@
  */
 
 import { BridgeCore } from './bridge-core.js';
+import { buildDisplayStateEvent } from './display-dim.js';
 import { initApme, isTimelineProjectionEnabled } from './apme/index.js';
 import { readLastTurn as readClaudeTranscriptLastTurn } from './apme/claude-transcript-reader.js';
 import { claudeHookToSpans } from './apme/adapters/claude-hook.js';
@@ -417,7 +418,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
       const events: BridgeEvent[] = [];
       if (lastStateEvent) events.push(lastStateEvent);
       events.push(core.buildUsage());
-      events.push({ type: 'display_state', displayOn: core.displayMonitor.isDisplayOn() } as BridgeEvent);
+      events.push(buildDisplayStateEvent(core.displayMonitor.isDisplayOn()) as BridgeEvent);
       core.broadcastSessionsList().catch(() => {});
       return events;
     });
@@ -1330,6 +1331,10 @@ function makeApmeAdapterCtx(
   };
 }
 
+function isClaudeTaskNotificationPrompt(text: string): boolean {
+  return text.trim().toLowerCase().startsWith('<task-notification>');
+}
+
 // ===== Claude Code timeline wiring =====
 
 function wireClaudeCodeTimeline(
@@ -1352,6 +1357,10 @@ function wireClaudeCodeTimeline(
       ccPendingChatStartTimer = null;
     }
     ccPendingChatStart = false;
+    if (isClaudeTaskNotificationPrompt(text)) {
+      ccLastPromptText = null;
+      return;
+    }
     ccLastPromptText = text || null;
     const snippet = text.length > 500 ? text.slice(0, 497) + '...' : text;
     const detail = text.length > 100 ? (text.length > 1000 ? text.slice(0, 1000) + '...' : text) : undefined;

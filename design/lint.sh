@@ -21,6 +21,8 @@ SCOPE_FILES=$(find . \
      -o -path './apple/build' -o -path './android/app/build' \
      -o -path './apple/AgentDeck/Resources/agentdeck-runtime' \
      -o -path './docs/design-mockups' \
+     -o -path './docs/design/tenin' \
+     -o -path './docs/design/AgentDeck Tide Bento (D1).html' \
      -o -path './plugin/bound.serendipity.agentdeck.sdPlugin/bin' \
      -o -path './plugin/bound.serendipity.agentdeck.sdPlugin/ui/sdpi-components.js' \
      -o -path './esp32/.pio' \
@@ -72,8 +74,8 @@ scan() {
             --exclude-dir=.zig-cache --exclude-dir=.zig-global-cache \
             --exclude-dir=build --exclude-dir=design-mockups --exclude-dir=agentdeck-runtime \
             --exclude-dir=bin --exclude-dir=.pio --exclude-dir=results \
-            --exclude-dir=creature-simulator \
-            --exclude=sdpi-components.js \
+            --exclude-dir=creature-simulator --exclude-dir=tenin \
+            --exclude=sdpi-components.js --exclude='AgentDeck Tide Bento (D1).html' \
             -- "$pattern" . 2>/dev/null)
 }
 

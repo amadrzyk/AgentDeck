@@ -14,6 +14,7 @@ function baseState(overrides: Partial<DashboardState> = {}): DashboardState {
     sessions: [],
     usage: null,
     modelCatalog: [],
+    moduleHealth: {},
     timeline: [],
     helpVisible: false,
     currentPort: 9121,

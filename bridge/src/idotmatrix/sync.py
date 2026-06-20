@@ -9,6 +9,7 @@ import urllib.request
 import urllib.error
 import io
 import argparse
+import json
 from PIL import Image as PilImage, ImageEnhance
 from idotmatrix import ConnectionManager
 from idotmatrix.modules.image import Image as IdmImage
@@ -30,6 +31,40 @@ async def fetch_frame(url: str) -> bytes:
             return response.read()
             
     return await loop.run_in_executor(None, _fetch)
+
+async def fetch_display_state(url: str):
+    """Fetch host display dim state from the AgentDeck daemon, if available."""
+    endpoint = f"{url.rstrip('/')}/display-state"
+
+    loop = asyncio.get_running_loop()
+    def _fetch():
+        with urllib.request.urlopen(endpoint, timeout=1.0) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    return await loop.run_in_executor(None, _fetch)
+
+def resolve_display_brightness(display_state, normal_brightness: int) -> tuple[int, bool, str]:
+    """Return (hardware brightness, dimmed, signature) for the current host state."""
+    if not isinstance(display_state, dict):
+        return normal_brightness, False, f"on|true|off|10|{normal_brightness}"
+
+    display_on = bool(display_state.get("displayOn", True))
+    dim = display_state.get("dim") if isinstance(display_state.get("dim"), dict) else {}
+    dim_enabled = dim.get("enabled", True)
+    if not isinstance(dim_enabled, bool):
+        dim_enabled = True
+    dim_mode = "min" if dim.get("mode") == "min" else "off"
+    try:
+        dim_level = int(dim.get("level", 10))
+    except (TypeError, ValueError):
+        dim_level = 10
+    dim_level = max(5, min(100, dim_level))
+    signature = f"{display_on}|{dim_enabled}|{dim_mode}|{dim_level}|{normal_brightness}"
+
+    if display_on or not dim_enabled:
+        return normal_brightness, False, signature
+    # iDotMatrix firmware accepts 5-100 only; use 5% as the practical off floor.
+    return (dim_level if dim_mode == "min" else 5), True, signature
 
 def make_offline_image() -> PilImage.Image:
     """Create a small local OFFLINE placeholder for bridge outages."""
@@ -98,6 +133,9 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
     last_hash = ""
     connected = False
     last_brightness_assert = 0.0
+    last_display_signature = ""
+    current_hw_brightness = brightness
+    display_dimmed = False
 
     # Graceful shutdown: when the daemon (or a user) stops us, we must leave the
     # panel in a clean state — a stateful BLE display otherwise freezes on the
@@ -127,10 +165,18 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
                 # stays dark. A short beat before/between control commands fixes it.
                 await _interruptible_sleep(stop_event, 0.4)
 
+                try:
+                    display_state = await fetch_display_state(url)
+                    current_hw_brightness, display_dimmed, last_display_signature = resolve_display_brightness(display_state, brightness)
+                except Exception:
+                    current_hw_brightness = brightness
+                    display_dimmed = False
+                    last_display_signature = ""
+
                 # Set initial hardware brightness
-                if brightness:
-                    print(f"Setting hardware brightness to {brightness}%...")
-                    await idm_common.setBrightness(brightness)
+                if current_hw_brightness:
+                    print(f"Setting hardware brightness to {current_hw_brightness}%...")
+                    await idm_common.setBrightness(current_hw_brightness)
                     await _interruptible_sleep(stop_event, 0.1)
 
                 # Enter DIY drawing mode (mode 1)
@@ -153,13 +199,34 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
                 await _interruptible_sleep(stop_event, 1.0)
                 continue
 
-            # 1c. Periodically re-assert hardware brightness. The panel can dim
+            # 1c. Apply host display sleep/wake dimming. The daemon exposes the
+            # same display_state that Pixoo/D200H/ESP32 receive over WS/serial.
+            try:
+                display_state = await fetch_display_state(url)
+                target_brightness, target_dimmed, signature = resolve_display_brightness(display_state, brightness)
+                if signature != last_display_signature or target_brightness != current_hw_brightness:
+                    print(f"Host display {'off' if target_dimmed else 'on'} — setting hardware brightness to {target_brightness}%")
+                    await idm_common.setBrightness(target_brightness)
+                    current_hw_brightness = target_brightness
+                    display_dimmed = target_dimmed
+                    last_display_signature = signature
+                    last_brightness_assert = time.monotonic()
+            except Exception:
+                # Older/session-only bridges do not expose /display-state; keep
+                # the configured brightness rather than failing sync.
+                pass
+
+            # 1d. Periodically re-assert hardware brightness. The panel can dim
             # itself (idle auto-dim, brownout reboot mid-session) while the BLE
             # link stays up, so a one-shot setBrightness on connect isn't enough —
             # re-send it so the display doesn't silently go dark.
-            if brightness and time.monotonic() - last_brightness_assert > 60:
-                await idm_common.setBrightness(brightness)
+            if current_hw_brightness and time.monotonic() - last_brightness_assert > 60:
+                await idm_common.setBrightness(current_hw_brightness)
                 last_brightness_assert = time.monotonic()
+
+            if display_dimmed:
+                await _interruptible_sleep(stop_event, POLL_INTERVAL)
+                continue
 
             # 2. Fetch frame from AgentDeck Bridge
             try:

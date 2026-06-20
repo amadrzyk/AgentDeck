@@ -336,7 +336,7 @@ const BUBBLE_CHARS = ['\u00B0', '\u00B7', '\u25CB', '\u25E6'];
 
 interface Bubble { x: number; y: number; char: string; speed: number; }
 
-// ===== OpenCode — Box-Drawing Nested Square (simulator SSOT) =====
+// ===== OpenCode — Canonical Hollow Vertical Ring =====
 
 export interface OpenCodeInstance {
   id: string;
@@ -352,33 +352,31 @@ function renderOpenCode(_inst: OpenCodeInstance, frame: number, scale: SpriteSca
   const isSleeping = _inst.state === 'sleeping' || _inst.state === 'paused';
   const isProcessing = _inst.state === 'processing';
   const outerColor = isSleeping ? DIM + fg(160, 158, 158) : fg(241, 236, 236);
-  const innerColor = isSleeping ? DIM + fg(60, 56, 56) : fg(75, 70, 70);
   const pulse = isProcessing && ((frame + _inst.phaseOffset) % 30 < 15);
   const oc = pulse ? fg(207, 206, 205) : outerColor;
-  const ic = innerColor;
   if (scale === 'xlarge') {
     return { lines: [
-      `${oc}\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510${RESET}`,
-      `${oc}\u2502${RESET}       ${oc}\u2502${RESET}`,
-      `${oc}\u2502${RESET} ${ic}\u250c\u2500\u2500\u2500\u2510${RESET} ${oc}\u2502${RESET}`,
-      `${oc}\u2502${RESET} ${ic}\u2502   \u2502${RESET} ${oc}\u2502${RESET}`,
-      `${oc}\u2502${RESET} ${ic}\u2514\u2500\u2500\u2500\u2518${RESET} ${oc}\u2502${RESET}`,
-      `${oc}\u2502${RESET}       ${oc}\u2502${RESET}`,
-      `${oc}\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518${RESET}`,
+      `${oc}\u250c\u2500\u2500\u2500\u2500\u2510${RESET}`,
+      `${oc}\u2502    \u2502${RESET}`,
+      `${oc}\u2502    \u2502${RESET}`,
+      `${oc}\u2502    \u2502${RESET}`,
+      `${oc}\u2502    \u2502${RESET}`,
+      `${oc}\u2502    \u2502${RESET}`,
+      `${oc}\u2514\u2500\u2500\u2500\u2500\u2518${RESET}`,
     ], color: outerColor };
   }
   if (scale === 'large') {
     return { lines: [
-      `${oc}\u250c\u2500\u2500\u2500\u2500\u2500\u2510${RESET}`,
-      `${oc}\u2502${RESET}     ${oc}\u2502${RESET}`,
-      `${oc}\u2502${RESET} ${ic}\u250c\u2500\u2510${RESET} ${oc}\u2502${RESET}`,
-      `${oc}\u2502${RESET}     ${oc}\u2502${RESET}`,
-      `${oc}\u2514\u2500\u2500\u2500\u2500\u2500\u2518${RESET}`,
+      `${oc}\u250c\u2500\u2500\u2500\u2510${RESET}`,
+      `${oc}\u2502   \u2502${RESET}`,
+      `${oc}\u2502   \u2502${RESET}`,
+      `${oc}\u2502   \u2502${RESET}`,
+      `${oc}\u2514\u2500\u2500\u2500\u2518${RESET}`,
     ], color: outerColor };
   }
   return { lines: [
     `${oc}\u250c\u2500\u2500\u2500\u2510${RESET}`,
-    `${oc}\u2502${ic}\u250c\u2500\u2510${oc}\u2502${RESET}`,
+    `${oc}\u2502   \u2502${RESET}`,
     `${oc}\u2514\u2500\u2500\u2500\u2518${RESET}`,
   ], color: outerColor };
 }
@@ -617,6 +615,30 @@ export function setVoiceAssistantState(ctx: TerrariumContext, state: string): vo
 
 // ===== Render Frame =====
 
+function stripAnsiCodes(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function drawLabelIfClear(
+  chars: string[],
+  charColors: string[],
+  text: string,
+  centerX: number,
+  color: string,
+): void {
+  const plain = stripAnsiCodes(text);
+  const startX = centerX - Math.floor(plain.length / 2);
+  for (let i = 0; i < plain.length; i++) {
+    const px = startX + i;
+    if (px < 0 || px >= chars.length || chars[px] !== ' ') return;
+  }
+  for (let i = 0; i < plain.length; i++) {
+    const px = startX + i;
+    chars[px] = plain[i];
+    charColors[px] = color;
+  }
+}
+
 export function renderTerrariumFrame(
   ctx: TerrariumContext, width: number, height: number, frame: number,
 ): string[] {
@@ -719,11 +741,7 @@ export function renderTerrariumFrame(
       // Name tag — directly above braille sprite
       if (oct.name && oy - 1 === row) {
         const name = oct.name.length > 12 ? oct.name.slice(0, 11) + '\u2026' : oct.name;
-        const nx = Math.floor(oct.x * width) - Math.floor(name.length / 2);
-        for (let nc = 0; nc < name.length; nc++) {
-          const px = nx + nc;
-          if (px >= 0 && px < width) { chars[px] = name[nc]; charColors[px] = fg(180, 180, 180); }
-        }
+        drawLabelIfClear(chars, charColors, name, Math.floor(oct.x * width), fg(180, 180, 180));
       }
       // "?" bubble — below sprite (not on name tag row, to avoid overlap)
       if (oct.state.startsWith('awaiting') && oy + braille.length === row) {
@@ -817,11 +835,7 @@ export function renderTerrariumFrame(
       // Name tag
       if (jf.name && jy - 1 === row) {
         const name = jf.name.length > 12 ? jf.name.slice(0, 11) + '\u2026' : jf.name;
-        const nx = Math.floor(jf.x * width) - Math.floor(name.length / 2);
-        for (let nc = 0; nc < name.length; nc++) {
-          const px = nx + nc;
-          if (px >= 0 && px < width) { chars[px] = name[nc]; charColors[px] = fg(180, 180, 180); }
-        }
+        drawLabelIfClear(chars, charColors, name, Math.floor(jf.x * width), fg(180, 180, 180));
       }
       // "?" bubble when awaiting
       if (jf.state.startsWith('awaiting') && jy + braille.length === row) {
@@ -843,7 +857,7 @@ export function renderTerrariumFrame(
       }
     }
 
-    // OpenCode (box-drawing nested square)
+    // OpenCode (single-color hollow vertical ring)
     for (const oc of ctx.opencode) {
       const { lines, color } = renderOpenCode(oc, frame, scale);
       const ocHalfW = Math.floor((lines[0]?.replace(/\x1b\[[^m]*m/g, '').length ?? 5) / 2);
@@ -863,11 +877,7 @@ export function renderTerrariumFrame(
       }
       if (oc.name && oy - 1 === row) {
         const name = oc.name.length > 12 ? oc.name.slice(0, 11) + '\u2026' : oc.name;
-        const nx = Math.floor(oc.x * width) - Math.floor(name.length / 2);
-        for (let nc = 0; nc < name.length; nc++) {
-          const px = nx + nc;
-          if (px >= 0 && px < width) { chars[px] = name[nc]; charColors[px] = fg(180, 180, 180); }
-        }
+        drawLabelIfClear(chars, charColors, name, Math.floor(oc.x * width), fg(180, 180, 180));
       }
       if (oc.state.startsWith('awaiting') && oy + lines.length === row) {
         const qx = Math.floor(oc.x * width) + ocHalfW + 1;
@@ -897,11 +907,7 @@ export function renderTerrariumFrame(
       const cfName = ctx.crayfish.sick ? `\u26A0 ${cfBaseName}` : cfBaseName;
       const cfNameColor = ctx.crayfish.sick ? fg(200, 120, 120) : fg(180, 180, 180);
       if (cy - 1 === row) {
-        const nx = Math.floor(ctx.crayfish.x * width) - Math.floor(cfName.length / 2);
-        for (let nc = 0; nc < cfName.length; nc++) {
-          const px = nx + nc;
-          if (px >= 0 && px < width) { chars[px] = cfName[nc]; charColors[px] = cfNameColor; }
-        }
+        drawLabelIfClear(chars, charColors, cfName, Math.floor(ctx.crayfish.x * width), cfNameColor);
       }
 
       // Signal wave rings + orbiting dots when ROUTING
