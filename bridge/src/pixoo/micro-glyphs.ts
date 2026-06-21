@@ -24,106 +24,110 @@ interface Glyph {
   work?: string[];
 }
 
-// Claude Code — terracotta octopus (#C07058): rounded body, two eyes, side arm
-// nubs, dangling legs. Mirrors OCTOPUS_GRID_HD's silhouette at 11×11.
+// Claude Code — terracotta octopus (#C07058): rounded full-width body, two 2×2
+// near-black negative-space eyes (canonical octopusEye), side arm nubs, four
+// dangling leg pairs. Mirrors OCTOPUS_GRID_HD/MD's silhouette at 11×11.
 const OCTOPUS: Glyph = {
   colors: { B: [235, 130, 90], A: [200, 100, 72], E: [16, 9, 9] },
   idle: [
     '..BBBBBBB..',
     '.BBBBBBBBB.',
-    '.BBBBBBBBB.',
-    '.BBEBBBEBB.',
+    'BBBBBBBBBBB',
+    'BBEEBBBEEBB',
+    'BBEEBBBEEBB',
     'ABBBBBBBBBA',
     'ABBBBBBBBBA',
     '.BBBBBBBBB.',
     '.BBBBBBBBB.',
-    '.A.A.A.A.A.',
-    'A.A.A.A.A.A',
-    '.A.A.A.A.A.',
+    'BB.BB.BB.BB',
+    'B..B...B..B',
   ],
   work: [
     '..BBBBBBB..',
     '.BBBBBBBBB.',
-    '.BBBBBBBBB.',
-    '.BBEBBBEBB.',
+    'BBBBBBBBBBB',
+    'BBEEBBBEEBB',
+    'BBEEBBBEEBB',
     'ABBBBBBBBBA',
     'ABBBBBBBBBA',
     '.BBBBBBBBB.',
     '.BBBBBBBBB.',
-    'A.A.A.A.A.A',
-    '.A.A.A.A.A.',
-    'A.A.A.A.A.A',
+    'BB.BB.BB.BB',
+    '..B.B.B.B..',
   ],
 };
 
-// Codex — indigo cloud (#6166E0) with a white `>` chevron + `_` terminal prompt.
-// The prompt mark is the Codex identity (see JELLYFISH_GRID_HD's `>`/`_` cells).
-// Keyed 'jellyfish' to match the renderer's creatureType for codex agents.
+// Codex — indigo cloud (#6166E0): cloud/clover body with top bumps and bottom
+// tentacle lobes (mirrors JELLYFISH_GRID_HD/MD), carrying a white `>` chevron +
+// `_` terminal prompt — the Codex identity. Keyed 'jellyfish' to match the
+// renderer's creatureType for codex agents.
 const JELLYFISH: Glyph = {
   colors: { B: [120, 126, 236], M: [238, 240, 255] },
   idle: [
-    '...........',
-    '...BBBBB...',
-    '..BBBBBBB..',
-    '.BBBBBBBBB.',
-    '.BMBBBBBBB.',
-    '.BBMBBBBBB.',
-    '.BMBBBBBBB.',
-    '.BBBBMMMBB.',
-    '..BBBBBBB..',
-    '...BBBBB...',
-    '...........',
+    '..BB.BB....',
+    '.BBBBBBBB..',
+    'BBBBBBBBBBB',
+    'BBBBBBBBBBB',
+    'BMMBBBBBBBB',
+    'BBMMBBBBBBB',
+    'BMMBBBBBBBB',
+    'BBBBMMMMBBB',
+    'BBBBBBBBBBB',
+    '.BB.BB.BB..',
+    '.B...B...B.',
   ],
 };
 
-// OpenCode — nested square bracket + core (the OpenCode logo). Light frame so it
-// reads (#3a3a3a brand gray is too dark for LEDs), gray core. Mirrors OPENCODE_GRID_HD.
+// OpenCode — two overlapping HOLLOW squares (the canonical opencode.svg ring
+// logo; no filled core — a solid center reads as a shadow). Light stroke so it
+// reads (#3a3a3a brand gray is too dark for LEDs). Mirrors OPENCODE_GRID_HD.
 const OPENCODE: Glyph = {
-  colors: { F: [232, 232, 232], C: [120, 124, 150] },
+  colors: { F: [232, 232, 232] },
   idle: [
-    '.FFFFFF....',
-    '.F....F....',
-    '.F....F....',
-    '.F....F....',
-    '.F..CCCCCC.',
-    '.F..CCCCCC.',
-    '.FFFCCCCCC.',
-    '....CCCCCC.',
-    '....CCCCCC.',
-    '....CCCCCC.',
+    'FFFFFF.....',
+    'F....F.....',
+    'F....F.....',
+    'F..FFFFFF..',
+    'F..F...F...',
+    'FFFF...F...',
+    '...F...F...',
+    '...F...F...',
+    '...FFFFFF..',
+    '...........',
     '...........',
   ],
 };
 
-// OpenClaw — red crayfish (#FF4D4D): round body, antennae to the top corners,
-// side claws, legs, two eyes. Mirrors CRAYFISH_GRID_HD.
+// OpenClaw — red crayfish (#FF4D4D): round body, antennae curving to the top
+// corners, two side-claw blobs, two teal eyes (canonical crayfishEye #00E5CC),
+// two leg stubs. Mirrors CRAYFISH_GRID_HD/MD.
 const CRAYFISH: Glyph = {
-  colors: { B: [255, 92, 92], C: [225, 70, 70], A: [220, 120, 110], E: [16, 9, 9] },
+  colors: { B: [255, 92, 92], C: [210, 52, 52], A: [225, 180, 170], E: [0, 229, 204] },
   idle: [
     'A.........A',
     '.A.......A.',
-    '..ABBBBBA..',
-    '.CBBBBBBBC.',
-    '.CBBEBEBBC.',
-    '.CBBBBBBBC.',
+    '..A.....A..',
+    '...BBBBB...',
+    '..BBBBBBB..',
+    'CCBBEBEBBCC',
+    'CCBBBBBBBCC',
     '..BBBBBBB..',
     '..BBBBBBB..',
-    '.A.A.A.A.A.',
-    'A.A.A.A.A.A',
-    '.A.A.A.A.A.',
+    '...BB.BB...',
+    '...B...B...',
   ],
   work: [
     'A.........A',
     '.A.......A.',
-    '..ABBBBBA..',
-    '..CBBBBBC..',
+    '..A.....A..',
+    '...BBBBB...',
+    '..BBBBBBB..',
     '.CBBEBEBBC.',
-    '..CBBBBBC..',
+    '.CBBBBBBBC.',
     '..BBBBBBB..',
     '..BBBBBBB..',
-    'A.A.A.A.A.A',
-    '.A.A.A.A.A.',
-    'A.A.A.A.A.A',
+    '...B.B.B...',
+    '..B..B..B..',
   ],
 };
 

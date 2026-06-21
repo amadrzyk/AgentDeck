@@ -26,103 +26,107 @@ enum MicroGlyphs {
         let work: [String]?
     }
 
-    // Claude Code — terracotta octopus (#C07058): body, two eyes, side arms, legs.
+    // Claude Code — terracotta octopus (#C07058): full-width body, two 2×2 near-black
+    // negative-space eyes, side arm nubs, four dangling leg pairs.
     private static let octopus = Glyph(
         colors: ["B": (235, 130, 90), "A": (200, 100, 72), "E": (16, 9, 9)],
         idle: [
             "..BBBBBBB..",
             ".BBBBBBBBB.",
-            ".BBBBBBBBB.",
-            ".BBEBBBEBB.",
+            "BBBBBBBBBBB",
+            "BBEEBBBEEBB",
+            "BBEEBBBEEBB",
             "ABBBBBBBBBA",
             "ABBBBBBBBBA",
             ".BBBBBBBBB.",
             ".BBBBBBBBB.",
-            ".A.A.A.A.A.",
-            "A.A.A.A.A.A",
-            ".A.A.A.A.A.",
+            "BB.BB.BB.BB",
+            "B..B...B..B",
         ],
         work: [
             "..BBBBBBB..",
             ".BBBBBBBBB.",
-            ".BBBBBBBBB.",
-            ".BBEBBBEBB.",
+            "BBBBBBBBBBB",
+            "BBEEBBBEEBB",
+            "BBEEBBBEEBB",
             "ABBBBBBBBBA",
             "ABBBBBBBBBA",
             ".BBBBBBBBB.",
             ".BBBBBBBBB.",
-            "A.A.A.A.A.A",
-            ".A.A.A.A.A.",
-            "A.A.A.A.A.A",
+            "BB.BB.BB.BB",
+            "..B.B.B.B..",
         ]
     )
 
-    // Codex — indigo cloud (#6166E0) with a white `>` chevron + `_` terminal prompt.
+    // Codex — indigo cloud (#6166E0): cloud body with top bumps + bottom tentacle
+    // lobes, carrying a white `>` chevron + `_` terminal prompt.
     private static let codex = Glyph(
         colors: ["B": (120, 126, 236), "M": (238, 240, 255)],
         idle: [
-            "...........",
-            "...BBBBB...",
-            "..BBBBBBB..",
-            ".BBBBBBBBB.",
-            ".BMBBBBBBB.",
-            ".BBMBBBBBB.",
-            ".BMBBBBBBB.",
-            ".BBBBMMMBB.",
-            "..BBBBBBB..",
-            "...BBBBB...",
-            "...........",
+            "..BB.BB....",
+            ".BBBBBBBB..",
+            "BBBBBBBBBBB",
+            "BBBBBBBBBBB",
+            "BMMBBBBBBBB",
+            "BBMMBBBBBBB",
+            "BMMBBBBBBBB",
+            "BBBBMMMMBBB",
+            "BBBBBBBBBBB",
+            ".BB.BB.BB..",
+            ".B...B...B.",
         ],
         work: nil
     )
 
-    // OpenCode — nested square bracket + core block (the OpenCode logo).
+    // OpenCode — two overlapping HOLLOW squares (canonical opencode.svg ring logo;
+    // no filled core — a solid center reads as a shadow).
     private static let opencode = Glyph(
-        colors: ["F": (232, 232, 232), "C": (120, 124, 150)],
+        colors: ["F": (232, 232, 232)],
         idle: [
-            ".FFFFFF....",
-            ".F....F....",
-            ".F....F....",
-            ".F....F....",
-            ".F..CCCCCC.",
-            ".F..CCCCCC.",
-            ".FFFCCCCCC.",
-            "....CCCCCC.",
-            "....CCCCCC.",
-            "....CCCCCC.",
+            "FFFFFF.....",
+            "F....F.....",
+            "F....F.....",
+            "F..FFFFFF..",
+            "F..F...F...",
+            "FFFF...F...",
+            "...F...F...",
+            "...F...F...",
+            "...FFFFFF..",
+            "...........",
             "...........",
         ],
         work: nil
     )
 
-    // OpenClaw — red crayfish (#FF4D4D): round body, antennae to corners, claws, legs, eyes.
+    // OpenClaw — red crayfish (#FF4D4D): round body, antennae curving to the top
+    // corners, two side-claw blobs, two teal eyes (#00E5CC), two leg stubs.
     private static let crayfish = Glyph(
-        colors: ["B": (255, 92, 92), "C": (225, 70, 70), "A": (220, 120, 110), "E": (16, 9, 9)],
+        colors: ["B": (255, 92, 92), "C": (210, 52, 52), "A": (225, 180, 170), "E": (0, 229, 204)],
         idle: [
             "A.........A",
             ".A.......A.",
-            "..ABBBBBA..",
-            ".CBBBBBBBC.",
-            ".CBBEBEBBC.",
-            ".CBBBBBBBC.",
+            "..A.....A..",
+            "...BBBBB...",
+            "..BBBBBBB..",
+            "CCBBEBEBBCC",
+            "CCBBBBBBBCC",
             "..BBBBBBB..",
             "..BBBBBBB..",
-            ".A.A.A.A.A.",
-            "A.A.A.A.A.A",
-            ".A.A.A.A.A.",
+            "...BB.BB...",
+            "...B...B...",
         ],
         work: [
             "A.........A",
             ".A.......A.",
-            "..ABBBBBA..",
-            "..CBBBBBC..",
+            "..A.....A..",
+            "...BBBBB...",
+            "..BBBBBBB..",
             ".CBBEBEBBC.",
-            "..CBBBBBC..",
+            ".CBBBBBBBC.",
             "..BBBBBBB..",
             "..BBBBBBB..",
-            "A.A.A.A.A.A",
-            ".A.A.A.A.A.",
-            "A.A.A.A.A.A",
+            "...B.B.B...",
+            "..B..B..B..",
         ]
     )
 

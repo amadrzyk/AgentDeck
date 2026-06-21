@@ -15,8 +15,10 @@ import argparse
 import asyncio
 import hashlib
 import io
+import json
 import signal
 import sys
+import urllib.request
 from typing import Iterable
 
 from PIL import Image as PilImage, ImageEnhance
@@ -113,10 +115,69 @@ def encode_image_bright(img: PilImage.Image, brightness: int, gamma: float, sat:
     return bytes(out)
 
 
+def fetch_display_state(url: str):
+    """Fetch host display dim state from the AgentDeck daemon, if available."""
+    endpoint = f"{url.rstrip('/')}/display-state"
+    with urllib.request.urlopen(endpoint, timeout=1.0) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def resolve_display_brightness(display_state, normal_brightness: int):
+    """Return (effective software brightness, dimmed, signature) for the host state.
+
+    The Timebox Mini has no hardware brightness command — brightness is baked into
+    the encoded frame by `encode_image_bright` (0 yields a blank frame). So when the
+    host display sleeps with dim 'off' we drop to 0 (a truly blank sleep frame); with
+    dim 'min' we drop to the configured dim level. The signature lets the caller
+    detect host-state transitions and force a re-encode/re-push at the new brightness.
+    """
+    if not isinstance(display_state, dict):
+        return normal_brightness, False, f"on|true|off|10|{normal_brightness}"
+
+    display_on = bool(display_state.get("displayOn", True))
+    dim = display_state.get("dim") if isinstance(display_state.get("dim"), dict) else {}
+    dim_enabled = dim.get("enabled", True)
+    if not isinstance(dim_enabled, bool):
+        dim_enabled = True
+    dim_mode = "min" if dim.get("mode") == "min" else "off"
+    try:
+        dim_level = int(dim.get("level", 10))
+    except (TypeError, ValueError):
+        dim_level = 10
+    dim_level = max(0, min(100, dim_level))
+    signature = f"{display_on}|{dim_enabled}|{dim_mode}|{dim_level}|{normal_brightness}"
+
+    if display_on or not dim_enabled:
+        return normal_brightness, False, signature
+    # Display off + dim enabled: 'off' => fully blank (0); 'min' => dim level.
+    return (dim_level if dim_mode == "min" else 0), True, signature
+
+
 async def write_packet(client, packet: bytes) -> None:
     """Chunked write-without-response to the transparent-UART TX characteristic."""
     for i in range(0, len(packet), CHUNK_SIZE):
         await client.write_gatt_char(WRITE_CHAR, packet[i:i + CHUNK_SIZE], response=False)
+
+
+async def push_micro_frame(client, url, brightness, gamma, sat, contrast, last_key, force=False) -> str:
+    """Fetch the native 11x11 micro frame and push it over BLE when its
+    content+brightness changed (or `force`). Returns the new dedup key.
+
+    `size=11&layout=micro` is a NATIVE 11x11 frame — a bold hand-authored creature
+    glyph on a status field, drawn pixel-for-pixel at the device resolution (no
+    downscale). The key mixes the source hash with `brightness` so a host display
+    sleep/wake (brightness change, same source frame) still forces a re-push.
+    """
+    frame_data = urllib.request.urlopen(
+        f"{url.rstrip('/')}/pixoo/frame?size=11&layout=micro", timeout=3.0
+    ).read()
+    key = f"{hashlib.sha256(frame_data).hexdigest()}|{brightness}"
+    if force or key != last_key:
+        img = PilImage.open(io.BytesIO(frame_data))
+        payload = encode_image_bright(img, brightness, gamma, sat, contrast)
+        await write_packet(client, build_static_image_packet(payload))
+        print(f"Frame sent ({key[:8]} @ {brightness}%)")
+    return key
 
 
 async def run(address: str, url: str, brightness: int, gamma: float, sat: float, contrast: float, once: bool = False) -> None:
@@ -133,8 +194,6 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
         except NotImplementedError:
             signal.signal(sig, lambda *_: None)
 
-    last_hash = ""
-
     # Imported lazily so the module is usable for encoding tests without bleak.
     from bleak import BleakClient
 
@@ -143,23 +202,57 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
             print(f"Connecting BLE {address}...")
             async with BleakClient(address, timeout=15.0) as client:
                 print(f"BLE connected (MTU={client.mtu_size})")
+
+                last_key = ""
+                current_brightness = brightness
+                display_dimmed = False
+                last_display_signature = ""
+                # Honor the host display dim state already at connect time so a
+                # reconnect while the screen is asleep comes up dim/blank, not bright.
+                try:
+                    current_brightness, display_dimmed, last_display_signature = \
+                        resolve_display_brightness(fetch_display_state(url), brightness)
+                except Exception:
+                    current_brightness, display_dimmed, last_display_signature = brightness, False, ""
+
                 while not stop.is_set():
+                    # 1. Apply host display sleep/wake. The daemon exposes the same
+                    #    display_state Pixoo/iDotMatrix/ESP32 receive; older session-
+                    #    only bridges omit it (keep the configured brightness).
+                    transitioned = False
                     try:
-                        import urllib.request
-                        # size=11&layout=micro: a NATIVE 11x11 frame — a bold
-                        # hand-authored creature glyph on a status field, drawn
-                        # pixel-for-pixel at the device resolution (no downscale).
-                        frame_data = urllib.request.urlopen(
-                            f"{url.rstrip('/')}/pixoo/frame?size=11&layout=micro", timeout=3.0
-                        ).read()
-                        frame_hash = hashlib.sha256(frame_data).hexdigest()
-                        if frame_hash != last_hash:
-                            img = PilImage.open(io.BytesIO(frame_data))
-                            payload = encode_image_bright(img, brightness, gamma, sat, contrast)
-                            packet = build_static_image_packet(payload)
-                            await write_packet(client, packet)
-                            last_hash = frame_hash
-                            print(f"Frame sent ({frame_hash[:8]})")
+                        eff_b, dimmed, sig = resolve_display_brightness(fetch_display_state(url), brightness)
+                        if sig != last_display_signature or eff_b != current_brightness:
+                            current_brightness, display_dimmed, last_display_signature = eff_b, dimmed, sig
+                            transitioned = True
+                            print(f"Host display {'asleep' if dimmed else 'awake'} — brightness {eff_b}%")
+                    except Exception:
+                        pass
+
+                    # 2. While the host display is asleep, push one frame at the dim
+                    #    brightness on the transition (0 => blank sleep frame), then
+                    #    pause polling to save BLE bandwidth (mirrors iDotMatrix).
+                    if display_dimmed:
+                        if transitioned or once:
+                            try:
+                                last_key = await push_micro_frame(
+                                    client, url, current_brightness, gamma, sat, contrast, last_key, force=True
+                                )
+                            except Exception as e:
+                                print(f"Dim-frame send error: {e}", file=sys.stderr)
+                        if once:
+                            return
+                        try:
+                            await asyncio.wait_for(stop.wait(), timeout=POLL_INTERVAL)
+                        except asyncio.TimeoutError:
+                            pass
+                        continue
+
+                    # 3. Normal streaming — push only when content or brightness changed.
+                    try:
+                        last_key = await push_micro_frame(
+                            client, url, current_brightness, gamma, sat, contrast, last_key
+                        )
                     except Exception as e:
                         print(f"Frame fetch/send error: {e}", file=sys.stderr)
                     if once:
