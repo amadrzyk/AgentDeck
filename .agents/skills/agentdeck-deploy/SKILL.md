@@ -49,12 +49,17 @@ Parse the argument string to determine target(s). Multiple targets can be combin
 
 ### ESP32 Boards
 
-| Board | Environment | Serial Pattern | Chip |
-|-------|------------|----------------|------|
-| **86 Box** (480×480) | `box_86` | `/dev/cu.usbserial-*` | ESP32-S3, CH340 |
-| **IPS 3.5"** (480×320) | `ips_35` | `/dev/cu.usbmodem*` | ESP32-S3, native USB |
-| **Round AMOLED** (360×360) | `round_amoled` | `/dev/cu.usbmodem*` | ESP32-S3, native USB |
-| **Ulanzi TC001** (8×32 LED) | `ulanzi_tc001` | `/dev/cu.usbserial-*` | ESP32-D0WD classic, CH340 |
+> **두 이름 층** (panel/form + 인치): `friendly` 는 `./scripts/flash.sh <friendly>` 에 넘기는 canonical 친근명, `pio env` 는 `pio run -e <pio env>` / `.pio/build/<pio env>/` 에 쓰는 실제 PlatformIO env. flash.sh 는 둘 다 받지만 `pio run -e` 는 **pio env 만** 받는다.
+
+| Board | friendly (flash.sh) | pio env (pio run -e) | Serial Pattern | Chip |
+|-------|------------|------------|----------------|------|
+| **86 Box** (480×480) | `box_40` | `box_86` | `/dev/cu.usbserial-*` | ESP32-S3, CH340 |
+| **IPS 3.5"** (480×320) | `ips_35` | `ips35` | `/dev/cu.usbmodem*` | ESP32-S3, native USB |
+| **Round AMOLED** (360×360) | `amoled_18` | `amoled` | `/dev/cu.usbmodem*` | ESP32-S3, native USB |
+| **TTGO T-Display** (135×240) | `tft_114` | `ttgo` | `/dev/cu.wchusbserial*` | ESP32-D0WDQ6, CH340 |
+| **ESP32-C6** (172×320) | `c6_147` | `esp32_c6_147` | `/dev/cu.usbmodem*` | ESP32-C6, native USB CDC |
+| **IPS 10.1"** (800×1280) | `ips_101` | `ips10` | `/dev/cu.wchusbserial*` | ESP32-P4 + C6 |
+| **Ulanzi TC001** (8×32 LED) | `led_8x32` | `led8x32` | `/dev/cu.usbserial-*` | ESP32-D0WD classic, CH340 |
 
 ## Execution Steps
 
@@ -252,7 +257,7 @@ After flash: USB re-plug required for JTAG boards (IPS 3.5", Round AMOLED).
 Use the helper script or the equivalent `esptool` command at `115200`:
 ```bash
 cd /Users/puritysb/github/AgentDeck/esp32
-./scripts/flash.sh ulanzi_tc001 /dev/cu.usbserial-211110
+./scripts/flash.sh led_8x32 /dev/cu.usbserial-211110
 ```
 
 Equivalent manual fallback:
@@ -261,9 +266,9 @@ cd /Users/puritysb/github/AgentDeck/esp32
 ~/.platformio/penv/bin/esptool --chip esp32 --port /dev/cu.usbserial-211110 --baud 115200 \
   --before default-reset --after hard-reset write-flash -z \
   --flash-mode dio --flash-freq 40m --flash-size 8MB \
-  0x1000 .pio/build/ulanzi_tc001/bootloader.bin \
-  0x8000 .pio/build/ulanzi_tc001/partitions.bin \
-  0x10000 .pio/build/ulanzi_tc001/firmware.bin
+  0x1000 .pio/build/led8x32/bootloader.bin \
+  0x8000 .pio/build/led8x32/partitions.bin \
+  0x10000 .pio/build/led8x32/firmware.bin
 ```
 
 Notes:

@@ -144,13 +144,14 @@
         <tr><td class="device-name">iDotMatrix 32×32</td><td><span class="badge b-hw">상용 BLE</span></td><td>BLE SoC (비-ESP32)</td><td>RGB AMOLED · <span class="res">32×32</span></td><td>BLE GATT</td><td>Bluetooth LE</td><td><span class="badge b-yes">YES</span></td></tr>
         <tr><td class="device-name">Divoom Timebox Mini</td><td><span class="badge b-hw">상용 BLE</span></td><td>BLE SoC (비-ESP32)</td><td>RGB LED · <span class="res">11×11</span></td><td>BLE GATT (ISSC)</td><td>Bluetooth LE</td><td><span class="badge b-yes">YES</span></td></tr>
         <tr><td class="device-name">Ulanzi TC001</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32 (classic)</td><td>WS2812B · <span class="res">8×32</span> (256 LED)</td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-warn">GAP<sup>1</sup></span></td></tr>
-        <tr><td class="device-name">Ulanzi D200H</td><td><span class="badge b-hw">HID deck</span></td><td>SigmaStar SSD210</td><td>nv3052c LCD · <span class="res">960×540</span> (14 keys)</td><td>USB HID</td><td>USB</td><td><span class="badge b-yes">YES</span></td></tr>
-        <tr><td class="device-name">Elgato Stream Deck+</td><td><span class="badge b-hw">HID deck</span></td><td>Elgato (내장)</td><td>LCD keys + dials + touch strip</td><td>WebSocket :9120</td><td>USB → 네트워크</td><td><span class="badge b-yes">YES<sup>3</sup></span></td></tr>
+        <tr><td class="device-name">Ulanzi D200H</td><td><span class="badge b-hw">HID deck</span></td><td>SigmaStar SSD210</td><td>nv3052c LCD · <span class="res">960×540</span> (14 keys)</td><td>Ulanzi Studio 플러그인 (단일 드라이버; direct-HID retire)</td><td>USB</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">Elgato Stream Deck (15-key)</td><td><span class="badge b-hw">HID deck</span></td><td>Elgato (내장)</td><td>LCD keys 15 (5×3)</td><td>WebSocket :9120</td><td>USB → 네트워크</td><td><span class="badge b-yes">YES<sup>3</sup></span></td></tr>
+        <tr><td class="device-name">Elgato Stream Deck+</td><td><span class="badge b-hw">HID deck</span></td><td>Elgato (내장)</td><td>LCD keys 8 (4×2) + dials 4 + touch strip</td><td>WebSocket :9120</td><td>USB → 네트워크</td><td><span class="badge b-yes">YES<sup>3</sup></span></td></tr>
         <tr><td class="device-name">Apple — macOS</td><td><span class="badge b-sw">SW</span></td><td>Apple Silicon / Intel</td><td>호스트 디스플레이</td><td>내장 Swift daemon / WS</td><td>—</td><td><span class="badge b-yes">YES</span></td></tr>
         <tr><td class="device-name">Apple — iOS / iPadOS</td><td><span class="badge b-sw">SW</span></td><td>A / M-series</td><td>디바이스 디스플레이</td><td>WebSocket :9120</td><td>WiFi (same-LAN)</td><td><span class="badge b-yes">YES</span></td></tr>
         <tr><td class="device-name">Android — e-ink</td><td><span class="badge b-sw">SW</span></td><td>벤더별 (RK3566 등)</td><td>e-ink 디스플레이</td><td>WebSocket (ADB localhost)</td><td>USB / ADB</td><td><span class="badge b-no">CLI<sup>2</sup></span></td></tr>
         <tr><td class="device-name">Android — 태블릿</td><td><span class="badge b-sw">SW</span></td><td>ARM / x86</td><td>컬러 LCD</td><td>WebSocket + mDNS</td><td>WiFi (same-LAN)</td><td><span class="badge b-warn">LAN<sup>2</sup></span></td></tr>
-        <tr><td class="device-name">SSE 스트림</td><td><span class="badge b-tui">프로토콜</span></td><td>호스트</td><td>브라우저 / 스크립트</td><td>HTTP SSE :9120 <code>/sse</code></td><td>로컬 / LAN</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">SSE 스트림</td><td><span class="badge b-tui">프로토콜</span></td><td>호스트</td><td>브라우저 / 스크립트</td><td>HTTP SSE :9120 <code>/sse</code></td><td>로컬 / LAN</td><td><span class="badge b-warn">YES*</span></td></tr>
         <tr><td class="device-name">TUI Dashboard</td><td><span class="badge b-tui">터미널</span></td><td>호스트 CPU</td><td>터미널 (truecolor)</td><td>WebSocket :9120</td><td>로컬</td><td><span class="badge b-yes">YES</span></td></tr>
       </tbody>
     </table>
@@ -158,29 +159,32 @@
   <p class="section-note">
     <sup>1</sup> <strong>GAP</strong> = TC001 ⚠는 <em>샌드박스 제약이 아니라 구현 갭</em>. 다른 ESP32 보드와 동일한 serial/WiFi state-JSON으로 자기 UI를 렌더하며 serial entitlement로 이미 커버됨(테스트가 serial board로 보고). Swift 데몬에 <code>led8x32</code> 경로 미검증이라 CLI-tier. <strong>"ADB" 표기는 전부 legacy/dead code</strong> — <code>AdbDeviceClass.ulanziTc001</code> 와이어 클래스 producer가 없어 ADB 분기는 죽어 있고 라이브 경로는 serial. 관련 표기는 정정됨(dead-code 제거는 후속). HW 검증 후 ✅ 승격 가능.
     <sup>2</sup> Android 앱은 mDNS LAN(iOS와 동일) + ADB localhost 양쪽 지원. USB-테더 <strong>e-ink</strong>는 Mac 앱이 <code>adb reverse</code>를 못 띄워 CLI 전용(진짜 제약). 같은 LAN의 <strong>태블릿</strong>은 mDNS로 App Store Mac 데몬에 직접 접속 가능(<strong>LAN</strong>).
-    <sup>3</sup> Elgato Stream Deck 앱 별도 설치(플러그인 호스트). · <strong>포트는 가변</strong> — ESP32는 <code>device_info_request</code>로 식별.
+    <sup>3</sup> Elgato Stream Deck 앱 별도 설치(플러그인 호스트). 표준 15키(<code>agentdeck-sd</code>, DeviceType 0)·SD+(<code>agentdeck-sdplus</code>, DeviceType 7)는 동일 플러그인의 두 프로파일이며 mini(1)·XL(2)도 <code>familyForDeviceType()</code>로 그리드 자동 산출. · <strong>포트는 가변</strong> — ESP32는 <code>device_info_request</code>로 식별.
+    <br><strong>*</strong> SSE 풀 스트리밍은 <strong>Node 브리지</strong>(<code>bridge/src/hook-server.ts</code>, <code>broadcastSse</code>) 한정. App Store macOS <strong>Swift 데몬</strong>(<code>DaemonServer.swift</code>)의 <code>/sse</code>는 <code>event: connected</code> 1회 후 끊는 <strong>스텁</strong>이라 스트리밍 안 함 — App Store 빌드의 라이브 SSE 대시보드는 외부(Node) 데몬 필요. 실 소비자는 리포 내 <code>/status</code>·<code>/pixoo</code> HTML 대시보드(인라인 EventSource).
   </p>
 
   <h2>A. ESP32 펌웨어 디스플레이 보드</h2>
   <p class="section-note">공통: PlatformIO + Arduino, <code>LVGL 9.2.0</code>(TC001 제외), 115200 baud, flash mode DIO, 이중 경로(USB Serial 기본 + WiFi WebSocket 독립). 출처: <code>esp32/platformio.ini</code> · <code>esp32/boards/board_*.h</code>.</p>
+  <p class="section-note"><strong>env 이름 두 층</strong>: <code>friendly명</code>은 <code>esp32/scripts/flash.sh</code>가 받는 canonical 친근명(panel/form + 인치: 3.5→35·1.8→18·1.14→114·1.47→147·10.1→101)이고, <code>pio env</code>는 <code>platformio.ini</code>의 실제 <code>[env:...]</code>(불변). flash.sh가 친근명→pio로 매핑하며 legacy 별칭(<code>round_amoled</code>·<code>ttgo</code>·<code>ips10</code> 등)도 계속 받는다. CI/<code>pio run -e</code>는 pio env 사용.</p>
   <div class="scroll">
     <table>
       <thead>
-        <tr><th>보드</th><th>env</th><th class="wrap-cell">모델 (제조사)</th><th>SoC</th><th>해상도</th><th>디스플레이 IC</th><th>터치 IC</th><th>Flash</th><th>PSRAM</th><th>USB-UART</th></tr>
+        <tr><th>보드</th><th>friendly명</th><th>pio env</th><th class="wrap-cell">모델 (제조사)</th><th>SoC</th><th>해상도</th><th>디스플레이 IC</th><th>터치 IC</th><th>Flash</th><th>PSRAM</th><th>USB-UART</th></tr>
       </thead>
       <tbody>
-        <tr><td class="device-name">IPS 3.5"</td><td><code>ips35</code></td><td>JC3248W535 (Guition)</td><td>ESP32-S3</td><td class="res">480×320</td><td>AXS15231B (QSPI)</td><td>통합</td><td>16MB</td><td>YES</td><td>Native USB JTAG</td></tr>
-        <tr><td class="device-name">Round AMOLED 1.8"</td><td><code>amoled</code></td><td>JC3636W518 (Guition)</td><td>ESP32-S3</td><td class="res">360×360</td><td>ST77916 (QSPI)</td><td>CST816S (I2C)</td><td>8MB</td><td>YES</td><td>Native USB JTAG</td></tr>
-        <tr><td class="device-name">86 Box 4"</td><td><code>box_86</code> / <code>rgb48</code></td><td>ESP32-S3-4848S040 (Guition)</td><td>ESP32-S3</td><td class="res">480×480</td><td>ST7701 (RGB 16-bit)</td><td>GT911 (I2C)</td><td>16MB</td><td>YES</td><td>CH340</td></tr>
-        <tr><td class="device-name">TTGO T-Display 1.14"</td><td><code>ttgo</code></td><td>LilyGO T-Display</td><td>ESP32-D0WDQ6</td><td class="res">135×240</td><td>ST7789 (SPI)</td><td>없음 (버튼 2)</td><td>16MB</td><td>NO</td><td>CH340<sup>4</sup></td></tr>
-        <tr><td class="device-name">ESP32-C6 1.47"</td><td><code>esp32_c6_147</code></td><td>Waveshare ESP32-C6-LCD-1.47"</td><td>ESP32-C6</td><td class="res">172×320</td><td>ST7789 (SPI)</td><td>없음 (BOOT)</td><td>4MB</td><td>NO</td><td>Native USB CDC</td></tr>
-        <tr><td class="device-name">IPS 10.1"</td><td><code>ips10</code></td><td>JC8012P4A1C (Guition)</td><td>ESP32-P4NRW32 (400MHz)</td><td class="res">800×1280</td><td>JD9365 (MIPI-DSI)</td><td>GSL3680 (I2C)</td><td>4MB<sup>5</sup></td><td>32MB</td><td>CH340</td></tr>
+        <tr><td class="device-name">IPS 3.5"</td><td><code>ips_35</code></td><td><code>ips35</code></td><td>JC3248W535 (Guition)</td><td>ESP32-S3</td><td class="res">480×320</td><td>AXS15231B (QSPI)</td><td>통합</td><td>16MB</td><td>YES</td><td>Native USB JTAG</td></tr>
+        <tr><td class="device-name">Round AMOLED 1.8"</td><td><code>amoled_18</code></td><td><code>amoled</code></td><td>JC3636W518 (Guition)</td><td>ESP32-S3</td><td class="res">360×360</td><td>ST77916 (QSPI)</td><td>CST816S (I2C)</td><td>8MB</td><td>YES</td><td>Native USB JTAG</td></tr>
+        <tr><td class="device-name">86 Box 4"</td><td><code>box_40</code></td><td><code>box_86</code><sup>6</sup></td><td>ESP32-S3-4848S040 (Guition)</td><td>ESP32-S3</td><td class="res">480×480</td><td>ST7701 (RGB 16-bit)</td><td>GT911 (I2C)</td><td>16MB</td><td>YES</td><td>CH340</td></tr>
+        <tr><td class="device-name">TTGO T-Display 1.14"</td><td><code>tft_114</code></td><td><code>ttgo</code></td><td>LilyGO T-Display</td><td>ESP32-D0WDQ6</td><td class="res">135×240</td><td>ST7789 (SPI)</td><td>없음 (버튼 2)</td><td>16MB</td><td>NO</td><td>CH340<sup>4</sup></td></tr>
+        <tr><td class="device-name">ESP32-C6 1.47"</td><td><code>c6_147</code></td><td><code>esp32_c6_147</code></td><td>Waveshare ESP32-C6-LCD-1.47"</td><td>ESP32-C6</td><td class="res">172×320</td><td>ST7789 (SPI)</td><td>없음 (BOOT)</td><td>4MB</td><td>NO</td><td>Native USB CDC</td></tr>
+        <tr><td class="device-name">IPS 10.1"</td><td><code>ips_101</code></td><td><code>ips10</code></td><td>JC8012P4A1C (Guition)</td><td>ESP32-P4NRW32 (400MHz)</td><td class="res">800×1280</td><td>JD9365 (MIPI-DSI)</td><td>GSL3680 (I2C)</td><td>4MB<sup>5</sup></td><td>32MB</td><td>CH340</td></tr>
       </tbody>
     </table>
   </div>
   <p class="section-note">
     <sup>4</sup> TTGO 플래시는 57600 baud + <code>--no-stub</code>(~5분). PSRAM 없는 classic이라 정적 DRAM ~10KB → 테라리움 축소 버퍼.
     <sup>5</sup> P4NRW32 모듈은 16MB Flash + 32MB PSRAM 통합이나 빌드는 4MB 파티션. WiFi는 co-processor <strong>ESP32-C6-MINI-1U-N4</strong>(esp-hosted), TX 20dBm.
+    <sup>6</sup> <code>box_86</code>의 legacy 중복 env <code>rgb48</code>가 <code>platformio.ini</code>의 <code>default_envs</code>(같은 <code>box_86.csv</code> 파티션, platform source만 다른 near-dup). 친근명 정리 범위에서 pio env는 유지 — <code>pio run</code> 무인자 빌드 시 <code>rgb48</code> 선택됨에 주의.
   </p>
 
   <h2>B. LED 매트릭스 디바이스</h2>
@@ -229,7 +233,7 @@
 
   <h2>C. 입력 / 제어 하드웨어 (HID 데크)</h2>
   <h3>Ulanzi D200H "Deck Dock"</h3>
-  <p class="section-note">stock HID 프로토콜(ADB/펌웨어 변조 없음), daemon-only. 출처: <code>docs/plugin-conventions.md</code> §D200H.</p>
+  <p class="section-note">stock HID 프로토콜(ADB/펌웨어 변조 없음), daemon-only. <strong>Ulanzi Studio 플러그인</strong>(<code>plugin-ulanzi</code>)이 <strong>유일한 지원 드라이버</strong> — D200H 는 Mac Ulanzi Studio 앱을 통해야만 안정 렌더. <strong>direct-HID 폴백은 retire(2026-06-21, <code>380c6510</code>)</strong>: 두 데몬 모두 더 이상 HID 로 열지 않음(Node <code>d200h: false</code> / Swift <code>enableD200hDirectHID = false</code>). 모듈 코드와 stand-down arbitration 은 dormant(보존·재활성 가능)하나 비활성. 출처: <code>docs/plugin-conventions.md</code> §D200H, 커밋 <code>380c6510</code>.</p>
   <div class="scroll">
     <table>
       <tbody>
@@ -239,22 +243,24 @@
         <tr><th>키</th><td>14 keys (3행×5열, Row2 col3+col4 합체), ~192×180px</td></tr>
         <tr><th>OS</th><td>FlythingsOS V2.1 (<code>Zkswe_SSD21X_SPINOR</code>)</td></tr>
         <tr><th>연결</th><td>USB HID — VID <code>0x2207</code> / PID <code>0x0019</code>, 1024B 패킷, 헤더 <code>0x7C7C</code>, ZIP 청킹 (WiFi 없음)</td></tr>
-        <tr><th>드라이버</th><td>Swift <code>D200hHidModule.swift</code>(IOKit) / Node <code>bridge/src/d200h/</code>(node-hid)</td></tr>
+        <tr><th>드라이버</th><td><strong>유일</strong>: Ulanzi Studio 플러그인 <code>plugin-ulanzi/</code>(daemon WS). direct-HID 모듈(Swift <code>D200hHidModule.swift</code> IOKit / Node <code>bridge/src/d200h/</code> node-hid)은 <strong>retire — dormant(비활성)</strong></td></tr>
       </tbody>
     </table>
   </div>
-  <h3>Elgato Stream Deck+</h3>
+  <h3>Elgato Stream Deck (표준 15키) · Stream Deck+</h3>
+  <p class="section-note">하나의 플러그인이 두(이상의) Elgato 하드웨어를 지원 — 액션 코드는 디바이스-불문이며 <code>familyForDeviceType()</code>(<code>plugin/src/actions/session-slot-button.ts</code>)가 등록 디바이스의 <code>columns×rows</code>로 키패드 슬롯(<code>slot = row*columns + col</code>) 자동 산출.</p>
   <div class="scroll">
     <table>
+      <thead><tr><th>항목</th><th>표준 Stream Deck (15키)</th><th>Stream Deck+</th></tr></thead>
       <tbody>
-        <tr><th>하드웨어</th><td>LCD 키 8개(2×4) + 로터리 인코더 4개 + LCD 터치 스트립</td></tr>
-        <tr><th>연결</th><td>호스트 USB → Elgato Stream Deck 앱 플러그인 → daemon WebSocket(:9120)</td></tr>
-        <tr><th>플러그인</th><td>Stream Deck SDK v2 · UUID <code>bound.serendipity.agentdeck</code> · 프로파일 <code>agentdeck-sdplus</code>(DeviceType 7) / <code>agentdeck-sd</code>(DeviceType 0)</td></tr>
-        <tr><th>인코더</th><td>E1 유틸리티 · E2 액션 · E3 터미널 · E4 음성 (음성 takeover 시 E2–E4 wide-canvas)</td></tr>
-        <tr><th>이벤트</th><td>양방향 · BridgeEvent 13종 전부</td></tr>
+        <tr><th>프로파일</th><td><code>agentdeck-sd</code> (DeviceType <strong>0</strong>)</td><td><code>agentdeck-sdplus</code> (DeviceType <strong>7</strong>)</td></tr>
+        <tr><th>키패드</th><td>LCD 키 <strong>15개 (5×3)</strong></td><td>LCD 키 <strong>8개 (4×2)</strong></td></tr>
+        <tr><th>인코더/스트립</th><td>없음</td><td>로터리 인코더 <strong>4개</strong> + LCD 터치 스트립</td></tr>
+        <tr><th>추가 지원</th><td colspan="2">mini(DeviceType 1) · XL(2)도 <code>familyForDeviceType()</code>로 그리드 자동 산출</td></tr>
       </tbody>
     </table>
   </div>
+  <p class="section-note">공통: 호스트 USB → Elgato Stream Deck 앱 플러그인 → daemon WebSocket(:9120) · Stream Deck SDK v2 · UUID <code>bound.serendipity.agentdeck</code> · 양방향 BridgeEvent 13종 전부. <strong>인코더 매핑(SD+ 전용)</strong>: E1 유틸리티 · E2 액션 · E3 터미널 · E4 음성 (음성 takeover 시 E2–E4 wide-canvas).</p>
 
   <h2>D. 모바일 / 데스크톱 소프트웨어 플랫폼</h2>
   <h3>Apple (iOS · iPadOS · macOS)</h3>
@@ -290,6 +296,7 @@
     </table>
   </div>
   <p class="section-note">e-ink 리프레시: GC16(표준) · DU(dither) · A2(fast). 컬러 e-ink는 1/4 해상도 컬러 / full B&amp;W. <strong>연결</strong>: Android 앱은 mDNS LAN(iOS와 동일) + ADB localhost 양쪽 지원 — USB-테더 e-ink는 <code>adb reverse</code> 필요(CLI 전용), 같은 LAN 태블릿은 mDNS로 App Store Mac 데몬 직접 접속(각주⁴).</p>
+  <p class="section-note"><strong>왜 Android 렌더링이 iOS(SwiftUI)와 다른가 — 근본적 차이, 통일 이득 없음.</strong> Android는 <strong>e-ink 리더 자체가 타깃</strong>(Crema/Onyx/Kobo/Pantone/Bigme)이라 벤더별 EPD 제어 인프라(<code>EinkDetector.kt</code>·<code>EinkRenderer.kt</code> 16-level 그레이 양자화·<code>EinkRefreshZone.kt</code> GC16/DU/A2 존)를 갖는다. iOS는 컬러 LCD/OLED 전용이라 SwiftUI <code>Canvas</code>+<code>TimelineView</code> 60fps면 충분하고 EPD 리프레시 모드 개념이 OS에 없어 분기 불가·불요. <strong>데이터/프로토콜 계층은 이미 공유</strong>(<code>shared/src/protocol.ts</code>, 양쪽 동일 WS dialect) — 갈라지는 건 렌더 파이프라인 + 디스커버리 플러밍(<code>NsdManager</code>/OkHttp vs <code>NWBrowser</code>/<code>URLSessionWebSocketTask</code>)뿐이고 둘 다 플랫폼-네이티브가 안정적이라 의도된 최적화. 더 통일하면 iOS에 무의미한 no-op e-ink shim이 생겨 <strong>유지보수가 오히려 나빠짐</strong> — 현 구조가 옳다.</p>
 
   <h2>E. 터미널 Surface</h2>
   <h3>TUI Dashboard <code>agentdeck dashboard</code></h3>
@@ -314,10 +321,12 @@
         <tr><td class="device-name">Android 태블릿</td><td><span class="badge b-warn">LAN</span></td><td class="wrap-cell">과분류. mDNS로 App Store Mac 데몬 직접 접속이 코드상 가능</td><td class="wrap-cell"><strong>개선 권장</strong>: e-ink(USB/adb)와 태블릿(LAN/mDNS) tier 분리</td></tr>
         <tr><td class="device-name">Android e-ink</td><td><span class="badge b-no">CLI</span></td><td class="wrap-cell"><strong>진짜 제약</strong>. USB-테더 + <code>adb reverse</code> 서브프로세스 필요 → sandbox 불가</td><td class="wrap-cell">현 구조 합리적(e-ink WiFi 불안정·USB 전제). 변경 불요</td></tr>
         <tr><td class="device-name">Timebox / iDotMatrix</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">CoreBluetooth 네이티브</td><td class="wrap-cell">최선. 단 <strong>데몬당 BLE 단일 연결</strong> — 동시 1대만. (구 Timebox-SPP serial 변종은 제거됨)</td></tr>
+        <tr><td class="device-name">SSE 스트림</td><td><span class="badge b-warn">YES*</span></td><td class="wrap-cell"><strong>구현 갭</strong>. 풀 스트리밍(<code>broadcastSse</code>, 멀티클라이언트+하트비트)은 Node 브리지(<code>hook-server.ts</code>)만 구현. App Store Swift 데몬(<code>DaemonServer.swift</code>)의 <code>/sse</code>는 <code>event: connected</code> 1회 후 끊는 <strong>스텁</strong></td><td class="wrap-cell"><strong>개선 권장</strong>: 샌드박스 제약 아님(같은 HTTP 서버에 SSE 가능). Swift 데몬에 멀티클라이언트 SSE 구현 시 ✅ 승격. 현 App Store 빌드는 라이브 SSE에 외부 Node 데몬 필요</td></tr>
+        <tr><td class="device-name">D200H</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">(갭 아님) Ulanzi Studio 플러그인이 <strong>단일 드라이버</strong>. direct-HID 폴백은 retire(2026-06-21, <code>380c6510</code>) — Node <code>d200h:false</code>/Swift <code>enableD200hDirectHID=false</code>, 모듈은 dormant 보존</td><td class="wrap-cell">최선. 플러그인 없이 HID 직구동 시 화면 깨짐 → 의도적 비활성. 재활성은 두 flip-point만 되돌리면 됨</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="section-note">요약: 진짜 sandbox 제약은 <strong>e-ink(adb)</strong> 경로뿐이며 CLI 대체 경로가 정당하다. <strong>TC001·Android 태블릿의 ❌ 는 구현/분류 갭</strong>이라 ⚠로 정정 — upstream <code>appstore-feature-matrix.md</code>·<code>AdbModule.swift</code>·<code>AgentState.swift</code>·<code>TopologyRail.swift</code> 주석의 ADB 오기도 함께 정정함(legacy dead-code 제거는 후속).</p>
+  <p class="section-note">요약: 진짜 sandbox 제약은 <strong>e-ink(adb)</strong> 경로뿐이며 CLI 대체 경로가 정당하다. <strong>TC001·Android 태블릿의 ❌ 는 구현/분류 갭</strong>이라 ⚠로 정정했고, <strong>SSE ✅* 는 Swift 데몬 SSE 미구현이라는 구현 갭</strong>(샌드박스 제약 아님)이라 별도 표기 — upstream <code>appstore-feature-matrix.md</code>·<code>AdbModule.swift</code>·<code>AgentState.swift</code>·<code>TopologyRail.swift</code> 주석의 ADB 오기도 함께 정정함(legacy dead-code 제거는 후속).</p>
 
   <footer>
     <ul>

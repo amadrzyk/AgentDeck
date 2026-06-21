@@ -15,8 +15,9 @@ Usage:
   $0 auto
   $0 <environment> [port]
 
-Environments:
-  ips_35 | round_amoled | box_86 | ulanzi_tc001 | ttgo_t_display
+Environments (canonical friendly name — panel/form + inches):
+  ips_35 | amoled_18 | box_40 | tft_114 | c6_147 | ips_101 | led_8x32
+  (legacy aliases still accepted: round_amoled, box_86, ttgo, esp32_c6_147, ulanzi_tc001, ...)
 
 Rules:
   - auto mode only selects boards that answer device_info_request
@@ -73,21 +74,30 @@ for pattern in patterns:
 PY
 }
 
+# Canonical friendly name = panel/form + inches (no decimal point).
+# Each line maps the canonical name + every legacy alias to the (unchanged) PlatformIO env.
 map_env_to_pio() {
     case "$1" in
         ips_35|ips35) echo "ips35" ;;
-        round_amoled|amoled) echo "amoled" ;;
-        box_86|86box) echo "box_86" ;;
-        ulanzi_tc001|led8x32) echo "led8x32" ;;
-        ttgo_t_display|ttgo) echo "ttgo" ;;
-        ips_10|ips10) echo "ips10" ;;
+        amoled_18|round_amoled|amoled) echo "amoled" ;;
+        box_40|box_86|86box) echo "box_86" ;;
+        led_8x32|ulanzi_tc001|led8x32) echo "led8x32" ;;
+        tft_114|ttgo_t_display|ttgo) echo "ttgo" ;;
+        c6_147|esp32_c6_147) echo "esp32_c6_147" ;;
+        ips_101|ips_10|ips10) echo "ips10" ;;
         *) echo "$1" ;;
     esac
 }
 
 validate_env() {
     case "$1" in
-        ips_35|ips35|round_amoled|amoled|box_86|86box|ulanzi_tc001|led8x32|ttgo_t_display|ttgo|ips_10|ips10) ;;
+        ips_35|ips35|\
+        amoled_18|round_amoled|amoled|\
+        box_40|box_86|86box|\
+        led_8x32|ulanzi_tc001|led8x32|\
+        tft_114|ttgo_t_display|ttgo|\
+        c6_147|esp32_c6_147|\
+        ips_101|ips_10|ips10) ;;
         *)
             echo "Unknown environment: $1" >&2
             usage >&2
@@ -106,7 +116,7 @@ If this is an IPS/Round Native USB board in recovery mode:
   3. Release BOOT after the usbmodem port stays up
   4. Re-run with explicit env and port:
      $0 ips_35 $1
-     $0 round_amoled $1
+     $0 amoled_18 $1
 
 Do not guess IPS vs Round from the usbmodem number alone.
 EOF
