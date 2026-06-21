@@ -19,6 +19,7 @@ import { DaemonClient } from './daemon-client.js';
 import { StateStore } from './state-store.js';
 import { svgToBase64Png, ICON_SIZE } from './raster.js';
 import { framesToGifBase64 } from './gif.js';
+import { launchCompanionApp } from './launch.js';
 import { dinfo, dlog, derr, flog } from './log.js';
 
 const PLUGIN_UUID = 'com.ulanzi.ulanzistudio.agentdeck';
@@ -198,6 +199,11 @@ function onPress(m: UlanziMessage): void {
     case 'command':
       dlog(TAG, `press ${inst.key} → ${action.command.type}`);
       daemon.send(action.command);
+      break;
+    case 'launch':
+      // Daemon down → there's no WS to send to; open the companion app instead.
+      dlog(TAG, `press ${inst.key} → launch companion app`);
+      void launchCompanionApp().catch((e) => derr(TAG, `launch failed: ${e}`));
       break;
   }
 }

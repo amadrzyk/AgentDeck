@@ -315,6 +315,7 @@ export type DeckAction =
   | { kind: 'back' }                      // return to list
   | { kind: 'page'; delta: number }       // paginate current view
   | { kind: 'command'; command: ButtonCommand }
+  | { kind: 'launch' }                    // daemon down → open the companion app locally
   | null;
 
 export interface SessionDeckCell { svg: string; action: DeckAction; }
@@ -370,11 +371,14 @@ export function buildSessionDeck(stateEvt: any, view: DeckView, positions: strin
   const animated = view.animated ?? false;
   if (slots.length === 0) return out;
 
-  // Disconnected: OFFLINE hero on first key, rest dim.
+  // Daemon down → OFFLINE hero on the center key, rest dim. Every key launches
+  // the companion app on press (parity with the SD/SD+ keypad, which opens the
+  // app from any key while disconnected), so "press any key" always works.
   if (state.state === 'DISCONNECTED' || state.state === 'disconnected') {
+    const hero = Math.floor(slots.length / 2);
     slots.forEach((pos, i) => out.set(pos, {
-      svg: i === 0 ? renderInfoSlot('OFFLINE', 'Open AgentDeck', 'activity', 'info') : renderEmptySlot(),
-      action: null,
+      svg: i === hero ? renderInfoSlot('OFFLINE', 'Open AgentDeck', 'activity', 'info', 'press any key') : renderEmptySlot(),
+      action: { kind: 'launch' },
     }));
     return out;
   }
