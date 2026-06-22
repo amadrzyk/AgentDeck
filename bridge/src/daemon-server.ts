@@ -364,6 +364,13 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
     modules.d200h = d200h.statusSnapshot();
   }
 
+  const trmnl = startedModules.find((m) => m.name === 'trmnl') as DeviceModule & {
+    statusSnapshot?: () => Record<string, unknown>;
+  };
+  if (trmnl?.statusSnapshot) {
+    modules.trmnl = trmnl.statusSnapshot();
+  }
+
   if (started.has('pixoo') || pixooDeviceCount() > 0) {
     const details = getPixooDeviceDetails();
     modules.pixoo = {
