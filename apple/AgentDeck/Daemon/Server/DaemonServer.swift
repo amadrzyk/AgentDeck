@@ -191,6 +191,7 @@ final class DaemonServer {
     private var displaySettingsObserver: NSObjectProtocol?
     private var adbModule: AdbModule?
     private var d200hModule: D200hHidModule?
+    private var trmnlModule: TrmnlModule?
 
     // APME
     private var apmeStore: ApmeStore?
@@ -1127,6 +1128,13 @@ final class DaemonServer {
         ) { _ in
             Task { await timebox.reloadFromSettingsExternal() }
         }
+
+        // TRMNL (WiFi e-ink BYOS panel — native HTTP + CoreGraphics, App Store legal).
+        // No hardware probing: a panel pointed at this daemon's HTTP port auto-enrolls
+        // and pulls a server-rendered 1-bit PNG sized to the resolution it reports.
+        let trmnl = TrmnlModule()
+        self.trmnlModule = trmnl
+        moduleManager.register(trmnl)
         // Display-sleep dim setting changed: refresh cache and, if the display
         // is already asleep, re-broadcast the current state so devices re-dim
         // to the new level/mode without waiting for a wake/sleep cycle.
@@ -1162,7 +1170,10 @@ final class DaemonServer {
         let pixooRef = pixoo
         let idotmatrixRef = idotmatrix
         let timeboxRef = timebox
-        let d200hRef = d200h
+        // D200H direct-HID is retired (enableD200hDirectHID == false), so this is
+        // nil and the broadcast fan-out below no-ops — the Ulanzi plugin drives it.
+        let d200hRef = self.d200hModule
+        let trmnlRef = trmnl
         await wsServer.onBroadcast { [weak self] data in
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
@@ -1199,7 +1210,10 @@ final class DaemonServer {
             // Timebox (BLE) module is also an actor — same SendableDict boxing.
             let timeboxEventBox = SendableDict(json)
             Task { await timeboxRef.handleEvent(timeboxEventBox.value) }
-            d200hRef.handleBroadcast(json)
+            d200hRef?.handleBroadcast(json)
+            // TRMNL module is an actor — same SendableDict boxing.
+            let trmnlEventBox = SendableDict(json)
+            Task { await trmnlRef.handleEvent(trmnlEventBox.value) }
         }
         DaemonLogger.shared.info("startDeviceModules: wsServer.onBroadcast done")
 
@@ -1413,6 +1427,21 @@ final class DaemonServer {
             return await self.pixooPreviewResponse()
         }
 
+        // TRMNL BYOS endpoints (WiFi e-ink panel pulls a server-rendered dashboard).
+        await httpServer.get("/api/setup") { [weak self] req in
+            await self?.trmnlSetupResponse(req) ?? .notFound
+        }
+        await httpServer.get("/api/display") { [weak self] req in
+            await self?.trmnlDisplayResponse(req) ?? .notFound
+        }
+        await httpServer.post("/api/log") { _ in
+            // Device logs — accept and drop (debug only).
+            HTTPServer.HTTPResponse(status: 204, headers: [:], body: nil)
+        }
+        await httpServer.get("/trmnl/image/*") { [weak self] req in
+            await self?.trmnlImageResponse(req) ?? .notFound
+        }
+
         // APME routes
         if let store = apmeStore {
             await ApmeHttpRoutes.register(on: httpServer, store: store)
@@ -1467,6 +1496,53 @@ final class DaemonServer {
             headers: ["Content-Type": "text/html; charset=utf-8"],
             body: Data(html.utf8)
         )
+    }
+
+    // MARK: - TRMNL BYOS handlers
+
+    private func trmnlBase(_ req: HTTPServer.HTTPRequest) -> String {
+        "http://\(req.headers["host"] ?? "localhost")"
+    }
+
+    private func trmnlSetupResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
+        guard let trmnl = trmnlModule else { return .notFound }
+        let r = await trmnl.setup(headers: req.headers, base: trmnlBase(req))
+        return HTTPServer.HTTPResponse(
+            status: r.status,
+            headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
+            body: r.body
+        )
+    }
+
+    private func trmnlDisplayResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
+        guard let trmnl = trmnlModule else { return .notFound }
+        let r = await trmnl.display(headers: req.headers, base: trmnlBase(req))
+        return HTTPServer.HTTPResponse(
+            status: r.status,
+            headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
+            body: r.body
+        )
+    }
+
+    private func trmnlImageResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
+        guard let trmnl = trmnlModule else { return .notFound }
+        let key = Self.trmnlImageKey(req.path) ?? "800x480"
+        guard let png = await trmnl.image(key: key) else { return .text("No frame", status: 204) }
+        return HTTPServer.HTTPResponse(
+            status: 200,
+            headers: ["Content-Type": "image/png", "Cache-Control": "no-store"],
+            body: png
+        )
+    }
+
+    /// Extract the "<W>x<H>" key from /trmnl/image/<W>x<H>-<hash>.png (nil for legacy URLs).
+    nonisolated private static func trmnlImageKey(_ path: String) -> String? {
+        guard let last = path.split(separator: "/").last,
+              let dash = last.firstIndex(of: "-") else { return nil }
+        let key = String(last[last.startIndex..<dash])
+        let parts = key.split(separator: "x")
+        guard parts.count == 2, Int(parts[0]) != nil, Int(parts[1]) != nil else { return nil }
+        return key
     }
 
     private func streamPixooFrames(on conn: HTTPServer.StreamConnection) async {
