@@ -14,8 +14,9 @@
  */
 import type { DeviceModule, BridgeContext } from './types.js';
 import { initTrmnlRenderer, isTrmnlResvgLoaded } from '../trmnl/image-renderer.js';
-import { refreshTrmnlFrame, setTrmnlState } from '../trmnl/frame-cache.js';
+import { refreshTrmnlFrame, setTrmnlState, getTrmnlFrameKeys } from '../trmnl/frame-cache.js';
 import { loadTrmnlConfig } from '../trmnl/trmnl-settings.js';
+import { getTelemetry } from '../trmnl/trmnl-telemetry.js';
 import { debug } from '../logger.js';
 
 const TAG = 'trmnl';
@@ -70,12 +71,16 @@ export class TrmnlModule implements DeviceModule {
 
   statusSnapshot(): Record<string, unknown> {
     const cfg = loadTrmnlConfig();
+    const activeResolutions = getTrmnlFrameKeys();
     return {
       resvgLoaded: isTrmnlResvgLoaded(),
       gateActive: this.gateActive,
       enabled: cfg.enabled,
       deviceCount: cfg.devices.length,
       refreshRate: cfg.refreshRate,
+      activeResolutions,
+      frameCount: activeResolutions.length,
+      telemetry: getTelemetry(),
     };
   }
 

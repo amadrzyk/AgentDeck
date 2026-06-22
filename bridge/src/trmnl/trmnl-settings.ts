@@ -77,16 +77,27 @@ function saveTrmnlConfig(cfg: TrmnlConfig): void {
   writeSettings(settings);
 }
 
-/** Normalize a MAC to uppercase colon-separated form for stable identity. */
+/**
+ * Normalize a MAC to a stable identity key. A canonical 12-hex address becomes
+ * uppercase colon-separated pairs; any other id (some firmware/cloud setups
+ * report non-standard or punctuated identifiers) collapses to its bare uppercase
+ * hex digits. Returning the raw, untrimmed string for the odd case would orphan
+ * or duplicate a device whose punctuation varies between polls — so we always
+ * derive a deterministic key from the hex content.
+ */
 export function normalizeMac(mac: string): string {
   const hex = (mac || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
-  if (hex.length !== 12) return (mac || '').trim().toUpperCase();
-  return hex.match(/.{2}/g)!.join(':');
+  if (hex.length === 12) return hex.match(/.{2}/g)!.join(':');
+  return hex || (mac || '').trim().toUpperCase();
+}
+
+/** True when two MAC spellings resolve to the same canonical identity. */
+export function sameMac(a: string, b: string): boolean {
+  return normalizeMac(a) === normalizeMac(b);
 }
 
 export function findDeviceByMac(mac: string): TrmnlDevice | undefined {
-  const norm = normalizeMac(mac);
-  return loadTrmnlConfig().devices.find((d) => normalizeMac(d.mac) === norm);
+  return loadTrmnlConfig().devices.find((d) => sameMac(d.mac, mac));
 }
 
 function genFriendlyId(): string {
@@ -106,7 +117,7 @@ function genFriendlyId(): string {
 export function ensureDevice(mac: string, name?: string): { device?: TrmnlDevice; created: boolean } {
   const cfg = loadTrmnlConfig();
   const norm = normalizeMac(mac);
-  const existing = cfg.devices.find((d) => normalizeMac(d.mac) === norm);
+  const existing = cfg.devices.find((d) => sameMac(d.mac, mac));
   if (existing) return { device: existing, created: false };
   if (!cfg.autoRegister) return { created: false };
 
@@ -123,8 +134,7 @@ export function ensureDevice(mac: string, name?: string): { device?: TrmnlDevice
 
 export function removeDevice(mac: string): boolean {
   const cfg = loadTrmnlConfig();
-  const norm = normalizeMac(mac);
-  const filtered = cfg.devices.filter((d) => normalizeMac(d.mac) !== norm);
+  const filtered = cfg.devices.filter((d) => !sameMac(d.mac, mac));
   if (filtered.length === cfg.devices.length) return false;
   cfg.devices = filtered;
   saveTrmnlConfig(cfg);

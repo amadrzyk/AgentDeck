@@ -191,13 +191,19 @@ function hashBuffer(buf: Buffer): string {
  * Accepts a raw state event or a pre-parsed DashState (passed through to the
  * shared layout). `now` may be supplied for deterministic tests.
  */
-export function renderTrmnlFrame(stateEvt: any, now?: Date): TrmnlFrame {
+export function renderTrmnlFrame(
+  stateEvt: any,
+  now?: Date,
+  size?: { width: number; height: number },
+): TrmnlFrame {
+  const width = size?.width && size.width > 0 ? Math.round(size.width) : TRMNL_WIDTH;
+  const height = size?.height && size.height > 0 ? Math.round(size.height) : TRMNL_HEIGHT;
   let buffer: Buffer;
   if (Resvg) {
     try {
-      const svg = renderTrmnlDashboard(stateEvt, now ? { now } : {});
+      const svg = renderTrmnlDashboard(stateEvt, { ...(now ? { now } : {}), width, height });
       const resvg = new Resvg(svg, {
-        fitTo: { mode: 'width' as const, value: TRMNL_WIDTH },
+        fitTo: { mode: 'width' as const, value: width },
         font: FONT_OPTS,
         background: '#ffffff',
       });
@@ -206,16 +212,16 @@ export function renderTrmnlFrame(stateEvt: any, now?: Date): TrmnlFrame {
       buffer = encode1BitPng(bits, rendered.width, rendered.height, bytesPerRow);
     } catch (err) {
       debug(TAG, `render failed (${err}) — emitting blank frame`);
-      buffer = blankPng(TRMNL_WIDTH, TRMNL_HEIGHT);
+      buffer = blankPng(width, height);
     }
   } else {
-    buffer = blankPng(TRMNL_WIDTH, TRMNL_HEIGHT);
+    buffer = blankPng(width, height);
   }
   return {
     buffer,
     contentHash: hashBuffer(buffer),
-    width: TRMNL_WIDTH,
-    height: TRMNL_HEIGHT,
+    width,
+    height,
     contentType: 'image/png',
   };
 }

@@ -57,4 +57,24 @@ describe('renderTrmnlFrame', () => {
     });
     expect(idle.contentHash).not.toBe(busy.contentHash);
   });
+
+  it('rasterizes at a device-reported resolution', () => {
+    const frame = renderTrmnlFrame({ state: 'IDLE', allSessions: [] }, undefined, { width: 480, height: 800 });
+    expect(frame.width).toBe(480);
+    expect(frame.height).toBe(800);
+    const ihdr = parseIhdr(frame.buffer);
+    expect(ihdr.width).toBe(480);
+    expect(ihdr.height).toBe(800);
+    expect(ihdr.bitDepth).toBe(1);
+    expect(ihdr.colorType).toBe(0);
+    expect(frame.buffer.length).toBeLessThanOrEqual(90_000);
+  });
+
+  it('renders a tiny panel without throwing (compact fallback)', () => {
+    const frame = renderTrmnlFrame({ state: 'IDLE', allSessions: [] }, undefined, { width: 200, height: 120 });
+    const ihdr = parseIhdr(frame.buffer);
+    expect(ihdr.width).toBe(200);
+    expect(ihdr.height).toBe(120);
+    expect(frame.buffer.subarray(0, 8).equals(PNG_SIG)).toBe(true);
+  });
 });

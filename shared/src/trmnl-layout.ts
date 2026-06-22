@@ -1,6 +1,8 @@
 /**
  * TRMNL e-ink dashboard layout — renders the AgentDeck session overview as a
- * single 800×480 monochrome SVG, sized for the TRMNL 7.5" e-ink panel.
+ * monochrome SVG. Defaults to 800×480 (the OG TRMNL 7.5" panel) but reflows to
+ * any device-reported resolution via `opts.width`/`opts.height` so different
+ * BYOS panels render correctly.
  *
  * Unlike the Stream Deck / D200H renderers (color tiles, fast refresh), this is
  * a slow-refresh, 1-bit surface: pure black on white, no color reliance, status
@@ -89,10 +91,19 @@ function gauge(x: number, y: number, w: number, h: number, pct: number): string 
   ].join('');
 }
 
-/** One session row. `y` is the row's top edge. */
-function sessionRow(sess: SessionInfo, y: number, rowH: number): string {
-  const pad = 24;
-  const tagW = 108;
+/** Column geometry for one session row, derived from the panel width. */
+interface RowGeom {
+  pad: number;
+  tagW: number;
+  midX: number;
+  midW: number;
+  badgeX: number;
+  badgeW: number;
+}
+
+/** One session row. `y` is the row's top edge; `geom` is width-derived columns. */
+function sessionRow(sess: SessionInfo, y: number, rowH: number, geom: RowGeom): string {
+  const { pad, tagW, midX, midW, badgeX, badgeW } = geom;
   const status = statusLabel(sess.state);
   const awaiting = status === 'AWAITING';
   const els: string[] = [];
@@ -105,8 +116,6 @@ function sessionRow(sess: SessionInfo, y: number, rowH: number): string {
   );
 
   // Project + model (middle column).
-  const midX = pad + tagW + 18;
-  const midW = 420;
   const project = truncatePx(sess.projectName || '(no project)', midW, 24);
   const model = truncatePx(sess.modelName || '', midW, 16);
   els.push(
@@ -120,8 +129,6 @@ function sessionRow(sess: SessionInfo, y: number, rowH: number): string {
 
   // Status badge (right column). Awaiting gets a bold double border to stand out
   // without color; working gets a filled triangle marker.
-  const badgeW = 154;
-  const badgeX = TRMNL_WIDTH - pad - badgeW;
   const badgeY = y + 12;
   const badgeH = rowH - 24;
   if (awaiting) {
@@ -153,11 +160,22 @@ function sessionRow(sess: SessionInfo, y: number, rowH: number): string {
 export interface TrmnlRenderOpts {
   /** Override "now" for deterministic tests. */
   now?: Date;
+  /** Panel width in px (device-reported). Defaults to the OG 800. */
+  width?: number;
+  /** Panel height in px (device-reported). Defaults to the OG 480. */
+  height?: number;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
 }
 
 /**
- * Render the dashboard SVG. Accepts either a raw broadcast state event or a
- * pre-parsed DashState.
+ * Render the dashboard SVG at an arbitrary panel resolution. Accepts either a
+ * raw broadcast state event or a pre-parsed DashState. Geometry reflows from
+ * `opts.width`/`opts.height` (default 800×480) so any TRMNL/BYOS panel renders
+ * correctly: the row count is derived from the available height and the columns
+ * + footer gauges scale with the width.
  */
 export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOpts = {}): string {
   const state: DashState =
@@ -165,87 +183,104 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
       ? (input as DashState)
       : parseState(input);
   const now = opts.now ?? new Date();
+  const W = opts.width && opts.width > 0 ? Math.round(opts.width) : TRMNL_WIDTH;
+  const H = opts.height && opts.height > 0 ? Math.round(opts.height) : TRMNL_HEIGHT;
 
-  const sessions: SessionInfo[] =
-    state.allSessions.length > 0
-      ? state.allSessions
-      : [
-          {
-            id: 'local',
-            agentType: state.agentType as any,
-            projectName: state.projectName,
-            modelName: state.modelName,
-            state: (state.state || 'idle').toLowerCase(),
-            alive: true,
-            port: 0,
-          },
-        ];
+  // The dashboard is read-only — show exactly the live sessions, nothing
+  // synthetic. An empty list yields the idle hero below.
+  const sessions: SessionInfo[] = state.allSessions;
 
   const els: string[] = [];
   // Paper background — ensures alpha=255 everywhere so the 1-bit threshold is clean.
-  els.push(`<rect x="0" y="0" width="${TRMNL_WIDTH}" height="${TRMNL_HEIGHT}" fill="${PAPER}"/>`);
+  els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${PAPER}"/>`);
 
-  // --- Header ---
-  const headerH = 72;
-  els.push(
-    `<text x="24" y="48" font-family="${SANS}" font-size="34" font-weight="700" fill="${INK}">AgentDeck</text>`,
-  );
+  const pad = 24;
   const awaitingCount = sessions.filter((s) => statusLabel(s.state) === 'AWAITING').length;
   const workingCount = sessions.filter((s) => statusLabel(s.state) === 'WORKING').length;
   const summary = `${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${workingCount} working · ${awaitingCount} awaiting`;
-  els.push(
-    `<text x="${TRMNL_WIDTH - 24}" y="48" text-anchor="end" font-family="${SANS}" font-size="18" font-weight="600" fill="${INK}">${escXml(summary)}</text>`,
-  );
-  els.push(`<rect x="24" y="${headerH}" width="${TRMNL_WIDTH - 48}" height="3" fill="${INK}"/>`);
 
-  // --- Session rows ---
+  const headerH = 72;
+  const footerTop = H - 68;
   const bodyTop = headerH + 14;
-  const footerTop = 412;
   const rowH = 64;
-  const maxRows = Math.floor((footerTop - bodyTop) / rowH); // 5 rows
-  const visible = sessions.slice(0, maxRows);
-  const overflow = sessions.length - visible.length;
+  const maxRows = Math.floor((footerTop - bodyTop) / rowH);
 
-  if (state.allSessions.length === 0 && (state.state === 'DISCONNECTED' || state.state === 'disconnected')) {
+  // --- Extreme-aspect / tiny-panel guard ---
+  // Too short for even one row, or too narrow for the column layout: collapse to
+  // a centered wordmark + summary instead of overlapping boxes.
+  if (maxRows < 1 || W < 320) {
     els.push(
-      `<text x="${TRMNL_WIDTH / 2}" y="250" text-anchor="middle" font-family="${SANS}" font-size="28" font-weight="700" fill="${INK}">No active sessions</text>`,
-      `<text x="${TRMNL_WIDTH / 2}" y="288" text-anchor="middle" font-family="${SANS}" font-size="18" fill="${INK}">Start Claude Code, Codex, or OpenCode to see them here</text>`,
+      `<text x="${W / 2}" y="${H / 2 - 6}" text-anchor="middle" font-family="${SANS}" font-size="${Math.min(34, Math.round(W * 0.09))}" font-weight="700" fill="${INK}">AgentDeck</text>`,
+      `<text x="${W / 2}" y="${H / 2 + 22}" text-anchor="middle" font-family="${SANS}" font-size="14" font-weight="600" fill="${INK}">${escXml(summary)}</text>`,
+    );
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${els.join('')}</svg>`;
+  }
+
+  // --- Header ---
+  els.push(
+    `<text x="${pad}" y="48" font-family="${SANS}" font-size="34" font-weight="700" fill="${INK}">AgentDeck</text>`,
+    `<text x="${W - pad}" y="48" text-anchor="end" font-family="${SANS}" font-size="18" font-weight="600" fill="${INK}">${escXml(summary)}</text>`,
+    `<rect x="${pad}" y="${headerH}" width="${W - 2 * pad}" height="3" fill="${INK}"/>`,
+  );
+
+  // --- Session rows (or idle hero) ---
+  // Width-derived column geometry, shared by every row.
+  const tagW = Math.min(108, Math.round(W * 0.16));
+  const badgeW = clamp(Math.round(W * 0.19), 120, 180);
+  const badgeX = W - pad - badgeW;
+  const midX = pad + tagW + 18;
+  const rowGeom: RowGeom = { pad, tagW, midX, midW: badgeX - midX - 18, badgeX, badgeW };
+
+  if (sessions.length === 0) {
+    // Idle hero — keep header + footer (usage is still meaningful) and center a
+    // clean "no sessions" message in the body band (mirrors D200H's offline hero
+    // spirit, but read-only so no action prompt).
+    const cy = (bodyTop + footerTop) / 2;
+    els.push(
+      `<text x="${W / 2}" y="${cy - 6}" text-anchor="middle" font-family="${SANS}" font-size="28" font-weight="700" fill="${INK}">No active sessions</text>`,
+      `<text x="${W / 2}" y="${cy + 30}" text-anchor="middle" font-family="${SANS}" font-size="18" fill="${INK}">Start Claude Code, Codex, or OpenCode to see them here</text>`,
     );
   } else {
+    const visible = sessions.slice(0, maxRows);
+    const overflow = sessions.length - visible.length;
     visible.forEach((sess, i) => {
       const y = bodyTop + i * rowH;
       if (i > 0) {
-        els.push(`<rect x="24" y="${y}" width="${TRMNL_WIDTH - 48}" height="1" fill="${INK}"/>`);
+        els.push(`<rect x="${pad}" y="${y}" width="${W - 2 * pad}" height="1" fill="${INK}"/>`);
       }
-      els.push(sessionRow(sess, y, rowH));
+      els.push(sessionRow(sess, y, rowH, rowGeom));
     });
     if (overflow > 0) {
       els.push(
-        `<text x="${TRMNL_WIDTH / 2}" y="${bodyTop + maxRows * rowH - 10}" text-anchor="middle" font-family="${SANS}" font-size="16" font-weight="600" fill="${INK}">+${overflow} more session${overflow === 1 ? '' : 's'}</text>`,
+        `<text x="${W / 2}" y="${bodyTop + maxRows * rowH - 10}" text-anchor="middle" font-family="${SANS}" font-size="16" font-weight="600" fill="${INK}">+${overflow} more session${overflow === 1 ? '' : 's'}</text>`,
       );
     }
   }
 
-  // --- Footer (usage + totals + timestamp) ---
-  els.push(`<rect x="24" y="${footerTop}" width="${TRMNL_WIDTH - 48}" height="2" fill="${INK}"/>`);
+  // --- Footer (usage + totals + timestamp), scaled to the panel width ---
+  els.push(`<rect x="${pad}" y="${footerTop}" width="${W - 2 * pad}" height="2" fill="${INK}"/>`);
   const fy = footerTop + 26;
-  // 5H gauge
+  const gaugeW = clamp(Math.round(W * 0.18), 110, 200);
+  const g1Bar = pad + 34;
+  const g1Pct = g1Bar + gaugeW + 8;
+  const col2 = Math.round(W * 0.34);
+  const g2Bar = col2 + 34;
+  const g2Pct = g2Bar + gaugeW + 8;
   els.push(
-    `<text x="24" y="${fy + 4}" font-family="${SANS}" font-size="16" font-weight="700" fill="${INK}">5H</text>`,
-    gauge(58, fy - 12, 150, 16, state.fiveHourPercent),
-    `<text x="216" y="${fy + 4}" font-family="${MONO}" font-size="16" fill="${INK}">${Math.round(state.fiveHourPercent)}%</text>`,
-  );
-  // 7D gauge
-  els.push(
-    `<text x="278" y="${fy + 4}" font-family="${SANS}" font-size="16" font-weight="700" fill="${INK}">7D</text>`,
-    gauge(312, fy - 12, 150, 16, state.sevenDayPercent),
-    `<text x="470" y="${fy + 4}" font-family="${MONO}" font-size="16" fill="${INK}">${Math.round(state.sevenDayPercent)}%</text>`,
+    // 5H gauge
+    `<text x="${pad}" y="${fy + 4}" font-family="${SANS}" font-size="16" font-weight="700" fill="${INK}">5H</text>`,
+    gauge(g1Bar, fy - 12, gaugeW, 16, state.fiveHourPercent),
+    `<text x="${g1Pct}" y="${fy + 4}" font-family="${MONO}" font-size="16" fill="${INK}">${Math.round(state.fiveHourPercent)}%</text>`,
+    // 7D gauge
+    `<text x="${col2}" y="${fy + 4}" font-family="${SANS}" font-size="16" font-weight="700" fill="${INK}">7D</text>`,
+    gauge(g2Bar, fy - 12, gaugeW, 16, state.sevenDayPercent),
+    `<text x="${g2Pct}" y="${fy + 4}" font-family="${MONO}" font-size="16" fill="${INK}">${Math.round(state.sevenDayPercent)}%</text>`,
   );
   // tokens + cost + updated stamp (right aligned)
   const totals = `${fmtTokens(state.totalTokens)} tok · $${(state.totalCost || 0).toFixed(2)}`;
   els.push(
-    `<text x="${TRMNL_WIDTH - 24}" y="${fy + 4}" text-anchor="end" font-family="${MONO}" font-size="16" fill="${INK}">${escXml(totals)}  ·  ${hhmm(now)}</text>`,
+    `<text x="${W - pad}" y="${fy + 4}" text-anchor="end" font-family="${MONO}" font-size="16" fill="${INK}">${escXml(totals)}  ·  ${hhmm(now)}</text>`,
   );
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${TRMNL_WIDTH}" height="${TRMNL_HEIGHT}" viewBox="0 0 ${TRMNL_WIDTH} ${TRMNL_HEIGHT}">${els.join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${els.join('')}</svg>`;
 }

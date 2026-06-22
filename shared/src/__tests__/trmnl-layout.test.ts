@@ -58,19 +58,51 @@ describe('renderTrmnlDashboard', () => {
     }
   });
 
-  it('falls back to a single synthetic row when no sessions are present', () => {
+  it('renders the idle hero (no synthetic row) when there are no sessions', () => {
     const svg = renderTrmnlDashboard(
       { state: 'IDLE', projectName: 'solo', modelName: 'gpt-5', agentType: 'codex-cli', allSessions: [] },
       { now: NOW },
     );
-    expect(svg).toContain('CODEX');
-    expect(svg).toContain('solo');
-    expect(svg).toContain('1 session · 0 working · 0 awaiting');
+    expect(svg).toContain('No active sessions');
+    expect(svg).toContain('0 sessions · 0 working · 0 awaiting');
+    // No phantom session row synthesized from the top-level state.
+    expect(svg).not.toContain('CODEX');
+    expect(svg).not.toContain('solo');
   });
 
   it('shows an overflow note when sessions exceed the visible rows', () => {
     const many = Array.from({ length: 8 }, (_, i) => session(`s${i}`, 'claude-code', 'idle'));
     const svg = renderTrmnlDashboard({ state: 'IDLE', allSessions: many }, { now: NOW });
     expect(svg).toMatch(/\+\d+ more session/);
+  });
+
+  it('reflows to a device-reported resolution', () => {
+    const portrait = renderTrmnlDashboard(
+      { state: 'IDLE', allSessions: [] },
+      { now: NOW, width: 480, height: 800 },
+    );
+    expect(portrait).toContain('width="480"');
+    expect(portrait).toContain('height="800"');
+    expect(portrait).toContain('viewBox="0 0 480 800"');
+  });
+
+  it('fits more session rows on a taller panel', () => {
+    const many = Array.from({ length: 8 }, (_, i) => session(`s${i}`, 'claude-code', 'idle'));
+    const tall = renderTrmnlDashboard({ state: 'IDLE', allSessions: many }, { now: NOW, width: 480, height: 960 });
+    const og = renderTrmnlDashboard({ state: 'IDLE', allSessions: many }, { now: NOW });
+    // 480×960 fits all 8 rows (no overflow note); 800×480 only fits ~5.
+    expect(tall).not.toMatch(/\+\d+ more session/);
+    expect(og).toMatch(/\+\d+ more session/);
+  });
+
+  it('collapses to a compact wordmark on a tiny panel without throwing', () => {
+    const svg = renderTrmnlDashboard(
+      { state: 'IDLE', allSessions: [session('a', 'claude-code', 'processing')] },
+      { now: NOW, width: 200, height: 120 },
+    );
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('width="200"');
+    expect(svg).toContain('height="120"');
+    expect(svg).toContain('AgentDeck');
   });
 });
