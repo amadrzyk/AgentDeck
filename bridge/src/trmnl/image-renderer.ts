@@ -141,32 +141,47 @@ function encode1BitPng(bits: Uint8Array, width: number, height: number, bytesPer
   ]);
 }
 
-/** Threshold RGBA pixels to a packed 1-bit bitmap (1 = white, 0 = black). */
+/**
+ * Box-downsample a supersampled RGBA buffer (`ss`× the target size) to a packed
+ * 1-bit bitmap (1 = white, 0 = black). Averaging each ss×ss block of luma BEFORE
+ * thresholding is what sharpens text on a 1-bit panel: a hard threshold of a
+ * 1×-rendered glyph drops/jaggies thin strokes (notably Hangul), whereas the
+ * averaged edge lands on the majority-coverage boundary, so the same glyph reads
+ * crisp. `ss === 1` degrades to a plain threshold.
+ */
 function rgbaToPacked1Bit(
   pixels: Buffer | Uint8Array,
-  width: number,
-  height: number,
-): { bits: Uint8Array; bytesPerRow: number } {
+  srcWidth: number,
+  srcHeight: number,
+  ss = 1,
+): { bits: Uint8Array; bytesPerRow: number; width: number; height: number } {
+  const width = Math.floor(srcWidth / ss);
+  const height = Math.floor(srcHeight / ss);
   const bytesPerRow = (width + 7) >> 3;
   const bits = new Uint8Array(bytesPerRow * height);
   bits.fill(0xff); // default white
+  const norm = 1 / (ss * ss);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const p = (y * width + x) * 4;
-      const r = pixels[p];
-      const g = pixels[p + 1];
-      const b = pixels[p + 2];
-      // Rec.601 luma; transparent pixels (alpha 0) read as white since our SVG
-      // paints a full white background, so alpha is effectively always 255.
-      const luma = (r * 299 + g * 587 + b * 114) / 1000;
-      if (luma < 128) {
+      let sum = 0;
+      for (let dy = 0; dy < ss; dy++) {
+        const sy = Math.min(y * ss + dy, srcHeight - 1);
+        const rowBase = sy * srcWidth;
+        for (let dx = 0; dx < ss; dx++) {
+          const sx = Math.min(x * ss + dx, srcWidth - 1);
+          const p = (rowBase + sx) * 4;
+          // Rec.601 luma; transparent pixels (alpha 0) read as white since our SVG
+          // paints a full white background, so alpha is effectively always 255.
+          sum += (pixels[p] * 299 + pixels[p + 1] * 587 + pixels[p + 2] * 114) / 1000;
+        }
+      }
+      if (sum * norm < 128) {
         // black pixel → clear the bit
-        const byteIdx = y * bytesPerRow + (x >> 3);
-        bits[byteIdx] &= ~(0x80 >> (x & 7));
+        bits[y * bytesPerRow + (x >> 3)] &= ~(0x80 >> (x & 7));
       }
     }
   }
-  return { bits, bytesPerRow };
+  return { bits, bytesPerRow, width, height };
 }
 
 /** A fully-white 1-bit PNG (fallback when resvg is unavailable). */
@@ -205,14 +220,18 @@ export function renderTrmnlFrame(
   if (Resvg) {
     try {
       const svg = renderTrmnlDashboard(stateEvt, { ...(now ? { now } : {}), width, height });
+      // Supersample so the 1-bit threshold has sub-pixel edge info (crisper text,
+      // esp. Hangul). Cap the rasterized width so large panels don't blow up the
+      // per-frame render: 800→3×, ~1200→2×, ≥2400→1×.
+      const ss = Math.max(1, Math.min(3, Math.floor(2400 / width)));
       const resvg = new Resvg(svg, {
-        fitTo: { mode: 'width' as const, value: width },
+        fitTo: { mode: 'width' as const, value: width * ss },
         font: FONT_OPTS,
         background: '#ffffff',
       });
       const rendered = resvg.render();
-      const { bits, bytesPerRow } = rgbaToPacked1Bit(rendered.pixels, rendered.width, rendered.height);
-      buffer = encode1BitPng(bits, rendered.width, rendered.height, bytesPerRow);
+      const packed = rgbaToPacked1Bit(rendered.pixels, rendered.width, rendered.height, ss);
+      buffer = encode1BitPng(packed.bits, packed.width, packed.height, packed.bytesPerRow);
     } catch (err) {
       debug(TAG, `render failed (${err}) — emitting blank frame`);
       buffer = blankPng(width, height);

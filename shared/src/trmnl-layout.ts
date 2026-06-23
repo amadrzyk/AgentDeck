@@ -406,20 +406,24 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
     }
   }
 
-  // --- Footer: 5H + 7D quota on one line, filling the width ---
-  // Each half: label, a wide gauge, the %, and a detailed "resets in Hh Mm". No
-  // token tally / wall clock. Unknown quota draws a hatched "—" not a lying 0%.
+  // --- Footer: Claude brand mark + 5H/7D quota on one line ---
+  // The mark on the far left labels the block as Claude subscription usage. Each
+  // half: label, gauge, %, then the reset countdown tucked right after the % (no
+  // "resets" filler word, no wasted gap). Unknown quota draws a hatched "—".
   els.push(`<rect x="${pad}" y="${footerTop}" width="${W - 2 * pad}" height="2" fill="${INK}"/>`);
   const usageKnown = state.usageKnown !== false;
   const fy = footerTop + 33;
   const gh = 18;
-  const colW = (W - 2 * pad) / 2;
-  // Generous gauge so the footer uses its space instead of leaving it empty.
-  const gaugeW = clamp(Math.round(colW * 0.42), 120, 240);
+  // Claude mark (canonical brand glyph), vertically centered in the footer band.
+  const markSize = 30;
+  els.push(agentGlyphMono('claude-code', pad + markSize / 2, footerTop + 26, markSize, INK, PAPER));
+  const usageX0 = pad + markSize + 18;
+  const colW = (W - pad - usageX0) / 2;
+  const gaugeW = clamp(Math.round(colW * 0.4), 110, 220);
 
   const quotaInline = (x: number, label: string, pct: number, resetsAt: string | undefined): void => {
-    const gx = x + 34;
-    const px = gx + gaugeW + 10;
+    const gx = x + 30;
+    const px = gx + gaugeW + 8;
     els.push(
       `<text x="${x}" y="${fy}" font-family="${SANS}" font-size="18" font-weight="700" fill="${INK}">${label}</text>`,
       usageKnown ? gauge(gx, fy - 14, gaugeW, gh, pct) : gaugeUnknown(gx, fy - 14, gaugeW, gh),
@@ -427,14 +431,14 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
     );
     const remaining = usageKnown ? fmtRemaining(resetsAt, now) : '';
     if (remaining) {
-      // Right-aligned at the end of this half so the detail reads cleanly.
+      // Tucked right after the % (≈ width of "100%") instead of flushed to the column edge.
       els.push(
-        `<text x="${x + colW - 12}" y="${fy}" text-anchor="end" font-family="${SANS}" font-size="15" font-weight="600" fill="${INK}">resets ${escXml(remaining)}</text>`,
+        `<text x="${px + 50}" y="${fy}" font-family="${SANS}" font-size="15" font-weight="600" fill="${INK}">${escXml(remaining)}</text>`,
       );
     }
   };
-  quotaInline(pad, '5H', state.fiveHourPercent, state.fiveHourResetsAt);
-  quotaInline(pad + colW, '7D', state.sevenDayPercent, state.sevenDayResetsAt);
+  quotaInline(usageX0, '5H', state.fiveHourPercent, state.fiveHourResetsAt);
+  quotaInline(usageX0 + colW, '7D', state.sevenDayPercent, state.sevenDayResetsAt);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${els.join('')}</svg>`;
 }

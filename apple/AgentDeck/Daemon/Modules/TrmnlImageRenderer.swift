@@ -22,22 +22,30 @@ enum TrmnlImageRenderer {
     static func renderPng(_ state: TrmnlDashState, width: Int, height: Int) -> Data {
         let w = max(1, width)
         let h = max(1, height)
-        let bytesPerRow = w // DeviceGray, 1 byte/pixel
-        var gray = [UInt8](repeating: 0xFF, count: bytesPerRow * h)
+        // Supersample so the 1-bit threshold has sub-pixel edge info → crisper text
+        // (esp. Hangul). Cap the rasterized width so big panels don't blow up the
+        // per-frame render: 800→3×, ~1200→2×, ≥2400→1×.
+        let ss = max(1, min(3, 2400 / w))
+        let pw = w * ss
+        let ph = h * ss
+        let bytesPerRow = pw // DeviceGray, 1 byte/pixel
+        var gray = [UInt8](repeating: 0xFF, count: bytesPerRow * ph)
 
         gray.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress,
                   let ctx = CGContext(
-                      data: base, width: w, height: h,
+                      data: base, width: pw, height: ph,
                       bitsPerComponent: 8, bytesPerRow: bytesPerRow,
                       space: CGColorSpaceCreateDeviceGray(),
                       bitmapInfo: CGImageAlphaInfo.none.rawValue
                   )
             else { return }
+            // Draw in logical w×h space; the CTM scale rasterizes at ss resolution.
+            if ss != 1 { ctx.scaleBy(x: CGFloat(ss), y: CGFloat(ss)) }
             draw(state, ctx: ctx, width: w, height: h)
         }
 
-        return encode1BitPng(fromGray: gray, width: w, height: h, grayRowBytes: bytesPerRow)
+        return encode1BitPng(fromGray: gray, width: w, height: h, grayRowBytes: bytesPerRow, ss: ss)
     }
 
     // MARK: - Drawing (top-down coordinates; flipped into CG's bottom-left origin)
@@ -233,14 +241,18 @@ enum TrmnlImageRenderer {
             }
         }
 
-        // Footer: 5H + 7D quota on one line, filling the width — label, a wide
-        // gauge, the %, and a detailed "resets Hh Mm" right-aligned per half.
+        // Footer: Claude brand mark + 5H/7D quota on one line. The mark labels the
+        // block as Claude usage; the reset countdown tucks right after the % (no
+        // "resets" filler word), not flushed to the column edge.
         fill(pad, footerTop, W - 2 * pad, 2, black)
         let usageKnown = state.usageKnown
         let fTop = footerTop + 18
         let gh: CGFloat = 18
-        let colW = (W - 2 * pad) / 2
-        let gaugeW = clampF((colW * 0.42).rounded(), 120, 240)
+        let markSize: CGFloat = 30
+        agentGlyph("claude-code", pad + markSize / 2, footerTop + 26, markSize)
+        let usageX0 = pad + markSize + 18
+        let colW = (W - pad - usageX0) / 2
+        let gaugeW = clampF((colW * 0.4).rounded(), 110, 220)
 
         func gauge(_ gx: CGFloat, _ gy: CGFloat, _ pct: Double) {
             stroke(gx, gy, gaugeW, gh, 1.5)
@@ -263,17 +275,18 @@ enum TrmnlImageRenderer {
             ctx.restoreGState()
         }
         func quotaInline(_ x0: CGFloat, _ label: String, _ pct: Double, _ resetsAt: String?) {
-            let gx = x0 + 34
-            let px = gx + gaugeW + 10
+            let gx = x0 + 30
+            let px = gx + gaugeW + 8
             text(label, x: x0, top: fTop, size: 18, bold: true)
             if usageKnown { gauge(gx, fTop, pct) } else { gaugeUnknown(gx, fTop) }
             text(usageKnown ? "\(Int(pct.rounded()))%" : "—", x: px, top: fTop, size: 18, mono: true)
             if usageKnown, let r = Self.fmtRemaining(resetsAt), !r.isEmpty {
-                text("resets \(r)", x: x0 + colW - 12, top: fTop, size: 15, bold: true, align: .right)
+                // Tucked right after the % (≈ width of "100%"), not flushed right.
+                text(r, x: px + 50, top: fTop, size: 15, bold: true, align: .left)
             }
         }
-        quotaInline(pad, "5H", state.fiveHourPercent, state.fiveHourResetsAt)
-        quotaInline(pad + colW, "7D", state.sevenDayPercent, state.sevenDayResetsAt)
+        quotaInline(usageX0, "5H", state.fiveHourPercent, state.fiveHourResetsAt)
+        quotaInline(usageX0 + colW, "7D", state.sevenDayPercent, state.sevenDayResetsAt)
     }
 
     /// Reset countdown with two-unit detail: "3h 34m", "2d 20h", "45m". Mirrors
@@ -434,14 +447,24 @@ enum TrmnlImageRenderer {
 
     /// Threshold the 8-bit gray buffer (CG bottom-up) to a top-down 1-bit packed
     /// bitmap (1 = white, 0 = black) and encode as a grayscale PNG, bit depth 1.
-    private static func encode1BitPng(fromGray gray: [UInt8], width: Int, height: Int, grayRowBytes: Int) -> Data {
+    private static func encode1BitPng(fromGray gray: [UInt8], width: Int, height: Int, grayRowBytes: Int, ss: Int = 1) -> Data {
         let rowBytes = (width + 7) / 8
         var packed = [UInt8](repeating: 0xFF, count: rowBytes * height)
+        let srcH = height * ss
+        let norm = 1.0 / Double(ss * ss)
         gray.withUnsafeBufferPointer { src in
             for y in 0..<height {
-                let cgRow = (height - 1 - y) * grayRowBytes // CG buffer is bottom-up
-                for x in 0..<width where src[cgRow + x] < 128 {
-                    packed[y * rowBytes + (x >> 3)] &= ~(UInt8(0x80) >> UInt8(x & 7))
+                for x in 0..<width {
+                    // Box-average the ss×ss block (CG buffer is bottom-up) before
+                    // thresholding so glyph edges land on majority coverage → crisp.
+                    var sum = 0
+                    for dy in 0..<ss {
+                        let cgRow = (srcH - 1 - (y * ss + dy)) * grayRowBytes
+                        for dx in 0..<ss { sum += Int(src[cgRow + x * ss + dx]) }
+                    }
+                    if Double(sum) * norm < 128 {
+                        packed[y * rowBytes + (x >> 3)] &= ~(UInt8(0x80) >> UInt8(x & 7))
+                    }
                 }
             }
         }

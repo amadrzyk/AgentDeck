@@ -30,6 +30,31 @@ agentdeck trmnl     # prints http://<LAN-IP>:9120 + enrolled panels + health
 
 Set that one URL as the panel's custom/BYOS server. It auto-enrolls on first poll (no MAC entry). **Critical:** run a single daemon as the hub on a stable `LAN-IP:9120`. The **Node daemon is the usage-capable hub** (it reads Claude OAuth quota); the **macOS app should run as a client** (`isUsingExternalDaemon`). Two hubs racing for port 9120 — or a panel pinned to a fallback port that comes and goes — is what makes the firmware flip between the dashboard and its **"WiFi connected / TRMNL not responding"** error screen.
 
+**Poll loop** (the panel drives everything — the daemon never pushes):
+
+```
+TRMNL panel (battery e-ink, deep-sleep)          AgentDeck daemon (hub, :9120)
+   │
+   │ GET /api/setup   id=MAC, fw, batt, rssi, w, h     ┐ first boot only
+   ├──────────────────────────────────────────────────►│ enroll(MAC) → api_key (soft auth)
+   │◄ 200 {api_key, friendly_id, image_url, filename}  ─┘
+   │
+ ┌─┤ GET /api/display id=MAC, access-token, w, h
+ │ ├──────────────────────────────────────────────────►│ render frame, cache by "WxH" (LRU 8)
+ │ │◄ 200 {status:0, image_url, filename,              │  filename = visual hash (NO wall-clock)
+ │ │        refresh_rate, image_url_timeout, sleep}   ─┘  refresh_rate = AWAITING? 60 : 180  (floor 30)
+ │ │
+ │ │ filename == cached?  ─► skip download, just sleep  ← battery + flaky-WiFi saver
+ │ │ filename changed?    ─► GET /trmnl/image/WxH-hash.png
+ │ ├──────────────────────────────────────────────────►│ serve pre-rendered 1-bit PNG
+ │ │◄ 200 image/png ────────────────────────────────────┘
+ │ │ paint e-ink, deep-sleep for refresh_rate seconds
+ └─┤
+ sleep
+```
+
+Both hubs implement the contract: Node `bridge/src/trmnl/{byos-server,frame-cache,trmnl-settings,trmnl-telemetry}.ts`, Swift `apple/.../Daemon/Modules/Trmnl{Module,Settings,ImageRenderer}.swift` (CoreGraphics → 1-bit PNG, no subprocess) + routes in `DaemonServer.swift`.
+
 **Behavior** (aligned to the `usetrmnl/firmware` BYOS contract):
 - **Response shape** — `/api/display` returns `status:0, image_url, filename, refresh_rate (number), image_url_timeout, special_function:"sleep", reset_firmware:false, update_firmware:false, firmware_url:null`. `refresh_rate` is a **number** (the firmware parses it as a uint; a string can read as 0). `image_url` is 1-bit **PNG** (firmware sniffs `BM` → BMP, else PNG/JPEG — PNG is supported).
 - **Stable `filename`** — the firmware caches the image by `filename` and **skips the re-download when it's unchanged**. So the frame hash changes ONLY on real visual change — never for a ticking clock. This is what keeps a battery panel on a flaky link from re-downloading (and full-flashing the e-ink) every poll.
@@ -40,6 +65,19 @@ Set that one URL as the panel's custom/BYOS server. It auto-enrolls on first pol
 - **Health** — `agentdeck trmnl` and `/status` `modules.trmnl` expose per-panel lastSeen/battery/RSSI + a `stale` flag.
 
 Settings (`~/.agentdeck/settings.json` `trmnl` block): `enabled`, `refreshRate`, `refreshActive`, `imageUrlTimeout`, `autoRegister`, `devices[]`.
+
+### Why it flips to "TRMNL logo → WiFi connected → not responding"
+
+That three-screen sequence is the **firmware's boot/reconnect UI**, not a server render. The panel shows it whenever a single poll **round-trip fails at the network layer** (`WIFI_FAILED` = the *device's* HTTP request timed out / was refused / had no route — never a 500 from us). On the *next* poll that succeeds it boots back through the same logo → WiFi-connected screens into the dashboard. So the "중간중간 전환" the user sees is simply **occasional failed polls**, one every time a poll lands in a dead window.
+
+The firmware-contract bugs that used to cause this on *every* poll are already fixed (commit `b5b12c72`): `refresh_rate` is a number (a string parsed as `0` → busy-loop), `image_url_timeout` is sent, and `filename` is a wall-clock-free visual hash (a ticking clock used to churn the hash → re-download every poll → flash + flaky-link failures). What remains are **transport** dead windows. Daemon-side causes, most → least controllable:
+
+1. **App Nap (FIXED).** A backgrounded menubar (`LSUIElement`) daemon with the Mac display asleep but the system awake is a prime App Nap target — macOS suspends the process and the `NWListener` stops accepting, so the panel's next poll times out. The daemon now holds a `ProcessInfo.beginActivity(.userInitiatedAllowingIdleSystemSleep)` token for its lifetime (`DaemonServer.startServices` step 15, released in `shutdown`) — App Nap can't suspend the listener while the Mac is awake, and the `…AllowingIdleSystemSleep` variant still lets the Mac sleep normally (no laptop drain). *Run the daemon as a persistent hub (Node `agentdeck daemon` or the macOS app left running) — not a foreground session that exits.*
+2. **Two hubs / port churn.** Two daemons racing for 9120, or a panel pinned to a fallback port that comes and goes, intermittently points the panel at a dead address. Run exactly one hub on a stable `LAN-IP:9120` (see Setup above).
+3. **IP rebind.** The panel stores one fixed server URL; if the hub's LAN IP changes (DHCP renewal, WiFi reconnect) the URL goes stale until the panel is re-pointed. The listener binds `0.0.0.0` and survives, and the daemon re-advertises Bonjour on IP change, but the BYOS firmware stores a fixed URL and won't auto-rediscover. Pin the hub to a DHCP reservation / static IP (or a stable `.local` name the panel can resolve).
+4. **System sleep.** When the whole Mac sleeps nothing serves — unavoidable; the panel rides it out and recovers on the first post-wake poll (the daemon re-syncs sessions/usage/Bonjour on `kIOMessageSystemHasPoweredOn`).
+
+**Diagnosing:** `/api/display` polls now log at debug level (`DaemonLogger` category `TRMNL`, `id=<MAC> → http <status>`). If the panel shows "not responding" yet no `TRMNL /api/display` line appears around that time, the request never reached the daemon (transport — cases 1–4 above), not a render fault. `agentdeck trmnl` / `/status` `modules.trmnl` also expose per-panel `lastSeen` + a `stale` flag (no poll within 2× the current cadence).
 
 Reference: [BYOS docs](https://docs.trmnl.com/go/diy/byos) · [byos_sinatra](https://github.com/usetrmnl/byos_sinatra) (canonical response shape) · [firmware](https://github.com/usetrmnl/firmware) (`src/bl.cpp` — image sniff, `image_url_timeout`, `WIFI_FAILED`).
 
