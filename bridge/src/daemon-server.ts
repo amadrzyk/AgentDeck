@@ -155,7 +155,7 @@ function isToolGated(toolName: string, gatedTools: string[]): boolean {
 function formatApprovalQuestion(toolName: string, toolInput: unknown): string {
   const inp = toolInput && typeof toolInput === 'object' ? (toolInput as Record<string, unknown>) : {};
   let detail = '';
-  for (const k of ['command', 'file_path', 'path', 'pattern', 'url']) {
+  for (const k of ['command', 'file_path', 'notebook_path', 'path', 'pattern', 'url']) {
     if (typeof inp[k] === 'string') { detail = inp[k] as string; break; }
   }
   const base = toolName ? `Allow ${toolName}` : 'Allow tool';

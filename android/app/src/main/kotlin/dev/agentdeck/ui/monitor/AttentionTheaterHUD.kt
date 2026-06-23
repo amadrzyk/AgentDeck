@@ -181,7 +181,18 @@ fun AttentionTheaterHUD(
             }
         }
 
-        if (useHorizontal) {
+        if (effectiveOptions.isEmpty()) {
+            // No device-answerable choice (Notification-only attention, or a
+            // prompt whose options couldn't be parsed) — point the user to the
+            // terminal instead of showing dead buttons.
+            Text(
+                text = "↳ Respond in your terminal",
+                color = TerrariumColors.HUDSubtext,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        } else if (useHorizontal) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 effectiveOptions.forEachIndexed { listIndex, option ->
                     val idx = option.index ?: listIndex
@@ -213,18 +224,14 @@ fun AttentionTheaterHUD(
     }
 }
 
-/** If the parser delivered no options, fall back to the legacy yes/no/always
- *  trio so the card never appears blank. Bridge parsers sometimes hit a
- *  permission prompt whose labels couldn't be extracted — better to show
- *  the familiar trio than nothing. */
-private fun effectiveOptions(options: List<PromptOption>): List<PromptOption> {
-    if (options.isNotEmpty()) return options
-    return listOf(
-        PromptOption(label = "Yes",    shortcut = "y", index = 0),
-        PromptOption(label = "No",     shortcut = "n", index = 1),
-        PromptOption(label = "Always", shortcut = "a", index = 2),
-    )
-}
+/** The options to render — exactly what the bridge/daemon delivered. When
+ *  empty the prompt isn't remotely answerable (a Notification-only attention
+ *  signal, or a no-PTY session whose options couldn't be parsed), so the card
+ *  shows a "respond in your terminal" hint instead of fabricating a
+ *  yes/no/always trio whose taps would dispatch `select_option` to a session
+ *  that can't act on it. Mirrors Apple `AttentionTheaterHUD.effectiveOptions`
+ *  and the shared d200h-layout terminal-hint branch. */
+private fun effectiveOptions(options: List<PromptOption>): List<PromptOption> = options
 
 private fun useHorizontalLayout(options: List<PromptOption>, promptType: String?): Boolean {
     if (options.size > 3) return false

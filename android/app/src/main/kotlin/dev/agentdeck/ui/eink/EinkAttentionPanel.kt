@@ -65,14 +65,12 @@ fun buildEinkAttentionFeatured(state: DashboardState): EinkAttentionFeatured? {
     )
 }
 
-fun effectiveEinkAttentionOptions(options: List<PromptOption>): List<PromptOption> {
-    if (options.isNotEmpty()) return options
-    return listOf(
-        PromptOption(label = "Yes", shortcut = "y", index = 0),
-        PromptOption(label = "No", shortcut = "n", index = 1),
-        PromptOption(label = "Always", shortcut = "a", index = 2),
-    )
-}
+/** Options to render — exactly what the bridge/daemon delivered. When empty the
+ *  prompt isn't remotely answerable from this e-ink surface (Notification-only
+ *  attention, or an observed gated prompt this panel can't resolve), so the panel
+ *  shows a "respond in your terminal" hint rather than fabricating a
+ *  yes/no/always trio whose taps dispatch `select_option` to nowhere. */
+fun effectiveEinkAttentionOptions(options: List<PromptOption>): List<PromptOption> = options
 
 @Composable
 fun EinkAttentionPanel(
@@ -158,7 +156,15 @@ fun EinkAttentionPanel(
                 )
             }
 
-            LazyColumn(
+            if (options.isEmpty()) {
+                Text(
+                    text = "Respond in your terminal",
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f, fill = false),

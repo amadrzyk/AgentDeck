@@ -87,14 +87,23 @@ export function applyAwaitingOverlayToObserved<
 }
 
 /**
- * Heuristic: does a Notification `message` look like a permission/input
+ * Heuristic: does a Notification `message` look like an actual permission
  * prompt rather than an idle-timeout reminder? Claude's Notification hook
- * fires for both, so this filter prevents idle pings from flipping a session
- * to awaiting. Kept conservative.
+ * fires for BOTH "Claude needs your permission to use Bash" (a real decision)
+ * and "Claude is waiting for your input" (a 60s idle ping). Only the former is
+ * an awaiting state — the latter must NOT flip a session to attention, or every
+ * idle session falsely shows a permission popup with no answerable choice.
+ *
+ * So this matches genuine permission phrasing ONLY. Earlier alternatives like
+ * `waiting for your` / `wants to` / `confirm` / `to proceed` were too broad and
+ * caught the idle ping (and arbitrary status text), which was the root cause of
+ * false "Attention" popups. Biased toward precision: a missed permission
+ * Notification just means no soft attention badge for a non-gated tool (the user
+ * still sees the prompt in their terminal), whereas a false positive nags with a
+ * dead popup. Gated tools (Bash/Write/Edit/…) are unaffected — they take the
+ * held PreToolUse path with a real requestId, independent of this filter.
  */
 export function looksLikePermissionMessage(message: string): boolean {
   if (!message) return false;
-  return /needs? your permission|waiting for your|wants to|approve|permission to use|confirm|to proceed/i.test(
-    message,
-  );
+  return /needs? your permission|permission to use|requesting permission/i.test(message);
 }

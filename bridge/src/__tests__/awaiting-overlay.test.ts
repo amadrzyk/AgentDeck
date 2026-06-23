@@ -60,14 +60,18 @@ describe('awaiting-overlay', () => {
   });
 
   describe('looksLikePermissionMessage', () => {
-    it('matches real permission prompts', () => {
+    it('matches genuine permission prompts', () => {
       expect(looksLikePermissionMessage('Claude needs your permission to use Bash')).toBe(true);
-      expect(looksLikePermissionMessage('Claude is waiting for your input')).toBe(true);
-      expect(looksLikePermissionMessage('Claude wants to run npm test')).toBe(true);
+      expect(looksLikePermissionMessage('Claude needs your permission to run this command')).toBe(true);
+      expect(looksLikePermissionMessage('Requesting permission to use Edit')).toBe(true);
     });
-    it('rejects idle pings and empty messages', () => {
+    it('rejects the idle ping, non-permission status text, and empty messages', () => {
       expect(looksLikePermissionMessage('')).toBe(false);
+      // The 60s idle reminder fires through the SAME Notification hook — it must
+      // NOT flip a session to attention (this was the false-positive root cause).
+      expect(looksLikePermissionMessage('Claude is waiting for your input')).toBe(false);
       expect(looksLikePermissionMessage('Claude has been idle for 60 seconds')).toBe(false);
+      expect(looksLikePermissionMessage('Claude wants to run npm test')).toBe(false);
     });
   });
 

@@ -3116,13 +3116,17 @@ final class DaemonServer {
         event == "codex_tool_start" || event == "codex_tool_end"
     }
 
-    /// Does a Notification `message` look like a permission/input prompt rather
-    /// than an idle-timeout reminder? Claude's Notification hook fires for both,
-    /// so this conservative filter prevents idle pings from flipping a session
-    /// to awaiting. Mirrors the Node `looksLikePermissionMessage` regex.
+    /// Does a Notification `message` look like an ACTUAL permission prompt rather
+    /// than an idle-timeout reminder? Claude's Notification hook fires for both
+    /// "Claude needs your permission to use Bash" (a real decision) and "Claude
+    /// is waiting for your input" (a 60s idle ping); only the former is an
+    /// awaiting state. Matches genuine permission phrasing ONLY — the earlier
+    /// broad alternatives (`waiting for your`, `wants to`, `confirm`, `to proceed`)
+    /// caught the idle ping and were the root cause of false "Attention" popups.
+    /// Mirrors the Node `looksLikePermissionMessage` regex.
     nonisolated static func looksLikePermissionMessage(_ message: String) -> Bool {
         guard !message.isEmpty else { return false }
-        let pattern = "needs? your permission|waiting for your|wants to|permission to use|approve|confirm|to proceed"
+        let pattern = "needs? your permission|permission to use|requesting permission"
         return message.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
@@ -3332,7 +3336,7 @@ final class DaemonServer {
     nonisolated static func formatApprovalQuestion(tool: String, toolInput: Any?) -> String {
         var detail = ""
         if let inp = toolInput as? [String: Any] {
-            for key in ["command", "file_path", "path", "pattern", "url"] {
+            for key in ["command", "file_path", "notebook_path", "path", "pattern", "url"] {
                 if let value = inp[key] as? String { detail = value; break }
             }
         }
