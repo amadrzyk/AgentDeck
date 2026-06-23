@@ -29,8 +29,13 @@ export interface EnrichedSession {
   elapsedSec?: number;
 }
 
-/** Cache last-known sibling state to avoid propagating undefined on transient fetch failures */
-const siblingStateCache = new Map<string, { state: string; modelName?: string; effortLevel?: string }>();
+/** Cache last-known sibling state to avoid propagating undefined on transient fetch failures.
+ * `updatedAt` bounds how long a vanished session may ride its last-known state: once the
+ * cache ages past LIVENESS_GRACE_MS without a successful probe/push, we stop treating it as
+ * alive so devices (TRMNL e-ink, ESP32, Pixoo) prune ended sessions instead of showing them
+ * forever (the registry only prunes on PID death, which lingers when the parent shell lives). */
+const siblingStateCache = new Map<string, { state: string; modelName?: string; effortLevel?: string; updatedAt: number }>();
+const LIVENESS_GRACE_MS = 20_000;
 
 /** Push-channel state cache — populated by DaemonWsClient session_push_state messages */
 const pushStateCache = new Map<string, { state: string; modelName?: string; effortLevel?: string; updatedAt: number }>();
@@ -39,7 +44,7 @@ const pushStateCache = new Map<string, { state: string; modelName?: string; effo
 export function updatePushState(sessionId: string, state: string, modelName?: string, effortLevel?: string): void {
   pushStateCache.set(sessionId, { state, modelName, effortLevel, updatedAt: Date.now() });
   // Also update sibling cache so it stays consistent
-  siblingStateCache.set(sessionId, { state, modelName, effortLevel });
+  siblingStateCache.set(sessionId, { state, modelName, effortLevel, updatedAt: Date.now() });
 }
 
 /** Check if push-channel has fresh state (< 30s old) */
@@ -115,13 +120,18 @@ export async function enrichSessionsWithState(
       const res = await fetch(`http://127.0.0.1:${s.port}/health`, { signal: AbortSignal.timeout(2000) });
       const data = await res.json() as { state?: string; modelName?: string; effortLevel?: string };
       if (data.state) {
-        siblingStateCache.set(s.id, { state: data.state, modelName: data.modelName, effortLevel: data.effortLevel });
+        siblingStateCache.set(s.id, { state: data.state, modelName: data.modelName, effortLevel: data.effortLevel, updatedAt: Date.now() });
       }
       return { ...base, state: data.state, modelName: data.modelName, effortLevel: data.effortLevel };
     } catch {
+      // Probe failed. Within the grace window keep the last-known state alive so a
+      // transient blip doesn't flicker a healthy session off the deck; past it,
+      // mark the session dead so devices prune the ended session.
       const cached = siblingStateCache.get(s.id);
-      if (cached) return { ...base, state: cached.state, modelName: cached.modelName, effortLevel: cached.effortLevel };
-      return base;
+      if (cached && Date.now() - cached.updatedAt < LIVENESS_GRACE_MS) {
+        return { ...base, state: cached.state, modelName: cached.modelName, effortLevel: cached.effortLevel };
+      }
+      return { ...base, alive: false, state: cached?.state ?? 'disconnected' };
     }
   }));
 }

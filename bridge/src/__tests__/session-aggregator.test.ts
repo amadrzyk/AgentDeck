@@ -82,7 +82,7 @@ describe('session-aggregator', () => {
     ]);
   });
 
-  it('falls back to base session info when sibling /health fails (no cache)', async () => {
+  it('marks the session dead when sibling /health fails with no cache', async () => {
     clearSiblingStateCache('sibling');
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect failed'));
 
@@ -92,16 +92,18 @@ describe('session-aggregator', () => {
       'processing',
     );
 
+    // No cached state to ride: an unreachable sibling is dead, so devices
+    // (TRMNL e-ink, ESP32, Pixoo) prune it instead of showing it forever.
     expect(sessions).toEqual([
       expect.objectContaining({
         id: 'sibling',
         port: 9131,
         projectName: 'AgentDeck',
-        alive: true,
+        alive: false,
         agentType: 'codex-cli',
       }),
     ]);
-    expect(sessions[0].state).toBeUndefined();
+    expect(sessions[0].state).toBe('disconnected');
   });
 
   it('returns cached state when sibling /health fails after a previous success', async () => {
@@ -145,7 +147,8 @@ describe('session-aggregator', () => {
       'idle',
     );
 
-    // Clear cache then fail — should get undefined state
+    // Clear cache then fail — no stale fallback, so the session is marked dead
+    // (not left riding the now-cleared 'idle').
     clearSiblingStateCache('sibling');
     vi.mocked(globalThis.fetch).mockRejectedValueOnce(new Error('timeout'));
 
@@ -155,7 +158,8 @@ describe('session-aggregator', () => {
       'idle',
     );
 
-    expect(sessions[0].state).toBeUndefined();
+    expect(sessions[0].alive).toBe(false);
+    expect(sessions[0].state).toBe('disconnected');
   });
 
   it('sweeps cached state for sessions that drop out of the active set', async () => {
@@ -182,7 +186,8 @@ describe('session-aggregator', () => {
       'idle',
     );
 
-    // 3. sibling-a returns with a failing /health — cache was swept, so no stale fallback.
+    // 3. sibling-a returns with a failing /health — cache was swept, so no stale
+    // fallback: it's marked dead rather than riding the old 'processing'.
     vi.mocked(globalThis.fetch).mockRejectedValueOnce(new Error('timeout'));
     const sessions = await enrichSessionsWithState(
       [makeSession({ id: 'sibling-a', port: 9130 })],
@@ -190,7 +195,8 @@ describe('session-aggregator', () => {
       'idle',
     );
 
-    expect(sessions[0].state).toBeUndefined();
+    expect(sessions[0].alive).toBe(false);
+    expect(sessions[0].state).toBe('disconnected');
   });
 
   it('buildEnrichedSessionsList includes own session and excludes daemon', async () => {
