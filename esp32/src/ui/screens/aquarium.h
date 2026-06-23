@@ -22,6 +22,14 @@ lv_obj_t* aquariumCreate();
 void aquariumUpdate(float dt);
 
 /**
+ * Resolve the host-display dim instruction (off / min / restore) into a backlight
+ * level and apply it. Called every frame from the main loop regardless of the
+ * active view, so the panel sleeps with the Mac on the timeline/detail views too —
+ * not only on the aquarium. No-op when the target equals the last applied level.
+ */
+void applyHostDimBrightness();
+
+/**
  * Set connection overlay status (full-screen scrim with card).
  */
 void aquariumSetConnectionStatus(ConnOverlayStatus status);

@@ -421,6 +421,10 @@ static void uiTask(void* param) {
             Screens::aquariumSetConnectionStatus(desiredOverlay);
         }
 
+        // Apply the host-display dim/restore every frame, independent of the active
+        // view, so the panel sleeps with the Mac even on the timeline/detail screens.
+        Screens::applyHostDimBrightness();
+
         // Update current view
         uint32_t tView0 = micros();
         switch (currentView) {
@@ -588,14 +592,12 @@ void setup() {
 
 #if !defined(BOARD_LED8X32) && !defined(BOARD_TTGO) && !defined(BOARD_ESP32_C6_147)
     // Init PSRAM
-    if (psramFound()) {
-        Serial.printf("PSRAM: %d KB free\n", ESP.getFreePsram() / 1024);
-    } else {
+    if (!psramFound()) {
         Serial.println("WARNING: No PSRAM found!");
     }
-#else
-    Serial.printf("Free heap: %d KB\n", ESP.getFreeHeap() / 1024);
 #endif
+    // Boot heap snapshot — free + largest-free-block (fragmentation signal).
+    logHeap("boot");
 
     // Init state
     g_stateMutex = xSemaphoreCreateMutex();

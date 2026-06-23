@@ -227,9 +227,12 @@ lv_obj_t* aquariumCreate() {
     return screen;
 }
 
-void aquariumUpdate(float dt) {
+void applyHostDimBrightness() {
     // Host display sleep → dim/restore ESP32 backlight, honoring the host's
-    // dim instruction (enabled / off vs min / level).
+    // dim instruction (enabled / off vs min / level). Driven every frame from the
+    // main loop so it applies on every view (aquarium, timeline, detail), not just
+    // the aquarium — otherwise the panel stays lit when the Mac sleeps while the
+    // user left it on the timeline/detail screen.
     lockState();
     bool displayOn = g_state.hostDisplayOn;
     uint8_t userBright = g_state.userBrightness;
@@ -255,7 +258,9 @@ void aquariumUpdate(float dt) {
         lastAppliedBrightness = target;
         UI::setBrightness(target);
     }
+}
 
+void aquariumUpdate(float dt) {
     // Render terrarium frame only when connection overlay is hidden to save CPU/SPI bandwidth
     bool scrimHidden = true;
     if (connScrim) {

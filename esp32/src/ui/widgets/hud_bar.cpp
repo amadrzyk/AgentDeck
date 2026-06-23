@@ -944,22 +944,12 @@ void init(lv_obj_t* parent) {
         lv_obj_add_flag(cell[i], LV_OBJ_FLAG_HIDDEN);
     }
 
-    // Compact usage gauges pinned at the bottom (gauge row appended by shared code below)
-    panelRight = lv_obj_create(panelLeft);
-    lv_obj_set_size(panelRight, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(panelRight, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(panelRight, 0, 0);
-    lv_obj_set_style_pad_all(panelRight, 0, 0);
-    lv_obj_set_style_pad_row(panelRight, 2, 0);
-    lv_obj_clear_flag(panelRight, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(panelRight, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(panelRight, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_add_flag(panelRight, LV_OBJ_FLAG_HIDDEN);   // usage now lives in the full-width top bar
-
-    lblTankHeader = lv_label_create(panelRight);
-    lv_obj_set_style_text_color(lblTankHeader, lv_color_hex(Theme::HUDDim), 0);
-    lv_obj_set_style_text_font(lblTankHeader, &lv_font_montserrat_10, 0);
-    lv_label_set_text(lblTankHeader, "CLAUDE USAGE");
+    // Usage lives solely in the full-width top bar (5H/7D gauges) on the D1 layout.
+    // The old bottom "CLAUDE USAGE" panel was redundant with it, so it is not created
+    // here. Leaving these null makes every `if (panelRight)` visibility guard below a
+    // no-op, so nothing re-shows it at runtime.
+    panelRight = nullptr;
+    lblTankHeader = nullptr;
 
 #elif IS_ROUND
     // === Round AMOLED layout: top status bar + bottom gauges ===
@@ -1415,19 +1405,21 @@ void update() {
             lv_label_set_text(tbPerf, pb);
         }
 #endif
-        // Top-bar 5h / 7d usage gauges (bar fill width + pct). p5h/p7d are 0..1 (negative = no data).
+        // Top-bar 5h / 7d usage gauges (bar fill width + pct). p5h/p7d are 0..100
+        // percent (same scale as g_state.fiveHourPercent / updateGauge); negative =
+        // no data. The 92px track maps 0..100% → 0..92px.
         if (tb5hFill) {
-            int w5 = p5h >= 0.0f ? (int)(p5h * 92.0f + 0.5f) : 0; if (w5 > 92) w5 = 92;
+            int w5 = p5h >= 0.0f ? (int)(p5h / 100.0f * 92.0f + 0.5f) : 0; if (w5 > 92) w5 = 92;
             lv_obj_set_width(tb5hFill, w5);
-            lv_obj_set_style_bg_color(tb5hFill, lv_color_hex(p5h >= 0.85f ? D1_ATTN : D1_OK), 0);
-            char pb[8]; if (p5h >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p5h * 100.0f + 0.5f)); else snprintf(pb, sizeof(pb), "-");
+            lv_obj_set_style_bg_color(tb5hFill, lv_color_hex(p5h >= 85.0f ? D1_ATTN : D1_OK), 0);
+            char pb[8]; if (p5h >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p5h + 0.5f)); else snprintf(pb, sizeof(pb), "-");
             if (tb5hPct) lv_label_set_text(tb5hPct, pb);
         }
         if (tb7dFill) {
-            int w7 = p7d >= 0.0f ? (int)(p7d * 92.0f + 0.5f) : 0; if (w7 > 92) w7 = 92;
+            int w7 = p7d >= 0.0f ? (int)(p7d / 100.0f * 92.0f + 0.5f) : 0; if (w7 > 92) w7 = 92;
             lv_obj_set_width(tb7dFill, w7);
-            lv_obj_set_style_bg_color(tb7dFill, lv_color_hex(p7d >= 0.85f ? D1_ATTN : D1_OK), 0);
-            char pb[8]; if (p7d >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p7d * 100.0f + 0.5f)); else snprintf(pb, sizeof(pb), "-");
+            lv_obj_set_style_bg_color(tb7dFill, lv_color_hex(p7d >= 85.0f ? D1_ATTN : D1_OK), 0);
+            char pb[8]; if (p7d >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p7d + 0.5f)); else snprintf(pb, sizeof(pb), "-");
             if (tb7dPct) lv_label_set_text(tb7dPct, pb);
         }
         if (terrCount) {

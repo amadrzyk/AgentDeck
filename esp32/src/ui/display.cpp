@@ -1149,9 +1149,11 @@ void setBrightness(int level) {
     // AXS15231B: PWM backlight
     analogWrite(BOARD_PIN_BL, level);
 #elif defined(BOARD_IPS10)
-    // Backlight on/off
-    pinMode(BOARD_PIN_BL, OUTPUT);
-    digitalWrite(BOARD_PIN_BL, level > 0 ? HIGH : LOW);
+    // JD9365 backlight on GPIO23. analogWrite() drives it via LEDC PWM so the host's
+    // "min" dim level (e.g. 25/255) actually dims the panel instead of snapping to
+    // full-on; level 0 → fully off. (The JD9365 driver only init'd it as a binary
+    // GPIO; analogWrite re-attaches the pin to a LEDC channel on first call.)
+    analogWrite(BOARD_PIN_BL, level);
 #elif defined(BOARD_TTGO)
     // TTGO: LovyanGFX Light_PWM owns GPIO4 (single owner). s_lastBrightness lets
     // reassertPanel() re-apply duty to self-heal a stuck backlight after sleep.
