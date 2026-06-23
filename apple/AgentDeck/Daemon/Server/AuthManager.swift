@@ -111,6 +111,13 @@ final class AuthManager: Sendable {
     // MARK: - Network Helpers
 
     static func getLanIP() -> String? {
+        // Prefer the default-route interface's IPv4 so a dual-homed host (e.g.
+        // en0 + en1 on the same subnet) advertises the address a remote device
+        // can actually reach, not an arbitrary secondary one. App-Store-safe: a
+        // UDP "connect" sends no packet — it just makes the kernel resolve the
+        // source address via the route table (no subprocess, unlike `route`).
+        if let routed = primaryRouteIP() { return routed }
+
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
         defer { freeifaddrs(ifaddr) }
@@ -129,6 +136,38 @@ final class AuthManager: Sendable {
             }
         }
         return nil
+    }
+
+    /// IPv4 of the default-route interface via the UDP-connect source-address
+    /// trick (no packet leaves the host). Returns nil when there's no route.
+    private static func primaryRouteIP() -> String? {
+        let fd = socket(AF_INET, SOCK_DGRAM, 0)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+
+        var dest = sockaddr_in()
+        dest.sin_family = sa_family_t(AF_INET)
+        dest.sin_port = in_port_t(53).bigEndian
+        inet_pton(AF_INET, "8.8.8.8", &dest.sin_addr)
+        let connected = withUnsafePointer(to: &dest) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connected == 0 else { return nil }
+
+        var local = sockaddr_in()
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &local) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+        }
+        guard named == 0 else { return nil }
+
+        var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        inet_ntop(AF_INET, &local.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN))
+        let ip = String(cString: buf)
+        if ip.isEmpty || ip == "0.0.0.0" || ip.hasPrefix("169.254.") { return nil }
+        return ip
     }
 
     private static func getLocalIPAddresses() -> Set<String> {

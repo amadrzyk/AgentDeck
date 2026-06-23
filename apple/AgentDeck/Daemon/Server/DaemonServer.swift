@@ -482,6 +482,15 @@ final class DaemonServer {
     private var lastKnownIP: String?
     private var networkDebounceTask: Task<Void, Never>?
 
+    // App Nap guard. A backgrounded menubar (LSUIElement) daemon with the display
+    // asleep is a prime App Nap target — macOS suspends the process and the
+    // NWListener stops accepting, so a TRMNL panel's periodic poll (or any device
+    // request) times out and the firmware flips to its "WiFi connected / not
+    // responding" screen. Holding a userInitiatedAllowingIdleSystemSleep activity
+    // keeps the listener responsive while the Mac is awake; the trailing
+    // …AllowingIdleSystemSleep still lets the Mac sleep normally (no laptop-drain).
+    private var backgroundActivity: NSObjectProtocol?
+
     // Polling tasks
     private var sessionPollTask: Task<Void, Never>?
     private var usagePollTask: Task<Void, Never>?
@@ -1039,6 +1048,13 @@ final class DaemonServer {
         }
         monitor.start(queue: DispatchQueue(label: "dev.agentdeck.networkmonitor"))
 
+        // 15. Hold a process activity so App Nap can't suspend the listener while the
+        // app is backgrounded + the display is asleep (pull-only devices like the
+        // TRMNL panel keep polling on their own clock; a napped daemon = WIFI_FAILED).
+        backgroundActivity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Serving local dashboard devices (HTTP/WS, TRMNL e-ink polls)")
+
         DaemonLogger.shared.info("Daemon running on port \(port) — all modules wired")
     }
 
@@ -1517,6 +1533,10 @@ final class DaemonServer {
     private func trmnlDisplayResponse(_ req: HTTPServer.HTTPRequest) async -> HTTPServer.HTTPResponse {
         guard let trmnl = trmnlModule else { return .notFound }
         let r = await trmnl.display(headers: req.headers, base: trmnlBase(req))
+        // A successful poll is the heartbeat — if the panel shows "not responding"
+        // yet this line never appears, the request never reached the daemon (App Nap
+        // / network), not a render fault. Cheap and only at debug level.
+        DaemonLogger.shared.debug("TRMNL", "/api/display id=\(req.headers["id"] ?? "?") → http \(r.status)")
         return HTTPServer.HTTPResponse(
             status: r.status,
             headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
@@ -5074,6 +5094,8 @@ final class DaemonServer {
         // Resolve any held PreToolUse approvals to "ask" so their suspended hook
         // responses unblock (→ Claude's own prompt) instead of hanging the socket.
         for (requestId, _) in pendingApprovals { resolveApproval(requestId: requestId, decision: "ask") }
+        if let backgroundActivity { ProcessInfo.processInfo.endActivity(backgroundActivity) }
+        backgroundActivity = nil
         networkMonitor?.cancel()
         networkMonitor = nil
         networkDebounceTask?.cancel()
