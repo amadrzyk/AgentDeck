@@ -16,8 +16,10 @@ import asyncio
 import hashlib
 import io
 import json
+import os
 import signal
 import sys
+import time
 import urllib.request
 from typing import Iterable
 
@@ -26,6 +28,10 @@ from PIL import Image as PilImage, ImageEnhance
 DEFAULT_URL = "http://127.0.0.1:9120"
 POLL_INTERVAL = 1.5
 RECONNECT_DELAY = 3.0
+# If the bridge stays unreachable this long, the daemon that spawned us is gone
+# (crash / SIGKILL / sleep-kill / launchd) — exit cleanly after blanking the
+# panel instead of looping forever as an orphan holding the BLE link hostage.
+BRIDGE_GONE_EXIT_SEC = 30.0
 
 TIMEBOX_W = 11
 TIMEBOX_H = 11
@@ -159,6 +165,14 @@ async def write_packet(client, packet: bytes) -> None:
         await client.write_gatt_char(WRITE_CHAR, packet[i:i + CHUNK_SIZE], response=False)
 
 
+async def blank_panel(client) -> None:
+    """Push an all-black 11x11 farewell frame so the stateful LED panel doesn't
+    freeze on the last dashboard scene after we go away. The Timebox Mini has no
+    text resolution for an "OFFLINE" label (mirrors the Swift TimeboxModule, which
+    also blanks to 11x11 black; iDotMatrix/Pixoo can fit an OFFLINE glyph)."""
+    await write_packet(client, build_static_image_packet(bytes(182)))
+
+
 async def push_micro_frame(client, url, brightness, gamma, sat, contrast, last_key, force=False) -> str:
     """Fetch the native 11x11 micro frame and push it over BLE when its
     content+brightness changed (or `force`). Returns the new dedup key.
@@ -191,13 +205,36 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, handle_stop)
-        except NotImplementedError:
-            signal.signal(sig, lambda *_: None)
+        except (NotImplementedError, RuntimeError):
+            # Fall back to a classic handler that still requests a clean stop.
+            # The previous fallback installed a no-op handler that IGNORED
+            # SIGTERM — that stranded the process (the daemon's SIGTERM on
+            # shutdown did nothing) and left orphaned sync clients running for
+            # days, each holding the BLE link. Never ignore the signal.
+            signal.signal(sig, lambda *_: loop.call_soon_threadsafe(handle_stop))
 
     # Imported lazily so the module is usable for encoding tests without bleak.
     from bleak import BleakClient
 
+    last_bridge_ok = time.monotonic()
+
+    def should_exit() -> bool:
+        """True when we've been orphaned (parent daemon gone) or the bridge has
+        been unreachable long enough that nobody will ever stop us. A stateful
+        BLE panel can't detect a dropped link, so an orphan would otherwise loop
+        forever holding the single-central connection."""
+        if os.getppid() == 1:
+            print("Parent daemon gone (orphaned) — shutting down Timebox sync.")
+            return True
+        if time.monotonic() - last_bridge_ok > BRIDGE_GONE_EXIT_SEC:
+            print(f"Bridge unreachable >{int(BRIDGE_GONE_EXIT_SEC)}s — shutting down Timebox sync.")
+            return True
+        return False
+
     while not stop.is_set():
+        if should_exit():
+            stop.set()
+            break
         try:
             print(f"Connecting BLE {address}...")
             async with BleakClient(address, timeout=15.0) as client:
@@ -212,16 +249,21 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                 try:
                     current_brightness, display_dimmed, last_display_signature = \
                         resolve_display_brightness(fetch_display_state(url), brightness)
+                    last_bridge_ok = time.monotonic()
                 except Exception:
                     current_brightness, display_dimmed, last_display_signature = brightness, False, ""
 
                 while not stop.is_set():
+                    if should_exit():
+                        stop.set()
+                        break
                     # 1. Apply host display sleep/wake. The daemon exposes the same
                     #    display_state Pixoo/iDotMatrix/ESP32 receive; older session-
                     #    only bridges omit it (keep the configured brightness).
                     transitioned = False
                     try:
                         eff_b, dimmed, sig = resolve_display_brightness(fetch_display_state(url), brightness)
+                        last_bridge_ok = time.monotonic()
                         if sig != last_display_signature or eff_b != current_brightness:
                             current_brightness, display_dimmed, last_display_signature = eff_b, dimmed, sig
                             transitioned = True
@@ -238,6 +280,7 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                                 last_key = await push_micro_frame(
                                     client, url, current_brightness, gamma, sat, contrast, last_key, force=True
                                 )
+                                last_bridge_ok = time.monotonic()
                             except Exception as e:
                                 print(f"Dim-frame send error: {e}", file=sys.stderr)
                         if once:
@@ -253,6 +296,7 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                         last_key = await push_micro_frame(
                             client, url, current_brightness, gamma, sat, contrast, last_key
                         )
+                        last_bridge_ok = time.monotonic()
                     except Exception as e:
                         print(f"Frame fetch/send error: {e}", file=sys.stderr)
                     if once:
@@ -261,6 +305,18 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                         await asyncio.wait_for(stop.wait(), timeout=POLL_INTERVAL)
                     except asyncio.TimeoutError:
                         pass
+
+                # Inner loop exited. If we're shutting down (SIGTERM, orphaned, or
+                # bridge gone) and the link is still up, blank the panel before the
+                # `async with` drops BLE — otherwise the stateful LED panel freezes
+                # on the last dashboard frame forever (parity with iDotMatrix's
+                # OFFLINE farewell and the Swift TimeboxModule's 11x11 black blank).
+                if stop.is_set() and client.is_connected:
+                    try:
+                        await blank_panel(client)
+                        print("Shutting down — blanked Timebox panel.")
+                    except Exception as e:
+                        print(f"Farewell blank failed: {e}", file=sys.stderr)
         except Exception as e:
             print(f"BLE connection error: {e}", file=sys.stderr)
             if once:
