@@ -19,6 +19,10 @@ from idotmatrix.modules.common import Common as IdmCommon
 DEFAULT_URL = "http://127.0.0.1:9120"
 POLL_INTERVAL = 1.5  # 1.5 seconds interval (balanced for BLE bandwidth)
 OFFLINE_HASH = "offline"
+# If the bridge stays unreachable this long, the daemon that spawned us is gone
+# (crash / SIGKILL / sleep-kill / launchd) — exit cleanly after painting OFFLINE
+# instead of looping forever as an orphan that holds the BLE link hostage.
+BRIDGE_GONE_EXIT_SEC = 30.0
 
 async def fetch_frame(url: str) -> bytes:
     """Fetch the current 32x32 BMP frame from the AgentDeck bridge."""
@@ -136,22 +140,43 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
     last_display_signature = ""
     current_hw_brightness = brightness
     display_dimmed = False
+    last_bridge_ok = time.monotonic()
 
     # Graceful shutdown: when the daemon (or a user) stops us, we must leave the
     # panel in a clean state — a stateful BLE display otherwise freezes on the
     # last dashboard frame forever. Trap SIGTERM/SIGINT, break the loop, and push
     # the OFFLINE frame before disconnecting (mirrors the Pixoo/D200H teardown
     # invariant). add_signal_handler isn't available on all platforms; fall back
-    # to default handling there.
+    # to a classic handler that still requests a clean stop (never ignore the
+    # signal — that would strand the panel on its last frame).
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
+    def _request_stop() -> None:
+        stop_event.set()
     for _sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(_sig, stop_event.set)
+            loop.add_signal_handler(_sig, _request_stop)
         except (NotImplementedError, RuntimeError):
-            pass
+            signal.signal(_sig, lambda *_: loop.call_soon_threadsafe(_request_stop))
 
     while not stop_event.is_set():
+        # Self-terminate when orphaned. If the daemon that spawned us died
+        # (crash / SIGKILL / sleep-kill / launchd), our parent reparents to
+        # PID 1 (launchd/init). A stateful BLE panel can't detect a dropped
+        # link, so without this we'd loop forever holding the single-central
+        # BLE connection — blocking the next daemon's fresh sync and leaving a
+        # zombie behind (observed: multiple orphaned sync clients across days).
+        # Break the loop so the teardown below paints OFFLINE, then exit.
+        if os.getppid() == 1:
+            print("Parent daemon gone (orphaned) — shutting down iDotMatrix sync.")
+            stop_event.set()
+            break
+        # Belt-and-suspenders: if the bridge has been unreachable for a sustained
+        # window (parent alive but wedged, or getppid is unreliable), also exit.
+        if time.monotonic() - last_bridge_ok > BRIDGE_GONE_EXIT_SEC:
+            print(f"Bridge unreachable >{int(BRIDGE_GONE_EXIT_SEC)}s — shutting down iDotMatrix sync.")
+            stop_event.set()
+            break
         try:
             # 1. Ensure bluetooth connection
             if not connected:
@@ -231,6 +256,7 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
             # 2. Fetch frame from AgentDeck Bridge
             try:
                 frame_data = await fetch_frame(url)
+                last_bridge_ok = time.monotonic()
             except urllib.error.URLError as ue:
                 print(f"Bridge API offline or unreachable (GET /pixoo/frame): {ue.reason}")
                 if connected and last_hash != OFFLINE_HASH:

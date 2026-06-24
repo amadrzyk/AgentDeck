@@ -31,8 +31,19 @@ final class ModuleManager {
     }
 
     func stopAll() async {
-        for module in modules {
-            await module.stop()
+        // Stop modules in PARALLEL, not sequentially. App termination gives the
+        // whole shutdown a single ~3s budget (AppDelegate.applicationShouldTerminate),
+        // and several stateful-push devices paint a farewell frame in stop()
+        // (Pixoo "OFFLINE" over HTTP with a 2s cap, iDotMatrix/Timebox BLE blanks,
+        // D200H OFFLINE). Sequential stops let an early slow module (Pixoo's 2s
+        // HTTP deadline) eat the budget so later devices' farewell pushes get
+        // cut off by the force-exit and the panel freezes on the last scene.
+        // Each module's stop() touches an independent transport, so running them
+        // concurrently is safe and keeps every farewell inside the budget.
+        await withTaskGroup(of: Void.self) { group in
+            for module in modules {
+                group.addTask { await module.stop() }
+            }
         }
     }
 
