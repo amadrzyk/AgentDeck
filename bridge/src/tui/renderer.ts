@@ -396,8 +396,9 @@ function moduleStatusIcon(ok: boolean, warning = false): string {
   return ok ? '\u25CF' : warning ? '\u25C6' : '\u25CB';
 }
 
-function renderModuleHealthLines(moduleHealth: ModuleMap, width: number): string[] {
+function renderModuleHealthLines(moduleHealth: ModuleMap | undefined, width: number): string[] {
   const lines: string[] = [];
+  if (!moduleHealth) return lines;
   const push = (label: string, detail: string, ok: boolean, warning = false) => {
     const color = ok ? colors.idle : warning ? colors.awaiting : colors.dim;
     lines.push(` ${color}${moduleStatusIcon(ok, warning)}${RESET} ${truncText(`${label} ${detail}`.trim(), width - 4)}`);
