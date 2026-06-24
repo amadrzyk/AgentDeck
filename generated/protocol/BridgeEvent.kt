@@ -845,6 +845,7 @@ data class SessionInfo (
     @Json(name = "foldedSessionIds")
     val foldedSessionIDS: List<String>? = null,
 
+    val goal: String? = null,
     val groupSize: Double? = null,
     val id: String,
     val modelName: String? = null,

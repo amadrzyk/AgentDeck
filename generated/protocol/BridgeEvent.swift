@@ -1767,6 +1767,7 @@ struct ADSessionInfo: Codable, Equatable {
     var effortLevel: String?
     var elapsedSec: Double?
     var foldedSessionIds: [String]?
+    var goal: String?
     var groupSize: Double?
     var id: String
     var modelName: String?
@@ -1792,6 +1793,7 @@ struct ADSessionInfo: Codable, Equatable {
         case effortLevel = "effortLevel"
         case elapsedSec = "elapsedSec"
         case foldedSessionIds = "foldedSessionIds"
+        case goal = "goal"
         case groupSize = "groupSize"
         case id = "id"
         case modelName = "modelName"
@@ -1837,6 +1839,7 @@ extension ADSessionInfo {
         effortLevel: String?? = nil,
         elapsedSec: Double?? = nil,
         foldedSessionIds: [String]?? = nil,
+        goal: String?? = nil,
         groupSize: Double?? = nil,
         id: String? = nil,
         modelName: String?? = nil,
@@ -1862,6 +1865,7 @@ extension ADSessionInfo {
             effortLevel: effortLevel ?? self.effortLevel,
             elapsedSec: elapsedSec ?? self.elapsedSec,
             foldedSessionIds: foldedSessionIds ?? self.foldedSessionIds,
+            goal: goal ?? self.goal,
             groupSize: groupSize ?? self.groupSize,
             id: id ?? self.id,
             modelName: modelName ?? self.modelName,
