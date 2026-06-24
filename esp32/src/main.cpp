@@ -146,11 +146,16 @@ static void networkTask(void* param) {
         g_state.wsConnected = conn;
         unlockState();
 
-#if defined(BOARD_TTGO)
-        // Classic ESP32: WiFi RF activity couples noise into the SPI display,
-        // glitching the panel. When USB serial is the live transport WiFi is
-        // unneeded — park the radio after it's been stable for a few seconds to
-        // keep the panel clean. Restore it the moment serial drops.
+#if defined(BOARD_TTGO) || defined(BOARD_LED8X32)
+        // Classic ESP32 display-noise mitigation. Two coupling paths, same cure:
+        //   TTGO  — WiFi RF activity couples analog noise into the SPI panel.
+        //   TC001 — WiFi interrupts starve FastLED's RMT refill ISR, corrupting
+        //           the WS2812 bitstream (random bright/garbage pixels). The
+        //           classic ESP32 has no RMT DMA and IDF5 dropped FastLED's
+        //           anti-flicker builtin driver, so the RMT path is ISR-bound.
+        // When USB serial is the live transport WiFi is unneeded — park the radio
+        // after it's been stable a few seconds. Restore it the moment serial drops
+        // (WiFi-only operation, with no serial, is unaffected — parking never fires).
         {
             static bool radioParked = false;
             static uint32_t serialStableSince = 0;
