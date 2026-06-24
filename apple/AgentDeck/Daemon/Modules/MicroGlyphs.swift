@@ -1,13 +1,17 @@
 #if os(macOS)
 // MicroGlyphs.swift — Native 11×11 creature glyphs for the Timebox Mini micro layout.
 //
-// Swift mirror of bridge/src/pixoo/micro-glyphs.ts. The Timebox Mini has only 121
-// LEDs; downscaling the 32×32 terrarium creature bottoms out at a fuzzy silhouette,
-// so each creature is hand-authored directly at 11×11 as a bold, high-contrast
+// Swift mirror of bridge/src/pixoo/micro-glyphs.ts (the SSOT). The Timebox Mini has
+// only 121 LEDs; downscaling the 32×32 terrarium creature bottoms out at a fuzzy
+// silhouette, so each creature is authored directly at 11×11 as a bold, high-contrast
 // bitmap. The glyphs are the canonical brand marks (assets/logos/*_creature_gen.png,
 // design/brand/*.svg): Claude=rusty robot, Codex=cloud+`>_`, OpenClaw=lobster,
-// OpenCode=ring. The grids and colors here are kept byte-identical to the TS module
-// so the App Store macOS build and the Node CLI render the same frames.
+// OpenCode=ring.
+//
+// The grid/color DATA lives in MicroGlyphs.generated.swift, produced from the TS
+// module by `pnpm generate-micro-glyphs` — do NOT hand-edit the data here or there;
+// edit micro-glyphs.ts and regenerate so the App Store macOS build and the Node CLI
+// can never drift. This file holds only the consuming logic (paint + statusBg).
 //
 // Grid characters: '.' transparent (shows status bg), 'B' body, 'A' arm/leg/antenna,
 // 'C' claw, 'D' joint/shadow, 'E' eye, 'M' prompt marking, 'F' logo frame.
@@ -22,124 +26,21 @@ enum MicroGlyphs {
     typealias RGB = (UInt8, UInt8, UInt8)
     static let size = 11
 
-    private struct Glyph {
+    // Constructed by the generated data table (MicroGlyphs.generated.swift), keyed by
+    // the TS MicroCreature names. Kept non-private so the generated extension can build it.
+    struct Glyph {
         let colors: [Character: RGB]
         let idle: [String]
         let work: [String]?
     }
 
-    // Claude Code — rusty robot (assets/logos/robot_creature_gen.png): rectangular
-    // head with two glowing amber eyes, neck, body with arms (darker joints) jutting
-    // out the sides, two legs. Terracotta body kept bright for the LED panel.
-    private static let octopus = Glyph(
-        colors: ["B": (235, 130, 90), "D": (150, 84, 64), "E": (255, 176, 64)],
-        idle: [
-            "...........",
-            "..BBBBBBB..",
-            "..BEEBEEB..",
-            "..BBBBBBB..",
-            "....BBB....",
-            ".DBBBBBBBD.",
-            ".DBBBBBBBD.",
-            "..BBBBBBB..",
-            "...BB.BB...",
-            "...BB.BB...",
-            "...........",
-        ],
-        work: [
-            "...........",
-            "..BBBBBBB..",
-            "..BEEBEEB..",
-            "..BBBBBBB..",
-            "....BBB....",
-            ".DBBBBBBBD.",
-            ".DBBBBBBBD.",
-            "..BBBBBBB..",
-            "...BB.BB...",
-            "..BB...BB..",
-            "..D.....D..",
-        ]
-    )
-
-    // Codex — lavender cloud (#6166E0, cloud_creature_gen.png): bumpy round cloud
-    // body carrying a white `>` chevron + `_` terminal prompt.
-    private static let codex = Glyph(
-        colors: ["B": (120, 126, 236), "M": (238, 240, 255)],
-        idle: [
-            ".BB.BB.BB..",
-            "BBBBBBBBBB.",
-            "BBBBBBBBBBB",
-            "BBBBBBBBBBB",
-            "BBMBBBBBBBB",
-            "BBBMMBBBBBB",
-            "BBMBBBBBBBB",
-            "BBBBBMMMBBB",
-            "BBBBBBBBBBB",
-            ".BBBBBBBBB.",
-            "..B.BB.B...",
-        ],
-        work: nil
-    )
-
-    // OpenCode — two overlapping HOLLOW squares (canonical opencode.svg ring logo;
-    // no filled core — a solid center reads as a shadow). Centered in the field.
-    private static let opencode = Glyph(
-        colors: ["F": (232, 232, 232)],
-        idle: [
-            "...........",
-            ".FFFFFF....",
-            ".F....F....",
-            ".F....F....",
-            ".F..FFFFFF.",
-            ".F..F...F..",
-            ".FFFF...F..",
-            "....F...F..",
-            "....F...F..",
-            "....FFFFFF.",
-            "...........",
-        ],
-        work: nil
-    )
-
-    // OpenClaw — red mechanical lobster (#FF4D4D, lobster_creature_gen.png): two big
-    // claws raised at the top corners, antennae rising from the center, a head with
-    // two teal eyes (#00E5CC), and a vertical segmented tail fanning out below.
-    private static let crayfish = Glyph(
-        colors: ["B": (255, 92, 92), "C": (210, 52, 52), "A": (225, 180, 170), "E": (0, 229, 204)],
-        idle: [
-            "CC.......CC",
-            "CC...A...CC",
-            ".C..AAA..C.",
-            "...BEBEB...",
-            "...BBBBB...",
-            "A..BBBBB..A",
-            ".A.BBBBB.A.",
-            "...BBBBB...",
-            "...BBBBB...",
-            "...BB.BB...",
-            "..BB...BB..",
-        ],
-        work: [
-            "CC.......CC",
-            ".C...A...C.",
-            "..C.AAA.C..",
-            "...BEBEB...",
-            "...BBBBB...",
-            ".A.BBBBB.A.",
-            "A..BBBBB..A",
-            "...BBBBB...",
-            "...BBBBB...",
-            "...B.B.B...",
-            "..BB...BB..",
-        ]
-    )
-
     private static func glyph(for creature: MicroCreature) -> Glyph {
+        // Maps the Swift enum to the TS creature key (jellyfish == codex).
         switch creature {
-        case .octopus: return octopus
-        case .codex: return codex
-        case .opencode: return opencode
-        case .crayfish: return crayfish
+        case .octopus: return generatedGlyphs["octopus"]!
+        case .codex: return generatedGlyphs["jellyfish"]!
+        case .opencode: return generatedGlyphs["opencode"]!
+        case .crayfish: return generatedGlyphs["crayfish"]!
         }
     }
 
