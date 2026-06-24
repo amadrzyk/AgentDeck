@@ -12,8 +12,8 @@ Stream Deck+ controller for AI coding agents — a bidirectional local control s
 - **config/** — Default settings and prompt templates
 - **setup/** — npm setup package (`npx @agentdeck/setup`)
 - **android/** — Jetpack Compose launcher app (CremaS, Onyx, Kobo, tablets)
-- **apple/** — SwiftUI Multiplatform app (iOS/iPadOS/macOS). macOS includes **in-process Swift daemon** (30 files ~5500 LOC, no Node.js dependency)
-- **esp32/** — PlatformIO Arduino firmware (LVGL touch displays + WS2812B matrix)
+- **apple/** — SwiftUI Multiplatform app (iOS/iPadOS/macOS). macOS includes **in-process Swift daemon** (`apple/AgentDeck/Daemon/`, ~63 files, no Node.js dependency) — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix/TRMNL e-ink), Gateway proxy, HTTP+WS server
+- **esp32/** — PlatformIO Arduino firmware (LVGL touch displays + WS2812B matrix). The **TRMNL e-ink panel is NOT firmware** — it's a commercial WiFi e-ink device driven by the HTTP BYOS pull module in `bridge/src/trmnl/` + `apple/.../Daemon/Modules/Trmnl*.swift`. See [docs/devices.md](docs/devices.md#trmnl-e-ink-byos)
 
 See [docs/architecture.md](docs/architecture.md) for full architecture details (BridgeCore, PtyAdapter hierarchy, device modules, AgentAdapter abstraction, Gateway protocol, plugin connection model).
 
@@ -66,10 +66,10 @@ git tag apple-v1.0.0 && git push origin apple-v1.0.0  # CI → TestFlight
 
 ```bash
 pnpm -r --parallel dev   # watch mode for all packages
-pnpm test                # run unit tests (vitest, 646 tests)
+pnpm test                # run unit tests (vitest)
 pnpm vitest run --coverage  # coverage report + threshold check
 pnpm test:report         # unified report (vitest + Android + Apple + Robot)
-pnpm test:android        # Android JUnit tests only (82 tests)
+pnpm test:android        # Android JUnit tests only
 cd plugin && streamdeck link   # link plugin to Stream Deck app
 ```
 
@@ -77,7 +77,7 @@ cd plugin && streamdeck link   # link plugin to Stream Deck app
 
 This repo is built by switching between Claude Code, Codex, OpenCode, and Antigravity. **[docs/agent-harness.md](docs/agent-harness.md)** is the canonical map of how each agent enters the repo, what it reads, and what it auto-discovers — read it when onboarding a new agent or wondering why a skill/workflow isn't picked up.
 
-- **Repo instructions**: `AGENTS.md` is the entry file Codex/OpenCode/Antigravity discover by convention. It requires `CLAUDE.md` first, then targeted `DEVELOPMENT_LOG.md` lookup instead of loading the full log.
+- **Repo instructions**: `AGENTS.md` is the entry file Codex/OpenCode/Antigravity discover by convention. It requires `CLAUDE.md` first, then targeted `DEVELOPMENT_LOG.md` lookup instead of loading the full log. The active log keeps only the most recent ~2 months; older entries are archived by month under [`docs/devlog/`](docs/devlog/README.md) — grep a specific month file when you need history, never load all archives at once.
 - **Repo skills (SSOT)**: canonical skills live in `.agents/skills/<name>/SKILL.md` (discovered by Codex; Claude reaches them via the pointers in `.claude/skills/`). Use them before hand-rolling commands. **`.claude/skills/*.md` are thin pointers — never put procedure content there; edit the `.agents/skills/` copy so the two agents can't drift.**
 - **Workflow originals**: `.agents/workflows/` remains the canonical human-readable procedure directory; skills may route into these files. OpenCode has no skill auto-discovery — point it at these workflow files explicitly.
 - **Session handoff**: use the `session-end` repo skill before `/clear`, `/new`, or handing work to another session. It summarizes current state and updates durable docs only when the change is project-significant.
@@ -118,35 +118,9 @@ This diagnostic path is developer tooling only: it lives in `scripts/` and `.age
 
 ## Windows dev setup
 
-The Node.js bridge, hook installer, and Stream Deck plugin run on Windows 11. Apple, Android, and ESP32 native builds are macOS/Linux-only and are out of scope for Windows.
+The Node.js bridge, hook installer, and Stream Deck plugin run on Windows 11 (Apple/Android/ESP32 native builds are out of scope). Full prereqs, install/run steps, and the intentional Windows differences (ConPTY, data dir, PowerShell hook one-liner, daemon-install no-op, device-module gating, darwin-only sampler) live in **[README → Windows (Bridge + Plugin)](README.md#windows-bridge--plugin)**. Code refs: `bridge/src/pty-manager.ts`, `hooks/src/install.ts`, `bridge/src/cli.ts`.
 
-Prereqs (Windows 11):
-- **Node.js ≥ 22** + **pnpm**
-- **Stream Deck app** (Elgato) — `pnpm` setup also probes `%PROGRAMFILES%\Elgato\StreamDeck\` and `%LOCALAPPDATA%\Programs\Elgato\StreamDeck\`
-- **Claude Code CLI** on PATH
-- **Git Bash or WSL on PATH** for the bash scripts under `scripts/` (`install.sh`, `uninstall.sh`, `generate-protocol.sh`, `package-plugin.sh`) and `design/lint.sh`. The `postinstall` step is pure Node and runs without bash.
-
-Then:
-
-```powershell
-pnpm install            # postinstall runs scripts/postinstall.mjs (no-op on Windows)
-pnpm build
-pnpm test
-agentdeck daemon start  # daemon listens on 9120, writes %USERPROFILE%\.agentdeck\daemon.json
-# In another terminal:
-agentdeck claude        # spawns Claude Code via Windows ConPTY (cmd.exe /d /s /c)
-```
-
-Windows differences (intentional — see `bridge/src/pty-manager.ts`, `hooks/src/install.ts`, `bridge/src/cli.ts`):
-- **Data dir**: `%USERPROFILE%\.agentdeck\` (same layout as macOS `~/.agentdeck/`). The `AGENTDECK_DATA_DIR` env override still works.
-- **PTY**: ConPTY through `cmd.exe` with `/d /s /c` args (POSIX uses `/bin/zsh -l -c`). `node-pty`'s Windows prebuild is used as-is — no source build, so no Visual Studio Build Tools requirement.
-- **Hook command**: Claude Code hook entries on Windows use a `powershell -NoProfile -ExecutionPolicy Bypass -Command "..."` one-liner that reads `%USERPROFILE%\.agentdeck\daemon.json`, probes `/health`, and POSTs the stdin payload via `Invoke-RestMethod`. The macOS App Store sandbox-container fallback paths are intentionally omitted (those directories don't exist on Windows).
-- **`agentdeck daemon install/uninstall`**: no-op with a friendly message on Windows. Autostart is out of scope; add a Startup-folder shortcut yourself if you want it. `daemon start/stop/status` work normally.
-- **Device-module auto-detection**: `adb` is probed with `adb version` (cross-platform); the `/dev/tty.*` USB-serial scan is gated behind a `process.platform !== 'win32'` check (Windows COM-port enumeration not implemented). `bonjour-service`, `node-hid` (D200H), and `better-sqlite3` (APME) all use Windows-compatible prebuilds.
-- **APME hardware sampler** (`bridge/src/apme/hw-sampler.ts`) is darwin-only — it returns a minimal snapshot on Windows and the recommender treats that as "neutral".
-- **macOS-only plugin utility actions** (brightness / volume / dark-mode via `osascript`) gracefully no-op on Windows.
-
-When debugging Windows-specific issues, prefer running each command above directly in PowerShell so output appears in the conversation rather than relying on the Apple/Xcode diagnostic bundle, which is macOS-only.
+Dev-only note: when debugging Windows issues, run commands directly in PowerShell so output appears in the conversation — the Apple/Xcode diagnostic bundle is macOS-only.
 
 ## CLI
 
@@ -179,6 +153,8 @@ agentdeck devices            # Connected devices
 agentdeck qr                 # Pairing QR code
 agentdeck diag               # Diagnostic dump
 agentdeck pixoo {scan|add|list|remove|test}
+agentdeck timebox {scan|add|list|remove|test|sync}   # Divoom Timebox Mini (BLE)
+agentdeck trmnl              # TRMNL e-ink BYOS: server URL + enrolled panels + health
 agentdeck wifi-setup         # ESP32 WiFi provisioning (--ssid, --password)
 ```
 
@@ -243,7 +219,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/agent-harness.md](docs/agent-harness.md) | Cross-agent developer harness — how Claude Code / Codex / OpenCode / Antigravity each enter the repo, read instructions, and discover skills/workflows; skill SSOT rules |
 | [docs/architecture.md](docs/architecture.md) | Monorepo layout, BridgeCore, PtyAdapter, AgentAdapter, Gateway protocol, plugin connection |
 | [docs/daemon.md](docs/daemon.md) | Daemon hub, singleton guard, mDNS recovery, usage relay, Gateway isolation, multi-surface monitoring |
-| [docs/plugin-conventions.md](docs/plugin-conventions.md) | Encoder LCD, wide canvas, button label, OC Timeline pipeline, D200H HID, display sleep/wake |
+| [docs/plugin-conventions.md](docs/plugin-conventions.md) | Encoder LCD, wide canvas, button label, OC Timeline pipeline, D200H (Ulanzi Studio plugin), display sleep/wake |
 | [docs/v4-layout.md](docs/v4-layout.md) | v4 Session-Per-Button keypad + encoder mapping, v3→v4 changes |
 | [docs/tui-dashboard.md](docs/tui-dashboard.md) | `agentdeck dashboard` — terrarium, sprites, adaptive layouts |
 | [docs/esp32.md](docs/esp32.md) | Firmware boards, flash safety, WiFi provisioning, disconnect recovery |
@@ -255,7 +231,7 @@ The macOS app ships through the App Store and must stay **self-contained** under
 | [docs/appstore-metadata-draft.md](docs/appstore-metadata-draft.md) | App Store Connect metadata draft (ko + en) — title/subtitle/description/keywords/what's-new |
 | [docs/testflight-qa-checklist.md](docs/testflight-qa-checklist.md) | Internal tester pre-submission checklist covering onboarding, pairing, voice, sandbox invariants |
 | [docs/devices.md](docs/devices.md) | Device-specific details |
-| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | 지원 dashboard 하드웨어/OS 종합 사양 매트릭스 — 14 surface(ESP32 보드·LED·HID 데크·Apple/Android·TUI)의 SoC·해상도·Flash·SDK·deployment target. 시각화 뷰 [docs/hardware/index.html](docs/hardware/index.html) |
+| [docs/hardware-compatibility.md](docs/hardware-compatibility.md) | 지원 dashboard 하드웨어/OS 종합 사양 매트릭스 — 16 surface(ESP32 보드·LED·HID 데크·TRMNL e-ink·Apple/Android·TUI)의 SoC·해상도·Flash·SDK·deployment target. 시각화 뷰 [docs/hardware/index.html](docs/hardware/index.html) |
 | [docs/protocol.md](docs/protocol.md) | Bridge ↔ plugin WebSocket protocol |
 | [docs/gateway-protocol.md](docs/gateway-protocol.md) | OpenClaw Gateway WebSocket — frame format, Ed25519 handshake, RPC/event catalog, versioning |
 | [docs/testing.md](docs/testing.md) | Test infrastructure reference |

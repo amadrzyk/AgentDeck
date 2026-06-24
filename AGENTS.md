@@ -14,7 +14,7 @@
 
 ### 1. 컨텍스트 및 아키텍처 파악 (필수)
 - 모든 작업(특히 새로운 기능 추가, 구조 변경, 디버깅) 시작 전에 **반드시 `CLAUDE.md`를 먼저 읽으십시오.**
-- `DEVELOPMENT_LOG.md`는 전체 파일을 매번 통독하지 마십시오. 먼저 최신 항목(파일 상단 일부)을 확인한 뒤, 작업 대상 키워드/파일명으로 `rg` 검색하여 관련 항목만 읽으십시오. 예: `rg -n "Codex|codex|hooks|config.toml" DEVELOPMENT_LOG.md`.
+- `DEVELOPMENT_LOG.md`는 전체 파일을 매번 통독하지 마십시오. 이 파일은 **최근 2개월분만** 유지하고, 그 이전 기록은 월별로 `docs/devlog/<YYYY-MM>.md` 에 아카이브되어 있습니다(인덱스: `docs/devlog/README.md`). 먼저 최신 항목(파일 상단 일부)을 확인한 뒤, 작업 대상 키워드/파일명으로 `rg` 검색하되 더 오래된 기록이 필요하면 **해당 월 아카이브 파일만** 검색하십시오(아카이브 전체를 한꺼번에 로드하지 말 것). 예: `rg -n "Codex|hooks|config.toml" DEVELOPMENT_LOG.md docs/devlog/2026-04.md`.
 - `CLAUDE.md`는 프로젝트 아키텍처, 브릿지-플러그인 통신 규약, 포트 설정, UI/UX 비전(특히 Android E-ink 최적화 규칙)을 담고 있는 **단일 진실 공급원(SSOT)**입니다.
 - 정보를 여러 문서로 분산시키지 마십시오. 만약 프로젝트의 핵심 구조적 변경이 발생하면, 이 정보들을 `CLAUDE.md`나 `DEVELOPMENT_LOG.md`에 업데이트하여 최신 상태로 유지해야 합니다.
 
