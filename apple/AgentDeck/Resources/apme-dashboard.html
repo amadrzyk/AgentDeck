@@ -5,14 +5,33 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AgentDeck — Agent Performance Monitoring & Evaluation</title>
 <style>
-:root{--bg:#0f172a;--surface:#1e293b;--border:#334155;--text:#e2e8f0;--muted:#94a3b8;--dim:#64748b;--green:#22c55e;--yellow:#f59e0b;--red:#ef4444;--blue:#3b82f6;--accent:#818cf8}
+/* APME Dashboard — palette derived from design/tokens.css.
+ * The dashboard ships as a single embedded HTML resource (WKWebView
+ * loads it via the in-process daemon), so the canonical CSS file can't
+ * be <link>'d. The :root primitives below are a manual mirror of
+ * design/tokens.css — when CSS tokens change, sync them here too.
+ */
+:root{
+  /* === Design system primitives (mirrors design/tokens.css §2) === */
+  --ink-900:#0e1f1f;--ink-800:#15302f;--ink-700:#1f4544;--ink-500:#426664;--ink-300:#7c9694;
+  --kelp-500:#2f8a7c;--kelp-300:#6fb6a8;
+  --ui-ok:#52D988;--ui-attn:#FFA93D;--ui-error:#FF6B6B;--ui-cyan:#3ED6E8;
+  --ui-idle-dark:#7a8a9c;--ui-popup-bg-dark:#0a1a2a;--ui-tty-text:#c8d0d8;
+  --sh-card-h:0 10px 28px -8px rgba(14, 31, 31, 0.55);
+
+  /* === Dashboard-local semantic aliases === */
+  --bg:var(--ui-popup-bg-dark);--surface:var(--ink-800);--border:var(--ink-700);
+  --text:var(--ui-tty-text);--muted:var(--ui-idle-dark);--dim:var(--ink-500);
+  --green:var(--ui-ok);--yellow:var(--ui-attn);--red:var(--ui-error);--blue:var(--ui-cyan);
+  --accent:var(--kelp-500);
+}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:13px;height:100vh;overflow:hidden}
 
 /* ── Header ── */
 header{display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--surface)}
 header h1{font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
-.live{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.live{width:8px;height:8px;border-radius:999px;background:var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
 header .status{margin-left:auto;font-size:11px;color:var(--dim)}
 
@@ -44,9 +63,9 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .score-low{color:var(--red)}
 .score-na{color:var(--dim)}
 .badge{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;display:inline-block}
-.badge-committed{background:#166534;color:#bbf7d0}
-.badge-abandoned{background:#7f1d1d;color:#fecaca}
-.badge-iterated{background:#78350f;color:#fef3c7}
+.badge-committed{background:color-mix(in srgb, var(--green) 22%, transparent);color:var(--green)}
+.badge-abandoned{background:color-mix(in srgb, var(--red) 22%, transparent);color:var(--red)}
+.badge-iterated{background:color-mix(in srgb, var(--yellow) 22%, transparent);color:var(--yellow)}
 .badge-exploratory{background:var(--surface);color:var(--muted);border:1px solid var(--border)}
 .badge-pending{background:var(--surface);color:var(--dim)}
 .badge-cat{background:var(--surface);color:var(--accent);border:1px solid rgba(129,140,248,0.3);font-size:10px;padding:1px 6px;border-radius:4px}
@@ -65,7 +84,7 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .done-item,.missed-item{padding:4px 0;font-size:12px}
 .done-item::before{content:'✓ ';color:var(--green);font-weight:700}
 .missed-item::before{content:'✗ ';color:var(--red);font-weight:700}
-.reasoning{font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px;padding:10px;background:var(--surface);border-radius:6px;border-left:3px solid var(--accent)}
+.reasoning{font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px;padding:10px;background:var(--surface);border-radius:8px;border-left:3px solid var(--accent)}
 
 .metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
 .metric-card{background:var(--surface);border-radius:8px;padding:12px;text-align:center}
@@ -75,7 +94,7 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .composite-bar{height:8px;background:var(--surface);border-radius:4px;overflow:hidden;margin:8px 0}
 .composite-fill{height:100%;border-radius:4px;transition:width 0.3s}
 
-.turn-card{background:var(--surface);border-radius:6px;padding:10px 12px;margin-bottom:6px}
+.turn-card{background:var(--surface);border-radius:8px;padding:10px 12px;margin-bottom:6px}
 .turn-card .turn-idx{color:var(--accent);font-weight:600;font-size:11px}
 .turn-card .turn-prompt{color:var(--text);font-size:12px;margin:4px 0}
 .turn-card .turn-stats{font-size:11px;color:var(--dim);display:flex;gap:12px}
@@ -84,9 +103,9 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 
 .vibe-bar{display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
 .vibe-btn{padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.15s}
-.vibe-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.3)}
-.vibe-approve{background:#166534;color:#bbf7d0}
-.vibe-reject{background:#7f1d1d;color:#fecaca}
+.vibe-btn:hover{transform:translateY(-1px);box-shadow:var(--sh-card-h)}
+.vibe-approve{background:color-mix(in srgb, var(--green) 28%, transparent);color:var(--green)}
+.vibe-reject{background:color-mix(in srgb, var(--red) 28%, transparent);color:var(--red)}
 .vibe-current{font-size:11px;color:var(--dim);display:flex;align-items:center;margin-left:8px}
 
 .panel{display:none}.panel.visible{display:block;height:100%}
@@ -195,30 +214,7 @@ function renderRuns(runs){
         '<td class="task-col" title="'+esc(r.taskPrompt||'')+'">'+esc(task)+'</td>'+
         '<td>'+tm+(dur?' · '+fd(dur):'')+'</td></tr>';
     }).join('');
-    if(!filtered.length)tb.innerHTML='<tr><td colspan="9" class="empty" style="padding:0">'+(runs.length?'No runs match filters':renderEmptyState())+'</td></tr>';
-}
-/**
- * Rich first-use empty state. Replaces a bare "No runs yet" message with
- * an onboarding card so new users understand what APME will do once they
- * run their first session. Kept inline (no template file) because the
- * dashboard ships as a single JS string for the daemon HTTP route.
- */
-function renderEmptyState(){
-  return '<div style="padding:48px 32px;text-align:center;line-height:1.6">'+
-    '<div style="font-size:32px;margin-bottom:16px">📊</div>'+
-    '<div style="font-size:16px;color:var(--muted);font-weight:600;margin-bottom:8px">No APME reports yet</div>'+
-    '<div style="font-size:13px;color:var(--dim);max-width:420px;margin:0 auto 20px">'+
-      'APME evaluates each coding agent session after it finishes — task quality, outcome, and vibe scores. Start Claude Code or Codex in your own workspace and come back here once it completes.'+
-    '</div>'+
-    '<div style="font-size:12px;color:var(--dim);border-top:1px solid var(--border);padding-top:16px;max-width:420px;margin:0 auto">'+
-      '<div style="font-weight:600;margin-bottom:6px;color:var(--muted)">Quick start</div>'+
-      '<div style="text-align:left;padding-left:16px">'+
-        '<div>1. Enable AgentDeck hooks in Settings → Claude Code Hooks</div>'+
-        '<div>2. Run your coding agent in your own workspace</div>'+
-        '<div>3. When the agent finishes its turn, a row appears here</div>'+
-      '</div>'+
-    '</div>'+
-  '</div>';
+    if(!filtered.length)tb.innerHTML='<tr><td colspan="9" class="empty">'+(runs.length?'No runs match filters':'No reports yet. Enable hooks in Settings, run your coding agent in your own workspace, then return after a turn completes.')+'</td></tr>';
 }
 async function loadRuns(){
   try{
@@ -234,7 +230,7 @@ async function selectRun(id){
   el.innerHTML='<div class="detail-empty">Loading...</div>';
   try{
     let r=await fetch(api('/apme/run/'+id));if(!r.ok)r=await fetch(api('/apme/run?id='+id));
-    const d=await r.json();const run=d.run||{};const evals=d.evals||[];const turns=d.turns||[];const tasks=d.tasks||[];const vibe=d.vibe;
+    const d=await r.json();const run=d.run||{};const evals=d.evals||[];const turns=d.turns||[];const vibe=d.vibe;
 
     // Normalize field names — Node.js uses snake_case, Swift may use camelCase in some paths.
     const startedAt=run.started_at??run.startedAt;
@@ -269,7 +265,7 @@ async function selectRun(id){
 
     // Active session notice
     if(!endedAt){
-      h+='<div class="section" style="padding:10px 12px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:6px;color:var(--blue);font-size:12px">⏳ Session active — score, category, and outcome appear after the session ends.</div>';
+      h+='<div class="section" style="padding:10px 12px;background:color-mix(in srgb, var(--blue) 15%, transparent);border:1px solid color-mix(in srgb, var(--blue) 30%, transparent);border-radius:8px;color:var(--blue);font-size:12px">⏳ Session active — score, category, and outcome appear after the session ends.</div>';
     }
 
     // Composite score bar
@@ -333,38 +329,6 @@ async function selectRun(id){
     }else if(layer1Skipped){
       h+='<div class="section"><div class="section-head">Deterministic Checks</div>';
       h+='<div style="font-size:12px;color:var(--muted);line-height:1.5">LLM-only evaluation for this run. Deterministic project checks were skipped ('+esc(layer1Skipped)+').</div>';
-      h+='</div>';
-    }
-
-    // Tasks — meaningful per-task units bounded by todo_complete/clear/session_end/manual/idle_gap
-    if(tasks.length>0){
-      h+='<div class="section"><div class="section-head">Tasks ('+tasks.length+')</div>';
-      for(const tk of tasks){
-        const idx=tk.task_index??tk.taskIndex??0;
-        const sig=tk.boundary_signal??tk.boundarySignal??'open';
-        const sigLabel=sig==='todo_complete'?'TODO done':sig==='clear'?'/clear':sig==='session_end'?'Session end':sig==='manual'?'Manual':sig==='idle_gap'?'Idle gap':sig;
-        const summary=tk.summary||'';
-        const cat=tk.task_category??tk.taskCategory;
-        const cscore=tk.composite_score??tk.compositeScore;
-        const oc=tk.outcome;
-        const sa=tk.started_at??tk.startedAt;
-        const ea=tk.ended_at??tk.endedAt;
-        const dur=ea&&sa?fd(ea-sa):'open';
-        const firstT=tk.first_turn_index??tk.firstTurnIndex;
-        const lastT=tk.last_turn_index??tk.lastTurnIndex;
-        const turnSpan=(firstT!=null&&lastT!=null)?(firstT===lastT?'turn '+firstT:'turns '+firstT+'–'+lastT):'';
-        h+='<div class="turn-card">';
-        h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">';
-        h+='<span class="turn-idx">Task '+(idx+1)+'</span>';
-        h+='<span style="font-size:11px;color:var(--dim)">'+sigLabel+(turnSpan?' · '+turnSpan:'')+' · '+dur+'</span>';
-        if(cscore!=null)h+=fs(cscore);else h+='<span style="font-size:11px;color:var(--dim)">…</span>';
-        h+='</div>';
-        const ocGlyph=oc==='success'?'✓':oc==='partial'?'△':oc==='fail'?'✗':oc==='abandoned'?'⊘':'';
-        const ocColor=oc==='success'?'var(--green)':oc==='fail'?'var(--red)':oc==='partial'?'var(--orange,#f59e0b)':oc==='abandoned'?'var(--dim)':'var(--dim)';
-        if(cat||oc)h+='<div style="margin-top:4px">'+(cat?'<span class="badge-cat">'+cat+'</span>':'')+(oc?' <span style="font-size:11px;color:'+ocColor+';margin-left:6px">'+ocGlyph+' '+oc+'</span>':'')+'</div>';
-        if(summary)h+='<div style="color:var(--muted);font-size:12px;margin:6px 0 0;padding:6px 8px;background:var(--bg);border-radius:4px;border-left:2px solid var(--accent)">'+esc(summary.slice(0,500))+'</div>';
-        h+='</div>';
-      }
       h+='</div>';
     }
 
@@ -440,13 +404,6 @@ async function loadCategories(){
   }catch(e){document.getElementById('categories-content').innerHTML='<div class="empty">Error: '+e.message+'</div>'}
 }
 
-/**
- * Recommend tab — surfaces the recommender payoff: for each task category,
- * which agent/model performs best. Ranks the (agent, model, category)
- * sample-granularity scorecard (v_sample_scorecard) by quality, tie-broken by
- * cost-per-quality. The top row per category is the recommended default — this
- * is the "which agent/model is good at what" answer APME exists to produce.
- */
 async function loadRecommend(){
   try{
     const r=await fetch(api('/apme/samples'));const d=await r.json();
@@ -466,7 +423,7 @@ async function loadRecommend(){
       h+='<table style="margin-top:4px"><thead><tr><th>Agent</th><th>Model</th><th>Quality</th><th>$/Quality</th><th>Cost</th><th>Samples</th></tr></thead><tbody>';
       for(const s of list){
         const isBest=s===best;
-        h+='<tr'+(isBest?' style="background:rgba(34,197,94,0.08)"':'')+'><td>'+(isBest?'★ ':'')+esc(s.agentType||'—')+'</td><td>'+esc((s.modelId||'—').slice(0,22))+'</td><td>'+fs(s.avgQuality)+'</td><td>'+(s.costPerQuality!=null?'$'+s.costPerQuality.toFixed(3):'—')+'</td><td>'+(s.totalCost!=null?'$'+s.totalCost.toFixed(2):'—')+'</td><td>'+s.samples+'</td></tr>';
+        h+='<tr'+(isBest?' style="background:color-mix(in srgb, var(--green) 8%, transparent)"':'')+'><td>'+(isBest?'★ ':'')+esc(s.agentType||'—')+'</td><td>'+esc((s.modelId||'—').slice(0,22))+'</td><td>'+fs(s.avgQuality)+'</td><td>'+(s.costPerQuality!=null?'$'+s.costPerQuality.toFixed(3):'—')+'</td><td>'+(s.totalCost!=null?'$'+s.totalCost.toFixed(2):'—')+'</td><td>'+s.samples+'</td></tr>';
       }
       h+='</tbody></table></div>';
     }
