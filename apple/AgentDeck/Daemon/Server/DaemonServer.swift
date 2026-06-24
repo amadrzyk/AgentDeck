@@ -5307,92 +5307,10 @@ final class DaemonServer {
 
     // MARK: - APME eval result handling
 
-    private struct EvalTimelineNotes {
-        var summary: String?
-        var done: [String] = []
-        var missed: [String] = []
-        var reasoning: String?
-    }
-
-    private func compactTimelineText(_ value: String?, max: Int = 120) -> String {
-        let cleaned = (value ?? "")
-            .split(whereSeparator: { $0.isWhitespace })
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return "" }
-        return cleaned.count > max ? String(cleaned.prefix(max - 3)) + "..." : cleaned
-    }
-
-    private func nonEmptyTimelineText(_ value: String) -> String? {
-        value.isEmpty ? nil : value
-    }
-
-    private func formatEvalAxisScores(_ evals: [ApmeEval]) -> String {
-        evals
-            .filter { $0.metric != "overall" }
-            .map { "\($0.metric)=\(Int(($0.score * 100).rounded()))%" }
-            .joined(separator: " ")
-    }
-
-    private func parseEvalNotes(_ raw: String?) -> EvalTimelineNotes {
-        guard let raw, let data = raw.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              let obj = object as? [String: Any]
-        else { return EvalTimelineNotes() }
-
-        func readList(_ key: String) -> [String] {
-            guard let items = obj[key] as? [Any] else { return [] }
-            var result: [String] = []
-            for item in items {
-                if result.count >= 2 { break }
-                guard !(item is NSNull),
-                      let text = nonEmptyTimelineText(compactTimelineText(String(describing: item), max: 90))
-                else { continue }
-                result.append(text)
-            }
-            return result
-        }
-
-        return EvalTimelineNotes(
-            summary: nonEmptyTimelineText(compactTimelineText(obj["summary"] as? String, max: 140)),
-            done: readList("done"),
-            missed: readList("missed"),
-            reasoning: nonEmptyTimelineText(compactTimelineText(obj["reasoning"] as? String, max: 180))
-        )
-    }
-
-    private func formatEvalDetail(
-        summary: String? = nil,
-        axes: String? = nil,
-        done: [String] = [],
-        missed: [String] = [],
-        reasoning: String? = nil,
-        projectName: String? = nil,
-        prompt: String? = nil
-    ) -> String {
-        var lines: [String] = []
-        if let summary, !summary.isEmpty { lines.append("Summary: \(summary)") }
-        if let axes, !axes.isEmpty { lines.append("Axes: \(axes)") }
-        lines.append(contentsOf: done.map { "Done: \($0)" })
-        lines.append(contentsOf: missed.map { "Missed: \($0)" })
-        if let reasoning, !reasoning.isEmpty { lines.append("Reasoning: \(reasoning)") }
-        let source = [compactTimelineText(projectName, max: 40), compactTimelineText(prompt, max: 120)]
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
-        if !source.isEmpty { lines.append(source) }
-        return lines.joined(separator: "\n")
-    }
-
-    private func formatEvalRaw(scope: String, pct: Int, category: String?, label: String?, outcome: String? = nil) -> String {
-        let head = "★ \(scope) \(pct)% [\(category ?? "?")]" + (outcome.map { " \($0)" } ?? "")
-        let compactLabel = compactTimelineText(label, max: scope == "run" ? 90 : 120)
-        return compactLabel.isEmpty ? head : "\(head) \(compactLabel)"
-    }
-
     /// Called on the main actor when ApmeRunner finishes an eval job.
-    /// Mirrors bridge/src/daemon-server.ts lines 902-974 — persists turn-level
-    /// outcome/composite, broadcasts an `apme_eval` WS event, and appends a
-    /// `★ eval_result` timeline entry so every viewer target surfaces the score.
+    /// Persists turn-level outcome/composite and broadcasts an `apme_eval` WS
+    /// event so the scorecard surfaces update. The timeline is an activity log
+    /// only — eval results are no longer projected onto it (de-noise).
     @MainActor
     private func handleApmeResult(_ result: ApmeEvalJobResult) {
         guard let store = apmeStore else { return }
@@ -5403,17 +5321,11 @@ final class DaemonServer {
         // dashboards show the completed-task summary.
         if let taskId = result.taskId {
             guard let run = store.getRun(id: result.runId),
-                  let task = store.getTask(id: taskId)
+                  store.getTask(id: taskId) != nil
             else { return }
             let taskEvals = store.listEvalsForTask(taskId)
             let overall = taskEvals.first(where: { $0.metric == "overall" })?.score
                 ?? result.overall ?? 0
-
-            let pct = Int((overall * 100).rounded())
-            let category = task.taskCategory ?? run.taskCategory ?? "?"
-            let notes = parseEvalNotes(taskEvals.first(where: { $0.metric == "overall" })?.raw)
-            let summary = compactTimelineText(task.summary ?? notes.summary, max: 140)
-            let label = summary.isEmpty ? compactTimelineText(run.taskPrompt, max: 120) : summary
 
             broadcastApmeEval(
                 run: run,
@@ -5422,24 +5334,6 @@ final class DaemonServer {
                 outcome: "committed",
                 compositeScore: overall,
                 layer1SkippedReason: result.layer1SkippedReason
-            )
-
-            appendEvalResultTimeline(
-                raw: formatEvalRaw(scope: "task", pct: pct, category: category, label: label),
-                detail: formatEvalDetail(
-                    summary: summary.isEmpty ? nil : summary,
-                    axes: formatEvalAxisScores(taskEvals),
-                    done: notes.done,
-                    missed: notes.missed,
-                    reasoning: notes.reasoning,
-                    projectName: run.projectName,
-                    prompt: run.taskPrompt
-                ),
-                agentType: run.agentType,
-                projectName: run.projectName,
-                sessionId: run.sessionId,
-                startedAt: Double(task.startedAt),
-                endedAt: task.endedAt.map(Double.init)
             )
             return
         }
@@ -5456,18 +5350,6 @@ final class DaemonServer {
                 "compositeScore": overall.score,
             ])
 
-            let pct = Int((overall.score * 100).rounded())
-            let category = run.taskCategory ?? "?"
-            let turn = store.getTurn(id: turnId)
-            let notes = parseEvalNotes(overall.raw)
-            let promptSource = (turn?["prompt"] as? String) ?? run.taskPrompt ?? ""
-            let turnPrompt = compactTimelineText(promptSource, max: 140)
-            let responseLabel = nonEmptyTimelineText(compactTimelineText(turn?["response"] as? String, max: 120))
-            let label = notes.summary
-                ?? notes.done.first
-                ?? responseLabel
-                ?? turnPrompt
-
             // WS broadcast — turn eval
             broadcastApmeEval(
                 run: run,
@@ -5476,25 +5358,6 @@ final class DaemonServer {
                 outcome: "committed",
                 compositeScore: overall.score,
                 layer1SkippedReason: result.layer1SkippedReason
-            )
-
-            // Timeline entry (★ eval_result) — rendered by every viewer target
-            appendEvalResultTimeline(
-                raw: formatEvalRaw(scope: "turn", pct: pct, category: category, label: label),
-                detail: formatEvalDetail(
-                    summary: notes.summary,
-                    axes: formatEvalAxisScores(turnEvals),
-                    done: notes.done,
-                    missed: notes.missed,
-                    reasoning: notes.reasoning,
-                    projectName: run.projectName,
-                    prompt: turnPrompt.isEmpty ? run.taskPrompt : turnPrompt
-                ),
-                agentType: run.agentType,
-                projectName: run.projectName,
-                sessionId: run.sessionId,
-                startedAt: Self.doubleValue(turn?["started_at"]),
-                endedAt: Self.doubleValue(turn?["ended_at"])
             )
             return
         }
@@ -5512,37 +5375,6 @@ final class DaemonServer {
             outcome: run.outcome,
             compositeScore: run.compositeScore,
             layer1SkippedReason: result.layer1SkippedReason
-        )
-
-        let pctValue = overall ?? run.compositeScore ?? 0
-        let pct = Int((pctValue * 100).rounded())
-        let category = run.taskCategory ?? "?"
-        let outcome = run.outcome ?? "pending"
-        let overallEval = evals.first(where: { $0.layer == "llm_judge" && $0.metric == "overall" })
-        let notes = parseEvalNotes(overallEval?.raw)
-        let detAxes = evals
-            .filter { $0.layer == "deterministic" }
-            .map { "\($0.metric)=\($0.score > 0 ? "✓" : "✗")" }
-            .joined(separator: " ")
-        let judgeAxes = formatEvalAxisScores(evals.filter { $0.layer == "llm_judge" })
-        let axes = [detAxes, judgeAxes].filter { !$0.isEmpty }.joined(separator: " ")
-        let label = notes.summary ?? notes.done.first ?? compactTimelineText(run.taskPrompt, max: 120)
-        appendEvalResultTimeline(
-            raw: formatEvalRaw(scope: "run", pct: pct, category: category, label: label, outcome: outcome),
-            detail: formatEvalDetail(
-                summary: notes.summary,
-                axes: axes,
-                done: notes.done,
-                missed: notes.missed,
-                reasoning: notes.reasoning,
-                projectName: run.projectName,
-                prompt: run.taskPrompt
-            ),
-            agentType: run.agentType,
-            projectName: run.projectName,
-            sessionId: run.sessionId,
-            startedAt: Double(run.startedAt),
-            endedAt: run.endedAt.map(Double.init)
         )
     }
 
@@ -5594,31 +5426,6 @@ final class DaemonServer {
             "run": runDict,
         ]
         broadcastRaw(event)
-    }
-
-    /// Append an `eval_result` entry to the daemon timeline. Uses the
-    /// existing TimelineStore so downstream viewers pick it up through the
-    /// same channel that renders every other timeline entry.
-    @MainActor
-    private func appendEvalResultTimeline(raw: String, detail: String, agentType: String, projectName: String?, sessionId: String?, startedAt: Double?, endedAt: Double?) {
-        let entry = DaemonTimelineEntry(
-            ts: Date().timeIntervalSince1970 * 1000,
-            type: "eval_result",
-            raw: raw,
-            detail: detail,
-            approvalId: nil,
-            status: nil,
-            agentType: agentType,
-            repeatCount: nil,
-            automated: nil,
-            projectName: projectName,
-            sessionId: sessionId,
-            startedAt: startedAt,
-            endedAt: endedAt,
-            runId: nil
-        )
-        Task { await timelineStore.add(entry) }
-        broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)] as [String: Any])
     }
 
     @MainActor
@@ -6302,19 +6109,6 @@ final class DaemonServer {
                 "endedAt": now,
                 "taskCategory": "_empty",
             ])
-        }
-
-        // 6. Rubric auto-tuning (Phase 2). Gated by `shouldRetune` which
-        //    only fires when there are ≥10 disagreement samples and the
-        //    current rubric correlates poorly (<0.4) with user vibe. That
-        //    means we tune roughly once per week in normal use — cheap
-        //    enough even on paid backends, free on FM/MLX.
-        if ApmeTuner.shouldRetune(store: store) {
-            let outcome = await ApmeTuner.tune(store: store)
-            DaemonLogger.shared.debug(
-                "APME",
-                "tuner: accepted=\(outcome.accepted) reason=\(outcome.reason) new_version=\(outcome.newVersion.map { String($0) } ?? "n/a")"
-            )
         }
     }
 

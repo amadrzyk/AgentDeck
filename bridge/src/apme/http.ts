@@ -208,13 +208,6 @@ export async function handleApmeRequest(
       return true;
     }
 
-    // ── Rubric tune trigger (manual) ────────────────────────────────────────
-    if (method === 'POST' && path === '/apme/tune') {
-      const outcome = await apme.tuner.tune();
-      sendJson(res, 200, outcome);
-      return true;
-    }
-
     // Unknown /apme/* path
     sendJson(res, 404, { error: 'unknown apme endpoint' });
     return true;

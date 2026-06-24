@@ -6,10 +6,10 @@ import { ApmeStore } from '../apme/store.js';
 import { ApmeCollector } from '../apme/collector.js';
 import { ApmeRunner } from '../apme/runner.js';
 
-// Task-unit evaluation: TodoWrite all-completed / /clear / session_end
-// become automatic task boundaries. See plans/…-silly-horizon.md for the
-// rationale (Claude Code's built-in recap is not hookable and is not a
-// task-completion signal).
+// Task-unit evaluation: tasks segment on EXPLICIT boundaries (`/task close` /
+// device button → 'manual', `/clear`) or session_end. TodoWrite all-completed
+// is a non-segmenting soft hint (demoted 2026-06 — it fired unreliably ~18% on
+// Claude Code v2.1 and fragmented a single logical task into several units).
 
 async function makeStore(): Promise<ApmeStore> {
   const dir = mkdtempSync(join(tmpdir(), 'apme-task-'));
@@ -62,7 +62,7 @@ describe('ApmeCollector task boundaries', () => {
     expect(turns[0].task_id).toBe(tasks[0].id);
   });
 
-  it('TodoWrite with every todo completed closes the active task', () => {
+  it('TodoWrite all-completed is a soft hint — does NOT close the task', () => {
     const collector = new ApmeCollector(store);
     const { runId, sessionId } = openRun(collector);
 
@@ -80,9 +80,26 @@ describe('ApmeCollector task boundaries', () => {
 
     const tasks = store.listTasksForRun(runId);
     expect(tasks.length).toBe(1);
-    expect(tasks[0].boundarySignal).toBe('todo_complete');
-    expect(tasks[0].endedAt).toBeGreaterThan(0);
-    expect(collector.getActiveTaskId(sessionId)).toBeNull();
+    // Task stays open — only explicit boundaries or session_end segment now.
+    expect(tasks[0].boundarySignal).toBe('open');
+    expect(tasks[0].endedAt).toBeNull();
+    expect(collector.getActiveTaskId(sessionId)).toBe(tasks[0].id);
+  });
+
+  it('TodoWrite all-completed does not split — later turns stay in one task', () => {
+    const collector = new ApmeCollector(store);
+    const { runId, sessionId } = openRun(collector);
+
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'first' });
+    collector.ingestHook(sessionId, 'PostToolUse', {
+      tool_name: 'TodoWrite',
+      tool_input: { todos: [{ content: 'a', status: 'completed' }] },
+    });
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'second' });
+
+    const tasks = store.listTasksForRun(runId);
+    expect(tasks.length).toBe(1);
+    expect(tasks[0].endedAt).toBeNull();
   });
 
   it('TodoWrite with partial completion does NOT close the task', () => {
@@ -106,15 +123,13 @@ describe('ApmeCollector task boundaries', () => {
     expect(tasks[0].boundarySignal).toBe('open');
   });
 
-  it('next UserPromptSubmit after boundary opens a new task', () => {
+  it('next UserPromptSubmit after an explicit boundary opens a new task', () => {
     const collector = new ApmeCollector(store);
     const { runId, sessionId } = openRun(collector);
 
     collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'first' });
-    collector.ingestHook(sessionId, 'PostToolUse', {
-      tool_name: 'TodoWrite',
-      tool_input: { todos: [{ content: 'a', status: 'completed' }] },
-    });
+    // Explicit manual boundary (e.g. `/task close` or a device button).
+    collector.closeTaskExternal(sessionId, 'manual');
     collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'second' });
 
     const tasks = store.listTasksForRun(runId);
@@ -122,6 +137,7 @@ describe('ApmeCollector task boundaries', () => {
     expect(tasks[0].taskIndex).toBe(0);
     expect(tasks[1].taskIndex).toBe(1);
     expect(tasks[0].endedAt).toBeGreaterThan(0);
+    expect(tasks[0].boundarySignal).toBe('manual');
     expect(tasks[1].endedAt).toBeNull();
   });
 
@@ -153,7 +169,7 @@ describe('ApmeCollector task boundaries', () => {
     expect(tasks[0].endedAt).toBeGreaterThan(0);
   });
 
-  it('onTaskClosed fires with the task metadata', () => {
+  it('onTaskClosed fires on an explicit boundary with the task metadata', () => {
     const collector = new ApmeCollector(store);
     const seen: Array<{ taskId: string; runId: string; boundarySignal: string }> = [];
     collector.onTaskClosed = ({ taskId, runId, boundarySignal }) => {
@@ -161,14 +177,11 @@ describe('ApmeCollector task boundaries', () => {
     };
     const { runId, sessionId } = openRun(collector);
     collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'x' });
-    collector.ingestHook(sessionId, 'PostToolUse', {
-      tool_name: 'TodoWrite',
-      tool_input: { todos: [{ content: 'a', status: 'completed' }] },
-    });
+    collector.closeTaskExternal(sessionId, 'manual');
 
     expect(seen.length).toBe(1);
     expect(seen[0].runId).toBe(runId);
-    expect(seen[0].boundarySignal).toBe('todo_complete');
+    expect(seen[0].boundarySignal).toBe('manual');
   });
 
   it('onTaskOpened fires with sessionId + agentType + projectName + taskIndex', () => {
@@ -218,10 +231,7 @@ describe('ApmeCollector task boundaries', () => {
     };
     const { sessionId } = openRun(collector);
     collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'x' });
-    collector.ingestHook(sessionId, 'PostToolUse', {
-      tool_name: 'TodoWrite',
-      tool_input: { todos: [{ content: 'a', status: 'completed' }] },
-    });
+    collector.closeTaskExternal(sessionId, 'manual');
 
     expect(closes.length).toBe(1);
     expect(closes[0].sessionId).toBe(sessionId);
@@ -291,10 +301,8 @@ describe('ApmeRunner task eval', () => {
     collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'hi' });
     // Provide a response on the active turn so it's not all tool_only/empty.
     collector.setTurnResponse(sessionId, 'Sure — here is the plan.');
-    collector.ingestHook(sessionId, 'PostToolUse', {
-      tool_name: 'TodoWrite',
-      tool_input: { todos: [{ content: 'a', status: 'completed' }] },
-    });
+    // Explicit boundary closes the task and enqueues the rollup judge.
+    collector.closeTaskExternal(sessionId, 'manual');
 
     // Drain microtasks until the fire-and-forget task eval settles.
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -340,10 +348,7 @@ describe('ApmeRunner task eval', () => {
     // Prompt is empty AND response is empty → meaningful-text check fails.
     collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: '' });
     // Intentionally no setTurnResponse — the turn stays empty.
-    collector.ingestHook(sessionId, 'PostToolUse', {
-      tool_name: 'TodoWrite',
-      tool_input: { todos: [{ content: 'a', status: 'completed' }] },
-    });
+    collector.closeTaskExternal(sessionId, 'manual');
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(called).toBe(0);

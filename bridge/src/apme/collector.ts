@@ -26,7 +26,7 @@ import type { ApmeRunRow } from './types.js';
 import type { AgentType, TelemetrySpan, ApmeSampleEventRow, TrajectoryEventKind } from '@agentdeck/shared';
 import { priceUsd, providerFor } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
-import { classifyRunSmart } from './classifier.js';
+import { classifyRunSmart, computeSignals, classify } from './classifier.js';
 
 export interface OpenRunInput {
   sessionId: string;
@@ -280,15 +280,25 @@ export class ApmeCollector {
       }
     }
 
-    // ── Task boundary: TodoWrite all-completed ──
-    // Claude Code's TodoWrite PostToolUse payload contains tool_input.todos.
-    // When every todo status is "completed", treat it as the agent declaring
-    // the task finished. Close the current task; the next UserPromptSubmit
-    // opens a fresh one.
+    // ── Task boundary HINT: TodoWrite all-completed ──
+    // Demoted from a hard boundary to a non-segmenting hint (2026-06).
+    // TodoWrite-all-complete fires unreliably (~18% on Claude Code v2.1) and,
+    // when it did fire, fragmented a single logical task into several units.
+    // Tasks now segment only on EXPLICIT boundaries (`/task close`, `/clear`)
+    // or `session_end` — a stable, user-controlled unit. We still record the
+    // milestone in the trajectory so the task rollup can see that the agent
+    // declared its todos done, without splitting the task.
     if (event === 'PostToolUse' && toolName === 'TodoWrite') {
       const todos = extractTodos(data);
       if (todos && todos.length > 0 && todos.every((t) => t.status === 'completed')) {
-        this.closeTask(sessionId, 'todo_complete');
+        const task = this.sessionToTask.get(sessionId);
+        const turnIndex = this.sessionToTurn.get(sessionId)?.index;
+        if (task && turnIndex !== undefined) {
+          this.appendSampleEvent(
+            { taskId: task.id, runId, turnIndex },
+            { kind: 'state', dedupCore: `todos_complete:${turnIndex}:${todos.length}`, payloadObj: { state: 'todos_completed', count: todos.length } },
+          );
+        }
       }
     }
 
@@ -439,10 +449,29 @@ export class ApmeCollector {
       return;
     }
 
-    // Derive task category from the run (best-effort). Turn-level categories
-    // may diverge, but for now tasks inherit from the run.
+    // Category, present-at-close. Prefer the run's already-resolved category;
+    // otherwise classify synchronously from the run's signals so the task row
+    // (and its rollup judge rubric) always carries a stable category. The
+    // async run-level classifier (classifyRunSmart at closeRun) frequently
+    // resolves AFTER the task has already closed — leaving taskCategory null
+    // and the judge falling back to the wrong generic rubric.
     const run = this.store.getRun(task.runId);
-    const taskCategory = run?.taskCategory ?? null;
+    let taskCategory = run?.taskCategory ?? null;
+    if (!taskCategory || taskCategory === 'unknown') {
+      try {
+        const signals = computeSignals(this.store, task.runId);
+        // run.endedAt is still null at session_end close (updateRun runs after
+        // closeTask), so sessionDurationSec would be 0 and skew the duration
+        // rules — derive it from the task span instead.
+        if (signals.sessionDurationSec === 0) {
+          signals.sessionDurationSec = Math.max(0, Math.round((Date.now() - task.startedAt) / 1000));
+        }
+        const category = classify(signals);
+        if (category && category !== 'unknown') taskCategory = category;
+      } catch (err) {
+        debug('APME', `closeTask classify failed: ${String(err)}`);
+      }
+    }
 
     try {
       this.store.updateTask(task.id, {
@@ -688,16 +717,25 @@ export class ApmeCollector {
           return;
         }
         // Adapter-emitted boundaries (OpenClaw chat.aborted → 'manual',
-        // OpenClaw idle-gap timer → 'idle_gap', OpenCode TodoWrite
-        // all-completed → 'todo_complete') must close the active task.
-        // Without this route those spans were silently swallowed and the
-        // task only closed on session_end, breaking task_judge enqueue
-        // and Timeline task_end emission.
-        //
+        // OpenClaw idle-gap timer → 'idle_gap') close the active task.
         // `session_end` is intentionally excluded: closeRun fires that
         // path itself, and a duplicate here would double-emit onTaskClosed.
-        if (signal === 'todo_complete' || signal === 'manual' || signal === 'idle_gap') {
+        if (signal === 'manual' || signal === 'idle_gap') {
           this.closeTask(sessionId, signal);
+          return;
+        }
+        // `todo_complete` is a soft hint, not a boundary (see ingestHook
+        // TodoWrite handling) — record it in the trajectory without splitting
+        // the task. OpenCode's TodoWrite-all-completed routes here.
+        if (signal === 'todo_complete') {
+          const task = this.sessionToTask.get(sessionId);
+          const turnIndex = this.sessionToTurn.get(sessionId)?.index;
+          if (task && turnIndex !== undefined) {
+            this.appendSampleEvent(
+              { taskId: task.id, runId: task.runId, turnIndex },
+              { kind: 'state', dedupCore: `todos_complete:${turnIndex}`, payloadObj: { state: 'todos_completed' } },
+            );
+          }
           return;
         }
         debug('APME', `task_boundary span dropped: unknown signal=${signal ?? '<none>'}`);

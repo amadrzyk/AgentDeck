@@ -317,15 +317,21 @@ final class ApmeCollector {
                 }
             }
 
-            // ── Task boundary: TodoWrite all-completed ──
-            // PostToolUse payload carries tool_input.todos. When every todo
-            // status is "completed", treat it as the agent declaring the task
-            // finished and close the current task. Next UserPromptSubmit opens
-            // a fresh task.
+            // ── Task boundary HINT: TodoWrite all-completed ──
+            // Demoted from a hard boundary to a non-segmenting hint (2026-06,
+            // mirrors bridge/src/apme/collector.ts). TodoWrite-all-complete
+            // fired unreliably (~18% on Claude Code v2.1) and fragmented a
+            // single logical task. Tasks now segment only on EXPLICIT
+            // boundaries (`/task close`, `/clear`) or session_end. We still
+            // record the milestone in the trajectory as a non-segmenting state
+            // event so the rollup can see the agent declared its todos done.
             if (event.lowercased() == "tool_end" || event == "PostToolUse"),
                (data["tool_name"] as? String) == "TodoWrite",
-               Self.allTodosCompleted(data: data) {
-                closeTask(boundarySignal: "todo_complete")
+               Self.allTodosCompleted(data: data),
+               let task = activeTask, let turnIndex = activeTurn?.index {
+                _ = appendSampleEvent(taskId: task.id, runId: task.runId, turnIndex: turnIndex,
+                                      kind: "state", core: "todos_complete:\(turnIndex)",
+                                      payload: ["state": "todos_completed"])
             }
         }
     }
@@ -672,9 +678,25 @@ final class ApmeCollector {
             return
         }
 
-        // Inherit category from the run (best-effort).
+        // Category, present-at-close. Prefer the run's already-resolved
+        // category; otherwise classify synchronously from the run's signals so
+        // the task row (and its rollup judge rubric) always carries a stable
+        // category. The async run-level classifier (classifyRun at closeRun)
+        // frequently resolves AFTER the task has closed → nil category → the
+        // judge falls back to the wrong generic rubric. Mirrors
+        // bridge/src/apme/collector.ts closeTask.
         let run = store.getRun(id: task.runId)
-        let taskCategory = run?.taskCategory
+        var taskCategory = run?.taskCategory
+        if taskCategory == nil || taskCategory == "unknown" {
+            var signals = ApmeClassifier.computeSignals(store: store, runId: task.runId)
+            // run.endedAt is still nil at session_end close, so duration would
+            // be 0 and skew the duration rules — derive it from the task span.
+            if signals.sessionDurationSec == 0 {
+                signals.sessionDurationSec = max(0, Int((nowMs() - task.startedAt) / 1000))
+            }
+            let category = ApmeClassifier.classify(signals)
+            if category != .unknown { taskCategory = category.rawValue }
+        }
         let endedAt = nowMs()
 
         store.updateTask(id: task.id, fields: [

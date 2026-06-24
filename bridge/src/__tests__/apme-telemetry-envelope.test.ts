@@ -415,7 +415,7 @@ describe('ApmeCollector.ingestSpan dispatch', () => {
     expect(afterRunId).not.toBe(beforeRunId);
   });
 
-  it.each(['manual', 'idle_gap', 'todo_complete'] as const)(
+  it.each(['manual', 'idle_gap'] as const)(
     'task_boundary span with signal=%s closes the active task',
     (signal) => {
       // Seed a turn so a task is opened (closeTask drops empty tasks otherwise).
@@ -438,6 +438,28 @@ describe('ApmeCollector.ingestSpan dispatch', () => {
       expect(closedSignal).toBe(signal);
     },
   );
+
+  it('task_boundary span with signal=todo_complete is a soft hint — does NOT close the task', () => {
+    // Seed a turn so a task is open.
+    for (const s of claudeHookToSpans(ctx(), 'UserPromptSubmit', { message: { content: 'work' } })) {
+      collector.ingestSpan('S', s);
+    }
+    const taskId = collector.getActiveTaskId('S');
+    expect(taskId).not.toBeNull();
+
+    let closed = false;
+    collector.onTaskClosed = () => { closed = true; };
+
+    collector.ingestSpan('S', {
+      traceId: 'T', spanId: 'b', name: spanNameForKind('task_boundary'),
+      kind: 'task_boundary', ts: Date.now(),
+      attributes: { 'agentdeck.boundary_signal': 'todo_complete' },
+    });
+
+    // Task stays open; no onTaskClosed fired.
+    expect(collector.getActiveTaskId('S')).toBe(taskId);
+    expect(closed).toBe(false);
+  });
 
   it('task_boundary span with an unknown signal is dropped (no task close, no throw)', () => {
     for (const s of claudeHookToSpans(ctx(), 'UserPromptSubmit', { message: { content: 'work' } })) {

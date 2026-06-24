@@ -14,12 +14,11 @@
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { debug, logError } from '../logger.js';
+import { logError } from '../logger.js';
 import { ApmeStore } from './store.js';
 import { apmeDashboardHtml } from './dashboard-html.js';
 import { ApmeCollector } from './collector.js';
 import { ApmeRunner } from './runner.js';
-import { ApmeTuner } from './tuner.js';
 import { ApmeHwSampler } from './hw-sampler.js';
 import { ApmeRecommender } from './recommend.js';
 import { sampleEventToTimeline } from './sample-to-timeline.js';
@@ -29,7 +28,6 @@ export interface ApmeModule {
   store: ApmeStore;
   collector: ApmeCollector;
   runner: ApmeRunner;
-  tuner: ApmeTuner;
   hwSampler: ApmeHwSampler;
   recommender: ApmeRecommender;
 }
@@ -71,9 +69,8 @@ export async function initApme(
   const hwSampler = new ApmeHwSampler();
   const collector = new ApmeCollector(store, hwSampler);
   const runner = new ApmeRunner(store);
-  const tuner = new ApmeTuner(store);
   const recommender = new ApmeRecommender(store);
-  singleton = { store, collector, runner, tuner, hwSampler, recommender };
+  singleton = { store, collector, runner, hwSampler, recommender };
 
   const emitTimeline = opts.emitTimeline;
 
@@ -209,7 +206,6 @@ export type { ApmeConfig, ApmeJudgeConfig, ApmeJudgeBackend } from './settings.j
 export { ApmeStore } from './store.js';
 export { ApmeCollector } from './collector.js';
 export { ApmeRunner } from './runner.js';
-export { ApmeTuner } from './tuner.js';
 export { ApmeHwSampler } from './hw-sampler.js';
 export { ApmeRecommender } from './recommend.js';
 export { classifyRun, classifyRunSmart, classifyWithLlm, classify, computeSignals, TASK_CATEGORIES } from './classifier.js';

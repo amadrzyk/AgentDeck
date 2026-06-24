@@ -56,8 +56,6 @@ export interface ApmeDeterministicConfig {
 
 export interface ApmeConfig {
   enabled: boolean;
-  /** Auto-tune the judge rubric based on disagreement + vibe feedback. */
-  autoTune: boolean;
   deterministic: ApmeDeterministicConfig;
   judge: ApmeJudgeConfig;
   /** Models the user actually has access to — fed into the recommender. */
@@ -67,7 +65,6 @@ export interface ApmeConfig {
 /** Cost-sensitive defaults: local MLX, sparse sampling, no API calls. */
 export const DEFAULT_APME_CONFIG: ApmeConfig = {
   enabled: true,
-  autoTune: true,
   deterministic: {
     enabled: true,
     timeoutSec: 180,
@@ -145,7 +142,6 @@ export function loadApmeConfig(): ApmeConfig {
 
   const merged: ApmeConfig = {
     enabled: a.enabled ?? DEFAULT_APME_CONFIG.enabled,
-    autoTune: a.autoTune ?? DEFAULT_APME_CONFIG.autoTune,
     deterministic: det,
     judge,
     availableModels: Array.isArray(a.availableModels) ? a.availableModels : [],

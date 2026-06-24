@@ -7,7 +7,6 @@ import { AddressInfo } from 'net';
 import { ApmeStore } from '../apme/store.js';
 import { ApmeCollector } from '../apme/collector.js';
 import { ApmeRunner } from '../apme/runner.js';
-import { ApmeTuner } from '../apme/tuner.js';
 import { ApmeHwSampler } from '../apme/hw-sampler.js';
 import { ApmeRecommender } from '../apme/recommend.js';
 import { handleApmeRequest } from '../apme/http.js';
@@ -25,7 +24,6 @@ async function makeApme(): Promise<{ apme: ApmeModule; tmpDir: string } | null> 
     store,
     collector: new ApmeCollector(store, hwSampler),
     runner: new ApmeRunner(store),
-    tuner: new ApmeTuner(store),
     hwSampler,
     recommender: new ApmeRecommender(store),
   };
@@ -141,7 +139,8 @@ describe('APME HTTP routes', () => {
   });
 
   it('GET /apme/run/:id includes per-task rollup with attached evals', async () => {
-    // Seed a run, ingest a tool span, close a task via TodoWrite all-completed.
+    // Seed a run + a turn, record a TodoWrite all-completed hint (no longer a
+    // boundary), then close the run — the task closes on the session_end boundary.
     const runId = apme!.collector.openRun({
       sessionId: 's-task', agentType: 'claude-code', projectName: 'p', projectPath: '/tmp/p',
     });
@@ -180,8 +179,8 @@ describe('APME HTTP routes', () => {
     };
     expect(body.tasks).toBeDefined();
     expect(body.tasks.length).toBeGreaterThan(0);
-    // todo_complete boundary fired
-    expect(body.tasks.some((t) => t.boundarySignal === 'todo_complete')).toBe(true);
+    // session_end boundary fired (TodoWrite all-completed is now a soft hint).
+    expect(body.tasks.some((t) => t.boundarySignal === 'session_end')).toBe(true);
     // The seeded task_judge eval is attached
     const judged = body.tasks.find((t) => t.id === firstTaskId);
     expect(judged?.evals.some((e) => e.layer === 'task_judge' && e.metric === 'overall' && e.score === 0.83)).toBe(true);

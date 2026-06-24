@@ -29,7 +29,6 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
     withTempDataDir(() => {
       const cfg = loadApmeConfig();
       expect(cfg.enabled).toBe(true);
-      expect(cfg.autoTune).toBe(true);
       expect(cfg.deterministic.enabled).toBe(true);
       expect(cfg.deterministic.timeoutSec).toBe(DEFAULT_APME_CONFIG.deterministic.timeoutSec);
       expect(cfg.judge.backend).toBe('mlx');
@@ -76,7 +75,6 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       );
       const cfg = loadApmeConfig();
       expect(cfg.enabled).toBe(true); // unchanged default
-      expect(cfg.autoTune).toBe(true); // unchanged default
       expect(cfg.judge.backend).toBe('openclaw');
       expect(cfg.judge.model).toBe('gpt-4');
       expect(cfg.judge.sampleRate).toBe(0.5);
@@ -241,8 +239,5 @@ describe('loadApmeConfig — DEFAULT_APME_CONFIG sanity', () => {
   });
   it('default enabled is true (zero-config activation)', () => {
     expect(DEFAULT_APME_CONFIG.enabled).toBe(true);
-  });
-  it('default autoTune is true (rubric self-improves over time)', () => {
-    expect(DEFAULT_APME_CONFIG.autoTune).toBe(true);
   });
 });

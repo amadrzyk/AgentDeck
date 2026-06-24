@@ -47,8 +47,6 @@ struct ApmeDeterministicConfig: Codable {
 
 struct ApmeConfig: Codable {
     var enabled: Bool = true
-    /// Rubric auto-tuning (Phase 2 in Swift). Preserved for round-trip.
-    var autoTune: Bool = true
     var deterministic: ApmeDeterministicConfig = ApmeDeterministicConfig()
     var judge: ApmeJudgeConfig = ApmeJudgeConfig()
     var availableModels: [String] = []
@@ -136,7 +134,6 @@ enum ApmeSettings {
 
         var cfg = ApmeConfig()
         if let enabled = apme["enabled"] as? Bool { cfg.enabled = enabled }
-        if let autoTune = apme["autoTune"] as? Bool { cfg.autoTune = autoTune }
 
         if let det = apme["deterministic"] as? [String: Any] {
             if let e = det["enabled"] as? Bool { cfg.deterministic.enabled = e }

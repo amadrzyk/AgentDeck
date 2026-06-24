@@ -113,6 +113,7 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
   <div class="left">
     <div class="tabs">
       <button class="tab active" onclick="showTab('runs')">Runs</button>
+      <button class="tab" onclick="showTab('recommend')">Recommend</button>
       <button class="tab" onclick="showTab('scorecard')">Scorecard</button>
       <button class="tab" onclick="showTab('categories')">Categories</button>
     </div>
@@ -129,6 +130,7 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
           <th>Agent</th><th>Model</th><th>Project</th><th>Category</th><th>Score</th><th>Outcome</th><th>Vibe</th><th>Task</th><th>Time</th>
         </tr></thead><tbody id="runs-body"></tbody></table>
       </div>
+      <div class="panel" id="panel-recommend"><div id="recommend-content" class="empty">Loading...</div></div>
       <div class="panel" id="panel-scorecard"><div id="scorecard-content" class="empty">Loading...</div></div>
       <div class="panel" id="panel-categories"><div id="categories-content" class="empty">Loading...</div></div>
     </div>
@@ -447,8 +449,43 @@ async function loadCategories(){
   }catch(e){document.getElementById('categories-content').innerHTML='<div class="empty">Error: '+e.message+'</div>'}
 }
 
-loadRuns();loadScorecard();loadCategories();
-setInterval(loadRuns,15000);setInterval(loadScorecard,30000);setInterval(loadCategories,30000);
+/**
+ * Recommend tab — surfaces the recommender payoff: for each task category,
+ * which agent/model performs best. Ranks the (agent, model, category)
+ * sample-granularity scorecard (v_sample_scorecard) by quality, tie-broken by
+ * cost-per-quality. The top row per category is the recommended default — this
+ * is the "which agent/model is good at what" answer APME exists to produce.
+ */
+async function loadRecommend(){
+  try{
+    const r=await fetch(api('/apme/samples'));const d=await r.json();
+    const rows=(d.scorecards||[]).filter(s=>s.taskCategory&&s.taskCategory!=='_empty'&&s.avgQuality!=null);
+    const el=document.getElementById('recommend-content');
+    if(!rows.length){el.innerHTML='<div class="empty">Not enough evaluated tasks yet — recommendations appear once tasks have composite scores.</div>';return}
+    const byCat={};
+    for(const s of rows){(byCat[s.taskCategory]=byCat[s.taskCategory]||[]).push(s)}
+    let h='<div style="padding:12px 14px">';
+    h+='<div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">Best agent/model per task category — ranked by quality, tie-broken by cost-per-quality. ★ marks the recommended default for that kind of task.</div>';
+    for(const cat of Object.keys(byCat).sort()){
+      const list=byCat[cat].sort((a,b)=>(b.avgQuality-a.avgQuality)||((a.costPerQuality==null?1e9:a.costPerQuality)-(b.costPerQuality==null?1e9:b.costPerQuality)));
+      const best=list[0];
+      h+='<div style="margin-bottom:18px">';
+      h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap"><span class="badge-cat">'+esc(cat)+'</span>';
+      h+='<span style="font-size:12px;color:var(--muted)">Best: <b style="color:var(--text)">'+esc(best.agentType||'?')+' / '+esc(best.modelId||'?')+'</b> · '+fs(best.avgQuality)+' · '+(best.costPerQuality!=null?'$'+best.costPerQuality.toFixed(3)+'/q':'—')+' · '+best.samples+' samples</span></div>';
+      h+='<table style="margin-top:4px"><thead><tr><th>Agent</th><th>Model</th><th>Quality</th><th>$/Quality</th><th>Cost</th><th>Samples</th></tr></thead><tbody>';
+      for(const s of list){
+        const isBest=s===best;
+        h+='<tr'+(isBest?' style="background:rgba(34,197,94,0.08)"':'')+'><td>'+(isBest?'★ ':'')+esc(s.agentType||'—')+'</td><td>'+esc((s.modelId||'—').slice(0,22))+'</td><td>'+fs(s.avgQuality)+'</td><td>'+(s.costPerQuality!=null?'$'+s.costPerQuality.toFixed(3):'—')+'</td><td>'+(s.totalCost!=null?'$'+s.totalCost.toFixed(2):'—')+'</td><td>'+s.samples+'</td></tr>';
+      }
+      h+='</tbody></table></div>';
+    }
+    h+='</div>';
+    el.innerHTML=h;
+  }catch(e){document.getElementById('recommend-content').innerHTML='<div class="empty">Error: '+e.message+'</div>'}
+}
+
+loadRuns();loadRecommend();loadScorecard();loadCategories();
+setInterval(loadRuns,15000);setInterval(loadRecommend,30000);setInterval(loadScorecard,30000);setInterval(loadCategories,30000);
 </script>
 </body>
 </html>`;

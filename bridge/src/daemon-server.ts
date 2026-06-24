@@ -167,75 +167,6 @@ function log(msg: string): void {
   process.stderr.write(msg + '\n');
 }
 
-function compactTimelineText(value: unknown, max = 120): string {
-  const cleaned = typeof value === 'string'
-    ? value.replace(/\s+/g, ' ').trim()
-    : '';
-  if (!cleaned) return '';
-  return cleaned.length > max ? `${cleaned.slice(0, Math.max(0, max - 3))}...` : cleaned;
-}
-
-function formatEvalAxisScores(evals: Array<{ metric: string; score: number }>): string {
-  return evals
-    .filter((e) => e.metric !== 'overall')
-    .map((e) => `${e.metric}=${Math.round(e.score * 100)}%`)
-    .join(' ');
-}
-
-interface EvalNotes {
-  summary?: string;
-  done: string[];
-  missed: string[];
-  reasoning?: string;
-}
-
-function parseEvalNotes(raw: unknown): EvalNotes {
-  if (typeof raw !== 'string' || !raw.trim()) return { done: [], missed: [] };
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const readList = (key: 'done' | 'missed') =>
-      Array.isArray(parsed[key])
-        ? (parsed[key] as unknown[]).map((v) => compactTimelineText(v, 90)).filter(Boolean).slice(0, 2)
-        : [];
-    return {
-      summary: compactTimelineText(parsed.summary, 140) || undefined,
-      done: readList('done'),
-      missed: readList('missed'),
-      reasoning: compactTimelineText(parsed.reasoning, 180) || undefined,
-    };
-  } catch {
-    return { done: [], missed: [] };
-  }
-}
-
-function formatEvalDetail(parts: {
-  summary?: string;
-  axes?: string;
-  done?: string[];
-  missed?: string[];
-  reasoning?: string;
-  projectName?: string | null;
-  prompt?: string | null;
-}): string {
-  const lines = [
-    parts.summary ? `Summary: ${parts.summary}` : '',
-    parts.axes ? `Axes: ${parts.axes}` : '',
-    ...(parts.done ?? []).map((v) => `Done: ${v}`),
-    ...(parts.missed ?? []).map((v) => `Missed: ${v}`),
-    parts.reasoning ? `Reasoning: ${parts.reasoning}` : '',
-    parts.projectName || parts.prompt
-      ? [compactTimelineText(parts.projectName, 40), compactTimelineText(parts.prompt, 120)].filter(Boolean).join(' · ')
-      : '',
-  ].filter(Boolean);
-  return lines.join('\n');
-}
-
-function formatEvalRaw(scope: 'task' | 'turn' | 'run', pct: number, category: string | null | undefined, label?: string, outcome?: string | null): string {
-  const head = `★ ${scope} ${pct}% [${category ?? '?'}]${outcome ? ` ${outcome}` : ''}`;
-  const compactLabel = compactTimelineText(label, scope === 'run' ? 90 : 120);
-  return compactLabel ? `${head} ${compactLabel}` : head;
-}
-
 // ===== Usage relay (3-tier) =====
 
 interface RelayedUsage {
@@ -1646,10 +1577,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         const taskEvals = apme!.store.listEvalsForTask(taskId);
         const overallEval = taskEvals.find(e => e.metric === 'overall');
         if (!overallEval) return;
-        const pct = Math.round(overallEval.score * 100);
-        const notes = parseEvalNotes(overallEval.raw);
-        const summary = compactTimelineText(task.summary ?? notes.summary, 140);
-        const label = summary || compactTimelineText(run.taskPrompt, 120);
 
         const taskEvalEvent: import('@agentdeck/shared').ApmeEvalEvent = {
           type: 'apme_eval',
@@ -1667,35 +1594,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           },
         };
         core.broadcast(taskEvalEvent);
-
-        const axisStr = formatEvalAxisScores(taskEvals);
-        const taskDetail = formatEvalDetail({
-          summary: summary || undefined,
-          axes: axisStr || undefined,
-          done: notes.done,
-          missed: notes.missed,
-          reasoning: notes.reasoning,
-          projectName: run.projectName,
-          prompt: run.taskPrompt,
-        }) || `Task eval · ${compactTimelineText(run.taskPrompt, 80)}`;
-
-        core.bridgeTimeline.addEntry({
-          ts: Date.now(), type: 'eval_result',
-          raw: formatEvalRaw('task', pct, run.taskCategory ?? task.taskCategory, label),
-          detail: taskDetail,
-          agentType: run.agentType,
-          projectName: run.projectName ?? undefined,
-          sessionId: run.sessionId,
-          startedAt: task.startedAt,
-          endedAt: task.endedAt ?? undefined,
-        });
         return;
       }
       // Turn-level eval: broadcast and add timeline entry with turn score
       if (turnId) {
         const run = apme!.store.getRun(runId);
         if (!run) return;
-        const turn = apme!.store.getTurn(turnId);
         const turnEvals = apme!.store.listEvalsForTurn(turnId);
         const overall = turnEvals.find(e => e.metric === 'overall');
         if (!overall) return;
@@ -1707,7 +1611,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             compositeScore: overall.score,
           });
         } catch { /* ignore */ }
-        const pct = Math.round(overall.score * 100);
         // WS broadcast — reuse apme_eval event for turn eval so dashboards pick it up
         const turnEvalEvent: import('@agentdeck/shared').ApmeEvalEvent = {
           type: 'apme_eval',
@@ -1725,32 +1628,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           },
         };
         core.broadcast(turnEvalEvent);
-        const notes = parseEvalNotes(overall.raw);
-        const turnPrompt = compactTimelineText(turn?.prompt ?? run.taskPrompt, 140);
-        const label = notes.summary
-          || notes.done[0]
-          || compactTimelineText(turn?.response, 120)
-          || turnPrompt;
-        const turnAxisStr = formatEvalAxisScores(turnEvals);
-        const turnDetail = formatEvalDetail({
-          summary: notes.summary,
-          axes: turnAxisStr || undefined,
-          done: notes.done,
-          missed: notes.missed,
-          reasoning: notes.reasoning,
-          projectName: run.projectName,
-          prompt: turnPrompt || run.taskPrompt,
-        }) || `Turn eval · ${compactTimelineText(run.taskPrompt, 80)}`;
-        core.bridgeTimeline.addEntry({
-          ts: Date.now(), type: 'eval_result',
-          raw: formatEvalRaw('turn', pct, run.taskCategory, label),
-          detail: turnDetail,
-          agentType: run.agentType,
-          projectName: run.projectName ?? undefined,
-          sessionId: run.sessionId,
-          startedAt: (turn?.started_at as number | undefined) ?? (turn?.startedAt as number | undefined),
-          endedAt: (turn?.ended_at as number | undefined) ?? (turn?.endedAt as number | undefined),
-        });
         return;
       }
       const run = apme!.store.getRun(runId);
@@ -1778,54 +1655,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         },
       };
       core.broadcast(evalEvent);
-
-      // Change 9: separate deterministic layer timeline entry (lint/build/test)
-      const detEvals = evals.filter(e => e.layer === 'deterministic');
-      if (detEvals.length > 0) {
-        const detResults = detEvals.map(e => `${e.metric}=${e.score ? '✓' : '✗'}`).join(' ');
-        core.bridgeTimeline.addEntry({
-          ts: Date.now(), type: 'eval_result',
-          raw: `⚡ ${detResults}`,
-          detail: `Deterministic eval · ${run.projectName ?? ''}`,
-          agentType: run.agentType,
-          projectName: run.projectName ?? undefined,
-          sessionId: run.sessionId,
-          startedAt: run.startedAt,
-          endedAt: run.endedAt ?? undefined,
-        });
-      }
-
-      // Change 7: enriched run-level eval_result with axis scores + deterministic summary
-      const pct = Math.round((overallScore ?? run.compositeScore ?? 0) * 100);
-      const judgeEvals = evals.filter(e => e.layer === 'llm_judge' && e.metric !== 'overall');
-      const overallEval = evals.find(e => e.layer === 'llm_judge' && e.metric === 'overall');
-      const notes = parseEvalNotes(overallEval?.raw);
-      const axisStr = formatEvalAxisScores(judgeEvals);
-      const detStr = detEvals.length > 0
-        ? detEvals.map(e => `${e.metric}=${e.score ? '✓' : '✗'}`).join(' ') + ' · '
-        : '';
-      const detailAxes = [detStr.trim().replace(/\s+·$/, ''), axisStr].filter(Boolean).join(' ');
-      const label = notes.summary || notes.done[0] || compactTimelineText(run.taskPrompt, 120);
-      const enrichedDetail = formatEvalDetail({
-        summary: notes.summary,
-        axes: detailAxes || undefined,
-        done: notes.done,
-        missed: notes.missed,
-        reasoning: notes.reasoning,
-        projectName: run.projectName,
-        prompt: run.taskPrompt,
-      });
-      core.bridgeTimeline.addEntry({
-        ts: Date.now(),
-        type: 'eval_result',
-        raw: formatEvalRaw('run', pct, run.taskCategory, label, run.outcome ?? 'pending'),
-        detail: enrichedDetail || `${run.projectName ?? ''} · ${compactTimelineText(run.taskPrompt, 100)}`,
-        agentType: run.agentType,
-        projectName: run.projectName ?? undefined,
-        sessionId: run.sessionId,
-        startedAt: run.startedAt,
-        endedAt: run.endedAt ?? undefined,
-      });
     });
 
     const apmeEvalTimer = setInterval(() => {

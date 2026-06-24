@@ -1627,23 +1627,6 @@ apme
   });
 
 apme
-  .command('tune')
-  .description('Manually trigger rubric auto-tuning')
-  .action(async () => {
-    const { initApme } = await import('./apme/index.js');
-    const apme = await initApme();
-    if (!apme) { log('APME not available'); process.exit(1); }
-
-    log('Running rubric tuner...');
-    const outcome = await apme.tuner.tune();
-    if (outcome.accepted) {
-      log(`Accepted rubric v${outcome.newVersion} (correlation ${outcome.baselineCorrelation?.toFixed(2) ?? '?'} → ${outcome.proposedCorrelation?.toFixed(2) ?? '?'})`);
-    } else {
-      log(`Rejected: ${outcome.reason}`);
-    }
-  });
-
-apme
   .command('vibe <runId> <verdict>')
   .description('Submit vibe feedback (approve|reject|neutral)')
   .option('-n, --note <text>', 'Optional note')

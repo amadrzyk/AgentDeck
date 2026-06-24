@@ -20,7 +20,6 @@
 		071A3FB5F200FFCFA82F4294 /* MatrixTerminalPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AECC310DB5852BD8814BC04 /* MatrixTerminalPreviews.swift */; };
 		076E08E5217ECF4528B4AC9A /* TerrariumConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403CDDF7DDFCF5D8702491EA /* TerrariumConfig.swift */; };
 		07B804BD8A367595E8FF639F /* ActivityPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6186E147F760B85461F02022 /* ActivityPanel.swift */; };
-		07FC529F31F62ED1FD701417 /* ApmeTuner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0831DD21D16F2AB4056ADD8E /* ApmeTuner.swift */; };
 		08B47BC18D206538B33DD3B9 /* CloudCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A135216D37932FE68501F4 /* CloudCreature.swift */; };
 		091A43AE8CEB292071866D39 /* ApmeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E176199605E14D2EAF35A1 /* ApmeStore.swift */; };
 		0A7DA2C45E7C6BDB33D0F736 /* DevicePreviewCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C4FB1F847E5695EF75A4FB /* DevicePreviewCatalog.swift */; };
@@ -69,7 +68,6 @@
 		2E4BB417A1CB93B5962D6D09 /* IDotMatrixBLE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F068BCFDB979A23AEDA5C3 /* IDotMatrixBLE.swift */; };
 		2E7C2729C1B7011497854D53 /* Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E532E5457B6DFDE324D8F11C /* Protocol.swift */; };
 		2E8F7A4A759E6BE13F311440 /* SessionLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31609846ED73DC70F674FCF0 /* SessionLauncher.swift */; };
-		2F50D94B1FE7E4BF5C02E332 /* ApmeTuner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0831DD21D16F2AB4056ADD8E /* ApmeTuner.swift */; };
 		2FA1EFC88159FD511847AFEA /* ApmeHttpRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2D26F6BDF08F6E4F2F8439 /* ApmeHttpRoutes.swift */; };
 		3053AF2926E3B907DAB9250F /* PixooModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9342D343A701D2BDC92C845 /* PixooModule.swift */; };
 		313772161048869FB5896E3A /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5D17A24E0C5B16A097D62E9 /* AuthManager.swift */; };
@@ -375,7 +373,6 @@
 		05A9A073192C93C1277AE490 /* Creature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Creature.swift; sourceTree = "<group>"; };
 		06FFF88A2747DFBB1E626CA9 /* TimeboxBLE.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeboxBLE.swift; sourceTree = "<group>"; };
 		0815111538C63CAF8766B367 /* KelpField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KelpField.swift; sourceTree = "<group>"; };
-		0831DD21D16F2AB4056ADD8E /* ApmeTuner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeTuner.swift; sourceTree = "<group>"; };
 		0DD3A6826EADF11BB4C4F139 /* BubbleSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleSystem.swift; sourceTree = "<group>"; };
 		0F083DDE39507B6693AED227 /* ApmeCategoryE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeCategoryE2ETests.swift; sourceTree = "<group>"; };
 		118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCodexAppObserver.swift; sourceTree = "<group>"; };
@@ -805,7 +802,6 @@
 				758AAD78310D811B993ADA21 /* ApmeScorers.swift */,
 				CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */,
 				F8E176199605E14D2EAF35A1 /* ApmeStore.swift */,
-				0831DD21D16F2AB4056ADD8E /* ApmeTuner.swift */,
 			);
 			path = Apme;
 			sourceTree = "<group>";
@@ -1261,7 +1257,6 @@
 				89B569F2096B99D8C6ED3044 /* ApmeScorers.swift in Sources */,
 				FA0A73634F02279804DDF386 /* ApmeSettings.swift in Sources */,
 				091A43AE8CEB292071866D39 /* ApmeStore.swift in Sources */,
-				2F50D94B1FE7E4BF5C02E332 /* ApmeTuner.swift in Sources */,
 				A2D382D31BFCC8EAEE6F19F4 /* AppPreferences.swift in Sources */,
 				9B95E3162542EDD34CF868C1 /* AquariumSurface.swift in Sources */,
 				69EEBFCB47436C161B442D2B /* AttentionTheaterHUD.swift in Sources */,
@@ -1416,7 +1411,6 @@
 				5DCD91335EFB1B6500CA830E /* ApmeScorers.swift in Sources */,
 				C329FA364A949AB61F0A8AD9 /* ApmeSettings.swift in Sources */,
 				581FB47554F19C7FB58A531F /* ApmeStore.swift in Sources */,
-				07FC529F31F62ED1FD701417 /* ApmeTuner.swift in Sources */,
 				4EC0E953449451FC7C10AEBC /* AppPreferences.swift in Sources */,
 				0264C182D89757B656DFE108 /* AquariumSurface.swift in Sources */,
 				BEC7F51CDA512FE9DFB90F63 /* AttentionTheaterHUD.swift in Sources */,
