@@ -13,6 +13,8 @@ import {
   normalizeMac,
   TRMNL_DEFAULT_REFRESH,
   TRMNL_DEFAULT_REFRESH_ACTIVE,
+  TRMNL_DEFAULT_IMAGE_TIMEOUT,
+  TRMNL_MAX_IMAGE_TIMEOUT,
 } from '../trmnl/trmnl-settings.js';
 import { getTrmnlFrameKeys, refreshTrmnlFrame } from '../trmnl/frame-cache.js';
 import { getTelemetry, getTelemetryHealth, _resetTelemetry } from '../trmnl/trmnl-telemetry.js';
@@ -270,6 +272,33 @@ describe('TRMNL BYOS handlers', () => {
     expect(captured.body.refresh_rate).toBe(TRMNL_DEFAULT_REFRESH);
     expect(typeof captured.body.refresh_rate).toBe('number');
     expect(captured.body.image_url_timeout).toBeGreaterThan(0);
+  });
+
+  it('serves the default image_url_timeout on a strong WiFi link', () => {
+    const { res, captured } = fakeRes();
+    handleTrmnlDisplay(fakeReq({ ID: MAC, RSSI: '-55' }), res);
+    expect(captured.body.image_url_timeout).toBe(TRMNL_DEFAULT_IMAGE_TIMEOUT);
+  });
+
+  it('widens image_url_timeout on a weak WiFi link to avoid WIFI_FAILED', () => {
+    // A lossy link (the dominant cause of "not responding") gets the widest
+    // download window so the image GET can still finish before the firmware
+    // shows its error screen — but never past the firmware cap.
+    const { res, captured } = fakeRes();
+    handleTrmnlDisplay(fakeReq({ ID: MAC, RSSI: '-85' }), res);
+    expect(captured.body.image_url_timeout).toBeGreaterThan(TRMNL_DEFAULT_IMAGE_TIMEOUT);
+    expect(captured.body.image_url_timeout).toBeLessThanOrEqual(TRMNL_MAX_IMAGE_TIMEOUT);
+  });
+
+  it('widens image_url_timeout on the needs-setup (202) branch too', () => {
+    writeFileSync(
+      join(process.env.AGENTDECK_DATA_DIR!, 'settings.json'),
+      JSON.stringify({ trmnl: { autoRegister: false, devices: [] } }),
+    );
+    const { res, captured } = fakeRes();
+    handleTrmnlDisplay(fakeReq({ ID: 'AB:CD:EF:00:11:22', RSSI: '-90' }), res);
+    expect(captured.body.status).toBe(202);
+    expect(captured.body.image_url_timeout).toBeGreaterThan(TRMNL_DEFAULT_IMAGE_TIMEOUT);
   });
 
   it('keeps the slow cadence while WORKING (only AWAITING speeds it up)', () => {

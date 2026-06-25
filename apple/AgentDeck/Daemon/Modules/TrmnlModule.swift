@@ -195,7 +195,7 @@ actor TrmnlModule: DeviceModule {
                              "image_url": imageUrl(base, size, setupFrame.hash),
                              "filename": setupFrame.hash,
                              "refresh_rate": cfg.refreshRate,
-                             "image_url_timeout": cfg.imageUrlTimeout,
+                             "image_url_timeout": cfg.effectiveImageTimeout(rssi: h.rssi),
                              "special_function": "sleep",
                              "reset_firmware": false,
                              "update_firmware": false,
@@ -206,11 +206,14 @@ actor TrmnlModule: DeviceModule {
         // Adaptive cadence: only AWAITING speeds the loop up (battery e-ink).
         let act = activity()
         let refresh = cfg.effectiveRefresh(awaiting: act.awaiting, working: act.working)
+        // Widen the image-download window on a weak link so a lossy GET still
+        // finishes before the firmware's "not responding" (WIFI_FAILED) screen.
+        let imageTimeout = cfg.effectiveImageTimeout(rssi: h.rssi)
         return json(["status": 0,
                      "image_url": imageUrl(base, size, frame.hash),
                      "filename": frame.hash,
                      "refresh_rate": refresh,
-                     "image_url_timeout": cfg.imageUrlTimeout,
+                     "image_url_timeout": imageTimeout,
                      "special_function": "sleep",
                      "reset_firmware": false,
                      "update_firmware": false,

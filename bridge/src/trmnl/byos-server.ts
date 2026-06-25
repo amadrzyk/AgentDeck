@@ -24,6 +24,7 @@ import {
   loadTrmnlConfig,
   normalizeMac,
   effectiveRefreshRate,
+  effectiveImageTimeout,
 } from './trmnl-settings.js';
 import { getTrmnlFrame, getTrmnlFrameByKey, forceRenderTrmnlFrame, getTrmnlActivity } from './frame-cache.js';
 import type { TrmnlFrame } from './image-renderer.js';
@@ -177,7 +178,7 @@ export function handleTrmnlDisplay(req: IncomingMessage, res: ServerResponse): v
         image_url: imageUrl(req, size, setupFrame.contentHash),
         filename: setupFrame.contentHash,
         refresh_rate: cfg.refreshRate,
-        image_url_timeout: cfg.imageUrlTimeout,
+        image_url_timeout: effectiveImageTimeout(cfg, { rssi: h.rssi }),
         special_function: 'sleep',
         reset_firmware: false,
         update_firmware: false,
@@ -194,10 +195,14 @@ export function handleTrmnlDisplay(req: IncomingMessage, res: ServerResponse): v
   // Adaptive cadence: poll fast while an agent is AWAITING/WORKING, slow when idle.
   const activity = getTrmnlActivity();
   const refreshRate = effectiveRefreshRate(cfg, activity);
+  // Widen the image-download window on a weak link so a lossy GET still finishes
+  // before the firmware shows "not responding" (WIFI_FAILED).
+  const imageTimeout = effectiveImageTimeout(cfg, { rssi: h.rssi });
   debug(
     TAG,
     `display ${normalizeMac(mac)} ${size.width}x${size.height} hash=${frame.contentHash} ` +
-      `refresh=${refreshRate}s awaiting=${activity.awaiting} working=${activity.working}`,
+      `refresh=${refreshRate}s imageTimeout=${imageTimeout}s rssi=${h.rssi ?? 'n/a'} ` +
+      `awaiting=${activity.awaiting} working=${activity.working}`,
   );
   sendJson(res, 200, {
     status: 0,
@@ -205,8 +210,9 @@ export function handleTrmnlDisplay(req: IncomingMessage, res: ServerResponse): v
     filename: frame.contentHash,
     // Number (matches the reference BYOS + firmware's uint parse), not a string.
     refresh_rate: refreshRate,
-    // Generous image-download window so a flaky WiFi link doesn't trip "not responding".
-    image_url_timeout: cfg.imageUrlTimeout,
+    // Generous, link-aware image-download window so a flaky WiFi link doesn't trip
+    // the firmware's "not responding" screen.
+    image_url_timeout: imageTimeout,
     special_function: 'sleep',
     reset_firmware: false,
     update_firmware: false,

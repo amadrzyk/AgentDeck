@@ -17,16 +17,37 @@ struct TrmnlConfig: Sendable {
     /// Cadence (seconds) while a session is AWAITING the user.
     var refreshActive: Int = 60
     /// Image-download timeout (seconds) handed to the firmware as image_url_timeout.
-    var imageUrlTimeout: Int = 30
+    /// Generous default: most "not responding" cycles are a lossy image GET timing
+    /// out, not a server error. Mirrors TRMNL_DEFAULT_IMAGE_TIMEOUT.
+    var imageUrlTimeout: Int = 50
     var autoRegister: Bool = true
 
     /// Too-frequent polls drain the panel battery + full-flash the e-ink.
     static let minRefresh = 30
+    /// Hard cap the firmware honors for image_url_timeout (~65s internally).
+    static let maxImageTimeout = 65
+    /// RSSI (dBm) at/below which the WiFi link is treated as weak/lossy — the
+    /// dominant cause of "not responding" (WIFI_FAILED). Sent per poll by firmware.
+    static let weakRssiDbm = -78.0
+    /// Image-download window served on a weak link — near the firmware cap.
+    static let weakLinkImageTimeout = 60
 
     /// Cadence for a poll: only AWAITING speeds it up (a deep-sleep e-ink panel
     /// can't be pushed and each wake flashes the screen). Mirrors trmnl-settings.ts.
     func effectiveRefresh(awaiting: Int, working: Int) -> Int {
         max(TrmnlConfig.minRefresh, awaiting > 0 ? refreshActive : refreshRate)
+    }
+
+    /// Image-download timeout (seconds) for a poll. Widens toward the firmware cap
+    /// when the panel reports a weak WiFi signal so a lossy image GET still finishes
+    /// before "not responding" (WIFI_FAILED); a strong link keeps the lower default
+    /// so a dead link doesn't hold the radio on (battery). Mirrors trmnl-settings.ts.
+    func effectiveImageTimeout(rssi: Double?) -> Int {
+        var t = imageUrlTimeout
+        if let r = rssi, r.isFinite, r <= TrmnlConfig.weakRssiDbm {
+            t = max(t, TrmnlConfig.weakLinkImageTimeout)
+        }
+        return min(TrmnlConfig.maxImageTimeout, max(5, t))
     }
 }
 
@@ -103,8 +124,8 @@ enum TrmnlSettings {
         else if let r = t["refreshRate"] as? Double, r >= 5 { cfg.refreshRate = Int(r) }
         if let r = t["refreshActive"] as? Int, r >= 5 { cfg.refreshActive = r }
         else if let r = t["refreshActive"] as? Double, r >= 5 { cfg.refreshActive = Int(r) }
-        if let v = t["imageUrlTimeout"] as? Int, v > 0 { cfg.imageUrlTimeout = min(65, v) }
-        else if let v = t["imageUrlTimeout"] as? Double, v > 0 { cfg.imageUrlTimeout = min(65, Int(v)) }
+        if let v = t["imageUrlTimeout"] as? Int, v > 0 { cfg.imageUrlTimeout = min(TrmnlConfig.maxImageTimeout, v) }
+        else if let v = t["imageUrlTimeout"] as? Double, v > 0 { cfg.imageUrlTimeout = min(TrmnlConfig.maxImageTimeout, Int(v)) }
         if let a = t["autoRegister"] as? Bool { cfg.autoRegister = a }
         return cfg
     }

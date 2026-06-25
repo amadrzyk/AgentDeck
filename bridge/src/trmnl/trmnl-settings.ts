@@ -37,9 +37,23 @@ export const TRMNL_MIN_REFRESH = 30;
 /**
  * Seconds the firmware waits for the image download before giving up (its
  * `image_url_timeout`). Generous so a slow/flaky WiFi link doesn't trip the
- * device's "not responding" (WIFI_FAILED) screen. Firmware caps at ~65s.
+ * device's "not responding" (WIFI_FAILED) screen. Firmware caps at ~65s, so we
+ * keep a healthy default (most "not responding" cycles are a lossy image GET
+ * timing out, not a server error — see docs/devices.md TRMNL section).
  */
-export const TRMNL_DEFAULT_IMAGE_TIMEOUT = 30;
+export const TRMNL_DEFAULT_IMAGE_TIMEOUT = 50;
+/** Hard cap the firmware honors (it clamps `image_url_timeout` ~65s internally). */
+export const TRMNL_MAX_IMAGE_TIMEOUT = 65;
+/**
+ * RSSI (dBm) at or below which the panel's WiFi link is treated as weak/lossy.
+ * A weak link is the dominant real-world cause of "not responding" (WIFI_FAILED):
+ * the image download drops packets and times out. RSSI is sent by the firmware on
+ * every poll, so we can react per-poll. (-78 ≈ marginal; below it, retransmits
+ * stack up and the default window can be too tight.)
+ */
+export const TRMNL_WEAK_RSSI_DBM = -78;
+/** Image-download window served on a weak link — near the firmware cap. */
+export const TRMNL_WEAK_LINK_IMAGE_TIMEOUT = 60;
 
 export interface TrmnlDevice {
   /** Normalized (uppercase, colon-separated) MAC address — the device identity. */
@@ -76,6 +90,23 @@ export function effectiveRefreshRate(
   return Math.max(TRMNL_MIN_REFRESH, activity.awaiting > 0 ? cfg.refreshActive : cfg.refreshRate);
 }
 
+/**
+ * Image-download timeout (seconds) for a single poll. Widens toward the firmware
+ * cap when the panel reports a weak WiFi signal, so a lossy image GET still has
+ * the maximum window to finish before the firmware shows "not responding"
+ * (WIFI_FAILED) — the #1 source of TRMNL flicker on a marginal link. A strong link
+ * keeps the lower default so a genuinely dead link doesn't hold the radio on
+ * (battery). RSSI absent (older firmware) ⇒ default; the default itself is already
+ * generous. Clamped to [5, firmware cap].
+ */
+export function effectiveImageTimeout(cfg: TrmnlConfig, opts: { rssi?: number | null } = {}): number {
+  let t = cfg.imageUrlTimeout;
+  if (opts.rssi != null && Number.isFinite(opts.rssi) && opts.rssi <= TRMNL_WEAK_RSSI_DBM) {
+    t = Math.max(t, TRMNL_WEAK_LINK_IMAGE_TIMEOUT);
+  }
+  return Math.min(TRMNL_MAX_IMAGE_TIMEOUT, Math.max(5, Math.floor(t)));
+}
+
 function readSettings(): Record<string, unknown> {
   try {
     return JSON.parse(readFileSync(settingsPath(), 'utf-8'));
@@ -100,7 +131,7 @@ export function loadTrmnlConfig(): TrmnlConfig {
       : TRMNL_DEFAULT_REFRESH_ACTIVE;
   const imageUrlTimeout =
     typeof raw.imageUrlTimeout === 'number' && raw.imageUrlTimeout > 0
-      ? Math.min(65, Math.floor(raw.imageUrlTimeout))
+      ? Math.min(TRMNL_MAX_IMAGE_TIMEOUT, Math.floor(raw.imageUrlTimeout))
       : TRMNL_DEFAULT_IMAGE_TIMEOUT;
   return {
     enabled: raw.enabled === true,
