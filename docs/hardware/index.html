@@ -140,6 +140,7 @@
         <tr><td class="device-name">TTGO T-Display 1.14"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32 (classic)</td><td>ST7789 TFT · <span class="res">135×240</span></td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
         <tr><td class="device-name">ESP32-C6 1.47"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-C6 (RISC-V)</td><td>ST7789 TFT · <span class="res">172×320</span></td><td>USB Serial / WiFi WS</td><td>USB-CDC + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
         <tr><td class="device-name">IPS 10.1"</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-P4 + C6</td><td>JD9365 IPS MIPI-DSI · <span class="res">800×1280</span></td><td>USB Serial / WiFi WS</td><td>USB-Serial + WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
+        <tr><td class="device-name">XTeink X3</td><td><span class="badge b-hw">ESP32 FW</span></td><td>ESP32-C3</td><td>e-ink · <span class="res">528×792</span> (3.7")</td><td>WiFi WS (계획)</td><td>WiFi</td><td><span class="badge b-warn">EXP<sup>7</sup></span></td></tr>
         <tr><td class="device-name">Divoom Pixoo64</td><td><span class="badge b-hw">상용 LED</span></td><td>Divoom (비-ESP32)</td><td>RGB LED · <span class="res">64×64</span></td><td>HTTP REST :80</td><td>WiFi</td><td><span class="badge b-yes">YES</span></td></tr>
         <tr><td class="device-name">TRMNL e-ink (BYOS)</td><td><span class="badge b-hw">상용 e-ink</span></td><td>TRMNL (비-ESP32)</td><td>e-ink · <span class="res">800×480</span> (device-reported)</td><td>HTTP BYOS pull :9120</td><td>WiFi</td><td><span class="badge b-yes">YES<sup>4</sup></span></td></tr>
         <tr><td class="device-name">iDotMatrix 32×32</td><td><span class="badge b-hw">상용 BLE</span></td><td>BLE SoC (비-ESP32)</td><td>RGB AMOLED · <span class="res">32×32</span></td><td>BLE GATT</td><td>Bluetooth LE</td><td><span class="badge b-yes">YES</span></td></tr>
@@ -163,10 +164,11 @@
     <sup>3</sup> Elgato Stream Deck 앱 별도 설치(플러그인 호스트). 표준 15키(<code>agentdeck-sd</code>, DeviceType 0)·SD+(<code>agentdeck-sdplus</code>, DeviceType 7)는 동일 플러그인의 두 프로파일이며 mini(1)·XL(2)도 <code>familyForDeviceType()</code>로 그리드 자동 산출. · <strong>포트는 가변</strong> — ESP32는 <code>device_info_request</code>로 식별.
     <br><strong>*</strong> SSE 풀 스트리밍은 <strong>Node 브리지</strong>(<code>bridge/src/hook-server.ts</code>, <code>broadcastSse</code>) 한정. App Store macOS <strong>Swift 데몬</strong>(<code>DaemonServer.swift</code>)의 <code>/sse</code>는 <code>event: connected</code> 1회 후 끊는 <strong>스텁</strong>이라 스트리밍 안 함 — App Store 빌드의 라이브 SSE 대시보드는 외부(Node) 데몬 필요. 실 소비자는 리포 내 <code>/status</code>·<code>/pixoo</code> HTML 대시보드(인라인 EventSource).
     <br><sup>4</sup> <strong>TRMNL BYOS</strong>(Bring Your Own Server): 패널이 <code>/api/setup</code>·<code>/api/display</code>를 자기 스케줄로 폴링하면 daemon이 <strong>MAC 무관 auto-enroll</strong> 후 device-reported <code>Width</code>/<code>Height</code>로 렌더한 <strong>1-bit PNG</strong>를 pull(push 아님). 드라이버: Node <code>bridge/src/trmnl/</code> / Swift <code>Trmnl{Module,ImageRenderer,Settings}.swift</code>(CoreGraphics+CoreText로 1-bit PNG 직접 렌더, resvg/Node 불필요). <code>com.apple.security.network.server</code>로 커버 — Pixoo와 동일 LAN-HTTP 선례, 서브프로세스 없음. enrollment는 sandbox settings에 영속화, telemetry는 runtime-only.
+    <br><sup>7</sup> <strong>XTeink X3 = experimental</strong>: ESP32-C3 e-ink 포켓 리더로, AgentDeck 펌웨어가 아니라 오픈소스 <strong>CrossPoint Reader 포크</strong>(<code>crosspoint-agentdeck</code>, branch <code>agentdeck-decision-card</code>)로 "Decision Card" 펌웨어 개발 중. 아직 <code>device_info</code>/WS 미발신 → <strong>대시보드 미표시</strong>. 전송은 다른 ESP32와 동일한 WiFi WS(서브프로세스 없음)라 샌드박스 제약 아님. 소유 유닛은 pogo USB-data 패드 사망 → SD <code>update.bin</code> 플래시만 가능, AgentDeck <code>esp32/</code>에 board def 없음. 펌웨어가 WS/<code>device_info</code> 발신 시작하면 ✅ 승격 가능(현재 not-yet-shipping).
   </p>
 
   <h2>A. ESP32 펌웨어 디스플레이 보드</h2>
-  <p class="section-note">공통: PlatformIO + Arduino, <code>LVGL 9.2.0</code>(TC001 제외), 115200 baud, flash mode DIO, 이중 경로(USB Serial 기본 + WiFi WebSocket 독립). 출처: <code>esp32/platformio.ini</code> · <code>esp32/boards/board_*.h</code>.</p>
+  <p class="section-note">공통: PlatformIO + Arduino, <code>LVGL 9.2.0</code>(TC001·XTeink X3 제외), 115200 baud, flash mode DIO, 이중 경로(USB Serial 기본 + WiFi WebSocket 독립). 출처: <code>esp32/platformio.ini</code> · <code>esp32/boards/board_*.h</code>.</p>
   <p class="section-note"><strong>env 이름 두 층</strong>: <code>friendly명</code>은 <code>esp32/scripts/flash.sh</code>가 받는 canonical 친근명(panel/form + 인치: 3.5→35·1.8→18·1.14→114·1.47→147·10.1→101)이고, <code>pio env</code>는 <code>platformio.ini</code>의 실제 <code>[env:...]</code>(불변). flash.sh가 친근명→pio로 매핑하며 legacy 별칭(<code>round_amoled</code>·<code>ttgo</code>·<code>ips10</code> 등)도 계속 받는다. CI/<code>pio run -e</code>는 pio env 사용.</p>
   <div class="scroll">
     <table>
@@ -180,6 +182,7 @@
         <tr><td class="device-name">TTGO T-Display 1.14"</td><td><code>tft_114</code></td><td><code>ttgo</code></td><td>LilyGO T-Display</td><td>ESP32-D0WDQ6</td><td class="res">135×240</td><td>ST7789 (SPI)</td><td>없음 (버튼 2)</td><td>16MB</td><td>NO</td><td>CH340<sup>4</sup></td></tr>
         <tr><td class="device-name">ESP32-C6 1.47"</td><td><code>c6_147</code></td><td><code>esp32_c6_147</code></td><td>Waveshare ESP32-C6-LCD-1.47"</td><td>ESP32-C6</td><td class="res">172×320</td><td>ST7789 (SPI)</td><td>없음 (BOOT)</td><td>4MB</td><td>NO</td><td>Native USB CDC</td></tr>
         <tr><td class="device-name">IPS 10.1"</td><td><code>ips_101</code></td><td><code>ips10</code></td><td>JC8012P4A1C (Guition)</td><td>ESP32-P4NRW32 (400MHz)</td><td class="res">800×1280</td><td>JD9365 (MIPI-DSI)</td><td>GSL3680 (I2C)</td><td>4MB<sup>5</sup></td><td>32MB</td><td>CH340</td></tr>
+        <tr><td class="device-name">XTeink X3<sup>7</sup></td><td>—</td><td>—</td><td>XTeink X3 (XTeink)</td><td>ESP32-C3</td><td class="res">528×792</td><td>e-ink EPD (미확정)</td><td>없음</td><td>4MB</td><td>NO</td><td>pogo USB (데이터 사망)</td></tr>
       </tbody>
     </table>
   </div>
@@ -187,6 +190,7 @@
     <sup>4</sup> TTGO 플래시는 57600 baud + <code>--no-stub</code>(~5분). PSRAM 없는 classic이라 정적 DRAM ~10KB → 테라리움 축소 버퍼.
     <sup>5</sup> P4NRW32 모듈은 16MB Flash + 32MB PSRAM 통합이나 빌드는 4MB 파티션. WiFi는 co-processor <strong>ESP32-C6-MINI-1U-N4</strong>(esp-hosted), TX 20dBm.
     <sup>6</sup> <code>box_86</code>의 legacy 중복 env <code>rgb48</code>가 <code>platformio.ini</code>의 <code>default_envs</code>(같은 <code>box_86.csv</code> 파티션, platform source만 다른 near-dup). 친근명 정리 범위에서 pio env는 유지 — <code>pio run</code> 무인자 빌드 시 <code>rgb48</code> 선택됨에 주의.
+    <sup>7</sup> <strong>XTeink X3 = experimental.</strong> AgentDeck <code>esp32/</code> 펌웨어 아님 — 오픈소스 <strong>CrossPoint Reader 포크</strong>(<code>crosspoint-agentdeck</code>, branch <code>agentdeck-decision-card</code>)로 "Decision Card" 펌웨어 개발 중이라 <code>friendly명</code>/<code>pio env</code> 없음, LVGL 미사용(CrossPoint <code>GfxRenderer</code>). 전송 WiFi WS(계획). 소유 유닛은 USB-data 패드 사망 → SD <code>update.bin</code>만. 종합 매트릭스 각주<sup>7</sup> 참조.
   </p>
 
   <h2>B. LED 매트릭스 디바이스</h2>
@@ -325,6 +329,7 @@
         <tr><td class="device-name">Timebox / iDotMatrix</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">CoreBluetooth 네이티브</td><td class="wrap-cell">최선. 단 <strong>데몬당 BLE 단일 연결</strong> — 동시 1대만. (구 Timebox-SPP serial 변종은 제거됨)</td></tr>
         <tr><td class="device-name">SSE 스트림</td><td><span class="badge b-warn">YES*</span></td><td class="wrap-cell"><strong>구현 갭</strong>. 풀 스트리밍(<code>broadcastSse</code>, 멀티클라이언트+하트비트)은 Node 브리지(<code>hook-server.ts</code>)만 구현. App Store Swift 데몬(<code>DaemonServer.swift</code>)의 <code>/sse</code>는 <code>event: connected</code> 1회 후 끊는 <strong>스텁</strong></td><td class="wrap-cell"><strong>개선 권장</strong>: 샌드박스 제약 아님(같은 HTTP 서버에 SSE 가능). Swift 데몬에 멀티클라이언트 SSE 구현 시 ✅ 승격. 현 App Store 빌드는 라이브 SSE에 외부 Node 데몬 필요</td></tr>
         <tr><td class="device-name">D200H</td><td><span class="badge b-yes">YES</span></td><td class="wrap-cell">(갭 아님) Ulanzi Studio 플러그인이 <strong>단일 드라이버</strong>. direct-HID 폴백은 retire(2026-06-21, <code>380c6510</code>) — Node <code>d200h:false</code>/Swift <code>enableD200hDirectHID=false</code>, 모듈은 dormant 보존</td><td class="wrap-cell">최선. 플러그인 없이 HID 직구동 시 화면 깨짐 → 의도적 비활성. 재활성은 두 flip-point만 되돌리면 됨</td></tr>
+        <tr><td class="device-name">XTeink X3</td><td><span class="badge b-warn">EXP</span></td><td class="wrap-cell"><strong>구현 진행 중</strong>(experimental, 샌드박스 제약 아님). ESP32-C3 e-ink + 외부 <strong>CrossPoint 포크</strong> 펌웨어(<code>crosspoint-agentdeck</code>) 개발 중이라 아직 <code>device_info</code>/WS 미발신 → 대시보드 미표시. 전송은 다른 ESP32와 동일 WiFi WS(서브프로세스 없음)</td><td class="wrap-cell"><strong>개선 예정</strong>: 펌웨어가 WS/<code>device_info</code> 발신 시작하면 App Store ✅ 가능. 현재 not-yet-shipping</td></tr>
       </tbody>
     </table>
   </div>
