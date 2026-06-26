@@ -33,10 +33,16 @@ Bump versions forward; never reuse or lower a number that has already shipped.
 3. CI archives on a macOS runner and uploads to TestFlight.
 4. Local build: `bash scripts/build-apple-release.sh --all`.
 
-### Android (APK)
+### Android (APK + optional Google Play)
 1. Bump `versionName` + `versionCode` in `android/app/build.gradle.kts`.
 2. `git tag android-v<VERSION> && git push origin android-v<VERSION>` → CI builds + creates the GitHub Release with the signed APK.
-3. Local build: `bash scripts/build-android-release.sh` → `dist/agentdeck-v<VERSION>.apk`.
+3. Local build: `bash scripts/build-android-release.sh` → `dist/agentdeck-v<VERSION>.apk` (or `cd android && ./gradlew bundleRelease` for an `.aab`).
+
+**Google Play (gated, off by default).** The `android-release.yml` workflow has an optional AAB-build + Play-upload step that is a **no-op until enabled**, so it never breaks the APK release. To turn it on:
+1. Create the app in the Play Console (package `dev.agentdeck`) and upload the first AAB **manually once** (Play requires a manual first release before the API will accept uploads).
+2. Create a Play service account (Google Cloud → Play Console → API access), grant release permissions, download its JSON key.
+3. Add repo **secret** `PLAY_SERVICE_ACCOUNT_JSON` (the key JSON) and set repo **variable** `ANDROID_PLAY_ENABLED = true`.
+4. From then on, pushing an `android-v<VERSION>` tag also builds `app-release.aab` and uploads it to the **internal** track (change `track:` in the workflow to promote). `versionCode` must keep increasing — Play rejects downgrades.
 
 ### npm (`@agentdeck/*`)
 > **npm did NOT restart at 0.1.0.** `@agentdeck/shared`, `bridge`, and `setup` were *originally* published at 0.1.0, so those versions already exist and are immutable — registry `latest` is 0.2.x. The 2026-06-26 reset set the **source** `version` fields to 0.1.0 for cosmetic cross-track uniformity, but **nothing is published at 0.1.0 from the current code** and `pnpm publish` will skip/refuse it. Only these three packages are public (`private:false`); `plugin`, `plugin-ulanzi`, `hooks`, and the root are private.

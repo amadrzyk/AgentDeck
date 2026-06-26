@@ -63,6 +63,29 @@ jobs:
             4. Launch AgentDeck and scan the QR code from your bridge to pair
           files: dist/agentdeck-v${{ steps.version.outputs.VERSION }}.apk
 
+      # --- Google Play (optional) ---
+      # No-op until the repo variable ANDROID_PLAY_ENABLED is set to 'true'.
+      # Requires secret PLAY_SERVICE_ACCOUNT_JSON (Play Console service-account key).
+      - name: Build release AAB (Google Play)
+        if: ${{ vars.ANDROID_PLAY_ENABLED == 'true' }}
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: /tmp/release.jks
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: ./gradlew bundleRelease
+
+      - name: Upload to Google Play (internal track)
+        if: ${{ vars.ANDROID_PLAY_ENABLED == 'true' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.agentdeck
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+
       - name: Cleanup keystore
         if: always()
         run: rm -f /tmp/release.jks

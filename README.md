@@ -206,7 +206,7 @@ AgentDeck ships as **independent artifacts, one version track per channel** — 
 |---|---|---|---|---|
 | **npm** | `@agentdeck/setup` (CLI + Node daemon) | `npm-v*` | 0.2.x (latest) | Published — `npx @agentdeck/setup` |
 | **Apple App Store / TestFlight** | macOS + iOS app | `apple-v*` | 0.1.0 / build 1 | New bundle ID `bound.serendipity.agent.deck`; submission in progress |
-| **Google Play** | Android app (AAB) | `android-v*` | — | _Planned_ — not yet set up; Android currently ships via GitHub APK below |
+| **Google Play** | Android app (AAB) | `android-v*` | — | CI upload **wired but gated** (`ANDROID_PLAY_ENABLED` + `PLAY_SERVICE_ACCOUNT_JSON`); needs Play Console app + first manual upload. Until then, Android ships via the GitHub APK below |
 | **GitHub Release — Android** | signed APK | `android-v*` | 0.1.0 | Live — [download APK](https://github.com/puritysb/AgentDeck/releases/tag/android-v0.1.0) |
 | **GitHub Release — ESP32** | firmware `.bin` (per board) | `esp32-v*` | 0.1.1 | Live — [download](https://github.com/puritysb/AgentDeck/releases/tag/esp32-v0.1.1) |
 | **Elgato Marketplace** | Stream Deck+ plugin | `streamdeck-v*` | 0.1.0.0 | Artifact ready (GitHub mirror live); Marketplace upload pending |
