@@ -331,3 +331,29 @@ struct SerialPortInfo: Sendable, Hashable {
     var board: String?
     var firmwareVersion: String?
 }
+
+extension SerialPortInfo {
+    /// Human-friendly label for an ESP32 `board` wire string
+    /// (`DeviceInfoMessage.board`). The descriptive suffix mirrors the friendly
+    /// column in docs/hardware-compatibility.md (the naming SSOT). Unknown or
+    /// missing boards fall back to a plain "ESP32" during the ~2s window before
+    /// the firmware's first `device_info` frame arrives.
+    ///
+    /// This is the single source of truth — `TopologyRail` and
+    /// `MenuBarTopologyList` both call it so the two surfaces can't drift.
+    static func esp32DisplayName(for board: String?) -> String {
+        switch board {
+        case "ips_35":         return "ESP32 · IPS 3.5\""
+        case "ips_10":         return "ESP32 · IPS 10.1\""
+        case "round_amoled":   return "ESP32 · Round AMOLED 1.8\""
+        case "86box":          return "ESP32 · 86 Box 4\""
+        case "ttgo_t_display": return "ESP32 · TTGO T-Display 1.14\""
+        case "esp32_c6_147":   return "ESP32 · C6 1.47\""
+        // Ulanzi TC001 is an ESP32 under the hood but sold as a finished
+        // product, so surface the brand instead of the raw board name.
+        case "ulanzi_tc001":   return "Ulanzi TC001"
+        case .some(let b) where !b.isEmpty: return "ESP32 · \(b)"
+        default:               return "ESP32"
+        }
+    }
+}
