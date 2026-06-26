@@ -56,6 +56,7 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 ## Table of Contents
 
 - [What is AgentDeck?](#what-is-agentdeck)
+- [Distribution & Releases](#distribution--releases)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Manual Build & Install](#manual-build--install)
@@ -194,6 +195,24 @@ Claude Code Hooks ─ HTTP ───►│  Output Parser → State Machine    �
 The daemon is the sole hub for all dashboard clients. Session bridges handle PTY + hooks only. The daemon aggregates state from all sessions and broadcasts to all 16 surfaces. Local clients are auto-trusted; LAN clients authenticate with a token stored in the AgentDeck data directory (`~/.agentdeck/auth-token` for Node CLI / unsigned dev builds, `~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/auth-token` for the Mac App Store build — routed through `AgentDeckPaths.swift`). Interactive surfaces (Stream Deck, D200H, Android, Apple) can control the agent; monitoring surfaces (Pixoo, Timebox, TUI, ESP32, TRMNL e-ink) display state.
 
 On macOS, the AgentDeck Dashboard SwiftUI app ships with a full **in-process Swift daemon** (63 files, ~32,000 LOC) that re-implements the Node.js bridge — mDNS, device modules (ADB/Serial/Pixoo/Timebox/iDotMatrix/TRMNL e-ink), Gateway proxy, and WebSocket server. Installing the macOS app gives you the full bridge without Node.js. The `agentdeck` CLI remains the canonical path for Claude Code / Codex / OpenCode PTY sessions.
+
+---
+
+## Distribution & Releases
+
+AgentDeck ships as **independent artifacts, one version track per channel** — there is no single repo-wide version. Each track has its own prefixed git tag; the full policy, per-track bump steps, and monotonic-version constraints live in **[RELEASING.md](RELEASING.md)**. Browse builds on the [GitHub Releases](https://github.com/puritysb/AgentDeck/releases) page.
+
+| Channel | Artifact | Tag | Current | Status / how to get |
+|---|---|---|---|---|
+| **npm** | `@agentdeck/setup` (CLI + Node daemon) | `npm-v*` | 0.2.x (latest) | Published — `npx @agentdeck/setup` |
+| **Apple App Store / TestFlight** | macOS + iOS app | `apple-v*` | 0.1.0 / build 1 | New bundle ID `bound.serendipity.agent.deck`; submission in progress |
+| **Google Play** | Android app (AAB) | `android-v*` | — | _Planned_ — not yet set up; Android currently ships via GitHub APK below |
+| **GitHub Release — Android** | signed APK | `android-v*` | 0.1.0 | Live — [download APK](https://github.com/puritysb/AgentDeck/releases/tag/android-v0.1.0) |
+| **GitHub Release — ESP32** | firmware `.bin` (per board) | `esp32-v*` | 0.1.1 | Live — [download](https://github.com/puritysb/AgentDeck/releases/tag/esp32-v0.1.1) |
+| **Elgato Marketplace** | Stream Deck+ plugin | `streamdeck-v*` | 0.1.0.0 | Artifact ready (GitHub mirror live); Marketplace upload pending |
+| **Ulanzi Studio Marketplace** | D200H Deck Dock plugin | `ulanzi-v*` | 0.1.0 | Artifact ready (GitHub mirror live); Marketplace upload pending |
+
+> **The Stream Deck and Ulanzi plugins are thin clients** — they require the AgentDeck daemon (install via `npx @agentdeck/setup` or the macOS app), the way the OBS plugin requires OBS. They never embed the daemon (it's a port-9120 singleton). Without a daemon they show an OFFLINE state pointing to the install. See [RELEASING.md](RELEASING.md) for the rationale.
 
 ---
 
@@ -623,7 +642,7 @@ The app handles iOS background/foreground transitions gracefully — WebSocket r
 
 ### App Store Distribution
 
-The macOS and iOS builds are ready for App Store submission. The macOS build ships as a **self-contained Swift daemon** gated by the `AGENTDECK_APP_STORE` compile flag — no bundled Node.js, no bundled `adb`, no subprocess spawn, no AppleScript. User data lives in the app sandbox container (`~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/`, not `~/.agentdeck/`) per Apple Review Guideline 2.5.2. USB entitlements for D200H HID and Input Monitoring permission handling are wired; the first-launch onboarding asks for Claude Code hook access via explicit NSOpenPanel consent. OpenClaw integration uses the Gateway-native WebSocket path (see §OpenClaw Gateway below), not a file-based identity. TestFlight builds available now; App Store review is the active milestone.
+The macOS and iOS builds are ready for App Store submission. The macOS build ships as a **self-contained Swift daemon** gated by the `AGENTDECK_APP_STORE` compile flag — no bundled Node.js, no bundled `adb`, no subprocess spawn, no AppleScript. User data lives in the app sandbox container (`~/Library/Containers/bound.serendipity.agent.deck/Data/Library/Application Support/AgentDeck/`, not `~/.agentdeck/`) per Apple Review Guideline 2.5.2. USB entitlements for D200H HID and Input Monitoring permission handling are wired; the first-launch onboarding asks for Claude Code hook access via explicit NSOpenPanel consent. OpenClaw integration uses the Gateway-native WebSocket path (see §OpenClaw Gateway below), not a file-based identity. The app moved to a **fresh bundle ID** (`bound.serendipity.agent.deck`) and restarted at **0.1.0 / build 1** — a new App Store Connect record and provisioning are being set up, then `apple-v0.1.0` triggers the first TestFlight build (see [RELEASING.md](RELEASING.md)).
 
 ### OpenClaw Gateway (Gateway-native pairing)
 
