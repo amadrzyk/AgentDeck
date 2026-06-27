@@ -381,7 +381,7 @@ private fun UpstreamRows(state: DashboardState, scale: MonitorLayoutScale) {
                 name = "Antigravity",
                 status = LEDStatus.OK,
                 subtitle = antiPlan,
-                consumers = emptyList(),
+                consumers = consumersFor(ProviderKey.ANTIGRAVITY, state),
                 rateLimits = emptyList(),
             )
         }
@@ -706,7 +706,7 @@ private fun RateChipView(chip: RateChip) {
 
 // MARK: - Provider inference + consumer resolution
 
-private enum class ProviderKey { CLAUDE, OPENCLAW, MLX, OLLAMA, UNKNOWN }
+private enum class ProviderKey { CLAUDE, OPENCLAW, MLX, OLLAMA, ANTIGRAVITY, UNKNOWN }
 
 /**
  * Best-effort mapping from a session's model name to a provider slot.
@@ -714,10 +714,12 @@ private enum class ProviderKey { CLAUDE, OPENCLAW, MLX, OLLAMA, UNKNOWN }
  * sync when adding new providers or model families.
  */
 private fun providerFor(
+    agentType: String?,
     modelName: String?,
     mlxModels: List<String>,
     ollama: OllamaStatus?,
 ): ProviderKey {
+    if (agentType == "antigravity") return ProviderKey.ANTIGRAVITY
     val raw = modelName?.lowercase().orEmpty()
     if (raw.isEmpty()) return ProviderKey.UNKNOWN
     if (raw.startsWith("claude-") || raw.startsWith("opus") ||
@@ -753,7 +755,7 @@ private fun consumersFor(provider: ProviderKey, state: DashboardState): List<Col
     if (primaryAgentType != null && primaryAgentType != "daemon") {
         val key = primaryAgentType
         if (seen.add(key) &&
-            providerFor(primaryModel, state.mlxModels, state.ollamaStatus) == provider
+            providerFor(primaryAgentType, primaryModel, state.mlxModels, state.ollamaStatus) == provider
         ) {
             result += brandColorForAgent(primaryAgentType)
         }
@@ -765,7 +767,7 @@ private fun consumersFor(provider: ProviderKey, state: DashboardState): List<Col
         val key = agent
         if (!seen.add(key)) continue
         val modelName = session.modelName
-        if (providerFor(modelName, state.mlxModels, state.ollamaStatus) == provider) {
+        if (providerFor(agent, modelName, state.mlxModels, state.ollamaStatus) == provider) {
             result += brandColorForAgent(agent)
         }
     }

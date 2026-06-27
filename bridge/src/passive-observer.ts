@@ -125,6 +125,7 @@ export class PassiveSessionObserver {
       ...collectClaudeSessions(processes),
       ...(await collectCodexSessions(processes)),
       ...(await collectOpenCodeSessions(processes)),
+      ...(await collectAntigravitySessions(processes)),
     ];
     const next = dedupeObservedSessions(observed, managedSessions, processes);
     // Only notify on real change — an unconditional callback would emit a
@@ -450,6 +451,44 @@ async function collectOpenCodeSessions(processes: ProcInfo[]): Promise<ObservedS
   });
 }
 
+/**
+ * Surface standalone Antigravity processes for the CLI daemon. Antigravity hooks
+ * can provide structured events when explicitly configured, but passive
+ * discovery still gives hardware/UI a stable creature anchor for users running
+ * the IDE outside AgentDeck-managed launch paths.
+ */
+async function collectAntigravitySessions(processes: ProcInfo[]): Promise<ObservedSession[]> {
+  const procs = processes.filter((p) => isAntigravityProcessCommand(p.command));
+  if (procs.length === 0) return [];
+  const cwdByPid = await cwdForPids(procs.map((p) => p.pid));
+  return procs.map((proc) => {
+    const cwd = cwdByPid.get(proc.pid);
+    return {
+      id: `observed:antigravity:${proc.pid}`,
+      port: 0,
+      pid: proc.pid,
+      projectName: cwd && cwd !== '/' ? projectNameFromCwd(cwd) : 'Antigravity',
+      agentType: 'antigravity' as const,
+      alive: true,
+      state: 'idle' as const,
+      startedAt: new Date().toISOString(),
+      controlMode: 'observed' as const,
+      cwd: cwd && cwd !== '/' ? cwd : undefined,
+    };
+  });
+}
+
+export function isAntigravityProcessCommand(command: string): boolean {
+  return (
+    cmdHasBinary(command, 'antigravity') ||
+    /\/Antigravity\.app\/Contents\/MacOS\/Antigravity(?:\s|$)/.test(command) ||
+    /\bAntigravity(?:\s|$)/.test(command)
+  ) &&
+    !/\bAntigravity Helper\b/.test(command) &&
+    !command.includes('grep') &&
+    !command.includes('agentdeck');
+}
+
 /** cwd path for each pid via `lsof -d cwd` (best-effort; empty map on failure). */
 async function cwdForPids(pids: number[]): Promise<Map<number, string>> {
   const map = new Map<number, string>();
@@ -485,7 +524,7 @@ function dedupeObservedSessions(
 
   return observed.filter((session) => {
     if (managedIds.has(session.id)) return false;
-    const rawId = session.id.replace(/^observed:(?:claude|codex|opencode):/, '');
+    const rawId = session.id.replace(/^observed:(?:claude|codex|opencode|antigravity):/, '');
     if (managedIds.has(rawId)) return false;
     return !managedPids.some((pid) => pid === session.pid || isDescendantOf(session.pid, pid, byPid));
   });

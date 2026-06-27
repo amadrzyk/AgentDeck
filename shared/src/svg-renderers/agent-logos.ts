@@ -4,7 +4,7 @@
  * The exported names are kept for plugin compatibility, but the rendered
  * marks are the same AgentDeck creature language used by the terrarium:
  * Claude = robot, Codex = cloud prompt, OpenClaw = crayfish, OpenCode =
- * nested-square floater.
+ * nested-square floater, Antigravity = peak/arc mark.
  */
 
 import type { AgentType } from '../adapter.js';
@@ -18,6 +18,10 @@ export const ROBOT_CREATURE_PATH =
 
 /** OpenCode mark (design/brand/opencode.svg): hollow nested-square ring. */
 export const OPENCODE_RING_PATH = 'M16 6H8v12h8V6zm4 16H4V2h16v20z';
+
+/** Antigravity mark (design/brand/antigravity.svg): peak/arc. */
+export const ANTIGRAVITY_PATH =
+  'M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z';
 
 /** Claude Code creature asset: assets/logos/claude.svg. viewBox 0 0 24 24. */
 export const CLAUDE_LOGO_PATH =
@@ -136,6 +140,10 @@ function openCodeCreatureIcon(size: number, opacity: number, cx: number, cy: num
   ].join('');
 }
 
+function antigravityCreatureIcon(size: number, opacity: number, cx: number, cy: number): string {
+  return officialPathIcon(ANTIGRAVITY_PATH, '#D2D6DC', size * 0.76, opacity, cx, cy);
+}
+
 // ===== 1-bit monochrome glyph (e-ink / TRMNL) =====
 
 /** Canonical brand-path glyph per agent, plus optional white "eye" cutouts that
@@ -151,6 +159,7 @@ const AGENT_MONO_GLYPH: Record<string, MonoGlyph> = {
   'codex-app': { paths: [CODEX_LOGO_PATH] },
   codex: { paths: [CODEX_LOGO_PATH] },
   opencode: { paths: [OPENCODE_RING_PATH] },
+  antigravity: { paths: [ANTIGRAVITY_PATH] },
   openclaw: { paths: OPENCLAW_BODY_PATHS, eyes: [[8.835, 7.843, 1.05], [15.165, 7.843, 1.05]] },
 };
 
@@ -204,6 +213,9 @@ export function agentLogoIcon(
   if (agent === 'opencode') {
     return openCodeCreatureIcon(size, opacity, cx, cy);
   }
+  if (agent === 'antigravity') {
+    return antigravityCreatureIcon(size, opacity, cx, cy);
+  }
   return openClawCreatureIcon(size, opacity, cx, cy);
 }
 
@@ -230,6 +242,9 @@ export function agentLogoWatermark(
   }
   if (agent === 'opencode') {
     return openCodeCreatureIcon(72, markOpacity, 72, 72);
+  }
+  if (agent === 'antigravity') {
+    return antigravityCreatureIcon(72, markOpacity, 72, 72);
   }
   return openClawCreatureIcon(72, markOpacity, 72, 72);
 }

@@ -294,7 +294,7 @@ struct SessionListPanel: View {
     @ViewBuilder
     private func agentIconView(for agentType: String?) -> some View {
         switch agentType {
-        case "claude-code", "codex-cli", "codex-app", "openclaw", "opencode":
+        case "claude-code", "codex-cli", "codex-app", "openclaw", "opencode", "antigravity":
             AgentBrandIcon(
                 agentType: agentType,
                 tint: SessionBrand.color(for: agentType),
@@ -333,6 +333,7 @@ struct SessionListPanel: View {
         case "claude-code": return "Claude Code"
         case "openclaw": return "OpenClaw"
         case "opencode": return "OpenCode"
+        case "antigravity": return "Antigravity"
         default: return "Agent"
         }
     }

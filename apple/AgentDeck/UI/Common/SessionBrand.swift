@@ -23,6 +23,7 @@ enum SessionBrand {
         case "codex-app":   return Color(red: 0.38,  green: 0.40,  blue: 0.88)  // indigo
         case "openclaw":    return Color(red: 1.0,   green: 0.30,  blue: 0.30)  // #FF4D4D
         case "opencode":    return Color(red: 0.945, green: 0.925, blue: 0.925) // near-white
+        case "antigravity": return Color(red: 0.373, green: 0.388, blue: 0.408) // #5F6368
         case "daemon":      return Color(red: 0.55,  green: 0.55,  blue: 0.60)
         default:            return Color.secondary
         }
@@ -69,6 +70,7 @@ struct SessionCreatureIcon: View {
         case "codex-cli":   return "Codex session"
         case "codex-app":   return "Codex App session"
         case "opencode":    return "OpenCode session"
+        case "antigravity": return "Antigravity session"
         case "daemon":      return "Daemon"
         default:            return "Unknown agent session"
         }
@@ -128,6 +130,7 @@ struct AgentBrandIcon: View {
         case "codex-cli":   return "Codex session"
         case "codex-app":   return "Codex App session"
         case "opencode":    return "OpenCode session"
+        case "antigravity": return "Antigravity session"
         case "daemon":      return "Daemon"
         default:            return "Unknown agent session"
         }
@@ -146,6 +149,7 @@ private struct AgentBrandIconSpec {
         case "codex-app":   return .codex
         case "openclaw":    return .openClaw
         case "opencode":    return .openCode
+        case "antigravity": return .antigravity
         default:            return nil
         }
     }
@@ -170,6 +174,12 @@ private struct AgentBrandIconSpec {
 
     private static let openCode = AgentBrandIconSpec(
         paths: [parse(openCodePath)],
+        viewBox: 24,
+        evenOddFill: true
+    )
+
+    private static let antigravity = AgentBrandIconSpec(
+        paths: [parse(antigravityPath)],
         viewBox: 24,
         evenOddFill: true
     )
@@ -282,6 +292,10 @@ private struct AgentBrandIconSpec {
     // OpenCode mark — lobe-icons MIT (viewBox 0 0 24 24, nested-square)
     private static let openCodePath =
         "M16 6H8v12h8V6zm4 16H4V2h16v20z"
+
+    // Antigravity mark — lobe-icons MIT (viewBox 0 0 24 24, peak/arc)
+    private static let antigravityPath =
+        "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"
 
     private static let openClawPaths = [
         "M9.046 7.104a.527.527 0 110 1.055.527.527 0 010-1.055z",

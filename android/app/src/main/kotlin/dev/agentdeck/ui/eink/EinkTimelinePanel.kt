@@ -348,6 +348,7 @@ private fun sourceLabel(entry: TimelineEntry): String {
         "codex-app" -> "Codex App"
         "openclaw" -> "OpenClaw"
         "opencode" -> "OpenCode"
+        "antigravity" -> "Antigravity"
         "daemon" -> "Daemon"
         null -> ""
         else -> "Agent"

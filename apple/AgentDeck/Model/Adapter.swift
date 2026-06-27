@@ -10,6 +10,7 @@ enum AgentType: String, Codable, Sendable {
     case openclaw
     case codexCli = "codex-cli"
     case codexApp = "codex-app"
+    case antigravity
 }
 
 // MARK: - Agent Capabilities

@@ -354,7 +354,7 @@ struct TopologyRail: View {
                 status: .ok,
                 subtitle: plan,
                 rateLimits: [],
-                consumers: []  // no session → antigravity mapping yet
+                consumers: consumerCreatures(for: .antigravity)
             )
         )
     }
@@ -823,6 +823,7 @@ struct TopologyRail: View {
         var out: [ConsumerBadge] = []
         for session in stateHolder.state.siblingSessions where session.alive {
             let key = Self.providerFor(
+                agentType: session.agentType,
                 modelName: session.modelName,
                 mlxModels: stateHolder.state.mlxModels,
                 ollama: stateHolder.state.ollamaStatus
@@ -842,17 +843,19 @@ struct TopologyRail: View {
     // MARK: - Provider inference
 
     enum ProviderKey: Equatable {
-        case claude, openclaw, mlx, ollama, unknown
+        case claude, openclaw, mlx, ollama, antigravity, unknown
     }
 
     /// Best-effort mapping from a session's `modelName` to a provider row.
     /// Intentionally conservative — unknowns fall through so we don't
     /// mis-attribute a creature badge to the wrong reef.
     static func providerFor(
+        agentType: String? = nil,
         modelName: String?,
         mlxModels: [String],
         ollama: OllamaStatus?
     ) -> ProviderKey {
+        if agentType == "antigravity" { return .antigravity }
         guard let raw = modelName?.lowercased(), !raw.isEmpty else { return .unknown }
         if raw.hasPrefix("claude-") || raw.hasPrefix("opus") || raw.hasPrefix("sonnet") || raw.hasPrefix("haiku") {
             return .claude

@@ -193,7 +193,7 @@ Aquarium-tide design system. Spec: [DESIGN.md](DESIGN.md). Source of truth for c
 3. **Two faces only.** IBM Plex Sans (+ KR/JP) and JetBrains Mono. Never Inter / Roboto / Arial / Fraunces
 4. **Status colors are semantic.** `--status-idle` / `--status-processing` / `--status-awaiting` / `--status-error`. Only **amber awaiting** animates; never animate kelp or coral
 5. **Marketing vs product UI palette split.** Marketing surfaces (landing, docs, print) use the warm tokens. Product UI (menubar / e-ink / hardware / TTY) may also use the brighter `--ui-*` set. Marketing must NEVER touch `--ui-*`
-6. **Brand marks are upstream — do not redraw.** `design/brand/{claudecode,codex,openclaw,opencode}.svg` are the canonical agent marks. Brand colors (#C07058 / #6166E0 / #FF4D4D / #3a3a3a) are the only saturated reds/blues allowed
+6. **Brand marks are upstream — do not redraw.** `design/brand/{claudecode,codex,openclaw,opencode,antigravity}.svg` are the canonical agent marks. Brand colors (#C07058 / #6166E0 / #FF4D4D / #3a3a3a / #5F6368) are the only saturated reds/blues allowed
 7. **Real assets > drawn ones.** Hardware shots and brand marks come from `assets/` and `design/brand/`. Never illustrate hardware with hand-drawn SVG; ship the diagonal-hatch placeholder pattern (`.ad-hatch` / `.ad-placeholder`) when real assets aren't ready
 
 **Migration**: existing UI uses pre-design-system palettes (`StateColors.Hex.*`, `AgentDeckColors.*`). New code reaches for `DesignTokens.*`; migration is incremental, not a sweep. Run `bash design/lint.sh` for the violation count baseline

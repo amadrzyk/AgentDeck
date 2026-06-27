@@ -38,6 +38,7 @@ sealed class AgentMark(
             "openclaw" -> OpenClaw
             "codex-cli", "codex-app" -> null // CloudCreature uses its own >_ prompt, no watermark needed
             "opencode" -> null  // OpenCodeCreature is itself the logo, no watermark needed
+            "antigravity" -> ClaudeCode
             else -> null
         }
 

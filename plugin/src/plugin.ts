@@ -13,6 +13,7 @@ import {
   CODEX_CLI_CAPABILITIES,
   CODEX_APP_CAPABILITIES,
   CLAUDE_CODE_CAPABILITIES,
+  ANTIGRAVITY_CAPABILITIES,
   OPENCLAW_GATEWAY_PORT,
   type AgentType,
   type BillingType,
@@ -131,6 +132,7 @@ function capsForProxiedAgent(): import('@agentdeck/shared').AgentCapabilities {
   if (proxiedAgentType === 'opencode') return OPENCODE_CAPABILITIES;
   if (proxiedAgentType === 'codex-cli') return CODEX_CLI_CAPABILITIES;
   if (proxiedAgentType === 'codex-app') return CODEX_APP_CAPABILITIES;
+  if (proxiedAgentType === 'antigravity') return ANTIGRAVITY_CAPABILITIES;
   return connMgr.getCapabilities() ?? CLAUDE_CODE_CAPABILITIES;
 }
 
@@ -315,7 +317,7 @@ connMgr.on('state_update', (ev: StateUpdateEvent) => {
   }
 
   // Track proxied agent type from daemon (state_update.agentType overrides connection-level detection)
-  if (ev.agentType === 'openclaw' || ev.agentType === 'claude-code' || ev.agentType === 'codex-cli' || ev.agentType === 'codex-app' || ev.agentType === 'opencode') {
+  if (ev.agentType === 'openclaw' || ev.agentType === 'claude-code' || ev.agentType === 'codex-cli' || ev.agentType === 'codex-app' || ev.agentType === 'opencode' || ev.agentType === 'antigravity') {
     proxiedAgentType = ev.agentType;
   }
 

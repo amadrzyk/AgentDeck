@@ -300,7 +300,7 @@ actor TimeboxModule: DeviceModule {
         switch type {
         case "state_update":
             let eventAgentType = event["agentType"] as? String
-            let creatureAgents: Set<String> = ["claude-code", "codex-cli", "codex-app", "opencode"]
+            let creatureAgents: Set<String> = ["claude-code", "codex-cli", "codex-app", "opencode", "antigravity"]
             if let at = eventAgentType, creatureAgents.contains(at) {
                 cachedState = event["state"] as? String ?? "disconnected"
                 cachedProject = event["projectName"] as? String

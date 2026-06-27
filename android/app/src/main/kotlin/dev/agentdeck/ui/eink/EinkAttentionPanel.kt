@@ -288,6 +288,7 @@ private fun agentLabel(agentType: String?): String = when (agentType) {
     "codex-app" -> "Codex App"
     "openclaw" -> "OpenClaw"
     "opencode" -> "OpenCode"
+    "antigravity" -> "Antigravity"
     null -> "Agent"
     else -> agentType.replaceFirstChar { it.uppercaseChar() }
 }

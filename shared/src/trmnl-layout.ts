@@ -49,6 +49,7 @@ const AGENT_LABEL: Record<string, string> = {
   'codex-app': 'CODEX',
   codex: 'CODEX',
   opencode: 'OPENCODE',
+  antigravity: 'ANTIGRAVITY',
   openclaw: 'OPENCLAW',
   daemon: 'AGENT',
 };
@@ -359,7 +360,7 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
     const cy = (bodyTop + footerTop) / 2;
     els.push(
       `<text x="${W / 2}" y="${cy - 6}" text-anchor="middle" font-family="${SANS}" font-size="28" font-weight="700" fill="${INK}">No active sessions</text>`,
-      `<text x="${W / 2}" y="${cy + 30}" text-anchor="middle" font-family="${SANS}" font-size="18" fill="${INK}">Start Claude Code, Codex, or OpenCode to see them here</text>`,
+      `<text x="${W / 2}" y="${cy + 30}" text-anchor="middle" font-family="${SANS}" font-size="18" fill="${INK}">Start Claude Code, Codex, OpenCode, or Antigravity to see them here</text>`,
     );
   } else {
     // Reserve the last visible row for an overflow summary when there are extras,

@@ -73,7 +73,8 @@ enum DashboardDataRules {
         case "codex-cli": 2
         case "codex-app": 3
         case "opencode": 4
-        default: 5
+        case "antigravity": 5
+        default: 6
         }
     }
 

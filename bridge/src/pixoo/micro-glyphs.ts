@@ -12,8 +12,9 @@
  *   Codex   → lavender cloud carrying a white `>_` terminal prompt
  *   OpenClaw→ red lobster (raised top claws, teal eyes, segmented tail)
  *   OpenCode→ nested-square ring logo
- * The MicroCreature keys (octopus/jellyfish/opencode/crayfish) are legacy internal
- * codenames kept for the renderer mapping — only the art behind them is brand-true.
+ *   Antigravity→ peak/arc logo
+ * The MicroCreature keys are legacy internal codenames kept for the renderer
+ * mapping — only the art behind them is brand-true.
  *
  * Each glyph is an 11-row × 11-col string grid. Characters map to colors:
  *   '.' transparent (shows the status-color background)
@@ -22,7 +23,7 @@
  */
 
 export type RGB = readonly [number, number, number];
-export type MicroCreature = 'octopus' | 'jellyfish' | 'opencode' | 'crayfish';
+export type MicroCreature = 'octopus' | 'jellyfish' | 'opencode' | 'crayfish' | 'antigravity';
 export type MicroState = 'idle' | 'working' | 'asking';
 
 export const MICRO_SIZE = 11;
@@ -107,6 +108,24 @@ const OPENCODE: Glyph = {
   ],
 };
 
+// Antigravity — lobe-icons peak/arc mark, simplified for an 11×11 matrix.
+const ANTIGRAVITY: Glyph = {
+  colors: { F: [210, 214, 220] },
+  idle: [
+    '.....F.....',
+    '....FFF....',
+    '....FFF....',
+    '...FFFFF...',
+    '...FF.FF...',
+    '..FFF.FFF..',
+    '..FF...FF..',
+    '.FFF...FFF.',
+    '.FF.....FF.',
+    'FFF.....FFF',
+    '...........',
+  ],
+};
+
 // OpenClaw — red mechanical lobster (#FF4D4D, assets/logos/lobster_creature_gen.png):
 // two big claws raised at the top corners, antennae rising from the center, a head
 // with two teal eyes (#00E5CC), and a vertical segmented tail fanning out at the
@@ -146,6 +165,7 @@ const GLYPHS: Record<MicroCreature, Glyph> = {
   jellyfish: JELLYFISH,
   opencode: OPENCODE,
   crayfish: CRAYFISH,
+  antigravity: ANTIGRAVITY,
 };
 
 /** Dark status-color field so the bright creature pops. Amber awaiting pulses. */

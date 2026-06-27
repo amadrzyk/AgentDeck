@@ -42,7 +42,7 @@ export function sessionTier(state: string | undefined): SessionTier {
 
 /**
  * Rank agent types for stable ordering.
- * openclaw=0 (always first), claude-code=1, codex-cli=2, codex-app=3, opencode=4, others=5.
+ * openclaw=0 (always first), claude-code=1, codex-cli=2, codex-app=3, opencode=4, antigravity=5, others=6.
  */
 export function agentTypeRank(agentType: string | undefined): number {
   switch (agentType) {
@@ -51,7 +51,8 @@ export function agentTypeRank(agentType: string | undefined): number {
     case 'codex-cli': return 2;
     case 'codex-app': return 3;
     case 'opencode': return 4;
-    default: return 5;
+    case 'antigravity': return 5;
+    default: return 6;
   }
 }
 
@@ -101,7 +102,7 @@ export function hasOpenClawSession<T extends { agentType?: string }>(sessions: r
 /**
  * Sort sessions with stable ordering that does NOT jump on state changes.
  *
- * Order: agentType (openclaw first → claude-code → codex → opencode)
+ * Order: agentType (openclaw first → claude-code → codex → opencode → antigravity)
  *   → projectName alphabetically
  *   → startedAt ascending (oldest first) for stability
  *   → id as final tiebreaker

@@ -177,6 +177,7 @@ private fun sourceTag(entry: TimelineEntry): String {
         "codex-cli" -> "Codex CLI "
         "codex-app" -> "Codex App "
         "opencode" -> "OpenCode "
+        "antigravity" -> "Antigravity "
         null -> ""
         else -> "Agent "
     }

@@ -387,6 +387,7 @@ fun buildAttentionFeatured(
         "codex-app"   -> "Codex App"
         "openclaw"    -> "OpenClaw"
         "opencode"    -> "OpenCode"
+        "antigravity" -> "Antigravity"
         else          -> session.agentType?.replaceFirstChar { it.uppercaseChar() } ?: "Agent"
     }
     val parts = buildList {

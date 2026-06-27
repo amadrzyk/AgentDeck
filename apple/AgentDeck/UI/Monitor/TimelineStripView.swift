@@ -943,6 +943,7 @@ struct TimelineStripView: View {
         case "codex-app": "Codex App"
         case "openclaw": "OpenClaw"
         case "opencode": "OpenCode"
+        case "antigravity": "Antigravity"
         case "daemon": "Daemon"
         case nil: ""
         default: "Agent"
@@ -1467,6 +1468,7 @@ private struct TimelineSessionFilter: Equatable {
         case "codex-cli": return "Codex CLI"
         case "codex-app": return "Codex App"
         case "opencode": return "OpenCode"
+        case "antigravity": return "Antigravity"
         default: return sessionId
         }
     }

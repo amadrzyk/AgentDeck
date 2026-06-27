@@ -26,6 +26,7 @@ const CONSTS = [
   ['JELLYFISH', 'jellyfish'],
   ['OPENCODE', 'opencode'],
   ['CRAYFISH', 'crayfish'],
+  ['ANTIGRAVITY', 'antigravity'],
 ];
 
 const ts = readFileSync(srcFile, 'utf8');

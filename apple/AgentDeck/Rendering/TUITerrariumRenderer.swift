@@ -345,6 +345,8 @@ private enum TerrariumGridBuilder {
         case "opencode":
             // nested box
             return ["\u{2508}", "\u{25A2}", "\u{2508}"]
+        case "antigravity":
+            return ["\u{2571}", "\u{25B2}", "\u{2572}"]
         case "openclaw":
             // crayfish — pincers
             return state == "processing" ? ["\u{03BB}", "\u{25C9}", "\u{03BB}"]
@@ -360,6 +362,7 @@ private enum TerrariumGridBuilder {
         case "codex-cli":   return "cx"
         case "codex-app":   return "ca"
         case "opencode":    return "oc"
+        case "antigravity": return "ag"
         case "openclaw":    return "ow"
         default:            return "a\(index)"
         }

@@ -371,7 +371,7 @@ export interface DeckView {
   showUsage?: boolean;
 }
 
-const AGENT_RANK: Record<string, number> = { openclaw: 0, 'claude-code': 1, 'codex-cli': 2, 'codex-app': 2, codex: 2, opencode: 3 };
+const AGENT_RANK: Record<string, number> = { openclaw: 0, 'claude-code': 1, 'codex-cli': 2, 'codex-app': 2, codex: 2, opencode: 3, antigravity: 4 };
 
 /** Stable order → a session keeps the same key while the set is unchanged. */
 function sortSessions(sessions: SessionInfo[]): SessionInfo[] {

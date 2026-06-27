@@ -81,7 +81,8 @@ fun agentTypeRank(agentType: String?): Int = when (agentType) {
     "codex-cli" -> 2
     "codex-app" -> 3
     "opencode" -> 4
-    else -> 5
+    "antigravity" -> 5
+    else -> 6
 }
 
 // OpenClaw / Gateway visibility SSOT — hand-mirrored from
@@ -156,6 +157,7 @@ fun agentIcon(agentType: String?): String = when (agentType) {
     "codex-cli" -> "\u276F"           // ❯ (terminal prompt)
     "codex-app" -> "\u276F"           // ❯ (Codex mark)
     "opencode" -> "\u25A3"            // ▣ (nested square)
+    "antigravity" -> "\u25B2"          // ▲ (Antigravity peak)
     else -> "\u25CF"                   // ● bullet
 }
 

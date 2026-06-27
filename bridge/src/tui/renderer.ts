@@ -141,12 +141,14 @@ function creatureEmoji(agentType?: string): string {
     if ((agentType as string) === 'openclaw') return 'C';
     if ((agentType as string) === 'codex-cli' || (agentType as string) === 'codex-app') return 'X';
     if ((agentType as string) === 'opencode') return 'O';
+    if ((agentType as string) === 'antigravity') return 'A';
     return '*';
   }
   if ((agentType as string) === 'daemon') return '\u2699\uFE0F';      // ⚙️
   if ((agentType as string) === 'openclaw') return '\uD83E\uDD9E';    // 🦞
   if ((agentType as string) === 'codex-cli' || (agentType as string) === 'codex-app') return '\u2601';          // ☁ (cloud — matches creature)
   if ((agentType as string) === 'opencode') return '\u25A3';           // ▣ (nested square — matches creature)
+  if ((agentType as string) === 'antigravity') return '\u25B2';        // ▲ (Antigravity peak)
   return '\u273B';  // ✻ (teardrop-spoked asterisk — Claude sparkle)
 }
 
@@ -158,6 +160,7 @@ function creatureBrandColor(agentType?: string): string {
     case 'codex-cli':
     case 'codex-app': return fg(177, 167, 255);      // indigo
     case 'opencode': return fg(241, 236, 236);       // warm gray (#F1ECEC)
+    case 'antigravity': return fg(210, 214, 220);    // Google gray
     default: return '';
   }
 }

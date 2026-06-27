@@ -39,6 +39,7 @@ struct AttentionTheaterHUD: View {
         case "codex-app":   return "Codex App"
         case "openclaw":    return "OpenClaw"
         case "opencode":    return "OpenCode"
+        case "antigravity": return "Antigravity"
         default:            return session.agentType?.capitalized ?? "Agent"
         }
     }

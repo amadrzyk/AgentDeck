@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isAntigravityProcessCommand,
   parseClaudeTranscript,
   parseCodexRollout,
   parseLsofRollouts,
@@ -130,5 +131,15 @@ describe('passive-observer parsers', () => {
 
     expect(rollouts.get(123)).toBe('/Users/example/.codex/sessions/2026/04/26/rollout-abc.jsonl');
     expect(rollouts.get(456)).toBe('/Users/example/.codex/sessions/2026/04/26/rollout-def.jsonl');
+  });
+
+  it('recognizes standalone Antigravity processes for CLI daemon passive discovery', () => {
+    expect(isAntigravityProcessCommand('/Applications/Antigravity.app/Contents/MacOS/Antigravity')).toBe(true);
+    expect(isAntigravityProcessCommand('/opt/homebrew/bin/antigravity --folder /repo')).toBe(true);
+    expect(isAntigravityProcessCommand('Antigravity')).toBe(true);
+
+    expect(isAntigravityProcessCommand('Antigravity Helper (Renderer)')).toBe(false);
+    expect(isAntigravityProcessCommand('grep Antigravity')).toBe(false);
+    expect(isAntigravityProcessCommand('node /usr/local/bin/agentdeck antigravity')).toBe(false);
   });
 });

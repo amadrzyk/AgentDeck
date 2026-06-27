@@ -157,6 +157,7 @@ fun brandColorForAgent(agentType: String?): Color = when (agentType) {
     "codex-app"   -> Color(0xFF6166E0)
     "openclaw"    -> Color(0xFFFF4D4D)
     "opencode"    -> Color(0xFFF1ECEC)
+    "antigravity" -> Color(0xFF5F6368)
     "daemon"      -> Color(0xFF8C8C99)
     else          -> Color(0xFF94A3B8)
 }
@@ -193,6 +194,12 @@ private class BrandIconSpec(
                 color = Color(0xFFF1ECEC),  // warm gray
                 einkColor = Color(0xFF444444),
             )
+            "antigravity" -> BrandIconSpec(
+                pathDataList = listOf(ANTIGRAVITY_PATH),
+                viewBox = 24f,
+                color = Color(0xFF5F6368),
+                einkColor = Color(0xFF444444),
+            )
             else -> null
         }
     }
@@ -209,6 +216,10 @@ private const val OPENAI_PATH =
 // OpenCode mark — lobe-icons MIT (viewBox 0 0 24 24, nested-square)
 private const val OPENCODE_PATH =
     "M16 6H8v12h8V6zm4 16H4V2h16v20z"
+
+// Antigravity mark — lobe-icons MIT (viewBox 0 0 24 24, peak/arc)
+private const val ANTIGRAVITY_PATH =
+    "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"
 
 // OpenClaw — front-facing crayfish multi-path (viewBox 0 0 24 24)
 private val OPENCLAW_PATHS = listOf(

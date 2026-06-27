@@ -1577,6 +1577,7 @@ private struct ButtonSlot {
         case codexCli
         case openCode
         case openClaw
+        case antigravity
         case usage
         case back
         case stop
@@ -1700,6 +1701,7 @@ private enum D200hRenderer {
         case "openclaw": return rgb(255, 77, 77)
         case "codex-cli", "codex-app": return rgb(99, 102, 241)
         case "opencode": return rgb(241, 236, 236)
+        case "antigravity": return rgb(95, 99, 104)
         default: return rgb(192, 112, 88)
         }
     }
@@ -1804,6 +1806,7 @@ private enum D200hRenderer {
             case "codex-cli": agentLbl = "CODEX CLI"
             case "codex-app": agentLbl = "CODEX APP"
             case "opencode": agentLbl = "OPENCODE"
+            case "antigravity": agentLbl = "ANTIGRAVITY"
             default: agentLbl = "CLAUDE CODE"
             }
 
@@ -2029,6 +2032,7 @@ private enum D200hRenderer {
         switch agentType {
         case "codex-cli", "codex-app": return .codexCli
         case "opencode": return .openCode
+        case "antigravity": return .antigravity
         case "openclaw": return .openClaw
         default: return .claudeCode
         }
@@ -2915,7 +2919,7 @@ private func drawButtonIcon(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color
         switch glyph {
         case .none:
             break
-        case .claudeCode, .codexCli, .openCode, .openClaw:
+        case .claudeCode, .codexCli, .openCode, .openClaw, .antigravity:
             break
         case .usage:
             let barW: CGFloat = 10
@@ -3067,7 +3071,7 @@ private func drawButtonIcon(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color
 
 private func isSessionBrandGlyph(_ glyph: ButtonSlot.IconGlyph) -> Bool {
     switch glyph {
-    case .claudeCode, .codexCli, .openCode, .openClaw:
+    case .claudeCode, .codexCli, .openCode, .openClaw, .antigravity:
         return true
     default:
         return false
@@ -3111,6 +3115,15 @@ private func drawBrandGlyph(_ ctx: CGContext, glyph: ButtonSlot.IconGlyph, color
         drawCodexCloudCreature(ctx, rect: rect)
     case .openCode:
         drawOpenCodeCreature(ctx, rect: rect)
+    case .antigravity:
+        fillSvgPath(
+            ctx,
+            path: D200hBrandAssets.antigravityPath,
+            viewBox: CGRect(x: 0, y: 0, width: 24, height: 24),
+            rect: rect.insetBy(dx: rect.width * 0.06, dy: rect.height * 0.06),
+            fillColor: color,
+            eoFill: true
+        )
     case .openClaw:
         let viewBox = CGRect(x: 0, y: 0, width: 24, height: 24)
         let fitRect = rect.insetBy(dx: rect.width * 0.04, dy: rect.height * 0.04)
@@ -3234,6 +3247,9 @@ private enum D200hBrandAssets {
     // AgentDeck terrarium creature marks, reduced for D200H session tiles.
     nonisolated(unsafe) static let robotCreaturePath = parseSvgPathToCGPath(
         "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0v-3.1h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"
+    )
+    nonisolated(unsafe) static let antigravityPath = parseSvgPathToCGPath(
+        "M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"
     )
     nonisolated(unsafe) static let openClawBodyPaths = [
         parseSvgPathToCGPath("M16.877 1.912c.58-.27 1.14-.323 1.616-.037a.317.317 0 01-.326.542c-.227-.136-.547-.153-1.022.068-.352.165-.765.45-1.234.866 2.683 1.17 4.4 3.5 5.148 5.921a6.421 6.421 0 00-.704.184c-.578.016-1.174.204-1.502.735-.338.55-.268 1.276.072 2.069l.005.012.007.014c.523 1.045 1.318 1.91 2.2 2.284-.912 3.274-3.44 6.144-5.972 6.988v2.109h-2.11v-2.11c-1.043.417-2.086.01-2.11 0v2.11h-2.11v-2.11c-2.531-.843-5.061-3.713-5.973-6.987.882-.373 1.678-1.238 2.2-2.284l.007-.014.006-.012c.34-.793.41-1.518.071-2.069-.327-.531-.923-.719-1.503-.735a6.409 6.409 0 00-.704-.183c.749-2.421 2.466-4.751 5.149-5.922-.47-.416-.88-.701-1.234-.866-.474-.221-.794-.204-1.021-.068a.318.318 0 01-.435-.109.317.317 0 01.109-.433c.476-.286 1.036-.233 1.615.037.49.229 1.031.628 1.621 1.182A9.924 9.924 0 0112 2.568c1.199 0 2.284.19 3.256.526.59-.554 1.13-.953 1.62-1.182zM8.835 6.577a1.266 1.266 0 100 2.532 1.266 1.266 0 000-2.532zm6.33 0a1.267 1.267 0 100 2.533 1.267 1.267 0 000-2.533z"),

@@ -46,7 +46,7 @@ not imply endorsement, sponsorship, or affiliation with the respective owners.
 - **Claude**, **Claude Code** — trademarks of Anthropic, PBC.
 - **Codex**, **GPT** — trademarks of OpenAI, Inc.
 - **Antigravity** (the AI coding IDE) — trademark of Google LLC. AgentDeck
-  does not integrate with Google Antigravity.
+  identifies Antigravity sessions/status where explicitly configured by the user.
 - **OpenClaw** — independent open-source project. Name used to identify
   AgentDeck's OpenClaw Gateway integration.
 - **OpenCode** — project by SST.

@@ -16,13 +16,13 @@ This repo is built by switching between **Claude Code, Codex, OpenCode, and occa
 |---|---|---|---|---|
 | **Claude Code** | native, or `agentdeck claude` | `CLAUDE.md`; `.claude/skills/` | `.claude/skills/*.md` (pointers → `.agents/skills/`) | `.claude/skills/` files must stay **pointers**, not procedure copies |
 | **Codex** | `agentdeck codex` | `AGENTS.md` → `CLAUDE.md` | `.agents/skills/` (repo-scoped) + `.agents/workflows/` | — |
-| **OpenCode** | `agentdeck opencode` | `AGENTS.md` → `CLAUDE.md` | **none** — no hook system; PTY + SSE bridge only | No skill/workflow auto-discovery. Point it at `.agents/workflows/<name>.md` explicitly |
-| **Antigravity** | manual editing | `AGENTS.md` → `CLAUDE.md` | **none** | Instruction-files only. Not wired as an observable product session type — no dev hooks, no skill discovery |
+| **OpenCode** | `agentdeck opencode`, or native `opencode` | `AGENTS.md` → `CLAUDE.md` | OpenCode skills/plugins; AgentDeck also supports PTY + SSE bridge | AgentDeck workflows are still human procedures: point it at `.agents/workflows/<name>.md` explicitly when needed |
+| **Antigravity** | manual editing, or native Antigravity CLI/app | `AGENTS.md` → `CLAUDE.md` | Antigravity hooks/plugins/skills when the user configures them | AgentDeck does not auto-install Antigravity hooks. Current product session visibility is CLI daemon passive discovery only; App Store app shows usage/credit status, not coding-session observation |
 
 Notes:
 - **Claude Code & Codex** are the two first-class authoring agents: both get hooks (`~/.claude/settings.json`, `~/.codex/config.toml`) and discover skills.
-- **OpenCode** is a fully supported *product session type* (PTY + SSE overlay) but, as a *development tool* editing this repo, it has no skill/workflow auto-discovery — drive it from `AGENTS.md` + explicit workflow paths.
-- **Antigravity** appears in the `AGENTS.md` title because it reads that file; it has **no** session-observation, hooks, or skill discovery. The Apple app only reads Antigravity usage/credit stats — it does not observe Antigravity coding sessions. Don't expect skill auto-run when using Antigravity; cite the workflow file paths by hand.
+- **OpenCode** is a fully supported *product session type* through `agentdeck opencode` (PTY + SSE overlay). Native OpenCode also has plugin/event and skill surfaces, but AgentDeck does not rely on auto-installing them; explicit workflow paths remain the portable handoff.
+- **Antigravity** now has official hook/plugin/skill surfaces, but AgentDeck still treats them as user-managed. The App Store app only reads the user-approved Antigravity usage/credit database; coding-session creatures come from the optional CLI daemon passive discovery path unless/until a user installs a dedicated hook/plugin bridge.
 
 ## SSOT rules (where each kind of knowledge lives)
 

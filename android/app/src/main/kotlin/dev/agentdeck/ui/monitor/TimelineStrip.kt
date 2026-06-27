@@ -838,6 +838,7 @@ private fun agentTag(agentType: String?): String = when (agentType) {
     "codex-app" -> "Codex App"
     "openclaw" -> "OpenClaw"
     "opencode" -> "OpenCode"
+    "antigravity" -> "Antigravity"
     "daemon" -> "Daemon"
     null -> ""
     else -> "Agent"

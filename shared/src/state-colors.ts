@@ -32,6 +32,7 @@ export const AGENT_BRAND_COLORS: Record<string, string> = {
   'codex-cli':   '#6366f1',  // indigo
   'codex-app':   '#6366f1',  // indigo
   'opencode':    '#F1ECEC',  // cream
+  'antigravity': '#5F6368',  // Google gray
   'monitor':     '#94a3b8',  // slate
 };
 

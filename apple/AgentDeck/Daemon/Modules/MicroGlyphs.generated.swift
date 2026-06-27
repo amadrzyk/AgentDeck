@@ -106,6 +106,23 @@ extension MicroGlyphs {
             "..BB...BB..",
         ]
     ),
+    "antigravity": Glyph(
+        colors: ["F": (210, 214, 220)],
+        idle: [
+            ".....F.....",
+            "....FFF....",
+            "....FFF....",
+            "...FFFFF...",
+            "...FF.FF...",
+            "..FFF.FFF..",
+            "..FF...FF..",
+            ".FFF...FFF.",
+            ".FF.....FF.",
+            "FFF.....FFF",
+            "...........",
+        ],
+        work: nil
+    ),
     ]
 }
 #endif

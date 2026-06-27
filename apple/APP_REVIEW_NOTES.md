@@ -81,7 +81,11 @@ Unlike the other advanced integrations, OpenClaw **is** first-class in the App S
 
 ### OpenCode (not in the App Store build)
 
-OpenCode session monitoring is intentionally **not** part of the App Store build. Unlike Claude Code and Codex — which AgentDeck observes purely by receiving HTTP POSTs from hooks the user's own CLI executes — OpenCode ships no hook configuration mechanism, and its structured-event server binds to a random TCP port with no lock-file or other discoverable marker. Observing it would require either spawning the `opencode` process (forbidden in the sandbox) or open-ended local port scanning. The App Store build therefore does neither. OpenCode is supported only through the optional, separately-distributed Node.js developer bridge described at the top of these notes. No OpenCode-related copy in the App Store app prompts the user to install or launch anything.
+OpenCode session monitoring is intentionally **not** part of the App Store build. OpenCode has plugin/event extension surfaces, but AgentDeck does not install plugins, spawn `opencode`, or scan local random ports from the sandboxed app. The App Store build therefore does not attempt to discover native OpenCode sessions. OpenCode is supported only through the optional, separately-distributed Node.js developer bridge described at the top of these notes (`agentdeck opencode` PTY+SSE, plus CLI-daemon passive discovery for already-running processes). No OpenCode-related copy in the App Store app prompts the user to install or launch anything.
+
+### Antigravity (usage only in the App Store build)
+
+Antigravity coding-session monitoring is also intentionally **not** part of the App Store build. Antigravity has hook/plugin extension surfaces, but AgentDeck does not install hooks, spawn the Antigravity app/CLI, enumerate the user's real home directory, or scan processes from the sandboxed app. In the App Store build, Antigravity is limited to a user-approved local status integration: the user explicitly selects the Antigravity `state.vscdb` file through an `NSOpenPanel`, AgentDeck stores a security-scoped bookmark to that one file, and the dashboard displays plan/credit information only when parseable. Coding-session creatures for Antigravity are available only through the optional Node.js developer bridge/CLI daemon path, where passive process discovery is allowed outside the App Store sandbox. No Antigravity-related copy in the App Store app prompts the user to install or launch anything.
 
 ### Codex observation path
 

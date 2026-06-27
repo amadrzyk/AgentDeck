@@ -301,6 +301,7 @@ data class AgentCapabilities (
 )
 
 enum class AgentType(val value: String) {
+    Antigravity("antigravity"),
     ClaudeCode("claude-code"),
     CodexApp("codex-app"),
     CodexCLI("codex-cli"),
@@ -310,6 +311,7 @@ enum class AgentType(val value: String) {
 
     companion object {
         public fun fromValue(value: String): AgentType = when (value) {
+            "antigravity" -> Antigravity
             "claude-code" -> ClaudeCode
             "codex-app"   -> CodexApp
             "codex-cli"   -> CodexCLI

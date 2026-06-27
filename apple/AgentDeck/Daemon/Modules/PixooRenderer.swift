@@ -141,7 +141,7 @@ final class PixooRenderer {
 
     private static let phi = (1.0 + sqrt(5.0)) / 2.0
     private static let sessionToneFactors: [Double] = [1.08, 1.0, 0.9, 0.8, 0.72, 0.64]
-    private static let codingAgents = Set(["claude-code"])
+    private static let codingAgents = Set(["claude-code", "antigravity"])
     private static let cloudAgents = Set(["codex-cli", "codex-app"])
     private static let opencodeAgents = Set(["opencode"])
 
@@ -529,7 +529,8 @@ final class PixooRenderer {
             dominant?.state == .processing ? .working : (dominant?.state == .awaiting ? .asking : .idle)
         if let dominant {
             let creature: MicroCreature =
-                dominant.creatureType == .cloud ? .codex
+                dominant.agentType == "antigravity" ? .antigravity
+                    : dominant.creatureType == .cloud ? .codex
                     : (dominant.creatureType == .opencode ? .opencode : .octopus)
             MicroGlyphs.paint(&out, creature: creature, state: glyphState, animFrame: animFrame)
         } else if hasGateway {

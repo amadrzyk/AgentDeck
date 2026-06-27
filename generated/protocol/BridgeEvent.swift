@@ -519,6 +519,7 @@ extension ADAgentCapabilities {
 }
 
 enum ADAgentType: String, Codable, Equatable {
+    case antigravity = "antigravity"
     case claudeCode = "claude-code"
     case codexApp = "codex-app"
     case codexCli = "codex-cli"

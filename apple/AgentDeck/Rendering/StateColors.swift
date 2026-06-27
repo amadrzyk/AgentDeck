@@ -28,6 +28,7 @@ enum StateColors {
         static let openclaw   = "#ff4d4d"  // red
         static let codexCli   = "#6366f1"  // indigo-500
         static let opencode   = "#F1ECEC"  // cream
+        static let antigravity = "#5F6368"  // Google gray
         static let monitor    = "#94a3b8"  // slate-400
     }
 
@@ -43,6 +44,7 @@ enum StateColors {
         static let openclaw:     (UInt8, UInt8, UInt8) = (255, 77, 77)
         static let codexCli:     (UInt8, UInt8, UInt8) = (99, 102, 241)
         static let opencode:     (UInt8, UInt8, UInt8) = (241, 236, 236)
+        static let antigravity:  (UInt8, UInt8, UInt8) = (95, 99, 104)
         static let monitor:      (UInt8, UInt8, UInt8) = (148, 163, 184)
     }
 
@@ -74,6 +76,7 @@ enum StateColors {
         case "codex-cli":   return Color(hex: Hex.codexCli)
         case "codex-app":   return Color(hex: Hex.codexCli)
         case "opencode":    return Color(hex: Hex.opencode)
+        case "antigravity": return Color(hex: Hex.antigravity)
         case "monitor":     return Color(hex: Hex.monitor)
         default:            return Color(hex: Hex.monitor)  // slate fallback
         }

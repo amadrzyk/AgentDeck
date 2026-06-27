@@ -349,7 +349,7 @@ actor PixooModule: DeviceModule {
             let eventAgentType = event["agentType"] as? String
             // Only update primary state from creature agents — daemon/openclaw
             // events would otherwise overwrite the coding agent's PROCESSING state
-            let creatureAgents: Set<String> = ["claude-code", "codex-cli", "codex-app", "opencode"]
+            let creatureAgents: Set<String> = ["claude-code", "codex-cli", "codex-app", "opencode", "antigravity"]
             if let at = eventAgentType, creatureAgents.contains(at) {
                 cachedState = event["state"] as? String ?? "disconnected"
                 cachedProject = event["projectName"] as? String

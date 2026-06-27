@@ -6,7 +6,7 @@
 // silhouette, so each creature is authored directly at 11×11 as a bold, high-contrast
 // bitmap. The glyphs are the canonical brand marks (assets/logos/*_creature_gen.png,
 // design/brand/*.svg): Claude=rusty robot, Codex=cloud+`>_`, OpenClaw=lobster,
-// OpenCode=ring.
+// OpenCode=ring, Antigravity=peak/arc.
 //
 // The grid/color DATA lives in MicroGlyphs.generated.swift, produced from the TS
 // module by `pnpm generate-micro-glyphs` — do NOT hand-edit the data here or there;
@@ -18,7 +18,7 @@
 
 import Foundation
 
-enum MicroCreature { case octopus, codex, opencode, crayfish }
+enum MicroCreature { case octopus, codex, opencode, crayfish, antigravity }
 enum MicroGlyphState { case idle, working, asking }
 enum MicroAggregate { case idle, processing, awaiting, error }
 
@@ -41,6 +41,7 @@ enum MicroGlyphs {
         case .codex: return generatedGlyphs["jellyfish"]!
         case .opencode: return generatedGlyphs["opencode"]!
         case .crayfish: return generatedGlyphs["crayfish"]!
+        case .antigravity: return generatedGlyphs["antigravity"]!
         }
     }
 

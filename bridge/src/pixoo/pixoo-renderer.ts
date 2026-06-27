@@ -75,8 +75,8 @@ const PHI = (1 + Math.sqrt(5)) / 2;
 /** Active creature instances keyed by sessionId. */
 const creatureInstances = new Map<string, CreatureInstance>();
 
-/** Agent types that represent coding agents (draw as octopus). */
-const CODING_AGENTS = new Set(['claude-code']);
+/** Agent types that represent coding agents (draw as octopus/robot). */
+const CODING_AGENTS = new Set(['claude-code', 'antigravity']);
 /** Agent types drawn as jellyfish (cloud creature). */
 const JELLYFISH_AGENTS = new Set(['codex-cli', 'codex-app']);
 /** Agent types drawn as nested-square opencode. */
@@ -713,9 +713,10 @@ function renderMicroFrame(
         : 'idle';
   if (dominant) {
     const creature: MicroCreature =
-      dominant.creatureType === 'jellyfish' ? 'jellyfish'
-        : dominant.creatureType === 'opencode' ? 'opencode'
-          : 'octopus';
+      dominant.agentType === 'antigravity' ? 'antigravity'
+        : dominant.creatureType === 'jellyfish' ? 'jellyfish'
+          : dominant.creatureType === 'opencode' ? 'opencode'
+            : 'octopus';
     paintMicroGlyph(base, creature, glyphState, animFrame);
   } else if (hasGateway) {
     paintMicroGlyph(base, 'crayfish', routing ? 'working' : 'idle', animFrame);

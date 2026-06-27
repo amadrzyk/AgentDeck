@@ -53,7 +53,8 @@
 | 외부에서 이미 실행 중인 Claude/Codex 세션 passive discovery | ❌ | ✅ | `ps`/`lsof`/`/proc` + `~/.claude`/`~/.codex` transcript/rollout JSONL read 가 필요하므로 Node CLI daemon 전용. App Store 단독 앱은 hook/lifecycle 로 opt-in 된 세션만 표시하며 결함 안내 없이 완결 UI 유지 |
 | Permission prompt 표시 (awaiting + question) | ✅ | ✅ | Notification hook 의 free-text `message` 를 `looksLikePermissionMessage` 필터 후 세션 `question` 으로 표출 — 디바이스가 attention tier 로 전환 |
 | Device approval gating (PreToolUse Allow/Deny) | ❌ | ✅ | observed 세션의 PreToolUse hook HTTP 응답을 열어둔 채 디바이스 `permission_decision` 을 기다리는 구조 (`permission-resolver.ts`). Swift daemon 은 `requestId` 를 emit 하지 않으므로 디바이스에 Allow/Deny UI 자체가 나타나지 않음 — 표시상 결함 없이 display-only awaiting 으로 완결 |
-| OpenCode 세션 모니터링 | ❌ | ✅ | OpenCode 의 random-port 서버에 lock-file 이 없어 다중 인스턴스 discovery 불가. CLI/Node bridge 경로만 |
+| OpenCode 세션 모니터링 | ❌ | ✅ | OpenCode 는 plugin/event hook 표면을 제공하지만 App Store 앱이 외부 CLI/plugin 을 설치·기동하지 않는다. AgentDeck CLI/Node bridge 는 `agentdeck opencode` PTY+SSE 와 standalone `opencode` passive discovery 로 표시 |
+| Antigravity 세션 모니터링 | ❌ | ✅ | Antigravity 는 hook/plugin 표면을 제공하지만 App Store 앱이 외부 IDE 세션을 관측하거나 hook 을 설치하지 않는다. CLI daemon 은 standalone Antigravity 프로세스를 passive discovery 해서 creature anchor 로 표시. App Store 앱의 Antigravity 행은 user-approved `state.vscdb` 기반 사용량/크레딧 표시만 |
 | Claude / Codex / OpenCode 세션 실행 | ❌ | ✅ | App Store 는 세션 실행 진입점 없음 — `Launch Session` UI 는 2026-05-10 일괄 제거. App Store 빌드는 사용자가 자기 워크스페이스에서 실행한 agent 세션을 hook/lifecycle 로 passive monitor 만 함 |
 | OpenClaw Gateway pairing (WS 모드) | ✅ | ✅ | `ws://127.0.0.1:18789` 클라이언트 — RPC error + ws close 1008 reason 기반 auto-fallback (device 서명 거부 시 token-only retry) 포함 |
 | OpenClaw shared-token Keychain 저장 (paste) | ✅ | — | Settings → OpenClaw → Advanced 의 SecureField → `OpenClawGatewayTokenStore` (Keychain service `…openclaw.gateway-token`) |
@@ -77,7 +78,7 @@
 ## 요약
 
 - **App Store 만 써도** 가능: Claude Code hook 모니터링, **Codex lifecycle hooks + notify/OTel fallback 모니터링**, Anthropic Admin API 사용량 조회, iPad 페어링, **D200H / Pixoo / ESP32 / TRMNL e-ink (BYOS)** 하드웨어, 음성 입력, APME LLM 평가, **timeline LLM 요약 (Apple Intelligence / MLX / heuristic)**.
-- **App Store 밖 companion 경로**: **Android 기기 전부** (e-ink + 태블릿), ESP32 firmware flash, **OpenCode 모니터링**, Codex / OpenCode PTY 세션 실행, OpenClaw CLI 페어링, APME Layer 1 결정적 평가, Claude 구독 사용량 (5h/7d) gauge.
+- **App Store 밖 companion 경로**: **Android 기기 전부** (e-ink + 태블릿), ESP32 firmware flash, **OpenCode / Antigravity 세션 모니터링**, Codex / OpenCode PTY 세션 실행, OpenClaw CLI 페어링, APME Layer 1 결정적 평가, Claude 구독 사용량 (5h/7d) gauge.
 
 App Store 앱은 companion executable 설치/기동을 요구하지 않는다. 이미 사용자가 터미널에서 별도 daemon을 운영하는 경우에만 같은 포트/WS 프로토콜로 선택적으로 연결되며, 그 신호(`DaemonService.isUsingExternalDaemon`)가 true 일 때만 ADB-tier 디바이스 카드와 RATE LIMITS 섹션이 노출된다(progressive enhancement). 미감지 상태에서는 해당 섹션을 숨겨 단독 앱이 결함 없이 완결성있게 보이도록 한다.
 
