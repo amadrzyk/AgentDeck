@@ -152,7 +152,13 @@ actor DaemonTimelineStore {
     /// Recent entries attributed to one session (newest-last), for the
     /// `query_session_timeline` poll. `since` is an epoch-ms lower bound.
     func historyForSession(_ sessionId: String, since: Double? = nil, limit: Int = 16) -> [DaemonTimelineEntry] {
-        let matched = entries.filter { $0.sessionId == sessionId && (since == nil || $0.ts > since!) }
+        // sessions_list ids for observed sessions are prefixed ("observed:claude:<uuid>")
+        // while entries are keyed by the raw uuid — accept either.
+        let raw = sessionId.replacingOccurrences(
+            of: "^observed:(?:claude|codex|opencode|antigravity):", with: "", options: .regularExpression)
+        let matched = entries.filter {
+            ($0.sessionId == sessionId || $0.sessionId == raw) && (since == nil || $0.ts > since!)
+        }
         return Array(matched.suffix(limit))
     }
 

@@ -116,8 +116,12 @@ export class BridgeTimelineStore {
   /** Recent entries attributed to one session, for the `query_session_timeline`
    *  poll — lets a device that connects mid-session fill its Detail view. */
   getHistoryForSession(sessionId: string, since?: number, limit = 16): TimelineEntry[] {
+    // sessions_list ids for passively-observed sessions are prefixed
+    // ("observed:claude:<uuid>") while timeline entries are keyed by the raw uuid,
+    // so accept either form.
+    const raw = sessionId.replace(/^observed:(?:claude|codex|opencode|antigravity):/, '');
     const matched = this.entries.filter(
-      (e) => e.sessionId === sessionId && (since == null || e.ts > since),
+      (e) => (e.sessionId === sessionId || e.sessionId === raw) && (since == null || e.ts > since),
     );
     return matched.slice(-limit);
   }
