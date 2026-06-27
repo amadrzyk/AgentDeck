@@ -24,10 +24,18 @@ struct SetupNeededCard: View {
     let items: [SetupItem]
 
     #if os(macOS)
+    /// Needed to bounce the OpenClaw gateway adapter after an inline token
+    /// import. Optional + defaulted so DEBUG previews (which never trigger the
+    /// action) can construct the card without wiring a DaemonService.
+    var daemonService: DaemonService? = nil
     @Environment(\.openWindow) private var openWindow
     #endif
 
     @State private var pulse = false
+    /// Short feedback shown under an item after its inline action runs
+    /// (e.g. "Token imported — reconnecting…"). The card auto-dismisses when
+    /// the underlying status flips, so this is transient by nature.
+    @State private var actionMessage: String? = nil
 
     /// Open-Settings call-to-action — macOS only. iOS hides the button
     /// because every iOS-surfaced item already routes the user back to
@@ -65,6 +73,65 @@ struct SetupNeededCard: View {
         )
     }
 
+    /// Per-item inline call-to-action. Only OpenClaw token-remediable failures
+    /// carry one today; everything else falls through to the shared
+    /// "Open Settings" button. macOS + App Store only — the import path uses
+    /// NSOpenPanel + the user-selected-file entitlement, which doesn't exist on
+    /// iOS (iOS items already route the user to the Mac).
+    @ViewBuilder
+    private func inlineAction(for item: SetupItem) -> some View {
+        #if os(macOS) && AGENTDECK_APP_STORE
+        if item.primaryAction == .importOpenClawToken {
+            VStack(alignment: .leading, spacing: 3) {
+                Button {
+                    performImportOpenClawToken()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "tray.and.arrow.down")
+                        Text("Import token")
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color.black.opacity(0.85))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(TerrariumHUD.ledAmber)
+                            .shadow(color: TerrariumHUD.ledAmber.opacity(0.4), radius: 4, x: 0, y: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(Text(verbatim: "Pick ~/.openclaw/openclaw.json — AgentDeck saves the gateway token and reconnects."))
+
+                if let actionMessage {
+                    Text(actionMessage)
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(TerrariumHUD.subtext)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.leading, 22) // align under the item title (icon 14 + spacing 8)
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    #if os(macOS) && AGENTDECK_APP_STORE
+    private func performImportOpenClawToken() {
+        guard let daemonService else { return }
+        switch OpenClawTokenImporter.importFromConfigFile(daemonService: daemonService) {
+        case .imported:
+            actionMessage = "Token imported — reconnecting…"
+        case .cancelled:
+            break
+        case .failed(let message):
+            actionMessage = message
+        }
+    }
+    #endif
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -82,21 +149,24 @@ struct SetupNeededCard: View {
             }
 
             ForEach(items) { item in
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: item.icon)
-                        .font(.system(size: 10))
-                        .foregroundStyle(item.tint)
-                        .frame(width: 14)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.title)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(TerrariumHUD.text)
-                        Text(item.hint)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: item.icon)
                             .font(.system(size: 10))
-                            .foregroundStyle(TerrariumHUD.subtext)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(item.tint)
+                            .frame(width: 14)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(TerrariumHUD.text)
+                            Text(item.hint)
+                                .font(.system(size: 10))
+                                .foregroundStyle(TerrariumHUD.subtext)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
+                    inlineAction(for: item)
                 }
             }
 
@@ -129,6 +199,17 @@ struct SetupItem: Identifiable {
     let tint: Color
     let title: String
     let hint: String
+    /// Optional one-click remedy rendered inline under the item, in addition to
+    /// the card's shared "Open Settings" route. Defaulted so existing call sites
+    /// (and iOS) construct items unchanged.
+    var primaryAction: SetupItemAction? = nil
+}
+
+/// Inline remedies a SetupItem can offer. Kept as an enum (not a closure) so
+/// `SetupItem` stays `Identifiable`/value-typed and the action wiring lives in
+/// the card, where `daemonService` and feedback state are in scope.
+enum SetupItemAction: Equatable {
+    case importOpenClawToken
 }
 
 // MARK: - Item derivation
@@ -178,7 +259,8 @@ extension AgentStateHolder {
                 icon: descriptor.iconSystemName,
                 tint: status.tint,
                 title: descriptor.displayName,
-                hint: status.detail ?? descriptor.connectInstructions ?? status.label
+                hint: status.detail ?? descriptor.connectInstructions ?? status.label,
+                primaryAction: Self.openClawSetupAction(descriptor: descriptor, state: state)
             )
         }
 
@@ -217,6 +299,27 @@ extension AgentStateHolder {
         }
 
         return items
+    }
+
+    /// The OpenClaw setup item earns a one-click "Import token" button only when
+    /// the gateway auth failure is one a token import actually fixes. These three
+    /// statuses all tell the user (in `IntegrationStatusEvaluator.openClawStatus`)
+    /// to import/paste the shared token. Pairing / device-auth failures
+    /// (`pairing_required`, `device_auth_invalid`, `auth_failed`) need the
+    /// Web-UI-approve / reset-identity ladder that lives in Settings, so they keep
+    /// the generic "Open Settings" route (`primaryAction == nil`).
+    static func openClawSetupAction(descriptor: IntegrationDescriptor, state: DashboardState) -> SetupItemAction? {
+        #if AGENTDECK_APP_STORE
+        guard descriptor.id == IntegrationCatalog.openClaw.id else { return nil }
+        switch state.gatewayAuthStatus {
+        case "gateway_token_missing", "token_mismatch", "connect_timeout":
+            return .importOpenClawToken
+        default:
+            return nil
+        }
+        #else
+        return nil
+        #endif
     }
 
     static func shouldShowCodexObservationSetup(

@@ -216,7 +216,7 @@ struct MonitorScreen: View {
                 VStack {
                     Spacer()
                     HStack {
-                        SetupNeededCard(items: items)
+                        setupCard(items: items)
                             .padding(.leading, 14)
                             .padding(.bottom, preferences.showTimeline
                                      ? geo.size.height * sandFraction + 14
@@ -228,6 +228,19 @@ struct MonitorScreen: View {
                 .animation(.easeInOut(duration: 0.25), value: items.count)
             }
         }
+    }
+
+    /// Build the Setup card, handing the macOS variant the `daemonService` it
+    /// needs to perform an inline OpenClaw token import + adapter reconnect. iOS
+    /// has no import affordance (it routes users to the Mac), so it constructs
+    /// the card without it.
+    @ViewBuilder
+    private func setupCard(items: [SetupItem]) -> some View {
+        #if os(macOS)
+        SetupNeededCard(items: items, daemonService: daemonService)
+        #else
+        SetupNeededCard(items: items)
+        #endif
     }
 
     /// Sessions currently waiting for user input, sorted by `sessionRank`.

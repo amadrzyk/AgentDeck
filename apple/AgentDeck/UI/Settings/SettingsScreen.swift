@@ -1335,87 +1335,30 @@ struct SettingsScreen: View {
         OpenClawGatewayTokenParser.extractToken(from: json)
     }
 
-    /// Lets the user pick `openclaw.json` via NSOpenPanel and pulls the
-    /// gateway token out of it. The token can sit at any of three paths
-    /// depending on how OpenClaw was set up — `extractGatewayToken` walks
-    /// them in canonical-first order. The picker grants this app a one-shot
-    /// user-selected file scope, which is App Store sandbox-safe: the
-    /// existing `com.apple.security.files.user-selected.read-write`
-    /// entitlement covers it, no subprocess is spawned, and no path outside
-    /// the user's explicit selection is touched. The token is written to
-    /// Keychain via the existing `OpenClawGatewayTokenStore` and the gateway
-    /// adapter is bounced — Claude Code / Codex sessions keep running.
-    ///
-    /// Notes for App Store review:
-    /// - `panel.directoryURL` is only a Powerbox navigation hint. The app still
-    ///   receives access solely to the JSON file the user explicitly selects.
-    /// - `startAccessingSecurityScopedResource()` is paired with `defer` so
-    ///   the scope is released even if JSON parsing throws.
+    /// Lets the user pick `openclaw.json` via NSOpenPanel and pulls the gateway
+    /// token out of it, then maps the result onto this view's inline status
+    /// rows. The picker + parse + Keychain-write + bookmark + adapter-reconnect
+    /// orchestration (and its App Store review rationale) lives in the shared
+    /// `OpenClawTokenImporter` so the dashboard SetupNeededCard can offer the
+    /// exact same one-click import without duplicating it.
     private func importOpenClawTokenFromConfig() {
         #if os(macOS) && AGENTDECK_APP_STORE
-        let panel = NSOpenPanel()
-        panel.title = "Import OpenClaw Gateway Token"
-        panel.message = "Choose your OpenClaw config file (typically `~/.openclaw/openclaw.json`). AgentDeck will save the gateway token from it to your Keychain."
-        panel.prompt = "Import token"
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.nameFieldStringValue = "openclaw.json"
-        panel.showsHiddenFiles = true
-        // Open the panel directly inside `~/.openclaw/` so the (non-hidden)
-        // `openclaw.json` is visible immediately — relying on the user to
-        // toggle hidden files and drill into the dotfolder themselves was the
-        // root cause of "the file isn't there" reports (Powerbox doesn't
-        // reliably honour `showsHiddenFiles` for the in-process panel object).
-        //
-        // Inside App Sandbox `NSHomeDirectory()` returns the app's container
-        // path, which is *not* where OpenClaw lives. `getpwuid` returns the
-        // user's real `/Users/<name>/`; we append `.openclaw` when it exists
-        // and fall back to the real home otherwise. `directoryURL` is only a
-        // Powerbox navigation hint — it grants no read access; only the file
-        // the user explicitly selects becomes readable. This mirrors the
-        // already-shipping Antigravity picker, which points `directoryURL` at
-        // a deep app-support folder the same way.
-        if let pw = getpwuid(getuid()), let realHome = pw.pointee.pw_dir.flatMap({ String(cString: $0) }) {
-            let home = URL(fileURLWithPath: realHome)
-            let openclawDir = home.appendingPathComponent(".openclaw", isDirectory: true)
-            panel.directoryURL = FileManager.default.fileExists(atPath: openclawDir.path) ? openclawDir : home
-        }
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-
-        do {
-            let data = try Data(contentsOf: url)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                openClawGatewayTokenError = "That file isn't a JSON object. Pick `~/.openclaw/openclaw.json` or paste the token manually below."
-                return
-            }
-            guard let token = Self.extractGatewayToken(from: json) else {
-                openClawGatewayTokenError = "Couldn't find a gateway token in that file. Looked at `gateway.auth.token`, `auth.token`, `gateway.token`. Pick a different file or paste the token below."
-                return
-            }
-            try OpenClawGatewayTokenStore.saveToken(token)
-            // Persist a security-scoped bookmark to the picked file so a later
-            // rotated `gateway.auth.token` is re-read automatically on the next
-            // gateway (re)connect — the user grants file access once.
-            AppPreferences.shared.storeOpenClawConfigBookmark(for: url)
+        switch OpenClawTokenImporter.importFromConfigFile(daemonService: daemonService) {
+        case .cancelled:
+            return
+        case .failed(let message):
+            openClawGatewayTokenError = message
+        case .imported:
             openClawGatewayTokenInput = ""
             openClawGatewayTokenSaved = true
             openClawGatewayTokenError = nil
             openClawIdentityResetSucceeded = true
             openClawIdentityResetMessage = "Token imported. Reconnecting the gateway adapter — your other sessions are unaffected."
-            Task { await daemonService.reconnectGatewayAdapter() }
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(6))
                 openClawIdentityResetMessage = nil
                 openClawIdentityResetSucceeded = false
             }
-        } catch {
-            openClawGatewayTokenError = "Could not read the file: \(error.localizedDescription)"
         }
         #endif
     }
