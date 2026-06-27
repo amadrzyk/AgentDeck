@@ -30,6 +30,8 @@ static lv_obj_t* lblStatus  = nullptr;   // header status line: "● N sessions 
 static lv_obj_t* terrCount  = nullptr;   // "N LIVE" caption over the terrarium
 // D1 full-width top bar (brand · daemon status · 5h/7d usage gauges).
 static constexpr int IPS10_TOPBAR_H = 56;
+// Usage bar track width — shortened from 92 to make room for the leading agent icon.
+static constexpr int TB_BAR_W = 74;
 static lv_obj_t* tbDaemon  = nullptr;    // "● daemon :9120 · N agents"
 #if defined(IPS10_PERF_HUD)
 static lv_obj_t* tbPerf    = nullptr;    // worst-frame perf overlay (debug)
@@ -48,6 +50,8 @@ static lv_obj_t* tbCx5hPct  = nullptr;
 static lv_obj_t* tbCx7dPct  = nullptr;
 // Antigravity credits chip ("AG pro · 1234cr") — hidden when no data.
 static lv_obj_t* tbAg       = nullptr;
+// Leading agent icons before the gauge pairs (Codex icon hides with its gauges).
+static lv_obj_t* tbCodexIcon = nullptr;
 #include "../terrarium/creature_glyphs_generated.h"  // OCTOPUS_A8 / CRAYFISH_BODY_A8 / OPENCODE_A8 masks
 static constexpr int IPS10_SIDEBAR_W_MIN = 372;     // portrait / fallback minimum
 static constexpr int IPS10_TERRARIUM_W = 408;       // keep in sync with terrarium/renderer.cpp
@@ -88,6 +92,7 @@ static lv_image_dsc_t glyphOctopus;    // Claude
 static lv_image_dsc_t glyphCrayfish;   // OpenClaw
 static lv_image_dsc_t glyphOpencode;   // OpenCode
 static lv_image_dsc_t glyphAntigravity; // Antigravity
+static lv_image_dsc_t glyphCodex;      // Codex (cloud + >_ mark)
 static bool glyphsReady = false;
 static void ips10BuildGlyph(lv_image_dsc_t& g, const uint8_t* data, int w, int h) {
     g.header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -108,6 +113,7 @@ static void ips10InitGlyphs() {
     ips10BuildGlyph(glyphCrayfish, OPENCLAW_MARK_A8, OPENCLAW_MARK_W, OPENCLAW_MARK_H);
     ips10BuildGlyph(glyphOpencode, OPENCODE_A8,      OPENCODE_W,      OPENCODE_H);
     ips10BuildGlyph(glyphAntigravity, ANTIGRAVITY_A8, ANTIGRAVITY_W,  ANTIGRAVITY_H);
+    ips10BuildGlyph(glyphCodex,    CODEX_A8,         CODEX_W,         CODEX_H);
     glyphsReady = true;
 }
 // Map an agent type to its glyph descriptor (null → no glyph, e.g. Codex).
@@ -698,17 +704,28 @@ void init(lv_obj_t* parent) {
         lv_obj_set_flex_grow(sp, 1);
         lv_obj_clear_flag(sp, LV_OBJ_FLAG_SCROLLABLE);
 
-        // Claude 5h/7d (cyan) + Codex CX 5h/7d (blue). The Codex pair lives in a
-        // group container captured in `grp` so update() can hide it when no Codex
-        // limits are present — keeps the bar compact on the common single-agent setup.
+        // Claude 5h/7d (cyan) + Codex 5h/7d (blue). A leading agent icon (octopus /
+        // codex mark) labels each pair instead of a "CX" text prefix. The Codex pair
+        // (icon + both gauges) hides when no Codex limits are present — keeps the bar
+        // compact on the common single-agent setup. Glyphs must be built first.
+        ips10InitGlyphs();
         struct { const char* lab; lv_obj_t** fill; lv_obj_t** pct; lv_obj_t** grp;
-                 uint32_t labCol; uint32_t fillCol; } G[4] = {
-            {"5H",    &tb5hFill,   &tb5hPct,   nullptr,    0x5D7470, D1_OK},
-            {"7D",    &tb7dFill,   &tb7dPct,   nullptr,    0x5D7470, D1_OK},
-            {"CX 5H", &tbCx5hFill, &tbCx5hPct, &tbCx5hGrp, 0x7A80E8, D1_CODEX},
-            {"CX 7D", &tbCx7dFill, &tbCx7dPct, &tbCx7dGrp, 0x7A80E8, D1_CODEX},
+                 uint32_t labCol; uint32_t fillCol;
+                 const lv_image_dsc_t* icon; uint32_t iconCol; lv_obj_t** iconSlot; } G[4] = {
+            {"5H", &tb5hFill,   &tb5hPct,   nullptr,    0x5D7470, D1_OK,    &glyphOctopus, Theme::ClaudeBody, nullptr},
+            {"7D", &tb7dFill,   &tb7dPct,   nullptr,    0x5D7470, D1_OK,    nullptr,       0,                 nullptr},
+            {"5H", &tbCx5hFill, &tbCx5hPct, &tbCx5hGrp, 0x7A80E8, D1_CODEX, &glyphCodex,   Theme::CloudBody,  &tbCodexIcon},
+            {"7D", &tbCx7dFill, &tbCx7dPct, &tbCx7dGrp, 0x7A80E8, D1_CODEX, nullptr,       0,                 nullptr},
         };
         for (int gi = 0; gi < 4; gi++) {
+            // Leading agent icon (once per agent pair). A8 mask tinted to the brand.
+            if (G[gi].icon) {
+                lv_obj_t* ic = lv_image_create(tb);
+                lv_image_set_src(ic, G[gi].icon);
+                lv_obj_set_style_image_recolor(ic, lv_color_hex(G[gi].iconCol), 0);
+                lv_image_set_scale(ic, 256 * 22 / 64);   // 64px mask → 22px
+                if (G[gi].iconSlot) { *G[gi].iconSlot = ic; lv_obj_add_flag(ic, LV_OBJ_FLAG_HIDDEN); }
+            }
             lv_obj_t* g = lv_obj_create(tb);
             lv_obj_set_size(g, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
             lv_obj_set_style_bg_opa(g, LV_OPA_TRANSP, 0);
@@ -724,7 +741,7 @@ void init(lv_obj_t* parent) {
             lv_obj_set_style_text_color(lab, lv_color_hex(G[gi].labCol), 0);
             lv_label_set_text(lab, G[gi].lab);
             lv_obj_t* track = lv_obj_create(g);
-            lv_obj_set_size(track, 92, 6);
+            lv_obj_set_size(track, TB_BAR_W, 6);
             lv_obj_set_style_radius(track, 3, 0);
             lv_obj_set_style_bg_color(track, lv_color_hex(0xFFFFFF), 0);
             lv_obj_set_style_bg_opa(track, (lv_opa_t)45, 0);
@@ -1254,7 +1271,7 @@ static void updateGauge(lv_obj_t* fill, lv_obj_t* pctLabel, lv_obj_t* resetLabel
 static void setTopbarGauge(lv_obj_t* fill, lv_obj_t* pct, float v,
                            const char* reset, bool stale, uint32_t baseColor) {
     if (fill) {
-        int w = v >= 0.0f ? (int)(v / 100.0f * 92.0f + 0.5f) : 0; if (w > 92) w = 92;
+        int w = v >= 0.0f ? (int)(v / 100.0f * TB_BAR_W + 0.5f) : 0; if (w > TB_BAR_W) w = TB_BAR_W;
         lv_obj_set_width(fill, w);
         lv_obj_set_style_bg_color(fill, lv_color_hex(v >= 85.0f ? D1_ATTN : baseColor), 0);
     }
@@ -1481,6 +1498,10 @@ void update() {
         setTopbarGauge(tb7dFill, tb7dPct, p7d, reset7d, usageStale, D1_OK);
 
         bool hasCodex = (pcx5h >= 0.0f || pcx7d >= 0.0f);
+        if (tbCodexIcon) {
+            if (hasCodex) lv_obj_clear_flag(tbCodexIcon, LV_OBJ_FLAG_HIDDEN);
+            else          lv_obj_add_flag(tbCodexIcon, LV_OBJ_FLAG_HIDDEN);
+        }
         if (tbCx5hGrp) {
             if (hasCodex) lv_obj_clear_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
             else          lv_obj_add_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);

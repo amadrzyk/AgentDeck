@@ -218,9 +218,23 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
     // Pre-format ISO dates + strip unused fields
     const { ollamaStatus, tokenStatus, extraUsageEnabled, extraUsageMonthlyLimit,
             extraUsageUsedCredits, extraUsageUtilization, costSpent, costLimit,
-            sessionPercent, resetTime, resetDate, ...keep } = e;
+            sessionPercent, resetTime, resetDate, codexRateLimits, ...keep } = e;
+    // Codex windows carry ISO resetsAt too — pre-format like the Claude ones so a
+    // serial device (no NTP) can render the countdown instead of a blank.
+    const cx = codexRateLimits
+      ? {
+          ...codexRateLimits,
+          primary: codexRateLimits.primary
+            ? { ...codexRateLimits.primary, resetsAt: formatResetTime(codexRateLimits.primary.resetsAt) }
+            : undefined,
+          secondary: codexRateLimits.secondary
+            ? { ...codexRateLimits.secondary, resetsAt: formatResetTime(codexRateLimits.secondary.resetsAt) }
+            : undefined,
+        }
+      : undefined;
     return {
       ...keep,
+      ...(cx ? { codexRateLimits: cx } : {}),
       fiveHourResetsAt: formatResetTime(keep.fiveHourResetsAt),
       sevenDayResetsAt: formatResetTime(keep.sevenDayResetsAt),
     };
