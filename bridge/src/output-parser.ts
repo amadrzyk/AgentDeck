@@ -456,16 +456,36 @@ export class OutputParser extends EventEmitter {
 
     // --- Permission: "Yes, allow once" / "No, deny" / "Always allow" ---
     if (YES_NO_ALWAYS.test(chunk)) {
-      debug('Parser', 'EMIT permission_prompt (yes_no_always)');
       this.lastNavigableEmit = false;
       this.resetIdleTimer();
       this.resetOptionTimer();
+      // Prefer the rich block parser so Claude's REAL options survive — modern
+      // permission prompts are numbered and often carry a 3rd/4th choice (e.g.
+      // "Yes, and don't ask again", "No, and tell Claude what to do differently")
+      // that the narrow cursor-line regex below would drop. parseOptions handles
+      // numbered/bulleted lines, box-drawing chrome, cursor overwrite, and
+      // recommended/selected, and block-scopes so unrelated numbered response
+      // text isn't pulled in.
+      const rich = this.parseOptions(this.buffer.slice(-2000));
+      if (rich.options.length >= 2) {
+        const options = rich.options.map(opt => ({
+          ...opt,
+          shortcut: opt.shortcut || this.inferShortcut(opt.label),
+        }));
+        this.lastNavigableEmit = rich.navigable;
+        this.lastCursorIndex = rich.cursorIndex;
+        debug('Parser', `EMIT permission_prompt (yes_no_always, ${options.length} rich options, navigable=${rich.navigable}, cursor=${rich.cursorIndex})`);
+        this.emit('permission_prompt', { options, promptType: 'yes_no_always', navigable: rich.navigable, cursorIndex: rich.cursorIndex, question: this.parsePromptQuestion() });
+        this.startInteractiveCooldown();
+        return;
+      }
+      debug('Parser', 'EMIT permission_prompt (yes_no_always)');
+      // Legacy non-numbered "❯ Yes, allow once" lists: parseOptions can't read
+      // them, so use the cursor-line parser, then fall back to only the labels
+      // Claude actually rendered in this chunk — never fabricate a choice the
+      // user wasn't offered.
       const parsed = this.parsePermissionOptions(chunk);
-      const options = parsed.length > 0 ? parsed : [
-        { index: 0, label: 'Yes, allow once', shortcut: 'y' },
-        { index: 1, label: 'No, deny', shortcut: 'n' },
-        { index: 2, label: 'Always allow', shortcut: 'a' },
-      ];
+      const options = parsed.length > 0 ? parsed : this.fallbackYesNoAlwaysOptions(chunk);
       this.emit('permission_prompt', { options, promptType: 'yes_no_always', question: this.parsePromptQuestion() });
       this.startInteractiveCooldown();
       return;
@@ -848,6 +868,22 @@ export class OutputParser extends EventEmitter {
       }
     }
 
+    return options;
+  }
+
+  /** Last-resort yes/no/always options when neither the rich block parser nor
+   *  the cursor-line parser could read labels. Includes only the choices that
+   *  literally appear in this chunk, so we never present an option Claude didn't
+   *  offer. Guarantees at least the binary pair if the matched phrasing was odd. */
+  private fallbackYesNoAlwaysOptions(chunk: string): PromptOption[] {
+    const options: PromptOption[] = [];
+    if (/Yes,\s*allow once/i.test(chunk)) options.push({ index: options.length, label: 'Yes, allow once', shortcut: 'y' });
+    if (/No,\s*deny/i.test(chunk)) options.push({ index: options.length, label: 'No, deny', shortcut: 'n' });
+    if (/Always allow/i.test(chunk)) options.push({ index: options.length, label: 'Always allow', shortcut: 'a' });
+    if (options.length === 0) {
+      options.push({ index: 0, label: 'Yes, allow once', shortcut: 'y' });
+      options.push({ index: 1, label: 'No, deny', shortcut: 'n' });
+    }
     return options;
   }
 

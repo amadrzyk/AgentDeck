@@ -251,20 +251,12 @@ final class DaemonServer {
     /// terrariums on every surface.
     private var pushedSessionsById: [String: DaemonSessionEntry] = [:]
 
-    // ===== Device approvals (observed-session PreToolUse gating) =====
-    // Held PreToolUse hook responses, keyed by a fresh requestId. The hook HTTP
-    // response is suspended (continuation) until a device sends permission_decision
-    // or the timeout fires (→ "ask" = fall back to Claude's own prompt). Mirrors
-    // bridge/src/permission-resolver.ts. Lives on the MainActor; never crosses an
-    // isolation boundary.
-    private struct PendingApproval {
-        let continuation: CheckedContinuation<String, Never>
-        let sessionId: String
-        let timeoutTask: Task<Void, Never>
-    }
-    private var pendingApprovals: [String: PendingApproval] = [:]
-    private struct DeviceApprovalsCfg { let enabled: Bool; let gatedTools: [String]; let timeoutMs: Int }
-    private var cachedDeviceApprovals: (cfg: DeviceApprovalsCfg, at: Date)?
+    // Observed-session attention (the Notification overlay + held PreToolUse
+    // device-approval gate) was removed on 2026-06-27: hooks carry no real
+    // permission options and PreToolUse fires even for tools Claude auto-approves,
+    // so the gate produced false attention + a fabricated Allow/Deny. Accurate
+    // steering only exists on PTY-managed sessions (the CLI). Observed sessions
+    // report idle/processing only.
 
     // Debounce state for tool-boundary sessions_list broadcasts. State /
     // question transitions never ride this — see scheduleSessionsListBroadcast.
@@ -1404,14 +1396,15 @@ final class DaemonServer {
             let bodyData = request.body ?? Data()
             guard let self else { return .json(["received": true]) }
             if rawName == "PreToolUse" {
-                // PreToolUse is request-response: when device approvals are enabled
-                // and the tool is gated, the daemon holds this response open (up to
-                // the configured timeout) until a device sends `permission_decision`,
-                // then replies with the Claude Code permission decision. An empty
-                // body means "no decision" → Claude's own terminal prompt. This is
-                // the ONLY way to drive a no-PTY observed session forward.
-                let respBody = await self.handlePreToolUseHook(body: bodyData)
-                return .text(respBody)
+                // PreToolUse returns an empty body → Claude's normal permission flow
+                // runs untouched. The daemon no longer holds the response for a
+                // device gate: hooks carry no real permission options, and PreToolUse
+                // fires even for tools Claude auto-approves, so a gate produced false
+                // attention + a fabricated Allow/Deny. Accurate steering only exists
+                // on PTY-managed sessions (the CLI), so observed sessions report
+                // idle/processing only.
+                Task { @MainActor [weak self] in await self?.handleHookPost(rawName: rawName, body: bodyData) }
+                return .text("")
             }
             Task { @MainActor [weak self] in await self?.handleHookPost(rawName: rawName, body: bodyData) }
             return .json(["received": true])
@@ -2218,23 +2211,19 @@ final class DaemonServer {
             return
         }
 
-        // Device approval for a gated PreToolUse permission request (observed,
-        // no-PTY session). Must run BEFORE the gateway dispatch so a held local
-        // hook resolves first; only fall through to the gateway when there's no
-        // local pending entry. Mirrors `bridge/src/daemon-server.ts`.
+        // Gateway exec approval (OpenClaw) — resolve the held RPC approval. The
+        // observed-Claude device-approval gate was removed, so this only serves
+        // the OpenClaw exec-approval path now.
         if type == "permission_decision" {
             guard let requestId = cmd["requestId"] as? String,
                   let decision = cmd["decision"] as? String,
                   decision == "allow" || decision == "deny" else { return }
-            // 1. Local held PreToolUse hook (observed Claude).
-            if resolveApproval(requestId: requestId, decision: decision) { return }
-            // 2. Gateway exec approval (OpenClaw) — resolve the held RPC approval.
             if let gw = gatewayAdapter {
                 let cmdBox = SendableDict(cmd)
                 Task { await gw.sendRPC(method: "exec.approval.resolve", params: cmdBox.value) }
                 return
             }
-            DaemonLogger.shared.debug("Daemon", "permission_decision: no pending request \(requestId)")
+            DaemonLogger.shared.debug("Daemon", "permission_decision: no gateway for request \(requestId)")
             return
         }
 
@@ -2635,26 +2624,12 @@ final class DaemonServer {
             // session back to idle when the turn finishes.
             updateSessionHookState(sessionId: sessionId, state: "processing", clearTool: true)
         case "notification":
-            // Direct-`claude` permission prompts arrive as a Notification hook
-            // (the App Store daemon has no PTY parser and no `ps` observer, so
-            // this is the only awaiting signal). The hook carries free-text
-            // `message` and a `session_id` but no structured options, so we
-            // surface "awaiting + question" only; the device flips to the
-            // attention tier and shows the question. Cleared naturally by the
-            // next tool/stop/prompt hook via updateSessionHookState.
-            let message = json["message"] as? String ?? ""
-            let notificationType = json["notification_type"] as? String
-            if Self.isPermissionNotification(notificationType: notificationType, message: message), let sessionId,
-               var entry = pushedSessionsById[sessionId] {
-                let q = String(message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
-                if entry.state != "awaiting_permission" || entry.question != q {
-                    entry.state = "awaiting_permission"
-                    entry.question = q
-                    pushedSessionsById[sessionId] = entry
-                    upsertIntoCachedSessions(entry)
-                    broadcastSessionsList()
-                }
-            }
+            // Notification hooks no longer flip a session to attention. The hook
+            // carries only free-text `message` (no structured options) and fires
+            // for an observed session with no PTY to drive, so surfacing it would
+            // show a dead, unanswerable prompt. Accurate awaiting only comes from
+            // PTY-managed sessions (the CLI relays those with real options).
+            break
         case "codex_user_prompt_submit":
             _ = stateMachine.transition(trigger: "user_prompt_submit", source: .hook)
             updateSessionHookState(sessionId: sessionId, state: "processing")
@@ -3225,11 +3200,10 @@ final class DaemonServer {
         let oldTool = entry.currentTool
         let oldQuestion = entry.question
         entry.state = newState
-        // Any non-awaiting transition means a pending permission prompt was
-        // answered — drop the awaiting question + gate so they don't linger.
+        // Any non-awaiting transition means a pending prompt was answered — drop
+        // the awaiting question so it doesn't linger.
         if newState != "awaiting_permission" {
             entry.question = nil
-            entry.requestId = nil
         }
         if clearTool {
             entry.currentTool = nil
@@ -3251,47 +3225,16 @@ final class DaemonServer {
         }
     }
 
-    // MARK: - Device approvals (observed PreToolUse gating)
+    // MARK: - Hook dispatch
 
-    /// Generic (non-PreToolUse) hook entry: deserialize the body and dispatch.
-    /// PreToolUse takes the holding path (`handlePreToolUseHook`) instead.
+    /// Generic hook entry: deserialize the body and dispatch. All events
+    /// (including PreToolUse) route here; the daemon no longer holds PreToolUse
+    /// for a device gate.
     @MainActor
     private func handleHookPost(rawName: String, body: Data) async {
         var json = (try? JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]
         json["event"] = Self.mapHookEventName(rawName)
         await handleHookEvent(json)
-    }
-
-    /// PreToolUse entry. Runs normal hook handling first (sets processing /
-    /// currentTool), then — when device approvals are enabled and the tool is
-    /// gated — registers a gate and SUSPENDS until a device decides or the
-    /// timeout fires. Returns the Claude Code PreToolUse response body string
-    /// ("" = no decision → Claude's own terminal prompt).
-    @MainActor
-    private func handlePreToolUseHook(body: Data) async -> String {
-        var json = (try? JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]
-        json["event"] = "tool_start"
-        await handleHookEvent(json)
-
-        let cfg = deviceApprovalsConfig()
-        let toolName = json["tool_name"] as? String ?? ""
-        let sessionId = (json["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        // PreToolUse fires for every tool call regardless of permission mode; only
-        // hold when Claude itself could prompt, else we nag for a decision the
-        // agent never asked for. See shouldGate(permissionMode:tool:).
-        let permissionMode = json["permission_mode"] as? String
-        guard cfg.enabled, let sessionId, cfg.gatedTools.contains(toolName),
-              Self.shouldGate(permissionMode: permissionMode, tool: toolName),
-              pushedSessionsById[sessionId] != nil else {
-            return "" // not gated / auto-approved mode / unknown session → Claude's normal flow, zero added latency
-        }
-        let requestId = UUID().uuidString
-        setApprovalGate(sessionId: sessionId, requestId: requestId, tool: toolName, toolInput: json["tool_input"])
-        let decision = await awaitApproval(requestId: requestId, sessionId: sessionId, timeoutMs: cfg.timeoutMs)
-        if decision == "allow" || decision == "deny" {
-            return Self.preToolUseDecisionBody(decision)
-        }
-        return "" // "ask"/timeout → fall back to Claude's own terminal prompt
     }
 
     nonisolated static func mapHookEventName(_ rawName: String) -> String {
@@ -3305,118 +3248,6 @@ final class DaemonServer {
         case "Notification": return "notification"
         default: return rawName.lowercased()
         }
-    }
-
-    /// Register a held approval and suspend until resolved. Auto-resolves to
-    /// "ask" after `timeoutMs` so a never-answered prompt falls back to Claude's
-    /// terminal prompt (the hook curl's --max-time must exceed this).
-    @MainActor
-    private func awaitApproval(requestId: String, sessionId: String, timeoutMs: Int) async -> String {
-        // Defensive: resolve any stale entry under this id first.
-        if let existing = pendingApprovals.removeValue(forKey: requestId) {
-            existing.timeoutTask.cancel()
-            existing.continuation.resume(returning: "ask")
-        }
-        return await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
-            let timeoutTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(timeoutMs))
-                guard !Task.isCancelled else { return }
-                self?.resolveApproval(requestId: requestId, decision: "ask")
-            }
-            pendingApprovals[requestId] = PendingApproval(continuation: cont, sessionId: sessionId, timeoutTask: timeoutTask)
-            DaemonLogger.shared.debug("Daemon", "approval pending \(requestId) (session=\(sessionId))")
-        }
-    }
-
-    /// Resolve a held approval by id. Returns true when an entry existed.
-    @MainActor
-    @discardableResult
-    private func resolveApproval(requestId: String, decision: String) -> Bool {
-        guard let entry = pendingApprovals.removeValue(forKey: requestId) else { return false }
-        entry.timeoutTask.cancel()
-        entry.continuation.resume(returning: decision)
-        clearApprovalGate(sessionId: entry.sessionId)
-        DaemonLogger.shared.debug("Daemon", "approval resolved \(requestId) → \(decision)")
-        return true
-    }
-
-    /// Mark a session as awaiting device approval for a gated tool.
-    @MainActor
-    private func setApprovalGate(sessionId: String, requestId: String, tool: String, toolInput: Any?) {
-        guard var entry = pushedSessionsById[sessionId] else { return }
-        entry.state = "awaiting_permission"
-        entry.requestId = requestId
-        entry.question = Self.formatApprovalQuestion(tool: tool, toolInput: toolInput)
-        entry.promptType = "yes_no"
-        entry.options = nil
-        entry.navigable = false
-        pushedSessionsById[sessionId] = entry
-        upsertIntoCachedSessions(entry)
-        broadcastSessionsList()
-        if userFocusedSessionId == sessionId { broadcastStateUpdate() }
-    }
-
-    /// Clear a session's approval gate (decision arrived / timed out). Returns
-    /// the session to "processing"; the next hook corrects the precise state.
-    @MainActor
-    private func clearApprovalGate(sessionId: String) {
-        guard var entry = pushedSessionsById[sessionId] else { return }
-        guard entry.requestId != nil || entry.state == "awaiting_permission" else { return }
-        entry.requestId = nil
-        entry.question = nil
-        entry.promptType = nil
-        entry.state = "processing"
-        pushedSessionsById[sessionId] = entry
-        upsertIntoCachedSessions(entry)
-        broadcastSessionsList()
-        if userFocusedSessionId == sessionId { broadcastStateUpdate() }
-    }
-
-    /// Read `deviceApprovals` from settings.json (3s cache — PreToolUse fires on
-    /// every tool call). Absent object/field defaults to ON, matching the Node
-    /// daemon and `config/default-settings.json`.
-    @MainActor
-    private func deviceApprovalsConfig() -> DeviceApprovalsCfg {
-        let defaults = DeviceApprovalsCfg(enabled: true, gatedTools: ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"], timeoutMs: 45_000)
-        if let cached = cachedDeviceApprovals, Date().timeIntervalSince(cached.at) < 3 {
-            return cached.cfg
-        }
-        let cfg: DeviceApprovalsCfg
-        if let data = try? Data(contentsOf: AgentDeckPaths.settingsJson),
-           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let obj = root["deviceApprovals"] as? [String: Any] {
-            let enabled = (obj["enabled"] as? Bool) ?? true
-            let gated = (obj["gatedTools"] as? [String]) ?? defaults.gatedTools
-            let timeout = max(1000, (obj["timeoutMs"] as? Int) ?? defaults.timeoutMs)
-            cfg = DeviceApprovalsCfg(enabled: enabled, gatedTools: gated, timeoutMs: timeout)
-        } else {
-            cfg = defaults
-        }
-        cachedDeviceApprovals = (cfg, Date())
-        return cfg
-    }
-
-    /// Human-readable approval question, e.g. "Allow Bash: npm test?".
-    nonisolated static func formatApprovalQuestion(tool: String, toolInput: Any?) -> String {
-        var detail = ""
-        if let inp = toolInput as? [String: Any] {
-            for key in ["command", "file_path", "notebook_path", "path", "pattern", "url"] {
-                if let value = inp[key] as? String { detail = value; break }
-            }
-        }
-        let base = tool.isEmpty ? "Allow tool" : "Allow \(tool)"
-        let raw = detail.isEmpty ? "\(base)?" : "\(base): \(detail)?"
-        let collapsed = raw.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespaces)
-        return String(collapsed.prefix(120))
-    }
-
-    /// Claude Code PreToolUse decision body.
-    nonisolated static func preToolUseDecisionBody(_ decision: String) -> String {
-        let obj: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": decision]]
-        guard let data = try? JSONSerialization.data(withJSONObject: obj),
-              let str = String(data: data, encoding: .utf8) else { return "" }
-        return str
     }
 
     @MainActor
@@ -4583,15 +4414,14 @@ final class DaemonServer {
         e["cursorIndex"] = stateMachine.cursorIndex
         if let sp = stateMachine.suggestedPrompt { e["suggestedPrompt"] = sp }
         // Per-session awaiting overlay. The aggregate state machine can't
-        // attribute a gated PreToolUse (observed, no PTY) to a specific session,
-        // so when the FOCUSED session carries an awaiting gate in
-        // pushedSessionsById, surface its state/requestId/question here. Without
-        // this the Stream Deck encoder (which reads requestId off state_update)
-        // never enters interactive mode and can't approve an observed session.
+        // attribute a pushed (PTY-managed) session's awaiting state to a specific
+        // session, so when the FOCUSED session carries an awaiting state in
+        // pushedSessionsById, surface its state/question/promptType here so the
+        // encoder/HUD reflect it. Options arrive via the focus relay's real
+        // state_update for that session.
         if let fid = userFocusedSessionId, let entry = pushedSessionsById[fid],
            let st = entry.state, st.hasPrefix("awaiting") {
             e["state"] = st
-            if let rid = entry.requestId { e["requestId"] = rid }
             if let q = entry.question { e["question"] = q }
             if let pt = entry.promptType { e["promptType"] = pt }
             e["navigable"] = entry.navigable ?? false
@@ -5186,9 +5016,6 @@ final class DaemonServer {
 
     func shutdown() async {
         DaemonLogger.shared.info("Daemon shutting down...")
-        // Resolve any held PreToolUse approvals to "ask" so their suspended hook
-        // responses unblock (→ Claude's own prompt) instead of hanging the socket.
-        for (requestId, _) in pendingApprovals { resolveApproval(requestId: requestId, decision: "ask") }
         if let backgroundActivity { ProcessInfo.processInfo.endActivity(backgroundActivity) }
         backgroundActivity = nil
         networkMonitor?.cancel()
@@ -5381,7 +5208,6 @@ final class DaemonServer {
         if let navigable = s.navigable, navigable { d["navigable"] = true }
         if let q = s.question { d["question"] = q }
         if let pt = s.promptType { d["promptType"] = pt }
-        if let rid = s.requestId { d["requestId"] = rid }
         if let sa = s.startedAt {
             d["startedAt"] = sa
             // Per-session elapsed (seconds) for NTP-less devices (ESP32 D1 mosaic).

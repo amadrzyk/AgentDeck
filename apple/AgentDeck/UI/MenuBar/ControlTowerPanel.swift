@@ -185,22 +185,15 @@ struct ControlTowerPanel: View {
         stateHolder.state.focusedSessionId ?? stateHolder.state.sessionId
     }
 
-    /// Options to render in the menubar theater. Observed gated PreToolUse
-    /// (carries a requestId but no PTY) → a fixed Allow/Deny pair; otherwise
-    /// mirror the focused session's live options ONLY when they genuinely
-    /// belong to it. Mirrors `MonitorScreen`.
+    /// Options to render in the menubar theater. Only PTY-managed sessions expose
+    /// Claude's real choices; mirror the focused session's live options ONLY when
+    /// they genuinely belong to it. Observed (hook-only) sessions render [] →
+    /// "respond in terminal". Mirrors `MonitorScreen`.
     private func attentionOptions(for session: SessionInfo, isFocused: Bool) -> [PromptOption] {
-        if session.requestId != nil {
-            return [
-                PromptOption(index: 0, label: "Allow", shortcut: "y", recommended: true, selected: nil),
-                PromptOption(index: 1, label: "Deny", shortcut: "n", recommended: nil, selected: nil),
-            ]
-        }
         // Borrow the aggregate live options only when the latest awaiting
         // state_update is attributed to THIS session (a managed PTY session).
-        // Observed/Notification sessions have no PTY to drive, so showing
-        // leftover options from another session would render dead, mismatched
-        // buttons — return [] and let the HUD show "respond in terminal".
+        // Showing leftover options from another session would render dead,
+        // mismatched buttons — return [] and let the HUD show "respond in terminal".
         guard isFocused,
               stateHolder.state.sessionId == session.id,
               stateHolder.state.state.isAwaiting,
@@ -211,14 +204,8 @@ struct ControlTowerPanel: View {
     }
 
     private func respondToAwaiting(_ optionIndex: Int, session: SessionInfo) {
-        // Gated PreToolUse (observed, no PTY): resolve the held hook response via
-        // permission_decision — there's no PTY to drive. index 0 = Allow, 1 = Deny.
-        if let requestId = session.requestId {
-            stateHolder.sendCommand(.permissionDecision(requestId: requestId, decision: optionIndex == 0 ? "allow" : "deny"))
-            return
-        }
-        // Otherwise route via the daemon focus relay, then send the selection —
-        // `selectOption` is the canonical path (same as D200H + Cmd+Y/N/A).
+        // Route via the daemon focus relay, then send the selection — `selectOption`
+        // is the canonical path (same as D200H + Cmd+Y/N/A).
         stateHolder.sendCommand(.focusSession(sessionId: session.id))
         stateHolder.sendCommand(.selectOption(index: optionIndex))
     }

@@ -318,6 +318,32 @@ describe('OutputParser', () => {
       expect(events[0].options[2]).toMatchObject({ label: 'Always allow', shortcut: 'a' });
     });
 
+    it('keeps ALL real options when a numbered prompt contains "Yes, allow once" (no collapse to 3)', () => {
+      const p = armParser();
+      const events = collectEvents(p, 'permission_prompt');
+
+      // Modern Claude permission prompt: numbered, with a custom 4th choice. The
+      // literal "Yes, allow once" triggers the yes_no_always branch, which must
+      // now surface Claude's REAL options instead of the hardcoded triple.
+      p.feed(
+        'Do you want to proceed?\n' +
+        '❯ 1. Yes, allow once\n' +
+        '  2. Yes, and don\'t ask again this session\n' +
+        '  3. No, and tell Claude what to do differently\n' +
+        '  4. Edit command first\n'
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0].options).toHaveLength(4);
+      expect(events[0].options.map((o: PromptOption) => o.label)).toEqual([
+        'Yes, allow once',
+        'Yes, and don\'t ask again this session',
+        'No, and tell Claude what to do differently',
+        'Edit command first',
+      ]);
+      expect(events[0].promptType).toBe('yes_no_always');
+    });
+
     it('detects (Y)es/(N)o pattern', () => {
       const p = armParser();
       const events = collectEvents(p, 'permission_prompt');

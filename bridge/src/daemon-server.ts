@@ -22,8 +22,7 @@ import { PassiveSessionObserver } from './passive-observer.js';
 import { SessionTimelineRelay } from './session-timeline-relay.js';
 import { SessionFocusRelay } from './session-focus-relay.js';
 import { updatePushState } from './session-aggregator.js';
-import { setAwaitingOverlay, getAwaitingOverlay, clearAwaitingOverlay, isPermissionNotification, shouldGatePreToolUse, applyAwaitingOverlayToObserved } from './awaiting-overlay.js';
-import { registerPending, resolvePending, abandonPending, sweepStalePending, drainAllPending } from './permission-resolver.js';
+import { resolvePending, sweepStalePending, drainAllPending } from './permission-resolver.js';
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import {
@@ -49,6 +48,7 @@ import { rgbToBmp, pixooLiveHtml } from './hook-server.js';
 import { enableDebugLog, debug } from './logger.js';
 import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule } from './apme/index.js';
 import { handleApmeRequest } from './apme/http.js';
+import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
 import {
   handleTrmnlSetup,
   handleTrmnlDisplay,
@@ -117,53 +117,13 @@ function loadDaemonSettings(): Record<string, unknown> {
   return best?.parsed ?? {};
 }
 
-// ===== Device approvals (observed-session PreToolUse gating) =====
-
-interface DeviceApprovalsConfig {
-  enabled: boolean;
-  gatedTools: string[];
-  timeoutMs: number;
-}
-const DEFAULT_GATED_TOOLS = ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
-let cachedApprovals: { cfg: DeviceApprovalsConfig; at: number } | null = null;
-
-/** Read deviceApprovals settings with a 3s cache — the gate is checked on every
- *  PreToolUse (every tool call), so re-reading settings.json each time would add
- *  an fs hit per tool. Cache keeps "OFF = zero added latency" honest. */
-function getDeviceApprovalsConfig(): DeviceApprovalsConfig {
-  const now = Date.now();
-  if (cachedApprovals && now - cachedApprovals.at < 3000) return cachedApprovals.cfg;
-  const raw = (loadDaemonSettings().deviceApprovals ?? {}) as Record<string, unknown>;
-  const cfg: DeviceApprovalsConfig = {
-    // Default ON: observed-session approval is the only way a device popup can
-    // actually drive a no-PTY session forward, so absent config opts in. Only
-    // an explicit `enabled: false` keeps the gate off.
-    enabled: raw.enabled !== false,
-    gatedTools: Array.isArray(raw.gatedTools)
-      ? raw.gatedTools.filter((t): t is string => typeof t === 'string')
-      : DEFAULT_GATED_TOOLS,
-    timeoutMs: typeof raw.timeoutMs === 'number' && raw.timeoutMs > 0 ? raw.timeoutMs : 45_000,
-  };
-  cachedApprovals = { cfg, at: now };
-  return cfg;
-}
-
-function isToolGated(toolName: string, gatedTools: string[]): boolean {
-  return !!toolName && gatedTools.includes(toolName);
-}
-
-/** Human-readable approval question from a PreToolUse payload, e.g.
- *  "Allow Bash: npm test?" / "Allow Write: src/app.ts?". */
-function formatApprovalQuestion(toolName: string, toolInput: unknown): string {
-  const inp = toolInput && typeof toolInput === 'object' ? (toolInput as Record<string, unknown>) : {};
-  let detail = '';
-  for (const k of ['command', 'file_path', 'notebook_path', 'path', 'pattern', 'url']) {
-    if (typeof inp[k] === 'string') { detail = inp[k] as string; break; }
-  }
-  const base = toolName ? `Allow ${toolName}` : 'Allow tool';
-  const q = detail ? `${base}: ${detail}?` : `${base}?`;
-  return q.replace(/\s+/g, ' ').trim().slice(0, 120);
-}
+// Observed-session attention (the hook-driven Notification overlay + PreToolUse
+// device-approval gate) was removed on 2026-06-27. Hooks carry no structured
+// permission options and PreToolUse fires even for tools Claude auto-approves,
+// so the gate produced false attention and a fabricated Allow/Deny that never
+// matched Claude's real prompt. Accurate, rich steering only exists on
+// PTY-managed sessions (`agentdeck claude`), where the OutputParser reads the
+// real prompt. Observed sessions now report idle/processing only.
 
 function log(msg: string): void {
   process.stderr.write(msg + '\n');
@@ -648,11 +608,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     if (req.method === 'POST' && pathname.startsWith('/hooks/')) {
       const eventName = pathname.slice('/hooks/'.length);
       let body = '';
-      // Set when this PreToolUse response is held open awaiting device approval,
-      // so a client disconnect (Claude killed the hook) can drop the pending entry.
-      let heldRequestId: string | null = null;
       req.on('data', (c: Buffer) => { body += c; if (body.length > 1_000_000) req.destroy(); });
-      req.on('close', () => { if (heldRequestId) abandonPending(heldRequestId); });
       req.on('end', () => {
         let json: Record<string, unknown> = {};
         try { json = body ? JSON.parse(body) : {}; } catch { /* ignore */ }
@@ -674,35 +630,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         } else if (mapped === 'tool_end') {
           core.stateMachine.handleHookEvent('PostToolUse', json);
         }
-        // Per-session awaiting overlay (observed/direct-`claude` sessions).
-        // The single aggregate state machine above can't attribute awaiting to
-        // a specific session (all direct-`claude` hooks share `daemon-hook`),
-        // so we key the overlay by Claude's own session_id and merge it into
-        // the observed-session list at enrich time. See awaiting-overlay.ts.
-        const claudeSid = typeof json.session_id === 'string' ? json.session_id : undefined;
-        if (claudeSid) {
-          if (mapped === 'notification') {
-            const message = typeof json.message === 'string' ? json.message : '';
-            const notificationType = typeof json.notification_type === 'string' ? json.notification_type : undefined;
-            if (isPermissionNotification(notificationType, message)) {
-              setAwaitingOverlay(claudeSid, message);
-              // Broadcast immediately rather than waiting for the 2s debounce
-              // or the 5s observer tick, so the prompt surfaces within one frame.
-              core.broadcastSessionsList().catch(() => {});
-            }
-          } else if (
-            mapped === 'tool_start' || mapped === 'tool_end' ||
-            mapped === 'user_prompt_submit' || mapped === 'stop' ||
-            mapped === 'session_start' || mapped === 'session_end'
-          ) {
-            // Any subsequent hook means the prompt was answered — drop the
-            // overlay. Only rebroadcast if there was actually one to clear
-            // (direct-`claude` sessions fire tool hooks constantly).
-            if (clearAwaitingOverlay(claudeSid)) {
-              core.broadcastSessionsList().catch(() => {});
-            }
-          }
-        }
         // APME collector
         if (apme) {
           // Use a stable "hook session" for the daemon — hooks from direct `claude` runs
@@ -718,54 +645,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             });
           }
           apme.collector.ingestHook(hookSessionId, mapped, json);
+          // Direct `claude` runs reach the daemon only via these hooks, which
+          // never carry the model — so every such run persisted model_id=NULL
+          // (the bulk of the APME "unknown" rows). Recover it from the
+          // transcript Claude itself writes (message.model). Must run before
+          // closeRun tears down the session→run mapping.
+          if (mapped === 'stop' || mapped === 'session_end') {
+            const tp = json.transcript_path;
+            if (typeof tp === 'string' && tp) {
+              const model = readModelFromTranscript(tp);
+              if (model) apme.collector.updateModel(hookSessionId, model);
+            }
+          }
           if (mapped === 'session_end') {
             apme.collector.closeRun(hookSessionId);
           }
         }
 
         // ── Response ──
-        // PreToolUse may be held open for device approval (observed sessions);
-        // every other event acks immediately. The eager response that used to
-        // live after this callback was moved here so the hold is possible.
+        // PreToolUse returns an empty body → Claude's normal permission flow
+        // runs untouched (zero added latency, no daemon-side gate). Every other
+        // event acks immediately.
         if (eventName === 'PreToolUse') {
-          const cfg = getDeviceApprovalsConfig();
-          const toolName = typeof json.tool_name === 'string' ? json.tool_name : '';
-          // PreToolUse fires for every tool call regardless of permission mode;
-          // only hold when Claude itself could prompt, else we nag for a
-          // decision the agent never asked for. See shouldGatePreToolUse.
-          const permissionMode = typeof json.permission_mode === 'string' ? json.permission_mode : undefined;
-          if (cfg.enabled && claudeSid && isToolGated(toolName, cfg.gatedTools) && shouldGatePreToolUse(permissionMode, toolName)) {
-            const requestId = randomUUID();
-            heldRequestId = requestId;
-            // Overlay carries the requestId → devices render Allow/Deny and reply
-            // with permission_decision. This runs after the tool_start overlay-clear
-            // above, so it wins (sets the actionable gate for THIS tool).
-            setAwaitingOverlay(claudeSid, formatApprovalQuestion(toolName, json.tool_input), requestId);
-            registerPending(requestId, res, {
-              sessionId: claudeSid,
-              tool: toolName,
-              timeoutMs: cfg.timeoutMs,
-              // Fires on ANY resolution (device decision, timeout, sweep, drain) so
-              // the awaiting UI clears consistently across every surface.
-              onResolved: () => {
-                clearAwaitingOverlay(claudeSid);
-                core.broadcastSessionsList().catch(() => {});
-                broadcastFocusedState();
-              },
-            });
-            core.broadcastSessionsList().catch(() => {});
-            // If this session is already focused, refresh the focused state_update
-            // so encoder/HUD surfaces that read state_update show Allow/Deny live.
-            if (userFocusedSessionId && userFocusedSessionId.replace(/^observed:(?:claude|codex):/, '') === claudeSid) {
-              broadcastFocusedState();
-            }
-            // Response intentionally held — resolved by permission_decision or timeout.
-          } else {
-            // Not gated / disabled: empty body → hook echoes nothing → Claude's
-            // normal permission flow, zero added latency.
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end('');
-          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('');
         } else {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ received: true }));
@@ -921,27 +824,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       agentCapabilities: gwAlive ? OPENCLAW_CAPABILITIES : undefined,
       snapshot: core.stateMachine.getSnapshot(),
     }));
-    // Synthesize an awaiting-permission state for a focused observed session
-    // with a pending PreToolUse gate. Observed sessions have no bridge for the
-    // focus relay to stream from, so without this the encoder/HUD that read
-    // `state_update` would show the aggregate (idle/processing) instead of the
-    // gate. Reuses every client's existing AWAITING_PERMISSION rendering; the
-    // requestId tells them to reply with permission_decision, not select_option.
-    if (userFocusedSessionId) {
-      const uuid = userFocusedSessionId.replace(/^observed:(?:claude|codex):/, '');
-      const gate = getAwaitingOverlay(uuid);
-      if (gate?.requestId) {
-        const ev = stateEvent as unknown as Record<string, unknown>;
-        ev.state = 'awaiting_permission';
-        ev.options = [
-          { index: 0, label: 'Allow', shortcut: 'y', recommended: true },
-          { index: 1, label: 'Deny', shortcut: 'n' },
-        ];
-        ev.question = gate.question;
-        ev.requestId = gate.requestId;
-        ev.navigable = false;
-      }
-    }
     lastStateEvent = stateEvent;
     core.wsServer.broadcast(stateEvent);
   };
@@ -1148,12 +1030,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // Inject OpenClaw virtual session only after Gateway authentication succeeds.
   // Reachability alone is a topology signal, not proof that commands can route.
   core.setSessionsEnricher((sessions) => {
-    // Overlay hook-driven awaiting state onto observed (direct-`claude`) sessions.
-    // Done here in the synchronous enricher (runs on every broadcast) rather than
-    // inside the 5s-throttled observer, so a Notification arriving mid-window
-    // still surfaces within one frame. Key = the Claude session UUID embedded
-    // in `observed:claude:<uuid>`.
-    const observed = applyAwaitingOverlayToObserved(passiveSessionObserver.collect(sessions));
+    // Observed (direct-`claude`) sessions report idle/processing only — they
+    // carry no accurate awaiting signal (hooks don't expose permission options),
+    // so no attention overlay is applied here.
+    const observed = passiveSessionObserver.collect(sessions);
     // Derive per-session elapsed seconds from startedAt so NTP-less devices
     // (ESP32 IPS10 mosaic) render an elapsed value per cell without a wall clock.
     const now = Date.now();
@@ -1217,6 +1097,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           break;
         case 'parser':
           core.stateMachine.handleParserEvent(evt.event, evt.data);
+          // The OpenClaw adapter emits the real model via a model_info parser
+          // event, but it only ever updated the display StateMachine — the APME
+          // run was never told, so every openclaw run persisted model_id=NULL.
+          if (evt.event === 'model_info' && apme && openclawApmeSessionId) {
+            const model = evt.data?.model as string | undefined;
+            if (model) apme.collector.updateModel(openclawApmeSessionId, model);
+          }
           break;
         case 'metadata':
           if (evt.event === 'model_catalog') {

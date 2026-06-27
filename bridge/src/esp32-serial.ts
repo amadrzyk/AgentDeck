@@ -259,11 +259,10 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
         port: Number.isFinite(s.port) ? s.port : 0,
         alive: Boolean(s.alive),
         // Per-session detail for the IPS10 D1 mosaic (cells show tool/elapsed,
-        // and awaiting cells render inline Approve/Deny + option buttons).
+        // and awaiting cells render the real option buttons Claude reported).
         currentTool: limitString(s.currentTool, 39),
         promptType: limitString(s.promptType, 19),
         question: limitString(s.question, 159),
-        requestId: limitString(s.requestId, 39),
         elapsedSec: Number.isFinite(s.elapsedSec) ? Math.round(s.elapsedSec) : undefined,
         options: sanitizeOptions(s.options),
       })),

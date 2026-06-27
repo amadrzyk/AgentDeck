@@ -310,7 +310,6 @@ describe('prepareForSerial (source)', () => {
         agentType: 'claude-code', state: 'awaiting_permission', port: 9122, alive: true,
         currentTool: 'Write · ' + 'x'.repeat(80),
         question: 'q'.repeat(200),
-        requestId: 'r'.repeat(80),
         promptType: 'yes_no',
         elapsedSec: 1083.7,
         options: Array.from({ length: 12 }, (_, i) => ({ label: 'L'.repeat(120), index: i, recommended: i === 0 })),
@@ -321,7 +320,7 @@ describe('prepareForSerial (source)', () => {
     const s = prepared.sessions[0];
     expect(s.currentTool).toHaveLength(39);
     expect(s.question).toHaveLength(159);
-    expect(s.requestId).toHaveLength(39);
+    expect(s.requestId).toBeUndefined(); // observed gate removed — no requestId passthrough
     expect(s.promptType).toBe('yes_no');
     expect(s.elapsedSec).toBe(1084); // rounded
     expect(s.options).toHaveLength(8); // sanitizeOptions caps at 8

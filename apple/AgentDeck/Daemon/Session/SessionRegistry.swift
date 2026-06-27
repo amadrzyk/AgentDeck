@@ -81,9 +81,8 @@ struct DaemonSessionEntry: Codable, Sendable, Identifiable {
     var currentTool: String?
     var options: [[String: AnyCodable]]?
     var navigable: Bool?
-    var question: String?  // awaiting prompt question (from Notification hook message)
+    var question: String?  // awaiting prompt question (PTY-managed session)
     var promptType: String?  // shape of the awaiting prompt (yes_no / multi_select / diff_review)
-    var requestId: String?   // gated PreToolUse request id → device replies permission_decision
     var elapsedSec: Int?     // seconds since startedAt — derived at broadcast for NTP-less devices (ESP32 D1 mosaic)
 }
 

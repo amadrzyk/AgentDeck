@@ -440,11 +440,10 @@ struct SessionInfo: Codable, Sendable, Identifiable {
     var currentTool: String?
     var groupSize: Int?
     var foldedSessionIds: [String]?
-    /// Awaiting prompt question text (observed sessions: Notification message or
-    /// "Allow {tool}: …?"; managed PTY: parsed header).
+    /// Awaiting prompt question text (PTY-managed session: parsed header).
     var question: String?
-    /// Present when a gated PreToolUse permission is pending device approval —
-    /// the HUD renders Allow/Deny and replies with `permissionDecision(requestId:)`.
+    /// Deprecated wire-compat field. The observed device-approval gate was removed
+    /// (2026-06-27); nothing sets this anymore. Kept so older clients still decode.
     var requestId: String?
 }
 

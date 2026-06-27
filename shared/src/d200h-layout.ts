@@ -52,8 +52,6 @@ export interface DashState {
   options: PromptOption[];
   currentTool: string;
   allSessions: SessionInfo[];
-  /** Gated PreToolUse request id (observed/no-PTY session) → Allow/Deny via permission_decision. */
-  requestId?: string;
   /** Live PTY option cursor is navigable (❯) — drives select_option vs respond. */
   navigable?: boolean;
   /**
@@ -86,7 +84,6 @@ export function parseState(evt: any): DashState {
     ),
     currentTool: evt?.currentTool ?? '',
     allSessions: Array.isArray(evt?.allSessions) ? evt.allSessions : [],
-    requestId: typeof evt?.requestId === 'string' ? evt.requestId : undefined,
     navigable: Boolean(evt?.navigable),
     // Prefer an explicit flag; otherwise infer from the presence of a real percent.
     usageKnown:
@@ -204,20 +201,16 @@ function renderOfflineSlot(hero = false): string {
  */
 /**
  * One row-of-actions key for the legacy single-page D200H layout. Renders the
- * i-th real option when the focused/PTY session reported options; otherwise, for
- * an observed gated PreToolUse session (no PTY options but a `requestId`), shows
- * Allow/Deny in slots 0/1 wired to `permission_decision`. Falls back to an empty
- * slot — never a hardcoded Yes/No/Always that can't drive the agent.
+ * i-th real option Claude reported (PTY-managed session). When there are no
+ * options the slot stays empty — observed (hook-only) sessions can't expose the
+ * real choices, so we never fabricate an Allow/Deny that doesn't match the
+ * actual prompt.
  */
 function awaitingActionSlot(state: DashState, isAwaiting: boolean, i: number, col: number, row: number): KeySlot {
   if (isAwaiting) {
     const opt = state.options[i];
     if (opt) {
       return { col, row, svg: renderOptionButton(opt, i), label: '', command: { type: 'select_option', index: i } };
-    }
-    if (state.options.length === 0 && state.requestId) {
-      if (i === 0) return { col, row, svg: renderOptionButton({ index: 0, label: 'Allow' }, 0), label: '', command: { type: 'permission_decision', requestId: state.requestId, decision: 'allow' } };
-      if (i === 1) return { col, row, svg: renderOptionButton({ index: 1, label: 'Deny' }, 1), label: '', command: { type: 'permission_decision', requestId: state.requestId, decision: 'deny' } };
     }
   }
   return { col, row, svg: renderEmptySlot(), label: '', command: null };
@@ -506,7 +499,6 @@ function buildDetail(
   const focused = stateEvt?.focusedSessionId === sid || stateEvt?.sessionId === sid;
   const sState = (focused ? state.state : (sess?.state ?? 'idle')).toLowerCase();
   const options = (focused ? state.options : (sess?.options ?? [])) ?? [];
-  const requestId = (focused ? stateEvt?.requestId : sess?.requestId) as string | undefined;
   const tool = focused ? state.currentTool : sess?.currentTool;
   const model = sess?.modelName ?? state.modelName;
 
@@ -550,15 +542,10 @@ function buildDetail(
           : { type: 'respond', value: opt.shortcut || opt.label?.charAt(0)?.toLowerCase() || String(i + 1) };
         cells.push({ svg: renderOptionButton(opt, i), action: { kind: 'command', command } });
       });
-    } else if (requestId != null) {
-      // Observed gated PreToolUse (no PTY): the hook only supports allow/deny,
-      // so present exactly those — never a fake "Always".
-      cells.push({ svg: actionTile('Allow', '#22c55e'), action: { kind: 'command', command: { type: 'permission_decision', requestId, decision: 'allow' } } });
-      cells.push({ svg: actionTile('Deny', '#ef4444'), action: { kind: 'command', command: { type: 'permission_decision', requestId, decision: 'deny' } } });
     } else {
-      // Awaiting but not remotely answerable (Notification-only signal, or a
-      // multi-option prompt on a no-PTY session). Don't fabricate Yes/No/Always
-      // buttons that go nowhere — guide the user to the terminal instead.
+      // Awaiting but no real options to render — only PTY-managed sessions expose
+      // Claude's actual choices. Don't fabricate Allow/Deny that may not match the
+      // real prompt; guide the user to the terminal instead.
       cells.push({ svg: renderInfoSlot('AWAITING', 'answer in terminal', 'activity', 'action'), action: null });
     }
   } else if (processingState(sState)) {

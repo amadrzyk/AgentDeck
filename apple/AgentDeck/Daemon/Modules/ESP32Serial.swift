@@ -864,8 +864,8 @@ actor ESP32Serial {
         } else if type == "sessions_list" {
             // Per-session fields the device needs, with serial-size caps. Mirrors the Node
             // bridge's prepareForSerial map (bridge/src/esp32-serial.ts) so the App-Store Swift
-            // daemon drives the same IPS10 D1 cards + pixel-office (project pods, desks, inline
-            // Approve/Deny) even when no CLI daemon is running. Dead sessions excluded.
+            // daemon drives the same IPS10 D1 cards + pixel-office (project pods, desks, real
+            // option buttons) even when no CLI daemon is running. Dead sessions excluded.
             func lim(_ v: Any?, _ n: Int) -> String {
                 guard let s = v as? String else { return "" }
                 return s.count > n ? String(s.prefix(n)) : s
@@ -883,8 +883,7 @@ actor ESP32Serial {
                             "alive": s["alive"] ?? true,
                             "currentTool": lim(s["currentTool"], 39),
                             "promptType": lim(s["promptType"], 19),
-                            "question": lim(s["question"], 159),
-                            "requestId": lim(s["requestId"], 39)
+                            "question": lim(s["question"], 159)
                         ]
                         if let es = s["elapsedSec"] { o["elapsedSec"] = es }
                         if let op = s["options"] { o["options"] = op }

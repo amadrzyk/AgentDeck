@@ -270,22 +270,15 @@ struct MonitorScreen: View {
         return nil
     }
 
-    /// Options to render in the attention HUD. Gated PreToolUse (observed)
-    /// sessions carry a requestId but no PTY options, so present a fixed
-    /// Allow/Deny pair; otherwise mirror the focused session's live options
-    /// ONLY when they genuinely belong to it.
+    /// Options to render in the attention HUD. Only PTY-managed sessions expose
+    /// Claude's real choices; mirror the focused session's live options ONLY when
+    /// they genuinely belong to it. Observed (hook-only) sessions have no real
+    /// options and no PTY to drive, so they render [] → "respond in terminal".
     private func attentionOptions(for session: SessionInfo, isFocused: Bool) -> [PromptOption] {
-        if session.requestId != nil {
-            return [
-                PromptOption(index: 0, label: "Allow", shortcut: "y", recommended: true, selected: nil),
-                PromptOption(index: 1, label: "Deny", shortcut: "n", recommended: nil, selected: nil),
-            ]
-        }
         // Borrow the aggregate live options only when the latest awaiting
         // state_update is attributed to THIS session (a managed PTY session).
-        // Observed/Notification sessions have no PTY to drive, so showing
-        // leftover options from another session would render dead, mismatched
-        // buttons — return [] and let the HUD show "respond in terminal".
+        // Showing leftover options from another session would render dead,
+        // mismatched buttons — return [] and let the HUD show "respond in terminal".
         guard isFocused,
               stateHolder.state.sessionId == session.id,
               stateHolder.state.state.isAwaiting,
@@ -300,13 +293,6 @@ struct MonitorScreen: View {
     /// focus relay routes the response correctly when there are multiple
     /// awaiting sessions.
     private func respondToAwaiting(_ index: Int, session: SessionInfo) {
-        // Gated PreToolUse (observed session): resolve the held hook response via
-        // permission_decision instead of select_option (there's no PTY to drive).
-        // index 0 = Allow, 1 = Deny — matches the synthetic options passed to the HUD.
-        if let requestId = session.requestId {
-            stateHolder.sendCommand(.permissionDecision(requestId: requestId, decision: index == 0 ? "allow" : "deny"))
-            return
-        }
         stateHolder.sendCommand(.focusSession(sessionId: session.id))
         stateHolder.sendCommand(.selectOption(index: index))
     }

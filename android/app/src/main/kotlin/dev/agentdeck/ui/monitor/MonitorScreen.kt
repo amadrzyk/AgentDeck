@@ -72,7 +72,6 @@ import dev.agentdeck.net.BridgeConstants
 import dev.agentdeck.net.BridgeDiscovery
 import dev.agentdeck.net.ConnectionStatus
 import dev.agentdeck.net.DiscoveredBridge
-import dev.agentdeck.net.PromptOption
 import dev.agentdeck.state.AgentStateHolder
 import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.TimelineStore
@@ -892,18 +891,13 @@ private fun MonitorHUD(
         val featuredSession = awaiting.firstOrNull { it.id == dashState.sessionId } ?: awaiting.firstOrNull()
         if (featuredSession != null) {
             val isFocused = featuredSession.id == dashState.sessionId
-            // Gated PreToolUse (observed) sessions carry a requestId but no PTY
-            // options — present a fixed Allow/Deny pair and reply via permission_decision.
-            val gateRequestId = featuredSession.requestId
+            // Only PTY-managed sessions expose Claude's real choices. Observed
+            // (hook-only) sessions carry no options and aren't remotely answerable,
+            // so render [] → "respond in terminal" rather than a fabricated Allow/Deny.
             val featured = buildAttentionFeatured(
                 session = featuredSession,
                 question = featuredSession.question ?: (if (isFocused) dashState.question else null),
-                options = if (gateRequestId != null)
-                    listOf(
-                        PromptOption(label = "Allow", index = 0, shortcut = "y", recommended = true),
-                        PromptOption(label = "Deny", index = 1, shortcut = "n"),
-                    )
-                else if (isFocused) dashState.options else emptyList(),
+                options = if (isFocused) dashState.options else emptyList(),
                 promptType = if (isFocused) dashState.promptType else null,
                 cursorIndex = if (isFocused) dashState.cursorIndex ?: 0 else 0,
                 navigable = if (isFocused) dashState.navigable ?: false else false,
@@ -912,12 +906,8 @@ private fun MonitorHUD(
                 featured = featured,
                 queuedCount = (awaiting.size - 1).coerceAtLeast(0),
                 onRespond = { index ->
-                    if (gateRequestId != null) {
-                        BridgeConnection.instance.sendPermissionDecision(gateRequestId, if (index == 0) "allow" else "deny")
-                    } else {
-                        featured.sessionId?.let { BridgeConnection.instance.sendFocusSession(it) }
-                        BridgeConnection.instance.sendSelectOption(index)
-                    }
+                    featured.sessionId?.let { BridgeConnection.instance.sendFocusSession(it) }
+                    BridgeConnection.instance.sendSelectOption(index)
                 },
                 onFocus = {
                     featured.sessionId?.let { BridgeConnection.instance.sendFocusSession(it) }

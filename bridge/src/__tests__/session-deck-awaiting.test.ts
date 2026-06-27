@@ -56,16 +56,17 @@ describe('buildSessionDeck detail-view awaiting', () => {
     expect(cmds).toContainEqual({ type: 'respond', value: 'n' });
   });
 
-  it('observed gated PreToolUse (requestId, no options): Allow/Deny via permission_decision', () => {
+  it('observed session (requestId, no options): no fabricated Allow/Deny — only PTY sessions expose real choices', () => {
+    // Observed (hook-only) sessions carry no real permission options, so the deck
+    // must NOT synthesize an Allow/Deny that may not match Claude's actual prompt.
     const deck = buildSessionDeck({
       state: 'awaiting_permission',
       allSessions: [sess({ requestId: 'req-9' })],
     }, { mode: 'detail', openSessionId: 's1' }, POS);
     const cmds = commandsOf(deck);
-    expect(cmds).toContainEqual({ type: 'permission_decision', requestId: 'req-9', decision: 'allow' });
-    expect(cmds).toContainEqual({ type: 'permission_decision', requestId: 'req-9', decision: 'deny' });
-    // never a third "Always" — the hook only supports allow/deny
-    expect(cmds.filter((c) => c.type === 'permission_decision')).toHaveLength(2);
+    expect(cmds.find((c) => c.type === 'permission_decision')).toBeUndefined();
+    expect(cmds.find((c) => c.type === 'select_option')).toBeUndefined();
+    expect(cmds.find((c) => c.type === 'respond')).toBeUndefined();
   });
 
   it('awaiting but not remotely answerable (no options, no requestId): no fake action commands', () => {
