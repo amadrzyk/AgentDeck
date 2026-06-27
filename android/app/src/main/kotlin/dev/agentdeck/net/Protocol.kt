@@ -152,6 +152,10 @@ data class UsageUpdate(
     val codexAccountId: String? = null,
     val codexSubscriptionActiveUntil: String? = null,
     val codexLastRefreshAt: String? = null,
+    // Codex (ChatGPT) usage limits parsed from local rollout files — primary ≈
+    // 5h window, secondary ≈ weekly. Mirrors Claude's fiveHourPercent/
+    // sevenDayPercent shape. Only rides on usage_update, not state_update.
+    val codexRateLimits: CodexRateLimits? = null,
     val modelCatalog: List<ModelCatalogEntry>? = null,
     val mlxModels: List<String>? = null,
     val subscriptions: List<SubscriptionInfo>? = null,
@@ -169,6 +173,27 @@ data class AntigravityStatusInfo(
     val planName: String? = null,
     val availableCredits: Int? = null,
     val minimumCreditAmountForUsage: Int? = null,
+)
+
+/** One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape.
+ *  Sourced from the user's own local Codex rollout files — not an API call. */
+@Serializable
+data class CodexRateLimitWindow(
+    val usedPercent: Double? = null,
+    /** Rolling window length in minutes (primary ≈ 300 = 5h, secondary ≈ 10080 = 7d). */
+    val windowMinutes: Int? = null,
+    /** ISO-8601 reset instant. */
+    val resetsAt: String? = null,
+)
+
+/** Codex usage limits. `primary` is the short (5h-style) window, `secondary`
+ *  the long (weekly) window — same idea as the Claude 5h/7d gauges. */
+@Serializable
+data class CodexRateLimits(
+    val primary: CodexRateLimitWindow? = null,
+    val secondary: CodexRateLimitWindow? = null,
+    /** Plan tier reported alongside the limits (e.g. "plus", "pro"). */
+    val planType: String? = null,
 )
 
 @Serializable

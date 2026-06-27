@@ -38,9 +38,10 @@ describe('buildSessionDeck list-view usage tiles', () => {
     const prev = deck.get(PREV)!;
     const last = deck.get(LAST)!;
     expect(prev.svg).toContain('5H');
-    expect(prev.svg).toContain('42%');
+    // Water-tank headline is REMAINING quota (100 − used). 42% used → 58% left.
+    expect(prev.svg).toContain('58%');
     expect(last.svg).toContain('7D');
-    expect(last.svg).toContain('17%');
+    expect(last.svg).toContain('83%'); // 17% used → 83% left
     expect(prev.action).toEqual({ kind: 'command', command: { type: 'query_usage' } });
     expect(last.action).toEqual({ kind: 'command', command: { type: 'query_usage' } });
   });
@@ -97,5 +98,54 @@ describe('buildSessionDeck list-view usage tiles', () => {
     const deck = buildSessionDeck(baseState(0), { mode: 'list', showUsage: true }, POS);
     expect(deck.get(PREV)!.svg).toContain('5H');
     expect(deck.get(LAST)!.svg).toContain('7D');
+  });
+
+  it('appends Codex 5H/7D tiles when codexRateLimits is present (each datum)', () => {
+    const codex = {
+      codexRateLimits: {
+        primary: { usedPercent: 30, windowMinutes: 300, resetsAt: undefined },
+        secondary: { usedPercent: 10, windowMinutes: 10080, resetsAt: undefined },
+        planType: 'plus',
+      },
+    };
+    const deck = buildSessionDeck(baseState(2, codex), { mode: 'list', showUsage: true }, POS);
+    // 4 trailing keys reserved: Claude 5H/7D + Codex 5H/7D, in placement order.
+    const tail = sortedPos.slice(sortedPos.length - 4);
+    expect(deck.get(tail[0])!.svg).toContain('5H');   // Claude 5H
+    expect(deck.get(tail[1])!.svg).toContain('7D');   // Claude 7D
+    expect(deck.get(tail[2])!.svg).toContain('CX 5H'); // Codex primary → 70% left
+    expect(deck.get(tail[2])!.svg).toContain('70%');
+    expect(deck.get(tail[3])!.svg).toContain('CX 7D'); // Codex secondary → 90% left
+    expect(deck.get(tail[3])!.svg).toContain('90%');
+    // Codex water hue is the brand blue, distinct from Claude terracotta.
+    expect(deck.get(tail[2])!.svg).toContain('#6166E0');
+    expect(deck.get(tail[0])!.svg).toContain('#C07058');
+  });
+
+  it('renders only the Codex window whose datum exists', () => {
+    const onlyPrimary = {
+      codexRateLimits: { primary: { usedPercent: 25, windowMinutes: 300 } },
+    };
+    const deck = buildSessionDeck(baseState(2, onlyPrimary), { mode: 'list', showUsage: true }, POS);
+    const tail = sortedPos.slice(sortedPos.length - 3);
+    expect(tail.map((p) => deck.get(p)!.svg).some((s) => s.includes('CX 5H'))).toBe(true);
+    expect(tail.map((p) => deck.get(p)!.svg).some((s) => s.includes('CX 7D'))).toBe(false);
+  });
+
+  it('still reserves usage on a tiny deck (few keys), keeping >=1 session slot', () => {
+    // Only 3 keys placed: old `slots.length >= 6` gate dropped ALL usage here.
+    const tiny = ['0_0', '1_0', '2_0'];
+    const deck = buildSessionDeck(baseState(1), { mode: 'list', showUsage: true }, tiny);
+    // 2 trailing keys = Claude 5H/7D; first key stays for the session.
+    expect(deck.get('1_0')!.svg).toContain('5H');
+    expect(deck.get('2_0')!.svg).toContain('7D');
+    const opens = [...deck.values()].filter((c) => c.action?.kind === 'open');
+    expect(opens.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('never starves the only key on a 1-key deck (usage yields to the session)', () => {
+    const deck = buildSessionDeck(baseState(1), { mode: 'list', showUsage: true }, ['0_0']);
+    // maxReserve = 0 → no usage tile; the single key shows the session.
+    expect(deck.get('0_0')!.action?.kind).toBe('open');
   });
 });

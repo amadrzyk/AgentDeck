@@ -367,25 +367,23 @@ struct TopologyRail: View {
     /// Antigravity is a Google-hosted model product — when the bridge
     /// surfaces an active plan, it belongs in the upstream rail alongside
     /// Claude/OpenClaw/MLX/Ollama. Hidden when `planName` is nil or blank.
-    /// Remaining model credits (when present) ride in the subtitle — this is
-    /// the same local value the Antigravity IDE shows the user, read from the
-    /// local state DB (no Antigravity/Google API call), so it stays within ToS.
+    ///
+    /// Plan name ONLY. Antigravity's real usage view is two per-group quotas
+    /// (Gemini vs Claude+GPT-OSS, each a 5h + weekly %) that the app fetches
+    /// live from Google's backend and never persists locally — surfacing it
+    /// would mean calling a private Google endpoint (ToS risk), so we don't.
+    /// The local `availableCredits` value does NOT match that view, so it is
+    /// intentionally not displayed.
     private var antigravityRow: some View {
         guard let status = stateHolder.state.antigravityStatus,
               let plan = status.planName, !plan.isEmpty else {
             return AnyView(EmptyView())
         }
-        let subtitle: String = {
-            if let credits = status.availableCredits {
-                return "\(plan) · \(credits) cr"
-            }
-            return plan
-        }()
         return AnyView(
             ProviderRow(
                 name: "Antigravity",
                 status: .ok,
-                subtitle: subtitle,
+                subtitle: plan,
                 rateLimits: [],
                 consumers: consumerCreatures(for: .antigravity)
             )

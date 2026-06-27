@@ -406,8 +406,10 @@ connMgr.on('usage_update', (ev: UsageEvent) => {
   };
   updateUsageModeData(usageData);
   updateUsageDialData(usageData);
-  // v4: feed the pinned list-view usage tiles (classic SD / no encoder).
-  updateSlotUsage(usageData);
+  // v4: feed the pinned list-view water-tank usage tiles (classic SD / XL — no
+  // encoder). Codex rate limits (primary≈5h, secondary≈7d) ride alongside the
+  // Claude 5h/7d quota so the bottom row can draw both agents.
+  updateSlotUsage({ ...usageData, codexRateLimits: ev.codexRateLimits });
 });
 
 connMgr.on('connection', (ev: ConnectionEvent) => {

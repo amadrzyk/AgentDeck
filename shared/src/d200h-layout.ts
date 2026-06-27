@@ -22,7 +22,8 @@ import {
   svgFrame,
 } from './svg-renderers/index.js';
 import { State, type PromptOption } from './states.js';
-import type { SessionInfo, SubscriptionInfo } from './protocol.js';
+import type { SessionInfo, SubscriptionInfo, CodexRateLimits } from './protocol.js';
+import { Brand } from './design-tokens.js';
 
 /** Command dispatched when a key is pressed. `null` = inert tile (info/empty). */
 export type ButtonCommand = { type: string; [k: string]: unknown };
@@ -66,6 +67,12 @@ export interface DashState {
   sevenDayResetsAt?: string;
   /** Active subscriptions (Claude / ChatGPT plan) with optional expiry. */
   subscriptions?: SubscriptionInfo[];
+  /**
+   * Codex (ChatGPT) rolling-window usage parsed from local rollout files.
+   * `primary` ≈ the 5h window, `secondary` ≈ the weekly window — mirrors the
+   * Claude 5H/7D gauges. Absent when the user runs no Codex session.
+   */
+  codexRateLimits?: CodexRateLimits;
 }
 
 export function parseState(evt: any): DashState {
@@ -93,6 +100,10 @@ export function parseState(evt: any): DashState {
     fiveHourResetsAt: typeof evt?.fiveHourResetsAt === 'string' ? evt.fiveHourResetsAt : undefined,
     sevenDayResetsAt: typeof evt?.sevenDayResetsAt === 'string' ? evt.sevenDayResetsAt : undefined,
     subscriptions: Array.isArray(evt?.subscriptions) ? evt.subscriptions : undefined,
+    codexRateLimits:
+      evt?.codexRateLimits && typeof evt.codexRateLimits === 'object'
+        ? (evt.codexRateLimits as CodexRateLimits)
+        : undefined,
   };
 }
 
@@ -162,13 +173,139 @@ export function renderUsageWideSlot(fiveHourPct: number, sevenDayPct: number, kn
   return `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="144" viewBox="0 0 288 144">${elements}</svg>`;
 }
 
-function renderInfoButton(title: string, value: string, titleColor = '#94a3b8', valueColor = '#ffffff'): string {
-  const valueFontSize = value.length > 8 ? 16 : value.length > 5 ? 20 : 24;
+// --- Water-tank usage gauge (canonical D200H/Ulanzi usage tile) ---------------
+// Mirrors the Stream Deck water-tank redesign (plugin/src/renderers/water-tank-
+// gauge.ts) replicated here so shared has no plugin/ dependency. The water LEVEL
+// is the REMAINING quota (100 − usedPercent) so the tank visibly drains as the
+// agent burns its window. The water hue carries the agent brand (Claude
+// terracotta / Codex blue) so a glance tells which agent the tile belongs to.
+
+/** Reset countdown ("2h13m" / "6d4h") from an ISO instant; "" when unknown. */
+function formatResetCountdown(iso?: string): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '';
+  const diff = t - Date.now();
+  if (diff <= 0) return 'now';
+  const totalH = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (totalH >= 24) {
+    const days = Math.floor(totalH / 24);
+    const remainH = totalH % 24;
+    return remainH > 0 ? `${days}d${remainH}h` : `${days}d`;
+  }
+  return totalH > 0 ? `${totalH}h${m}m` : `${m}m`;
+}
+
+const USAGE_TANK = { x: 42, y: 32, w: 60, h: 82 };
+/** Agent-brand water palette (fill + lighter surface highlight). Brand tokens. */
+const USAGE_PALETTE: Record<'claude' | 'codex', { water: string; surface: string }> = {
+  claude: { water: Brand.claudeCode, surface: '#E0A48F' },
+  codex: { water: Brand.codex, surface: '#9AA0F4' },
+};
+
+export interface UsageTankData {
+  agent: 'claude' | 'codex';
+  /** Rolling window this tile represents (drives the clip id + label fallback). */
+  window: '5h' | '7d';
+  /** Tile label, e.g. "5H", "7D", "CX 5H", "CX 7D". */
+  label: string;
+  /** Percent of the window already CONSUMED (0–100). Water shows 100−this. */
+  usedPercent: number;
+  /** ISO-8601 reset instant for the countdown. */
+  resetsAt?: string;
+  /** False → no live quota: empty tank + "—" instead of a confident gauge. */
+  known?: boolean;
+}
+
+export function renderUsageTank(data: UsageTankData): string {
+  const W = 144, H = 144;
+  const T = USAGE_TANK;
+  const known = data.known !== false;
+  const agent = data.agent === 'codex' ? 'codex' : 'claude';
+  const pal = USAGE_PALETTE[agent];
+  const label = data.label || (agent === 'codex' ? `CX ${data.window.toUpperCase()}` : data.window.toUpperCase());
+  const BG = '#0f172a', TANK_EMPTY = '#0b1220', RIM = '#33415a', RIM_CRIT = '#ef4444';
+  const LABEL_DIM = '#64748b', TEXT_DIM = '#475569', COUNTDOWN = '#94a3b8';
+  const tank = `<rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9" fill="${TANK_EMPTY}"/>`;
+  const labelEl = `<text x="72" y="20" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="bold" fill="${known ? pal.water : LABEL_DIM}">${escXml(label)}</text>`;
+
+  if (!known) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+      + `<rect width="${W}" height="${H}" fill="${BG}"/>` + tank
+      + `<rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9" fill="none" stroke="${RIM}" stroke-width="2.5"/>`
+      + labelEl
+      + `<text x="72" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="${TEXT_DIM}">—</text></svg>`;
+  }
+
+  const used = Math.max(0, Math.min(100, data.usedPercent));
+  const remaining = Math.max(0, Math.min(100, 100 - used));
+  const waterH = Math.round((T.h * remaining) / 100);
+  const waterY = T.y + T.h - waterH;
+  const critical = remaining <= 15;
+  const headColor = remaining <= 15 ? '#ef4444' : remaining <= 35 ? '#eab308' : '#f1f5f9';
+  const seg = T.w / 2;
+  const amp = remaining > 1 && remaining < 100 ? 3 : 0;
+  const surfacePath = `M ${T.x} ${waterY} q ${seg / 2} ${-amp} ${seg} 0 q ${seg / 2} ${amp} ${seg} 0`;
+  const bodyPath = `${surfacePath} L ${T.x + T.w} ${T.y + T.h} L ${T.x} ${T.y + T.h} Z`;
+  const clipId = `utank-${agent}-${data.window}`;
+  const water = remaining > 0
+    ? `<g clip-path="url(#${clipId})">`
+        + `<path d="${bodyPath}" fill="${pal.water}"/>`
+        + `<path d="${surfacePath}" fill="none" stroke="${pal.surface}" stroke-width="2" stroke-linecap="round" opacity="0.85"/>`
+      + `</g>`
+    : '';
+  const reset = formatResetCountdown(data.resetsAt);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<defs><clipPath id="${clipId}"><rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9"/></clipPath></defs>`
+    + `<rect width="${W}" height="${H}" fill="${BG}"/>` + tank + water
+    + `<rect x="${T.x}" y="${T.y}" width="${T.w}" height="${T.h}" rx="9" fill="none" stroke="${critical ? RIM_CRIT : RIM}" stroke-width="2.5"/>`
+    + labelEl
+    + `<text x="72" y="82" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="${headColor}" stroke="${BG}" stroke-width="3.5" paint-order="stroke" stroke-linejoin="round">${Math.round(remaining)}%</text>`
+    + (reset ? `<text x="72" y="132" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="${COUNTDOWN}">${escXml(reset)}</text>` : '')
+    + `</svg>`;
+}
+
+/**
+ * Usage tiles for the session deck, in placement order. Claude 5H/7D are always
+ * present (reserved gauges that draw "—" when the quota is unknown); Codex 5H
+ * (primary) / 7D (secondary) appear ONLY when that datum exists in
+ * `codexRateLimits`. Each tile re-fetches quota on press.
+ */
+function buildUsageTiles(state: DashState): SessionDeckCell[] {
+  const action: DeckAction = { kind: 'command', command: { type: 'query_usage' } };
+  const known = state.usageKnown !== false;
+  const tiles: SessionDeckCell[] = [
+    { svg: renderUsageTank({ agent: 'claude', window: '5h', label: '5H', usedPercent: state.fiveHourPercent, resetsAt: state.fiveHourResetsAt, known }), action },
+    { svg: renderUsageTank({ agent: 'claude', window: '7d', label: '7D', usedPercent: state.sevenDayPercent, resetsAt: state.sevenDayResetsAt, known }), action },
+  ];
+  const cx = state.codexRateLimits;
+  if (cx?.primary) {
+    tiles.push({ svg: renderUsageTank({ agent: 'codex', window: '5h', label: 'CX 5H', usedPercent: cx.primary.usedPercent, resetsAt: cx.primary.resetsAt, known: true }), action });
+  }
+  if (cx?.secondary) {
+    tiles.push({ svg: renderUsageTank({ agent: 'codex', window: '7d', label: 'CX 7D', usedPercent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt, known: true }), action });
+  }
+  return tiles;
+}
+
+/**
+ * Display-only readout tile (TOKENS / COST / MODEL). Deliberately FLAT — no
+ * rounded button bezel/panel — so the user reads it as status, not a pressable
+ * key. (These tiles carry `command: null`; the old bezeled `svgFrame` look gave
+ * them a false "press me" affordance.) A thin baseline rule + small dim caption
+ * mark it as a label.
+ */
+function renderInfoButton(title: string, value: string, titleColor = '#7c8596', valueColor = '#e5e7eb'): string {
+  const valueFontSize = value.length > 8 ? 18 : value.length > 5 ? 22 : 26;
   const elements = [
-    `<text x="72" y="52" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="${titleColor}">${escXml(title)}</text>`,
-    `<text x="72" y="${86 + (valueFontSize < 20 ? 2 : 0)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${valueFontSize}" font-weight="bold" fill="${valueColor}">${escXml(value)}</text>`,
+    `<rect width="144" height="144" fill="#0b0c10"/>`,
+    `<text x="72" y="56" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" letter-spacing="1.5" fill="${titleColor}">${escXml(title.toUpperCase())}</text>`,
+    `<text x="72" y="92" text-anchor="middle" font-family="Arial,sans-serif" font-size="${valueFontSize}" font-weight="bold" fill="${valueColor}">${escXml(value)}</text>`,
+    `<rect x="44" y="108" width="56" height="2" rx="1" fill="#1e2330"/>`,
   ].join('');
-  return svgFrame('#1C1C1E', elements);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">${elements}</svg>`;
 }
 
 function renderModeButton(mode: string): string {
@@ -432,24 +569,22 @@ function buildList(
 ): Map<string, SessionDeckCell> {
   const sessions = sortSessions(state.allSessions);
 
-  // Pin the bottom-right two keys to 5H/7D global usage gauges (opt-in). On the
-  // D200H these land just left of the native clock widget; on classic Stream
-  // Deck they replace the encoder LCD this surface lacks. `usageHere` maps a
-  // reserved position → its tile, so paging math below treats those keys as
-  // unavailable for sessions and pins them on EVERY page (usage is global).
+  // Pin the trailing keys to global usage gauges (opt-in, water-tank style). On
+  // the D200H these land just left of the native clock widget; on classic Stream
+  // Deck they replace the encoder LCD this surface lacks. We reserve as many keys
+  // as we have usage tiles (Claude 5H/7D + any Codex windows), but NEVER more
+  // than `slots.length - 1` so at least one key stays for sessions — this is the
+  // fix for the old `slots.length >= 6` gate that silently dropped ALL usage when
+  // the user placed only a few AgentDeck keys. Codex tiles drop first on tiny
+  // decks (Claude prioritised). Reserved keys are pinned on EVERY page (usage is
+  // global), and paging math below treats them as unavailable for sessions.
   const usageHere = new Map<string, SessionDeckCell>();
-  if (view.showUsage && slots.length >= 6) {
-    const known = state.usageKnown !== false;
-    const last = slots[slots.length - 1];
-    const prev = slots[slots.length - 2];
-    usageHere.set(prev, {
-      svg: renderUsageButton('5H', state.fiveHourPercent, '#28a0b4', known),
-      action: { kind: 'command', command: { type: 'query_usage' } },
-    });
-    usageHere.set(last, {
-      svg: renderUsageButton('7D', state.sevenDayPercent, '#2850a0', known),
-      action: { kind: 'command', command: { type: 'query_usage' } },
-    });
+  if (view.showUsage) {
+    const usageTiles = buildUsageTiles(state);
+    const maxReserve = Math.max(0, slots.length - 1);
+    const reserveCount = Math.min(usageTiles.length, maxReserve);
+    const reserved = slots.slice(slots.length - reserveCount);
+    reserved.forEach((pos, i) => usageHere.set(pos, usageTiles[i]));
   }
   // Positions left for sessions / NEXT after carving out usage.
   const freeSlots = slots.filter((pos) => !usageHere.has(pos));

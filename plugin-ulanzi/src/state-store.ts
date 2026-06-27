@@ -65,6 +65,10 @@ export class StateStore {
       sevenDayPercent: (this.usage.sevenDayPercent as number) ?? (this.lastState.sevenDayPercent as number) ?? 0,
       fiveHourResetsAt: this.usage.fiveHourResetsAt as string | undefined,
       sevenDayResetsAt: this.usage.sevenDayResetsAt as string | undefined,
+      // Codex (ChatGPT) rolling-window quota rides the same usage_update event.
+      // Pass it straight through so the layout engine can draw CX 5H/7D tiles
+      // alongside Claude's, mirroring how fiveHourPercent is surfaced.
+      codexRateLimits: this.usage.codexRateLimits,
       usageKnown,
     };
   }

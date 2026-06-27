@@ -271,20 +271,68 @@ describe('SessionSlotManager list-view usage tiles', () => {
   const fewSessions = (n: number) =>
     Array.from({ length: n }, (_, i) => makeSession({ id: `s${i}`, port: 9121 + i, projectName: `p${i}` }));
 
-  it('pins 5H/7D to the last two keys of a classic Stream Deck', () => {
+  const CODEX_LIMITS = {
+    primary: { usedPercent: 30, windowMinutes: 300, resetsAt: '2099-01-01T00:00:00Z' },
+    secondary: { usedPercent: 12, windowMinutes: 10080, resetsAt: '2099-01-08T00:00:00Z' },
+  };
+
+  it('pins Claude 5H/7D to the last two keys of a classic Stream Deck (no Codex)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
     manager.updateSessions(fewSessions(3), false);
 
-    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usagePercent: 17, usageKnown: true });
-    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usagePercent: 42, usageKnown: true });
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usagePercent: 17, usageKnown: true, usageAgent: 'claude', usageWindow: '7d' });
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usagePercent: 42, usageKnown: true, usageAgent: 'claude', usageWindow: '5h' });
     // Sessions fill the front keys.
     expect(manager.getSlotConfig(0, SD_CLASSIC_LAYOUT).type).toBe('session');
   });
 
-  it('does NOT reserve usage on Stream Deck+ (encoder carries usage)', () => {
+  it('reserves 4 keys (Claude 5h/7d + Codex 5h/7d), left-aligned, when both agents report quota', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({
+      fiveHourPercent: 42,
+      fiveHourResetsAt: '2099-01-01T00:00:00Z',
+      sevenDayPercent: 17,
+      sevenDayResetsAt: '2099-01-02T00:00:00Z',
+      codexRateLimits: CODEX_LIMITS,
+    });
+    manager.updateSessions(fewSessions(3), false);
+
+    // Block is the last 4 keys: 11=C5h, 12=C7d, 13=CX5h, 14=CX7d.
+    expect(manager.getSlotConfig(11, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '5H', usageAgent: 'claude', usageWindow: '5h', usagePercent: 42 });
+    expect(manager.getSlotConfig(12, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: '7D', usageAgent: 'claude', usageWindow: '7d', usagePercent: 17 });
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 5H', usageAgent: 'codex', usageWindow: '5h', usagePercent: 30 });
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 7D', usageAgent: 'codex', usageWindow: '7d', usagePercent: 12 });
+    // Sessions still fill the front keys (before the reserved block).
+    expect(manager.getSlotConfig(0, SD_CLASSIC_LAYOUT).type).toBe('session');
+  });
+
+  it('hides Codex tiles when only Claude reports quota (reserve 2, not 4)', () => {
     const manager = new SessionSlotManager();
     manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
+    manager.updateSessions(fewSessions(3), false);
+
+    const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
+    expect(types.filter((t) => t === 'usage')).toHaveLength(2);
+    // No Codex-labelled tiles anywhere.
+    const labels = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).usageLabel);
+    expect(labels.some((l) => l?.startsWith('CX'))).toBe(false);
+  });
+
+  it('hides Claude tiles when only Codex reports quota (reserve 2 Codex tiles)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ codexRateLimits: CODEX_LIMITS });
+    manager.updateSessions(fewSessions(3), false);
+
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 5H', usageAgent: 'codex' });
+    expect(manager.getSlotConfig(14, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageLabel: 'CX 7D', usageAgent: 'codex' });
+    const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
+    expect(types.filter((t) => t === 'usage')).toHaveLength(2);
+  });
+
+  it('does NOT reserve usage on Stream Deck+ (encoder carries usage)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17, codexRateLimits: CODEX_LIMITS });
     manager.updateSessions(fewSessions(3), false);
 
     for (let slot = 0; slot < 8; slot++) {
@@ -292,10 +340,22 @@ describe('SessionSlotManager list-view usage tiles', () => {
     }
   });
 
-  it('marks usage unknown when no quota was fed (draws "—" downstream)', () => {
+  it('reserves NO usage keys when no quota was fed (hide-if-absent)', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions(fewSessions(1), false);
-    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'usage', usageKnown: false });
+    const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
+    expect(types.filter((t) => t === 'usage')).toHaveLength(0);
+  });
+
+  it('drops Claude tiles when its quota goes stale (hide-if-absent on stale)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17 });
+    manager.updateSessions(fewSessions(3), false);
+    expect(manager.getSlotConfig(13, SD_CLASSIC_LAYOUT).type).toBe('usage');
+
+    manager.updateUsage({ fiveHourPercent: 42, sevenDayPercent: 17, usageStale: true });
+    const types = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type);
+    expect(types.filter((t) => t === 'usage')).toHaveLength(0);
   });
 
   it('fits 13 sessions on a classic deck without paging (15 keys − 2 usage)', () => {
@@ -320,6 +380,21 @@ describe('SessionSlotManager list-view usage tiles', () => {
     const sessionCount = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type)
       .filter((t) => t === 'session').length;
     expect(sessionCount).toBe(12);
+  });
+
+  it('repositions NEXT→ ahead of a 4-key usage block when paginating', () => {
+    const manager = new SessionSlotManager();
+    manager.updateUsage({ fiveHourPercent: 1, sevenDayPercent: 2, codexRateLimits: CODEX_LIMITS });
+    manager.updateSessions(fewSessions(15), false); // > (15 − 4) cap → paginate
+
+    // NEXT→ sits just before the reserved block: keyCount(15) − 1 − reserve(4) = 10.
+    expect(manager.getSlotConfig(10, SD_CLASSIC_LAYOUT)).toMatchObject({ type: 'next-page' });
+    for (const s of [11, 12, 13, 14]) {
+      expect(manager.getSlotConfig(s, SD_CLASSIC_LAYOUT).type).toBe('usage');
+    }
+    const sessionCount = Array.from({ length: 15 }, (_, i) => manager.getSlotConfig(i, SD_CLASSIC_LAYOUT).type)
+      .filter((t) => t === 'session').length;
+    expect(sessionCount).toBe(10); // cap(11) − 1 NEXT key
   });
 
   it('pressing a usage tile resolves to refresh-usage', () => {

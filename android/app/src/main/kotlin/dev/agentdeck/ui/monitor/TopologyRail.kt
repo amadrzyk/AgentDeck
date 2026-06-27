@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.os.Build
 import dev.agentdeck.net.AgentState
+import dev.agentdeck.net.CodexRateLimits
 import dev.agentdeck.net.ModelCatalogEntry
 import dev.agentdeck.net.OllamaStatus
 import dev.agentdeck.net.SubscriptionInfo
@@ -312,6 +313,23 @@ private fun UpstreamRows(state: DashboardState, scale: MonitorLayoutScale) {
             )
         }
 
+        // Codex (ChatGPT) — Codex CLI writes a `rate_limits` snapshot (5h
+        // primary / weekly secondary) into its own local rollout files, so
+        // the daemon surfaces them here much like the Claude 5h/7d gauges.
+        // Local-file data, no OpenAI API call. Subtitle carries the ChatGPT
+        // plan label. Hidden when neither a plan nor limit data is present.
+        val codexPlan = usage.codexPlanType?.takeIf { it.isNotBlank() }
+        val codexRateLimits = buildCodexRateChips(state.codexRateLimits)
+        if (state.codexRateLimits != null || codexPlan != null) {
+            ProviderRow(
+                name = "Codex",
+                status = LEDStatus.OK,
+                subtitle = chatGptPlanLabel(codexPlan),
+                consumers = consumersFor(ProviderKey.CODEX, state),
+                rateLimits = codexRateLimits,
+            )
+        }
+
         val openClawVisible = (state.gatewayAvailable == true || state.gatewayConnected == true)
         if (openClawVisible) {
             // Only surface the catalog under OpenClaw when it actually
@@ -377,6 +395,10 @@ private fun UpstreamRows(state: DashboardState, scale: MonitorLayoutScale) {
         // for users not on Google's product.
         val antiPlan = state.antigravityStatus?.planName?.takeIf { it.isNotBlank() }
         if (antiPlan != null) {
+            // Plan name ONLY. Antigravity's real usage view (two per-group
+            // 5h/weekly quotas) is fetched live from Google's backend and not
+            // persisted locally; the local `availableCredits` value doesn't
+            // match it, so we intentionally don't show a credit number. Mirrors iOS.
             ProviderRow(
                 name = "Antigravity",
                 status = LEDStatus.OK,
@@ -706,7 +728,7 @@ private fun RateChipView(chip: RateChip) {
 
 // MARK: - Provider inference + consumer resolution
 
-private enum class ProviderKey { CLAUDE, OPENCLAW, MLX, OLLAMA, ANTIGRAVITY, UNKNOWN }
+private enum class ProviderKey { CLAUDE, OPENCLAW, CODEX, MLX, OLLAMA, ANTIGRAVITY, UNKNOWN }
 
 /**
  * Best-effort mapping from a session's model name to a provider slot.
@@ -720,6 +742,7 @@ private fun providerFor(
     ollama: OllamaStatus?,
 ): ProviderKey {
     if (agentType == "antigravity") return ProviderKey.ANTIGRAVITY
+    if (agentType == "codex-cli" || agentType == "codex-app") return ProviderKey.CODEX
     val raw = modelName?.lowercase().orEmpty()
     if (raw.isEmpty()) return ProviderKey.UNKNOWN
     if (raw.startsWith("claude-") || raw.startsWith("opus") ||
@@ -773,6 +796,58 @@ private fun consumersFor(provider: ProviderKey, state: DashboardState): List<Col
     }
 
     return result
+}
+
+/**
+ * Build Codex usage chips, mirroring the Claude 5h/7d layout. One chip per
+ * present window that carries a `usedPercent`; labels are derived from each
+ * window's length (300 min → "5h", 10080 min → "7d"). Mirrors the iOS
+ * `codexRateLimitChips`.
+ */
+private fun buildCodexRateChips(limits: CodexRateLimits?): List<RateChip> {
+    if (limits == null) return emptyList()
+    return buildList {
+        limits.primary?.let { p ->
+            val pct = p.usedPercent
+            if (pct != null) {
+                add(RateChip(label = windowLabel(p.windowMinutes), percent = pct, reset = p.resetsAt?.let { formatResetTime(it) }))
+            }
+        }
+        limits.secondary?.let { s ->
+            val pct = s.usedPercent
+            if (pct != null) {
+                add(RateChip(label = windowLabel(s.windowMinutes), percent = pct, reset = s.resetsAt?.let { formatResetTime(it) }))
+            }
+        }
+    }
+}
+
+/**
+ * Compact window label from a duration in minutes: whole days → "Nd", whole
+ * hours → "Nh", else "Nm". Days checked first so 10080 → "7d". Mirrors iOS
+ * `windowLabel`.
+ */
+private fun windowLabel(minutes: Int?): String {
+    val m = minutes ?: return "·"
+    if (m <= 0) return "·"
+    if (m % 1440 == 0) return "${m / 1440}d"
+    if (m % 60 == 0) return "${m / 60}h"
+    return "${m}m"
+}
+
+/**
+ * Friendly ChatGPT plan label from a raw `chatgpt_plan_type`. Returns null
+ * when blank so the subtitle stays hidden. Mirrors iOS `chatGptPlanLabel`.
+ */
+private fun chatGptPlanLabel(raw: String?): String? {
+    val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return when (trimmed.lowercase()) {
+        "plus" -> "ChatGPT Plus"
+        "pro" -> "ChatGPT Pro"
+        "team" -> "ChatGPT Team"
+        "enterprise" -> "ChatGPT Enterprise"
+        else -> "ChatGPT $trimmed"
+    }
 }
 
 // MARK: - Device (downstream) row

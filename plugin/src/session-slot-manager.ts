@@ -5,12 +5,29 @@
  * - List View: each button shows one session (OC first, then CC by startedAt)
  * - Detail View: button 1=BACK, button 2=session info, buttons 3-7=options, button 8=ESC/STOP
  */
-import type { SessionInfo, StatusCardTone, StatusIconKind } from '@agentdeck/shared';
-import { State, sortSessions, assignDisplayNames, foldCodexSessionsForDisplay, aliasModelName } from '@agentdeck/shared';
+import type { SessionInfo, StatusCardTone, StatusIconKind, CodexRateLimits } from '@agentdeck/shared';
+import { State, sortSessions, assignDisplayNames, foldCodexSessionsForDisplay, aliasModelName, Brand } from '@agentdeck/shared';
 import type { PromptOption } from '@agentdeck/shared';
 import { dlog } from './log.js';
 
 export type SlotView = 'list' | 'detail';
+
+/** Per-agent water-tank usage gauge spec for the pinned bottom-row tiles. */
+export interface UsageGauge {
+  agent: 'claude' | 'codex';
+  window: '5h' | '7d';
+  label: string;
+  percent: number;
+  resetsAt?: string;
+  known: boolean;
+  color: string;
+}
+
+/** Max bottom-row keys usage may claim: Claude 5h/7d + Codex 5h/7d. */
+const MAX_USAGE_RESERVE = 4;
+
+const CLAUDE_USAGE_COLOR = Brand.claudeCode;
+const CODEX_USAGE_COLOR = Brand.codex;
 
 export interface PresetAction {
   label: string;
@@ -24,7 +41,7 @@ export interface PresetAction {
 }
 
 export interface SessionSlotConfig {
-  type: 'session' | 'back' | 'info' | 'status' | 'option' | 'esc' | 'stop' | 'next-page' | 'preset' | 'usage' | 'empty';
+  type: 'session' | 'back' | 'info' | 'status' | 'option' | 'esc' | 'stop' | 'next-page' | 'preset' | 'usage' | 'usage-page' | 'empty';
   session?: SessionInfo;
   option?: PromptOption;
   optionIndex?: number;
@@ -36,11 +53,14 @@ export interface SessionSlotConfig {
   preset?: PresetAction;
   /** For list view: is this the currently "active" (connected) session? */
   isActive?: boolean;
-  /** For type 'usage': 5H/7D quota gauge tile. */
+  /** For type 'usage': 5H/7D quota gauge tile (water-tank). */
   usageLabel?: string;
   usagePercent?: number;
   usageColor?: string;
   usageKnown?: boolean;
+  usageAgent?: 'claude' | 'codex';
+  usageWindow?: '5h' | '7d';
+  usageResetsAt?: string;
 }
 
 export interface DeckLayout {
@@ -125,22 +145,6 @@ function normalizeLayout(layout?: Partial<DeckLayout>): DeckLayout {
   return { columns, rows, keyCount, family: layout?.family ?? DEFAULT_LAYOUT.family };
 }
 
-/**
- * How many bottom keys the list view pins to 5H/7D usage gauges. Classic Stream
- * Deck (15 keys) and XL (32) carry usage here because they have no encoder LCD;
- * Stream Deck+ (8 keys, family streamdeckplus) shows usage on its dial instead,
- * and the Mini (4 keys) is too small to spare two keys.
- */
-function usageReserveCount(layout: DeckLayout): number {
-  return layout.family !== 'streamdeckplus' && layout.keyCount >= 6 ? 2 : 0;
-}
-
-/** Session-fillable keys per page = grid minus pinned usage tiles, minus NEXT→ when paginating. */
-function listSessionsPerPage(layout: DeckLayout, totalSessions: number): number {
-  const cap = Math.max(1, layout.keyCount - usageReserveCount(layout));
-  return totalSessions > cap ? Math.max(1, cap - 1) : cap;
-}
-
 export class SessionSlotManager {
   private static readonly MODEL_SWITCH_TIMEOUT_MS = 12000;
 
@@ -155,10 +159,20 @@ export class SessionSlotManager {
   private _gatewayAvailable = false;
 
   // Global subscription quota (rides usage_update), pinned to the list view's
-  // last two keys on decks without an encoder LCD. Defaults read as "unknown".
+  // last keys on decks without an encoder LCD. Defaults read as "unknown" so an
+  // absent agent reserves no keys (hide-if-absent). Claude rides the top-level
+  // 5h/7d fields; Codex rides codexRateLimits (primary≈5h, secondary≈7d).
   private _fiveHourPercent = 0;
   private _sevenDayPercent = 0;
-  private _usageKnown = false;
+  private _fiveHourResetsAt: string | undefined;
+  private _sevenDayResetsAt: string | undefined;
+  private _fiveHourKnown = false;
+  private _sevenDayKnown = false;
+  private _codexPrimary: { percent: number; resetsAt?: string } | null = null;
+  private _codexSecondary: { percent: number; resetsAt?: string } | null = null;
+  // Page cursor for the (Phase-1-dormant) gauge paging when present gauges
+  // exceed MAX_USAGE_RESERVE. Never advances with ≤4 gauges.
+  private _usagePage = 0;
 
   // Detail view state (from the focused session's bridge)
   private _detailState = State.DISCONNECTED;
@@ -266,14 +280,87 @@ export class SessionSlotManager {
     this._gatewayAvailable = available;
   }
 
-  /** Feed the latest 5H/7D subscription quota for the pinned list-view usage tiles. */
-  updateUsage(usage: { fiveHourPercent?: number; sevenDayPercent?: number; usageStale?: boolean }): void {
+  /** Feed the latest Claude 5H/7D + Codex quota for the pinned list-view tiles. */
+  updateUsage(usage: {
+    fiveHourPercent?: number;
+    fiveHourResetsAt?: string;
+    sevenDayPercent?: number;
+    sevenDayResetsAt?: string;
+    usageStale?: boolean;
+    codexRateLimits?: CodexRateLimits;
+  }): void {
+    const stale = usage.usageStale === true;
     this._fiveHourPercent = usage.fiveHourPercent ?? 0;
     this._sevenDayPercent = usage.sevenDayPercent ?? 0;
-    // Distinguish "0% used" from "no data" so the tile draws "—" instead of a
-    // confident empty gauge when the hub has no OAuth source or went stale.
-    this._usageKnown = usage.usageStale !== true
-      && (usage.fiveHourPercent != null || usage.sevenDayPercent != null);
+    this._fiveHourResetsAt = usage.fiveHourResetsAt;
+    this._sevenDayResetsAt = usage.sevenDayResetsAt;
+    // Distinguish "0% used" from "no data" so we hide-if-absent (reserve no key)
+    // instead of pinning a confident empty gauge when the hub has no OAuth
+    // source or went stale.
+    this._fiveHourKnown = !stale && usage.fiveHourPercent != null;
+    this._sevenDayKnown = !stale && usage.sevenDayPercent != null;
+
+    const cx = usage.codexRateLimits;
+    this._codexPrimary = cx?.primary
+      ? { percent: cx.primary.usedPercent, resetsAt: cx.primary.resetsAt }
+      : null;
+    this._codexSecondary = cx?.secondary
+      ? { percent: cx.secondary.usedPercent, resetsAt: cx.secondary.resetsAt }
+      : null;
+  }
+
+  /**
+   * Present water-tank gauges in left-to-right (then bottom-row) display order:
+   * Claude 5h, Claude 7d, Codex 5h, Codex 7d. Hide-if-absent — an agent with no
+   * live quota contributes nothing, so it claims no keys.
+   */
+  private usageGauges(): UsageGauge[] {
+    const gauges: UsageGauge[] = [];
+    if (this._fiveHourKnown || this._sevenDayKnown) {
+      gauges.push({
+        agent: 'claude', window: '5h', label: '5H',
+        percent: this._fiveHourPercent, resetsAt: this._fiveHourResetsAt,
+        known: this._fiveHourKnown, color: CLAUDE_USAGE_COLOR,
+      });
+      gauges.push({
+        agent: 'claude', window: '7d', label: '7D',
+        percent: this._sevenDayPercent, resetsAt: this._sevenDayResetsAt,
+        known: this._sevenDayKnown, color: CLAUDE_USAGE_COLOR,
+      });
+    }
+    if (this._codexPrimary != null || this._codexSecondary != null) {
+      gauges.push({
+        agent: 'codex', window: '5h', label: 'CX 5H',
+        percent: this._codexPrimary?.percent ?? 0, resetsAt: this._codexPrimary?.resetsAt,
+        known: this._codexPrimary != null, color: CODEX_USAGE_COLOR,
+      });
+      gauges.push({
+        agent: 'codex', window: '7d', label: 'CX 7D',
+        percent: this._codexSecondary?.percent ?? 0, resetsAt: this._codexSecondary?.resetsAt,
+        known: this._codexSecondary != null, color: CODEX_USAGE_COLOR,
+      });
+    }
+    return gauges;
+  }
+
+  /**
+   * How many bottom keys the list view pins to usage gauges. Classic Stream
+   * Deck (15 keys) and XL (32) carry usage here (no encoder LCD); Stream Deck+
+   * (family streamdeckplus) shows usage on its dial instead, and the Mini
+   * (<6 keys) is too small to spare any. Capped at MAX_USAGE_RESERVE.
+   */
+  private usageReserve(layout: DeckLayout): number {
+    if (layout.family === 'streamdeckplus' || layout.keyCount < 6) return 0;
+    return Math.min(this.usageGauges().length, MAX_USAGE_RESERVE);
+  }
+
+  /** Cycle the gauge page (only meaningful when gauges overflow MAX_USAGE_RESERVE). */
+  cycleUsagePage(): void {
+    const gauges = this.usageGauges();
+    if (gauges.length <= MAX_USAGE_RESERVE) { this._usagePage = 0; return; }
+    const perPage = MAX_USAGE_RESERVE - 1;
+    const pages = Math.max(1, Math.ceil(gauges.length / perPage));
+    this._usagePage = (this._usagePage + 1) % pages;
   }
 
   // ---- Detail view state updates ----
@@ -343,7 +430,7 @@ export class SessionSlotManager {
 
   /** Handle button press. Returns action to take. */
   handleSlotPress(slot: number, layout?: DeckLayout): {
-    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'refresh-usage' | 'none';
+    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'refresh-usage' | 'cycle-usage-page' | 'none';
     sessionId?: string;
     sessionPort?: number;
     optionIndex?: number;
@@ -401,6 +488,9 @@ export class SessionSlotManager {
       case 'usage':
         return { action: 'refresh-usage' };
 
+      case 'usage-page':
+        return { action: 'cycle-usage-page' };
+
       default:
         return { action: 'none' };
     }
@@ -441,15 +531,21 @@ export class SessionSlotManager {
 
   // ---- Internal helpers ----
 
+  /** Session-fillable keys per page = grid minus pinned usage tiles, minus NEXT→ when paginating. */
+  private listSessionsPerPage(layout: DeckLayout, totalSessions: number): number {
+    const cap = Math.max(1, layout.keyCount - this.usageReserve(layout));
+    return totalSessions > cap ? Math.max(1, cap - 1) : cap;
+  }
+
   private totalPages(layout: DeckLayout = DEFAULT_LAYOUT): number {
     const count = this._sessions.length;
-    const cap = Math.max(1, layout.keyCount - usageReserveCount(layout));
+    const cap = Math.max(1, layout.keyCount - this.usageReserve(layout));
     if (count <= cap) return 1;
-    return Math.ceil(count / listSessionsPerPage(layout, count));
+    return Math.ceil(count / this.listSessionsPerPage(layout, count));
   }
 
   private needsPagination(layout: DeckLayout): boolean {
-    return this._sessions.length > Math.max(1, layout.keyCount - usageReserveCount(layout));
+    return this._sessions.length > Math.max(1, layout.keyCount - this.usageReserve(layout));
   }
 
   private isAwaitingDetailState(): boolean {
@@ -465,15 +561,39 @@ export class SessionSlotManager {
   }
 
   private getListSlotConfig(slot: number, layout: DeckLayout): SessionSlotConfig {
-    const usageReserve = usageReserveCount(layout);
+    const usageReserve = this.usageReserve(layout);
 
-    // Pin 5H/7D quota gauges to the last two keys (every page; usage is global).
-    if (usageReserve === 2) {
-      if (slot === layout.keyCount - 1) {
-        return { type: 'usage', usageLabel: '7D', usagePercent: this._sevenDayPercent, usageColor: '#2850a0', usageKnown: this._usageKnown };
-      }
-      if (slot === layout.keyCount - 2) {
-        return { type: 'usage', usageLabel: '5H', usagePercent: this._fiveHourPercent, usageColor: '#28a0b4', usageKnown: this._usageKnown };
+    // Pin water-tank quota gauges to the last keys (every page; usage is global).
+    // The reserved block is contiguous at the bottom-right; present gauges fill
+    // it left→right in display order (Claude 5h/7d, then Codex 5h/7d).
+    if (usageReserve > 0) {
+      const blockStart = layout.keyCount - usageReserve;
+      if (slot >= blockStart) {
+        const gauges = this.usageGauges();
+        const idx = slot - blockStart;
+        const overflow = gauges.length > usageReserve;
+        // Dormant in Phase 1 (≤4 gauges never overflow 4 reserved keys): when a
+        // future 5th gauge appears, the last reserved key becomes a page toggle.
+        if (overflow && idx === usageReserve - 1) {
+          const perPage = usageReserve - 1;
+          const pages = Math.max(1, Math.ceil(gauges.length / perPage));
+          return { type: 'usage-page', label: `${(this._usagePage % pages) + 1}/${pages}` };
+        }
+        const perPage = overflow ? usageReserve - 1 : usageReserve;
+        const g = gauges[this._usagePage * perPage + idx];
+        if (g) {
+          return {
+            type: 'usage',
+            usageLabel: g.label,
+            usagePercent: g.percent,
+            usageColor: g.color,
+            usageKnown: g.known,
+            usageAgent: g.agent,
+            usageWindow: g.window,
+            usageResetsAt: g.resetsAt,
+          };
+        }
+        return { type: 'empty' };
       }
     }
 
@@ -509,7 +629,7 @@ export class SessionSlotManager {
     }
 
     const needsPage = this.needsPagination(layout);
-    const sessionsOnPage = listSessionsPerPage(layout, this._sessions.length);
+    const sessionsOnPage = this.listSessionsPerPage(layout, this._sessions.length);
 
     // NEXT→ sits just before the pinned usage tiles (or the last key when no
     // usage is reserved). Sessions fill slots 0..sessionsOnPage-1.

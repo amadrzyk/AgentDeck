@@ -12,8 +12,8 @@ import streamDeck, {
   WillAppearEvent,
   WillDisappearEvent,
 } from '@elgato/streamdeck';
-import { State, renderUsageButton } from '@agentdeck/shared';
-import type { SessionInfo, PromptOption } from '@agentdeck/shared';
+import { State } from '@agentdeck/shared';
+import type { SessionInfo, PromptOption, CodexRateLimits } from '@agentdeck/shared';
 import { SessionSlotManager, type DeckLayout, type SessionSlotConfig } from '../session-slot-manager.js';
 import { computeCenterCluster } from '../center-slot.js';
 import {
@@ -24,14 +24,13 @@ import {
   renderNextPageButton,
   renderEscButton,
   renderStopButton,
-  renderDetailInfo,
   renderOptionButton,
-  renderInfoSlot,
   renderPresetButton,
-  renderStatusCard,
   type DisconnectedSlotConfig,
 } from '../renderers/session-slot-renderer.js';
 import { svgToDataUrl } from '../renderers/button-renderer.js';
+import { renderWaterTankGauge } from '../renderers/water-tank-gauge.js';
+import { renderStatusReadout, renderSessionReadout } from '../renderers/display-tile.js';
 import { dlog } from '../log.js';
 import { openAgentDeckAppOrGitHub } from '../utility-modes/macos.js';
 
@@ -88,8 +87,15 @@ export function setActiveSession(sessionId: string | null, port: number | null):
   if (manager.view === 'list') refreshAll();
 }
 
-/** Feed latest 5H/7D quota; re-render only the list view (where usage tiles live). */
-export function updateSlotUsage(usage: { fiveHourPercent?: number; sevenDayPercent?: number; usageStale?: boolean }): void {
+/** Feed latest Claude 5H/7D + Codex quota; re-render only the list view (where usage tiles live). */
+export function updateSlotUsage(usage: {
+  fiveHourPercent?: number;
+  fiveHourResetsAt?: string;
+  sevenDayPercent?: number;
+  sevenDayResetsAt?: string;
+  usageStale?: boolean;
+  codexRateLimits?: CodexRateLimits;
+}): void {
   manager.updateUsage(usage);
   if (manager.view === 'list') refreshAll();
 }
@@ -280,23 +286,30 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
     case 'back':
       return renderBackButton();
 
+    // INFO is a pure readout (which session am I steering) — render it flat and
+    // non-interactive so it doesn't masquerade as a pressable control.
     case 'info':
       if (config.session) {
-        return renderDetailInfo(
+        return renderSessionReadout(
           config.session,
           manager.detailState,
-          undefined, // tool shown separately
           manager.detailModelName ?? config.session.modelName,
           undefined,
           config.label,
           manager.detailEffortLevel ?? config.session.effortLevel,
         );
       }
-      return renderInfoSlot(config.label ?? '---', config.subtitle, config.icon, config.tone, config.detail);
+      return renderStatusReadout({
+        label: config.label ?? '---',
+        subtitle: config.subtitle,
+        detail: config.detail,
+        tone: config.tone,
+      });
 
+    // STATUS cards (MODEL / MODE / READY·STANDBY / AWAITING / TOOL / IDLE /
+    // HUB READY / NO SESSION) are readouts, not controls — flat, non-interactive.
     case 'status':
-      return renderStatusCard({
-        icon: config.icon ?? 'activity',
+      return renderStatusReadout({
         label: config.label ?? '---',
         subtitle: config.subtitle,
         detail: config.detail,
@@ -322,7 +335,17 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
       return renderNextPageButton(config.label ?? '');
 
     case 'usage':
-      return renderUsageButton(config.usageLabel ?? '', config.usagePercent ?? 0, config.usageColor ?? '#28a0b4', config.usageKnown !== false);
+      return renderWaterTankGauge({
+        agent: config.usageAgent ?? 'claude',
+        window: config.usageWindow ?? '5h',
+        label: config.usageLabel ?? '',
+        usedPercent: config.usagePercent ?? 0,
+        resetsAt: config.usageResetsAt,
+        known: config.usageKnown !== false,
+      });
+
+    case 'usage-page':
+      return renderNextPageButton(config.label ?? '');
 
     case 'empty':
     default:
@@ -374,6 +397,12 @@ export class SessionSlotButtonAction extends SingletonAction {
 
     if (result.action === 'next-page') {
       manager.nextPage(layout);
+      refreshAll();
+      return;
+    }
+
+    if (result.action === 'cycle-usage-page') {
+      manager.cycleUsagePage();
       refreshAll();
       return;
     }

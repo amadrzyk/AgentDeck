@@ -447,6 +447,7 @@ struct ControlTowerPanel: View {
         let hasGauges = stateHolder.state.fiveHourPercent != nil
             || stateHolder.state.sevenDayPercent != nil
             || (stateHolder.state.costLimit != nil && stateHolder.state.costLimit! > 0)
+            || stateHolder.state.codexRateLimits != nil
         let externalDaemonActive = daemonService.isUsingExternalDaemon
         if hasGauges || externalDaemonActive {
             VStack(alignment: .leading, spacing: 6) {
@@ -480,6 +481,31 @@ struct ControlTowerPanel: View {
                         percent: pct7d,
                         resetTime: stateHolder.state.sevenDayResetsAt
                     )
+                }
+                // Codex (ChatGPT) usage limits, when the daemon surfaced them
+                // from the local rollout files. Own sub-header so the 5h/7d
+                // labels don't read as Claude's. Hidden when absent.
+                if let codex = stateHolder.state.codexRateLimits,
+                   codex.primary != nil || codex.secondary != nil {
+                    Text("CODEX")
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(0.5)
+                        .foregroundColor(TerrariumHUD.subtext.opacity(0.8))
+                        .padding(.top, 2)
+                    if let p = codex.primary, let pct = p.usedPercent {
+                        compactGauge(
+                            label: TopologyRail.windowLabel(p.windowMinutes),
+                            percent: pct,
+                            resetTime: p.resetsAt
+                        )
+                    }
+                    if let s = codex.secondary, let pct = s.usedPercent {
+                        compactGauge(
+                            label: TopologyRail.windowLabel(s.windowMinutes),
+                            percent: pct,
+                            resetTime: s.resetsAt
+                        )
+                    }
                 }
                 if !hasGauges {
                     rateLimitsEmptyState

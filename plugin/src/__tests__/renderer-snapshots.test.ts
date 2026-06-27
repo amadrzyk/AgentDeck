@@ -43,6 +43,9 @@ import {
   renderUsageDisconnected,
 } from '../renderers/usage-dial-renderer.js';
 
+// ===== water-tank-gauge =====
+import { renderWaterTankGauge } from '../renderers/water-tank-gauge.js';
+
 // ===== response-renderer =====
 import {
   renderResponseIdle,
@@ -76,6 +79,12 @@ import {
   renderSessionSlot,
   renderStatusCard,
 } from '../renderers/session-slot-renderer.js';
+
+// ===== display-tile (non-interactive readouts) =====
+import {
+  renderStatusReadout,
+  renderSessionReadout,
+} from '../renderers/display-tile.js';
 
 // ===== timeline-renderer =====
 import { renderTimeline } from '../renderers/timeline-renderer.js';
@@ -292,6 +301,55 @@ describe('usage-dial-renderer snapshots', () => {
 
   it('renderUsageDisconnected', () => {
     expect(renderUsageDisconnected()).toMatchSnapshot();
+  });
+});
+
+// ===================================================================
+// Water-Tank Gauge (keypad usage tiles)
+// ===================================================================
+
+describe('water-tank-gauge snapshots', () => {
+  // Date.now is mocked to 1700000060000 in beforeEach → deterministic countdowns.
+  // These resolve to "2h13m" (5h window) and "6d" (7d window).
+  const reset5h = '2023-11-15T00:27:20Z';
+  const reset7d = '2023-11-20T22:14:20Z';
+
+  it('renderWaterTankGauge Claude 5h (healthy)', () => {
+    const svg = renderWaterTankGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: 30, resetsAt: reset5h });
+    // Claude water hue + label present.
+    expect(svg).toContain('#C07058');
+    expect(svg).toContain('>5H<');
+    // Headline = remaining quota (100 − 30 = 70%).
+    expect(svg).toContain('>70%<');
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('renderWaterTankGauge Claude 7d', () => {
+    expect(renderWaterTankGauge({ agent: 'claude', window: '7d', label: '7D', usedPercent: 12, resetsAt: reset7d })).toMatchSnapshot();
+  });
+
+  it('renderWaterTankGauge Codex 5h uses the blue brand hue', () => {
+    const svg = renderWaterTankGauge({ agent: 'codex', window: '5h', label: 'CX 5H', usedPercent: 55, resetsAt: reset5h });
+    expect(svg).toContain('#6166E0');
+    expect(svg).toContain('CX 5H');
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('renderWaterTankGauge Codex 7d', () => {
+    expect(renderWaterTankGauge({ agent: 'codex', window: '7d', label: 'CX 7D', usedPercent: 88, resetsAt: reset7d })).toMatchSnapshot();
+  });
+
+  it('renderWaterTankGauge critical (low remaining → warning rim + red headline)', () => {
+    const svg = renderWaterTankGauge({ agent: 'claude', window: '5h', label: '5H', usedPercent: 92, resetsAt: reset5h });
+    expect(svg).toContain('#ef4444'); // critical color on rim/headline
+    expect(svg).toContain('>8%<');
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('renderWaterTankGauge unknown draws an empty tank + dash', () => {
+    const svg = renderWaterTankGauge({ agent: 'codex', window: '5h', label: 'CX 5H', usedPercent: 0, known: false });
+    expect(svg).toContain('>—<');
+    expect(svg).toMatchSnapshot();
   });
 });
 
@@ -518,6 +576,55 @@ describe('session-slot-renderer snapshots', () => {
     expect(fresh).not.toContain('STALE');
     expect(stale).toContain('STALE');
     expect(stale).toMatchSnapshot();
+  });
+});
+
+// ===================================================================
+// Display Tiles (non-interactive readouts)
+// ===================================================================
+
+describe('display-tile snapshots', () => {
+  it('renderStatusReadout MODEL is flat (no raised bezel, no glyph)', () => {
+    const svg = renderStatusReadout({ label: 'MODEL', subtitle: 'sonnet 4.6', tone: 'info' });
+    // Flat readout: no raised inner key bezel rect, carries the left accent bar.
+    expect(svg).not.toContain('128');           // no 128×128 raised bezel rect
+    expect(svg).toContain('width="4"');          // left accent strip
+    expect(svg).toContain('MODEL');
+    expect(svg).toContain('sonnet 4.6');
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('renderStatusReadout READY (label only)', () => {
+    expect(renderStatusReadout({ label: 'READY', subtitle: 'idle', tone: 'ready' })).toMatchSnapshot();
+  });
+
+  it('renderStatusReadout AWAITING', () => {
+    expect(renderStatusReadout({ label: 'AWAITING', subtitle: 'choose option', tone: 'warning' })).toMatchSnapshot();
+  });
+
+  it('renderStatusReadout HUB READY (no-session hub state)', () => {
+    expect(renderStatusReadout({ label: 'HUB READY', subtitle: 'CONNECTED', tone: 'ready' })).toMatchSnapshot();
+  });
+
+  it('renderSessionReadout keeps name/model/state, flat & non-interactive', () => {
+    const svg = renderSessionReadout(makeSession(), State.IDLE, 'opus-4', undefined, 'AgentDeck', 'high');
+    expect(svg).not.toContain('128');           // no raised bezel
+    expect(svg).not.toContain('INFO');           // no button-style INFO badge
+    expect(svg).toContain('AgentDeck');
+    expect(svg).toContain('IDLE');
+    expect(svg).toMatchSnapshot();
+  });
+
+  it('renderSessionReadout openclaw hides model, shows STANDBY', () => {
+    const svg = renderSessionReadout(
+      makeSession({ agentType: 'openclaw', state: State.IDLE, projectName: 'Gateway' }),
+      State.IDLE,
+      'opus-4',
+      undefined,
+      'Gateway',
+    );
+    expect(svg).toContain('STANDBY');
+    expect(svg).toMatchSnapshot();
   });
 });
 

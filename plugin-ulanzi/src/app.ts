@@ -104,7 +104,9 @@ function deckSignature(ev: Record<string, unknown>): string {
   // 5H/7D quota rides usage_update, not state_update — without it here a
   // usage-only change would compare equal and the pinned gauges would never
   // refresh (scheduleRender fires but renderAll early-returns on equal sig).
-  const usage = `${ev.fiveHourPercent ?? ''}:${ev.sevenDayPercent ?? ''}:${ev.usageKnown ?? ''}`;
+  const cx = ev.codexRateLimits as { primary?: { usedPercent?: number }; secondary?: { usedPercent?: number } } | undefined;
+  const usage = `${ev.fiveHourPercent ?? ''}:${ev.sevenDayPercent ?? ''}:${ev.usageKnown ?? ''}`
+    + `:${cx?.primary?.usedPercent ?? ''}:${cx?.secondary?.usedPercent ?? ''}`;
   return [ev.state, ev.mode, ev.focusedSessionId ?? ev.sessionId ?? '', ev.requestId ?? '',
     ev.promptType ?? '', ev.currentTool ?? '', opts, usage, sessions].join('|');
 }

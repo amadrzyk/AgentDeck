@@ -14,6 +14,7 @@ import dev.agentdeck.net.PromptOption
 import dev.agentdeck.net.SessionInfo
 import dev.agentdeck.net.SubscriptionInfo
 import dev.agentdeck.net.AntigravityStatusInfo
+import dev.agentdeck.net.CodexRateLimits
 import dev.agentdeck.net.StateUpdate
 import dev.agentdeck.net.UsageUpdate
 import dev.agentdeck.net.VoiceState
@@ -77,6 +78,12 @@ data class DashboardState(
     val mlxModels: List<String> = emptyList(),
     val subscriptions: List<SubscriptionInfo> = emptyList(),
     val antigravityStatus: AntigravityStatusInfo? = null,
+    /**
+     * Codex (ChatGPT) usage limits — hoisted from usage_update so a later
+     * usage event carrying null doesn't wipe the last known value. Only
+     * rides on usage_update (never state_update), exactly like macOS/iOS.
+     */
+    val codexRateLimits: CodexRateLimits? = null,
 )
 
 class AgentStateHolder private constructor() {
@@ -244,6 +251,9 @@ class AgentStateHolder private constructor() {
                         mlxModels = incoming.mlxModels ?: current.mlxModels,
                         subscriptions = incoming.subscriptions ?: current.subscriptions,
                         antigravityStatus = incoming.antigravityStatus ?: current.antigravityStatus,
+                        // codexRateLimits only rides on usage_update — hoist it
+                        // so a later null incoming doesn't wipe it (mirrors iOS).
+                        codexRateLimits = incoming.codexRateLimits ?: current.codexRateLimits,
                     )
                 }
                 lastKnownState = _state.value
