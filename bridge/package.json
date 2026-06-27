@@ -14,7 +14,8 @@
     "assets/fonts",
     "assets/fm-helper",
     "fm-helper",
-    "scripts/build-fm-helper.mjs"
+    "scripts/build-fm-helper.mjs",
+    "scripts/cockpit.sh"
   ],
   "main": "./dist/index.js",
   "bin": {
