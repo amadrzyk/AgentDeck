@@ -34,10 +34,20 @@ static lv_obj_t* tbDaemon  = nullptr;    // "● daemon :9120 · N agents"
 #if defined(IPS10_PERF_HUD)
 static lv_obj_t* tbPerf    = nullptr;    // worst-frame perf overlay (debug)
 #endif
-static lv_obj_t* tb5hFill  = nullptr;    // 5h usage bar fill
-static lv_obj_t* tb7dFill  = nullptr;    // 7d usage bar fill
-static lv_obj_t* tb5hPct   = nullptr;    // "62%"
+static lv_obj_t* tb5hFill  = nullptr;    // 5h usage bar fill (Claude)
+static lv_obj_t* tb7dFill  = nullptr;    // 7d usage bar fill (Claude)
+static lv_obj_t* tb5hPct   = nullptr;    // "62% 2h13m"
 static lv_obj_t* tb7dPct   = nullptr;
+// Codex (ChatGPT) usage gauges — mirror the Claude 5h/7d pair, blue-tinted.
+// The whole group hides when no Codex limits are present (common case).
+static lv_obj_t* tbCx5hGrp = nullptr;    // group container (hide when no data)
+static lv_obj_t* tbCx7dGrp = nullptr;
+static lv_obj_t* tbCx5hFill = nullptr;
+static lv_obj_t* tbCx7dFill = nullptr;
+static lv_obj_t* tbCx5hPct  = nullptr;
+static lv_obj_t* tbCx7dPct  = nullptr;
+// Antigravity credits chip ("AG pro · 1234cr") — hidden when no data.
+static lv_obj_t* tbAg       = nullptr;
 #include "../terrarium/creature_glyphs_generated.h"  // OCTOPUS_A8 / CRAYFISH_BODY_A8 / OPENCODE_A8 masks
 static constexpr int IPS10_SIDEBAR_W_MIN = 372;     // portrait / fallback minimum
 static constexpr int IPS10_TERRARIUM_W = 408;       // keep in sync with terrarium/renderer.cpp
@@ -218,6 +228,7 @@ static constexpr uint32_t D1_OK    = 0x3ED6E8;  // processing (cyan)
 static constexpr uint32_t D1_ATTN  = 0xFFA93D;  // awaiting
 static constexpr uint32_t D1_ERROR = 0xFF6B6B;  // error
 static constexpr uint32_t D1_IDLE  = 0x7A8A9C;  // idle
+static constexpr uint32_t D1_CODEX = 0x6166E0;  // Codex brand blue (Brand.codex)
 static uint32_t ips10StateColor(const char* state) {
     if (strstr(state, "awaiting") != nullptr) return D1_ATTN;
     if (strcmp(state, "processing") == 0)     return D1_OK;
@@ -687,9 +698,17 @@ void init(lv_obj_t* parent) {
         lv_obj_set_flex_grow(sp, 1);
         lv_obj_clear_flag(sp, LV_OBJ_FLAG_SCROLLABLE);
 
-        struct { const char* lab; lv_obj_t** fill; lv_obj_t** pct; } G[2] = {
-            {"5H", &tb5hFill, &tb5hPct}, {"7D", &tb7dFill, &tb7dPct} };
-        for (int gi = 0; gi < 2; gi++) {
+        // Claude 5h/7d (cyan) + Codex CX 5h/7d (blue). The Codex pair lives in a
+        // group container captured in `grp` so update() can hide it when no Codex
+        // limits are present — keeps the bar compact on the common single-agent setup.
+        struct { const char* lab; lv_obj_t** fill; lv_obj_t** pct; lv_obj_t** grp;
+                 uint32_t labCol; uint32_t fillCol; } G[4] = {
+            {"5H",    &tb5hFill,   &tb5hPct,   nullptr,    0x5D7470, D1_OK},
+            {"7D",    &tb7dFill,   &tb7dPct,   nullptr,    0x5D7470, D1_OK},
+            {"CX 5H", &tbCx5hFill, &tbCx5hPct, &tbCx5hGrp, 0x7A80E8, D1_CODEX},
+            {"CX 7D", &tbCx7dFill, &tbCx7dPct, &tbCx7dGrp, 0x7A80E8, D1_CODEX},
+        };
+        for (int gi = 0; gi < 4; gi++) {
             lv_obj_t* g = lv_obj_create(tb);
             lv_obj_set_size(g, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
             lv_obj_set_style_bg_opa(g, LV_OPA_TRANSP, 0);
@@ -699,9 +718,10 @@ void init(lv_obj_t* parent) {
             lv_obj_clear_flag(g, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_set_flex_flow(g, LV_FLEX_FLOW_ROW);
             lv_obj_set_flex_align(g, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            if (G[gi].grp) { *G[gi].grp = g; lv_obj_add_flag(g, LV_OBJ_FLAG_HIDDEN); }
             lv_obj_t* lab = lv_label_create(g);
             lv_obj_set_style_text_font(lab, &font_kr_12, 0);
-            lv_obj_set_style_text_color(lab, lv_color_hex(0x5D7470), 0);
+            lv_obj_set_style_text_color(lab, lv_color_hex(G[gi].labCol), 0);
             lv_label_set_text(lab, G[gi].lab);
             lv_obj_t* track = lv_obj_create(g);
             lv_obj_set_size(track, 92, 6);
@@ -715,7 +735,7 @@ void init(lv_obj_t* parent) {
             lv_obj_set_size(fill, 0, 6);
             lv_obj_set_pos(fill, 0, 0);
             lv_obj_set_style_radius(fill, 3, 0);
-            lv_obj_set_style_bg_color(fill, lv_color_hex(0x3ED6E8), 0);
+            lv_obj_set_style_bg_color(fill, lv_color_hex(G[gi].fillCol), 0);
             lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
             lv_obj_set_style_border_width(fill, 0, 0);
             lv_obj_clear_flag(fill, LV_OBJ_FLAG_SCROLLABLE);
@@ -726,6 +746,14 @@ void init(lv_obj_t* parent) {
             lv_label_set_text(pct, "-");   // em dash placeholder
             *G[gi].pct = pct;
         }
+
+        // Antigravity credits chip — credits are a raw count (no max → not a gauge).
+        // Hidden until usage_update carries an antigravityStatus.
+        tbAg = lv_label_create(tb);
+        lv_obj_set_style_text_font(tbAg, &font_kr_12, 0);
+        lv_obj_set_style_text_color(tbAg, lv_color_hex(0xD2D6DC), 0);  // antigravity light grey
+        lv_label_set_text(tbAg, "");
+        lv_obj_add_flag(tbAg, LV_OBJ_FLAG_HIDDEN);
     }
 
     // Cards panel — sits BELOW the top bar (no in-panel header anymore; brand moved to the bar).
@@ -1219,6 +1247,26 @@ static void updateGauge(lv_obj_t* fill, lv_obj_t* pctLabel, lv_obj_t* resetLabel
     }
 }
 
+#if defined(BOARD_IPS10)
+// IPS10 D1 top-bar horizontal bar gauge. v < 0 → "-" + empty bar. baseColor is the
+// brand fill (Claude cyan / Codex blue); shifts to attn at ≥85%. Reset countdown and
+// the stale "!" marker are appended to the percent label (water-tank-gauge parity).
+static void setTopbarGauge(lv_obj_t* fill, lv_obj_t* pct, float v,
+                           const char* reset, bool stale, uint32_t baseColor) {
+    if (fill) {
+        int w = v >= 0.0f ? (int)(v / 100.0f * 92.0f + 0.5f) : 0; if (w > 92) w = 92;
+        lv_obj_set_width(fill, w);
+        lv_obj_set_style_bg_color(fill, lv_color_hex(v >= 85.0f ? D1_ATTN : baseColor), 0);
+    }
+    if (!pct) return;
+    char pb[28];
+    if (v < 0.0f) snprintf(pb, sizeof(pb), "-");
+    else if (reset && reset[0]) snprintf(pb, sizeof(pb), "%d%%%s %s", (int)(v + 0.5f), stale ? "!" : "", reset);
+    else snprintf(pb, sizeof(pb), "%d%%%s", (int)(v + 0.5f), stale ? "!" : "");
+    lv_label_set_text(pct, pb);
+}
+#endif
+
 void update() {
     if (!panelLeft) return;
 
@@ -1232,6 +1280,19 @@ void update() {
     reset5h[sizeof(reset5h) - 1] = '\0';
     reset7d[sizeof(reset7d) - 1] = '\0';
     bool usageStale = g_state.usageStale;
+#if defined(BOARD_IPS10)
+    float pcx5h = g_state.codexPrimaryPercent;
+    float pcx7d = g_state.codexSecondaryPercent;
+    char resetCx5h[20], resetCx7d[20];
+    strncpy(resetCx5h, g_state.codexPrimaryReset, sizeof(resetCx5h) - 1);
+    strncpy(resetCx7d, g_state.codexSecondaryReset, sizeof(resetCx7d) - 1);
+    resetCx5h[sizeof(resetCx5h) - 1] = '\0';
+    resetCx7d[sizeof(resetCx7d) - 1] = '\0';
+    float agCredits = g_state.antigravityCredits;
+    char agPlan[24];
+    strncpy(agPlan, g_state.antigravityPlan, sizeof(agPlan) - 1);
+    agPlan[sizeof(agPlan) - 1] = '\0';
+#endif
 
     // Copy session list
     uint8_t sessionCount = hasData ? g_state.sessionCount : (uint8_t)0;
@@ -1413,22 +1474,36 @@ void update() {
             lv_label_set_text(tbPerf, pb);
         }
 #endif
-        // Top-bar 5h / 7d usage gauges (bar fill width + pct). p5h/p7d are 0..100
-        // percent (same scale as g_state.fiveHourPercent / updateGauge); negative =
-        // no data. The 92px track maps 0..100% → 0..92px.
-        if (tb5hFill) {
-            int w5 = p5h >= 0.0f ? (int)(p5h / 100.0f * 92.0f + 0.5f) : 0; if (w5 > 92) w5 = 92;
-            lv_obj_set_width(tb5hFill, w5);
-            lv_obj_set_style_bg_color(tb5hFill, lv_color_hex(p5h >= 85.0f ? D1_ATTN : D1_OK), 0);
-            char pb[8]; if (p5h >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p5h + 0.5f)); else snprintf(pb, sizeof(pb), "-");
-            if (tb5hPct) lv_label_set_text(tb5hPct, pb);
+        // Top-bar usage gauges. Claude 5h/7d (cyan) always shown; Codex CX 5h/7d
+        // (blue) appear only when limits exist; Antigravity credits as a text chip.
+        // Percent + reset countdown + stale "!" mirror the plugin water-tank gauge.
+        setTopbarGauge(tb5hFill, tb5hPct, p5h, reset5h, usageStale, D1_OK);
+        setTopbarGauge(tb7dFill, tb7dPct, p7d, reset7d, usageStale, D1_OK);
+
+        bool hasCodex = (pcx5h >= 0.0f || pcx7d >= 0.0f);
+        if (tbCx5hGrp) {
+            if (hasCodex) lv_obj_clear_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
+            else          lv_obj_add_flag(tbCx5hGrp, LV_OBJ_FLAG_HIDDEN);
         }
-        if (tb7dFill) {
-            int w7 = p7d >= 0.0f ? (int)(p7d / 100.0f * 92.0f + 0.5f) : 0; if (w7 > 92) w7 = 92;
-            lv_obj_set_width(tb7dFill, w7);
-            lv_obj_set_style_bg_color(tb7dFill, lv_color_hex(p7d >= 85.0f ? D1_ATTN : D1_OK), 0);
-            char pb[8]; if (p7d >= 0.0f) snprintf(pb, sizeof(pb), "%d%%", (int)(p7d + 0.5f)); else snprintf(pb, sizeof(pb), "-");
-            if (tb7dPct) lv_label_set_text(tb7dPct, pb);
+        if (tbCx7dGrp) {
+            if (hasCodex) lv_obj_clear_flag(tbCx7dGrp, LV_OBJ_FLAG_HIDDEN);
+            else          lv_obj_add_flag(tbCx7dGrp, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (hasCodex) {
+            setTopbarGauge(tbCx5hFill, tbCx5hPct, pcx5h, resetCx5h, false, D1_CODEX);
+            setTopbarGauge(tbCx7dFill, tbCx7dPct, pcx7d, resetCx7d, false, D1_CODEX);
+        }
+
+        if (tbAg) {
+            if (agCredits >= 0.0f) {
+                char ab[40];
+                if (agPlan[0]) snprintf(ab, sizeof(ab), "AG %s " LV_SYMBOL_BULLET " %dcr", agPlan, (int)agCredits);
+                else           snprintf(ab, sizeof(ab), "AG %dcr", (int)agCredits);
+                lv_label_set_text(tbAg, ab);
+                lv_obj_clear_flag(tbAg, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(tbAg, LV_OBJ_FLAG_HIDDEN);
+            }
         }
         if (terrCount) {
             char tc[40]; snprintf(tc, sizeof(tc), "THE BULLPEN " LV_SYMBOL_BULLET " %d LIVE", n);

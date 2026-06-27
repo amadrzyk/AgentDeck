@@ -194,6 +194,42 @@ static void handleUsageUpdate(JsonObject& obj) {
     storeResetTime(obj, "fiveHourResetsAt", g_state.fiveHourReset, sizeof(g_state.fiveHourReset));
     storeResetTime(obj, "sevenDayResetsAt", g_state.sevenDayReset, sizeof(g_state.sevenDayReset));
 
+    // Codex (ChatGPT) rolling-window limits. Nested object mirrors the Claude
+    // 5h/7d shape — primary ≈ 5h window, secondary ≈ 7d. Absent (→ sentinel)
+    // for non-Codex users. Reuses the storeResetTime lambda on each window.
+    g_state.codexPrimaryPercent = -1.0f;
+    g_state.codexSecondaryPercent = -1.0f;
+    g_state.codexPrimaryReset[0] = '\0';
+    g_state.codexSecondaryReset[0] = '\0';
+    if (obj["codexRateLimits"].is<JsonObject>()) {
+        JsonObject cx = obj["codexRateLimits"].as<JsonObject>();
+        if (cx["primary"].is<JsonObject>()) {
+            JsonObject p = cx["primary"].as<JsonObject>();
+            if (p["usedPercent"].is<float>()) g_state.codexPrimaryPercent = p["usedPercent"].as<float>();
+            storeResetTime(p, "resetsAt", g_state.codexPrimaryReset, sizeof(g_state.codexPrimaryReset));
+        }
+        if (cx["secondary"].is<JsonObject>()) {
+            JsonObject s = cx["secondary"].as<JsonObject>();
+            if (s["usedPercent"].is<float>()) g_state.codexSecondaryPercent = s["usedPercent"].as<float>();
+            storeResetTime(s, "resetsAt", g_state.codexSecondaryReset, sizeof(g_state.codexSecondaryReset));
+        }
+    }
+
+    // Antigravity local IDE quota — availableCredits is a raw count (no max),
+    // so consumers render it as a text chip rather than a percentage gauge.
+    g_state.antigravityCredits = -1.0f;
+    g_state.antigravityPlan[0] = '\0';
+    if (obj["antigravityStatus"].is<JsonObject>()) {
+        JsonObject ag = obj["antigravityStatus"].as<JsonObject>();
+        if (ag["availableCredits"].is<float>())
+            g_state.antigravityCredits = ag["availableCredits"].as<float>();
+        if (ag["planName"].is<const char*>()) {
+            strncpy(g_state.antigravityPlan, ag["planName"].as<const char*>(),
+                    sizeof(g_state.antigravityPlan) - 1);
+            g_state.antigravityPlan[sizeof(g_state.antigravityPlan) - 1] = '\0';
+        }
+    }
+
     unlockState();
 }
 

@@ -100,6 +100,17 @@ struct DashboardState {
     uint32_t sessionDurationSec;
     float estimatedCostUsd;
     bool usageStale;
+    // Codex (ChatGPT) rolling-window limits — mirror the Claude 5h/7d shape.
+    // Sourced from the user's local Codex rollout files (bridge codex-rate-limits.ts).
+    // -1.0f sentinel = "no data" (window absent / not a Codex user).
+    float codexPrimaryPercent;     // ≈5h window usedPercent (0-100)
+    float codexSecondaryPercent;   // ≈7d window usedPercent (0-100)
+    char codexPrimaryReset[20];    // "1h 23m" relative (needs NTP) or ""
+    char codexSecondaryReset[20];
+    // Antigravity local IDE quota. availableCredits is a raw count (no max),
+    // so it renders as a text chip, not a gauge. -1.0f = "no data".
+    float antigravityCredits;
+    char antigravityPlan[24];
 
     // Permission/Options
     char question[200];
@@ -182,6 +193,12 @@ struct DashboardState {
         fiveHourPercent = -1.0f;
         sevenDayPercent = -1.0f;
         estimatedCostUsd = -1.0f;
+        codexPrimaryPercent = -1.0f;
+        codexSecondaryPercent = -1.0f;
+        codexPrimaryReset[0] = '\0';
+        codexSecondaryReset[0] = '\0';
+        antigravityCredits = -1.0f;
+        antigravityPlan[0] = '\0';
     }
 
     // Called while g_stateMutex is held. Keep long-lived connection memory
@@ -212,6 +229,12 @@ struct DashboardState {
         sevenDayPercent = -1.0f;
         fiveHourReset[0] = '\0';
         sevenDayReset[0] = '\0';
+        codexPrimaryPercent = -1.0f;
+        codexSecondaryPercent = -1.0f;
+        codexPrimaryReset[0] = '\0';
+        codexSecondaryReset[0] = '\0';
+        antigravityCredits = -1.0f;
+        antigravityPlan[0] = '\0';
         usageStale = true;
         timelineView = false;
         updateCreatureStates();

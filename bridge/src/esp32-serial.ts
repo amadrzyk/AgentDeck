@@ -729,11 +729,14 @@ function sendHeartbeat(): void {
   }
 
   // Send usage_update (so ESP32 always has fresh usage/reset times)
-  // Only send if API usage data is present (fiveHourPercent defined),
-  // otherwise the ESP32 would reset its cached values to "no data" sentinel.
+  // Only send once SOME usage signal is present — Claude 5h/7d, Codex limits,
+  // or Antigravity credits — otherwise the ESP32 would reset its cached values
+  // to the "no data" sentinel before any provider has populated them.
   if (usageProvider) {
     const event = usageProvider();
-    if (event && (event as any).fiveHourPercent != null) {
+    const u = event as any;
+    const hasUsage = u && (u.fiveHourPercent != null || u.codexRateLimits != null || u.antigravityStatus != null);
+    if (hasUsage && event) {
       for (const conn of connections) {
         if (!hasLiveDeviceInfo(conn)) continue;
         sendToConnection(conn, JSON.stringify(prepareForSerial(event, conn)));
