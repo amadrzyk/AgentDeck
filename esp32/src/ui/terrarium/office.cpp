@@ -164,17 +164,43 @@ static inline void blendPx(int x, int y, uint16_t col, uint8_t a) {
 
 // blit a 64×64 A8 mask, tinted, into a dw×dh box centered at (cx,cy). nearest-neighbour scale,
 // optional horizontal flip, global alpha. Used for the worker creature sprite.
+// HSV(h°, S=1, V=1) → RGB565. Used to paint the Antigravity rainbow mark.
+static inline uint16_t hue565(float h) {
+    h = fmodf(h, 360.0f); if (h < 0) h += 360.0f;
+    float hp = h / 60.0f;
+    float x = 1.0f - fabsf(fmodf(hp, 2.0f) - 1.0f);
+    float r = 0, g = 0, b = 0;
+    if (hp < 1)      { r = 1; g = x; }
+    else if (hp < 2) { r = x; g = 1; }
+    else if (hp < 3) { g = 1; b = x; }
+    else if (hp < 4) { g = x; b = 1; }
+    else if (hp < 5) { r = x; b = 1; }
+    else             { r = 1; b = x; }
+    return rgb565((uint8_t)(r * 255), (uint8_t)(g * 255), (uint8_t)(b * 255));
+}
+
 static void blitGlyph(const uint8_t* a8, int cx, int cy, int dw, int dh, uint16_t col, bool flipX, uint8_t ga) {
     if (!a8 || dw <= 0 || dh <= 0) return;
+    // The Antigravity mark is a spectral gradient, not a single colour — paint it
+    // per-pixel via a colour wheel (the A8 mask only carries the shape/alpha).
+    bool rainbow = (a8 == CreatureGlyphs::ANTIGRAVITY_A8);
     int x0 = cx - dw / 2, y0 = cy - dh / 2;
     for (int dy = 0; dy < dh; dy++) {
         int sy = dy * 64 / dh; if (sy > 63) sy = 63;
         const uint8_t* srow = a8 + sy * 64;
         for (int dx = 0; dx < dw; dx++) {
             int sx = dx * 64 / dw; if (sx > 63) sx = 63;
-            uint8_t m = srow[flipX ? (63 - sx) : sx];
+            int ssx = flipX ? (63 - sx) : sx;
+            uint8_t m = srow[ssx];
             if (m < 12) continue;
-            blendPx(x0 + dx, y0 + dy, col, (uint8_t)((m * ga) / 255));
+            uint16_t pcol = col;
+            if (rainbow) {
+                // Angle around the mark centre: green left, warm top-right, blue
+                // bottom-right — approximates the Antigravity spectral "A".
+                float ang = atan2f((float)(32 - sy), (float)(ssx - 32)) * 57.2958f;
+                pcol = hue565(ang - 60.0f);
+            }
+            blendPx(x0 + dx, y0 + dy, pcol, (uint8_t)((m * ga) / 255));
         }
     }
 }

@@ -668,7 +668,7 @@ void init(lv_obj_t* parent) {
         lv_obj_set_style_border_width(tb, 1, 0);
         lv_obj_set_style_border_color(tb, lv_color_hex(0x1B3F39), 0);
         lv_obj_set_style_radius(tb, 0, 0);
-        lv_obj_set_style_pad_left(tb, 18, 0); lv_obj_set_style_pad_right(tb, 18, 0);
+        lv_obj_set_style_pad_left(tb, 18, 0); lv_obj_set_style_pad_right(tb, 28, 0);
         lv_obj_set_style_pad_top(tb, 0, 0); lv_obj_set_style_pad_bottom(tb, 0, 0);
         lv_obj_set_style_pad_column(tb, 16, 0);
         lv_obj_clear_flag(tb, LV_OBJ_FLAG_SCROLLABLE);
@@ -724,6 +724,10 @@ void init(lv_obj_t* parent) {
                 lv_image_set_src(ic, G[gi].icon);
                 lv_obj_set_style_image_recolor(ic, lv_color_hex(G[gi].iconCol), 0);
                 lv_image_set_scale(ic, 256 * 22 / 64);   // 64px mask → 22px
+                // Constrain the layout box to the scaled size — without this the flex
+                // row reserves the full 64px source width, leaving a big gap before 5H.
+                lv_obj_set_size(ic, 22, 22);
+                lv_image_set_inner_align(ic, LV_IMAGE_ALIGN_CENTER);
                 if (G[gi].iconSlot) { *G[gi].iconSlot = ic; lv_obj_add_flag(ic, LV_OBJ_FLAG_HIDDEN); }
             }
             lv_obj_t* g = lv_obj_create(tb);
