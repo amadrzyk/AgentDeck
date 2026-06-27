@@ -1,0 +1,109 @@
+/**
+ * Antigravity (`agy` CLI) transcript parsing.
+ *
+ * The agy CLI persists each conversation as a plain JSONL transcript at
+ *   ~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl
+ * one JSON object per step:
+ *   { step_index, source, type, status, created_at, content?, thinking?, tool_calls? }
+ *
+ * Unlike Claude/Codex, the model id is NOT on each record. It surfaces in the
+ * first USER_INPUT's `<USER_SETTINGS_CHANGE>` tag ("...from None to <MODEL>.")
+ * when a model is selected for the conversation; otherwise the global default
+ * in `settings.json` applies. The session log carries a live override line too,
+ * but the per-conversation transcript is the cleanest attribution source.
+ *
+ * These pure functions are shared by the passive observer (creature + model
+ * display) and the APME ingester (run/turn model attribution) so agy gets the
+ * same scorecard treatment as the other agents.
+ */
+import { readFileSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+
+export interface AntigravityTranscriptSummary {
+  goal?: string;
+  state: 'idle' | 'processing';
+  currentTask?: string;
+  /** Human model label from the transcript's last USER_SETTINGS_CHANGE, if any
+   *  (e.g. "GPT-OSS 120B (Medium)", "Gemini 3.5 Flash (Medium)"). */
+  model?: string;
+}
+
+interface AgyRecord {
+  step_index?: number;
+  source?: string;
+  type?: string;
+  status?: string;
+  content?: string;
+  tool_calls?: Array<{ name?: string; args?: Record<string, unknown> }>;
+}
+
+/** Step types that represent the agent doing tool work (drives currentTask). */
+const TOOL_TYPES = new Set([
+  'VIEW_FILE', 'RUN_COMMAND', 'GREP_SEARCH', 'LIST_DIRECTORY', 'CODE_ACTION', 'EDIT_FILE',
+]);
+
+export function antigravityRoot(): string {
+  return join(homedir(), '.gemini', 'antigravity-cli');
+}
+
+/** Parse an agy transcript sample into goal / state / currentTask / model. */
+export function parseAntigravityTranscript(raw: string): AntigravityTranscriptSummary {
+  const records: AgyRecord[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try { records.push(JSON.parse(line) as AgyRecord); } catch { /* skip malformed line */ }
+  }
+
+  let goal: string | undefined;
+  let model: string | undefined;
+  let currentTask: string | undefined;
+  let processing = false;
+
+  for (const rec of records) {
+    if (rec.type === 'USER_INPUT' && typeof rec.content === 'string') {
+      if (!goal) {
+        const req = rec.content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/);
+        if (req && req[1].trim()) goal = cleanGoal(req[1]);
+      }
+      // "The user changed setting `Model Selection` from None to GPT-OSS 120B (Medium)."
+      // Take the latest one seen → the model active for this conversation.
+      const change = rec.content.match(/Model Selection`?\s+from\s+.*?\s+to\s+(.+?)\.(?:\s|$)/);
+      if (change && change[1].trim()) model = change[1].trim();
+    }
+    if (rec.status === 'RUNNING') processing = true;
+    if (rec.type && TOOL_TYPES.has(rec.type)) {
+      currentTask = rec.tool_calls?.[0]?.name ?? rec.type.toLowerCase();
+    }
+  }
+
+  return { goal, model, currentTask, state: processing ? 'processing' : 'idle' };
+}
+
+function cleanGoal(s: string): string {
+  return s.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+/** Global default model from settings.json (fallback when a conversation never
+ *  recorded an explicit model selection). */
+export function antigravityDefaultModel(): string | undefined {
+  try {
+    const j = JSON.parse(readFileSync(join(antigravityRoot(), 'settings.json'), 'utf8')) as { model?: string };
+    return typeof j.model === 'string' ? j.model : undefined;
+  } catch { return undefined; }
+}
+
+/** Resolve the conversationId for a workspace cwd via the last-opened cache. */
+export function antigravityConversationId(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined;
+  try {
+    const j = JSON.parse(
+      readFileSync(join(antigravityRoot(), 'cache', 'last_conversations.json'), 'utf8'),
+    ) as Record<string, string>;
+    return typeof j[cwd] === 'string' ? j[cwd] : undefined;
+  } catch { return undefined; }
+}
+
+export function antigravityTranscriptPath(conversationId: string): string {
+  return join(antigravityRoot(), 'brain', conversationId, '.system_generated', 'logs', 'transcript.jsonl');
+}

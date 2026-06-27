@@ -16,6 +16,13 @@ import {
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { EnrichedSession } from './session-aggregator.js';
+import {
+  parseAntigravityTranscript,
+  antigravityDefaultModel,
+  antigravityConversationId,
+  antigravityTranscriptPath,
+  type AntigravityTranscriptSummary,
+} from './apme/antigravity-transcript.js';
 
 export type ObservedState = 'idle' | 'processing';
 
@@ -461,25 +468,43 @@ async function collectAntigravitySessions(processes: ProcInfo[]): Promise<Observ
   const procs = processes.filter((p) => isAntigravityProcessCommand(p.command));
   if (procs.length === 0) return [];
   const cwdByPid = await cwdForPids(procs.map((p) => p.pid));
+  const defaultModel = antigravityDefaultModel();
   return procs.map((proc) => {
     const cwd = cwdByPid.get(proc.pid);
+    const realCwd = cwd && cwd !== '/' ? cwd : undefined;
+    // Resolve the active conversation for this workspace and parse its
+    // transcript for model / goal / state. Falls back to a pid-keyed id and the
+    // global default model when no conversation can be located.
+    const convId = antigravityConversationId(realCwd);
+    let summary: AntigravityTranscriptSummary | null = null;
+    if (convId) {
+      const sample = readFileHeadAndTail(antigravityTranscriptPath(convId), 64 * 1024, MAX_SAMPLE_BYTES);
+      if (sample) summary = parseAntigravityTranscript(sample);
+    }
     return {
-      id: `observed:antigravity:${proc.pid}`,
+      id: convId ? `observed:antigravity:${convId}` : `observed:antigravity:${proc.pid}`,
       port: 0,
       pid: proc.pid,
-      projectName: cwd && cwd !== '/' ? projectNameFromCwd(cwd) : 'Antigravity',
+      projectName: realCwd ? projectNameFromCwd(realCwd) : 'Antigravity',
       agentType: 'antigravity' as const,
       alive: true,
-      state: 'idle' as const,
+      state: summary?.state ?? 'idle',
+      modelName: summary?.model ?? defaultModel,
+      goal: summary?.goal,
+      currentTask: summary?.currentTask,
       startedAt: new Date().toISOString(),
       controlMode: 'observed' as const,
-      cwd: cwd && cwd !== '/' ? cwd : undefined,
+      cwd: realCwd,
     };
   });
 }
 
 export function isAntigravityProcessCommand(command: string): boolean {
   return (
+    // `agy` is the Antigravity CLI binary (Homebrew cask). This is the one the
+    // user actually runs for coding; the GUI app patterns below were the only
+    // matches in the original "creature foundation", which left the CLI blind.
+    cmdHasBinary(command, 'agy') ||
     cmdHasBinary(command, 'antigravity') ||
     /\/Antigravity\.app\/Contents\/MacOS\/Antigravity(?:\s|$)/.test(command) ||
     /\bAntigravity(?:\s|$)/.test(command)
