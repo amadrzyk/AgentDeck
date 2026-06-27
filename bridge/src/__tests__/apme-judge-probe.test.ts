@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { probeJudgeBackend, sanitizeForMlx, callJudgeWithMeta } from '../apme/runner.js';
+import { probeJudgeBackend, sanitizeForMlx, callJudgeWithMeta, clearFoundationModelsAutoCacheForTests } from '../apme/runner.js';
 import { DEFAULT_APME_CONFIG, type ApmeJudgeConfig } from '../apme/settings.js';
+import { clearFoundationModelsHelperForTests } from '../foundation-models-helper.js';
 
 // Codex stop-time review (2026-04-30) caught that the original probe
 // reported `status: 'ready'` for setups that would actually fail at first
@@ -16,6 +17,7 @@ import { DEFAULT_APME_CONFIG, type ApmeJudgeConfig } from '../apme/settings.js';
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ORIGINAL_DATA_DIR = process.env.AGENTDECK_DATA_DIR;
+const ORIGINAL_FM_HELPER = process.env.AGENTDECK_FM_HELPER;
 let dataDir: string;
 
 function makeFetchMock(routes: Record<string, { ok: boolean; status?: number; body?: unknown } | (() => Response)>): typeof fetch {
@@ -38,7 +40,9 @@ function makeFetchMock(routes: Record<string, { ok: boolean; status?: number; bo
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), 'apme-judge-probe-'));
   process.env.AGENTDECK_DATA_DIR = dataDir;
+  process.env.AGENTDECK_FM_HELPER = join(dataDir, 'missing-fm-helper');
   delete process.env.ANTHROPIC_API_KEY;
+  clearFoundationModelsHelperForTests();
 });
 
 afterEach(() => {
@@ -46,8 +50,12 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.AGENTDECK_DATA_DIR;
   else process.env.AGENTDECK_DATA_DIR = ORIGINAL_DATA_DIR;
+  if (ORIGINAL_FM_HELPER === undefined) delete process.env.AGENTDECK_FM_HELPER;
+  else process.env.AGENTDECK_FM_HELPER = ORIGINAL_FM_HELPER;
   if (ORIGINAL_API_KEY === undefined) delete process.env.ANTHROPIC_API_KEY;
   else process.env.ANTHROPIC_API_KEY = ORIGINAL_API_KEY;
+  clearFoundationModelsAutoCacheForTests();
+  clearFoundationModelsHelperForTests();
   vi.restoreAllMocks();
 });
 

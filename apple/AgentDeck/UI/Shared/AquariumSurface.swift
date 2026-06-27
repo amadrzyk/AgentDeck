@@ -30,7 +30,7 @@ let aquariumGradient = LinearGradient(
 ///      window including the titlebar band. Without this the titlebar
 ///      falls back to default vibrancy over a light desktop → the jarring
 ///      "light titlebar / dark content" mismatch users complained about.
-///      Available on our minimum target (macOS 15+).
+///      Available on our minimum target (macOS 26+).
 ///   2. `.background(aquariumGradient.ignoresSafeArea())` fills the
 ///      content area. Redundant with #1 for the main canvas, but lets
 ///      NavigationSplitView detail panels keep their fill when the
@@ -51,7 +51,7 @@ struct AquariumSurfaceModifier: ViewModifier {
 /// macOS-only helper: extends the aquarium gradient into the window
 /// titlebar band so the system vibrancy can't leak a light band above
 /// dark content. `.containerBackground(for: .window)` requires macOS 15,
-/// which matches our deployment target.
+/// which is below our deployment target.
 private struct WindowTitlebarBackground: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)

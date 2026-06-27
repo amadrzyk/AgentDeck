@@ -44,11 +44,11 @@ describe('llm-settings', () => {
 
   it('reads llm.mlx pin from settings.json', () => {
     writeSettings(dir, {
-      llm: { mlx: { endpoint: 'http://127.0.0.1:9999', model: 'mlx-community/Qwen3.6-35B-A3B-4bit' } },
+      llm: { mlx: { endpoint: 'http://127.0.0.1:9999', model: 'mlx-community/Qwen3-1.7B-4bit' } },
     });
     const s = loadMlxSettings();
     expect(s.endpoint).toBe('http://127.0.0.1:9999');
-    expect(s.model).toBe('mlx-community/Qwen3.6-35B-A3B-4bit');
+    expect(s.model).toBe('mlx-community/Qwen3-1.7B-4bit');
   });
 
   it('treats "qwen3-30b" and "default" as placeholders (unpinned)', () => {
@@ -64,9 +64,9 @@ describe('llm-settings', () => {
 
   it('falls back to apme.judge.model when llm.mlx is absent', () => {
     writeSettings(dir, {
-      apme: { judge: { model: 'mlx-community/Qwen3.6-35B-A3B-4bit' } },
+      apme: { judge: { model: 'mlx-community/Qwen3-1.7B-4bit' } },
     });
-    expect(loadMlxSettings().model).toBe('mlx-community/Qwen3.6-35B-A3B-4bit');
+    expect(loadMlxSettings().model).toBe('mlx-community/Qwen3-1.7B-4bit');
   });
 
   it('strips /chat/completions suffix from legacy endpoints', () => {

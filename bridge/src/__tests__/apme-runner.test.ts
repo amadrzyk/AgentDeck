@@ -1,12 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { execSync } from 'child_process';
 import { ApmeStore } from '../apme/store.js';
 import { ApmeCollector } from '../apme/collector.js';
-import { ApmeRunner, detectLanguage, parseJudgeJson, buildJudgePrompt, runDeterministic, effectiveJudgeModelTag } from '../apme/runner.js';
+import {
+  ApmeRunner,
+  detectLanguage,
+  parseJudgeJson,
+  buildJudgePrompt,
+  runDeterministic,
+  effectiveJudgeModelTag,
+  clearFoundationModelsAutoCacheForTests,
+} from '../apme/runner.js';
 import { DEFAULT_APME_CONFIG, shouldJudge } from '../apme/settings.js';
+import { clearFoundationModelsHelperForTests } from '../foundation-models-helper.js';
 import { clearMlxSettingsCache } from '@agentdeck/shared';
 import type { ApmeConfig } from '../apme/settings.js';
 import type { ApmeRunRow } from '../apme/types.js';
@@ -121,11 +130,11 @@ describe('effectiveJudgeModelTag', () => {
   it('uses llm.mlx pin over cfg.model for MLX backend', () => {
     writeFileSync(
       join(settingsDir, 'settings.json'),
-      JSON.stringify({ llm: { mlx: { model: 'mlx-community/Qwen3.6-35B-A3B-4bit' } } }),
+      JSON.stringify({ llm: { mlx: { model: 'mlx-community/Qwen3-1.7B-4bit' } } }),
     );
     clearMlxSettingsCache();
     const cfg = { ...DEFAULT_APME_CONFIG.judge, backend: 'mlx' as const, model: 'qwen3-30b' };
-    expect(effectiveJudgeModelTag(cfg)).toBe('mlx:mlx-community/Qwen3.6-35B-A3B-4bit');
+    expect(effectiveJudgeModelTag(cfg)).toBe('mlx:mlx-community/Qwen3-1.7B-4bit');
   });
 
   it('ignores llm.mlx pin for non-MLX backends', () => {
@@ -150,12 +159,15 @@ describe('callJudge foundationModels routing', () => {
   // Each test stubs global.fetch; restore between runs.
   const origFetch = globalThis.fetch;
   const origDataDir = process.env.AGENTDECK_DATA_DIR;
+  const origFmHelper = process.env.AGENTDECK_FM_HELPER;
   let settingsDir: string;
 
   beforeEach(() => {
     settingsDir = mkdtempSync(join(tmpdir(), 'apme-fm-routing-'));
     process.env.AGENTDECK_DATA_DIR = settingsDir;
+    process.env.AGENTDECK_FM_HELPER = join(settingsDir, 'missing-fm-helper');
     clearMlxSettingsCache();
+    clearFoundationModelsHelperForTests();
   });
 
   afterEach(() => {
@@ -163,7 +175,13 @@ describe('callJudge foundationModels routing', () => {
     rmSync(settingsDir, { recursive: true, force: true });
     if (origDataDir === undefined) delete process.env.AGENTDECK_DATA_DIR;
     else process.env.AGENTDECK_DATA_DIR = origDataDir;
+    if (origFmHelper === undefined) delete process.env.AGENTDECK_FM_HELPER;
+    else process.env.AGENTDECK_FM_HELPER = origFmHelper;
     clearMlxSettingsCache();
+    clearFoundationModelsAutoCacheForTests();
+    clearFoundationModelsHelperForTests();
+    vi.resetModules();
+    vi.doUnmock('../session-registry.js');
   });
 
   async function invokeCallJudge(backend: ApmeConfig['judge']['backend'], opts: Partial<ApmeConfig['judge']> = {}) {
@@ -180,14 +198,14 @@ describe('callJudge foundationModels routing', () => {
     expect(out).toBe('{"overall":0.8}');
   });
 
-  it('throws when FM reports unavailable (default = no fallback)', async () => {
+  it('throws when FM reports unavailable and fallback is disabled', async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'unavailable', reason: 'macOS 26 or later required' }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })) as typeof fetch;
-    await expect(invokeCallJudge('foundationModels')).rejects.toThrow(/unavailable/);
+    await expect(invokeCallJudge('foundationModels', { fallbackToMlx: false })).rejects.toThrow(/unavailable/);
   });
 
-  it('falls back to MLX only when fallbackToMlx is explicitly true', async () => {
+  it('falls back to MLX when fallbackToMlx is true', async () => {
     // FM returns unavailable; callJudge must retry via MLX when fallbackToMlx=true.
     // Two distinct URLs so the mock can route each backend independently.
     const fmUrl = 'http://127.0.0.1:9999/apme/judge/foundation-models';
@@ -224,6 +242,52 @@ describe('callJudge foundationModels routing', () => {
     // default chat URL. `mlxCalled` confirms routing reached MLX.
     expect(mlxCalled).toBe(true);
     expect(out).toBe('{"overall":0.5}');
+  });
+
+  it('caches auto-resolved FM endpoint failure and routes subsequent calls straight to MLX', async () => {
+    vi.resetModules();
+    vi.doMock('../session-registry.js', () => ({
+      findDaemonPortAsync: vi.fn(async () => ({ port: 9120 })),
+    }));
+    const mod = await import('../apme/runner.js');
+    mod.clearFoundationModelsAutoCacheForTests();
+
+    let fmCalls = 0;
+    let mlxCalls = 0;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const href = typeof url === 'string' ? url : String(url);
+      if (href.includes('/apme/judge/foundation-models')) {
+        fmCalls += 1;
+        return new Response(
+          JSON.stringify({ error: 'unavailable', reason: 'Node daemon has no FM adapter' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (href.includes('chat/completions')) {
+        mlxCalls += 1;
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: '{"overall":0.5}' } }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ data: [{ id: 'qwen3-test' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const cfg = {
+      ...DEFAULT_APME_CONFIG.judge,
+      backend: 'foundationModels' as const,
+      endpoint: undefined,
+      fallbackToMlx: true,
+    };
+
+    await mod.callJudgeWithMeta('p1', cfg);
+    await mod.callJudgeWithMeta('p2', cfg);
+
+    expect(fmCalls).toBe(1);
+    expect(mlxCalls).toBe(2);
   });
 });
 
@@ -366,7 +430,7 @@ describe('ApmeRunner.runOne', () => {
     expect(judgeMetrics).toContain('correctness');
     const overall = evals.find((e) => e.layer === 'llm_judge' && e.metric === 'overall');
     expect(overall?.score).toBeCloseTo(0.55);
-    expect(overall?.judgeModel).toBe('mlx:qwen3-30b');
+    expect(overall?.judgeModel).toBe('foundationModels:apple-intelligence');
     expect(overall?.rubricVer).toBe(1);
 
     // Judge received the run context + task prompt

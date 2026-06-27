@@ -9,7 +9,7 @@ Hand this checklist to internal testers (you + 2-3 trusted reviewers) before sub
 ## Tester setup
 
 - Clean Apple ID or a test account (optional but ideal — a first-time install reveals onboarding gaps).
-- macOS 15+ on Apple Silicon or Intel; or iOS 17+ on iPhone/iPad.
+- macOS 26+ on Apple Silicon or Intel; or iOS 17+ on iPhone/iPad.
 - Claude Code CLI installed: `npm install -g @anthropic-ai/claude-code`.
 - Internet connection (for initial Claude Code install + any remote agents).
 - Microphone (any built-in Mac mic or iPad mic works).

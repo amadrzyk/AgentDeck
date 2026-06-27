@@ -76,7 +76,7 @@ struct AgentStatusIcon: View {
             pulseDim: pulseTick
         )
         let view = composite.environment(\.colorScheme, colorScheme)
-        // AgentDeck targets macOS 15+, so `ImageRenderer` (macOS 13+) is
+        // AgentDeck targets macOS 26+, so `ImageRenderer` (macOS 13+) is
         // unconditionally available.
         let renderer = ImageRenderer(content: view)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0

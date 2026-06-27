@@ -4,7 +4,9 @@
  * Reads `~/.agentdeck/settings.json` and returns a fully resolved APME config
  * merged with cost-sensitive defaults. The contract is intentionally strict:
  *
- *   - Default judge backend = local MLX (zero marginal cost).
+ *   - Default judge backend = Foundation Models via the Swift daemon, then
+ *     the bundled CLI Swift helper, with explicit MLX fallback when neither
+ *     Foundation Models path is available.
  *   - `backend: "api"` is **NOT supported on the Node bridge** — `callApi()`
  *     in runner.ts is a stub that always throws. The Swift daemon
  *     (App Store macOS) does implement an Anthropic API adapter; users on
@@ -35,10 +37,9 @@ export interface ApmeJudgeConfig {
    *  For `foundationModels` this is the Swift daemon's `/apme/judge/foundation-models`
    *  endpoint — defaults to the daemon on the standard discovery path. */
   endpoint?: string;
-  /** Opt-in: when `foundationModels` is unavailable, retry via MLX instead of
-   *  skipping the eval. Default `false` to honour cost-sensitive-defaults and
-   *  the App Store invariant that evals must never silently route to network
-   *  backends. */
+  /** When `foundationModels` is unavailable, retry via local MLX instead of
+   *  skipping the eval. Default `true` on the Node bridge so CLI-only setups
+   *  still get zero-cost local evals when the Swift daemon is not running. */
   fallbackToMlx?: boolean;
 }
 
@@ -62,7 +63,7 @@ export interface ApmeConfig {
   availableModels: string[];
 }
 
-/** Cost-sensitive defaults: local MLX, sparse sampling, no API calls. */
+/** Cost-sensitive defaults: Foundation Models first, local MLX fallback, no API calls. */
 export const DEFAULT_APME_CONFIG: ApmeConfig = {
   enabled: true,
   deterministic: {
@@ -71,10 +72,13 @@ export const DEFAULT_APME_CONFIG: ApmeConfig = {
     commands: {},
   },
   judge: {
-    backend: 'mlx',
+    backend: 'foundationModels',
+    // Legacy MLX placeholder retained so sanitizeForMlx() and older settings
+    // loaders still resolve through llm.mlx / probe / MLX_FALLBACK_MODEL.
     model: 'qwen3-30b',
     sampleRate: 1.0,
     onlyWhenDisagreement: false,
+    fallbackToMlx: true,
   },
   availableModels: [],
 };

@@ -148,7 +148,7 @@ WebSocket and SSE forward all 13 `BridgeEvent` types without filtering.
 - **Special endpoints**:
   - `POST /voice/transcribe` — WAV upload → whisper transcription (AVAudioEngine 16kHz mono)
 - **Platform**: SwiftUI Multiplatform — single Xcode project, iOS + macOS native targets (no Mac Catalyst)
-- **Deployment target**: iOS 17.0 / iPadOS 17.0 / macOS 15.0 (macOS 15 raised on 2026-05-10 to use `Scene.defaultLaunchBehavior(.suppressed)` for Evaluation/Settings restoration suppression)
+- **Deployment target**: iOS 17.0 / iPadOS 17.0 / macOS 26.0 (macOS app now targets Apple Intelligence / Foundation Models availability; iOS remains a read-only companion)
 - **State**: `@Observable` (Observation framework) — equivalent to Android's MutableStateFlow
 - **Terrarium**: Canvas + TimelineView(.animation) 60fps, Metal backend automatic
 - **Layout**:

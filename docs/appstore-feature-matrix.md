@@ -15,7 +15,7 @@
 | Claude Code hook 설치 | ✅ | ✅ | NSOpenPanel 명시적 동의 |
 | 음성 입력 (on-device SFSpeech) | ✅ | ✅ | 오디오 외부 송신 없음 |
 | Device Preview catalog | ✅* | ✅ | *App Store 단독 모드는 자체 구동 가능한 preview target 표시. 외부 daemon 감지 시 Android e-ink / Android tablet 등 ADB-tier preview 가 read-only 로 추가 노출 (TC001 은 ESP32 serial 보드라 ADB-tier 아님 — 위 Downstream 표 참조) |
-| APME 평가 Layer 2 (LLM) | ✅ | ✅ | Apple Intelligence / MLX / Anthropic API |
+| APME 평가 Layer 2 (LLM) | ✅ | ✅ | App Store: Apple Intelligence / Anthropic API. CLI: Swift daemon proxy → bundled Swift Foundation Models helper → MLX / OpenClaw. |
 | APME 평가 Layer 1 (deterministic) | ❌ | ✅ | `git` / `pnpm` 서브프로세스 필요 |
 | Timeline `chat_end` LLM 요약 | ✅ | ✅ | App Store 빌드는 Apple Intelligence (FoundationModels, macOS 26+) → MLX (127.0.0.1:8800) → 휴리스틱 chain. Settings → Timeline summary 에서 backend 픽 가능. 서브프로세스/번들 인터프리터 없음 — `verify-appstore-archive.sh` 통과 |
 
@@ -68,7 +68,7 @@
 
 | Component | App Store | CLI |
 |---|:---:|:---:|
-| Minimum OS (macOS) | macOS 15 Sequoia | macOS 15 Sequoia (Node ≥22; see README) |
+| Minimum OS (macOS) | macOS 26+ | macOS 15+ Sequoia for the Node bridge; macOS 26+ when using the Swift daemon / Foundation Models helper |
 | Minimum OS (iOS/iPadOS) | iOS 17 | — |
 | In-process Swift daemon (macOS) | ✅ | — |
 | Node.js bridge process | — | ✅ |

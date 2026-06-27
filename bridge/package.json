@@ -11,7 +11,10 @@
   "files": [
     "dist",
     "!dist/__tests__",
-    "assets/fonts"
+    "assets/fonts",
+    "assets/fm-helper",
+    "fm-helper",
+    "scripts/build-fm-helper.mjs"
   ],
   "main": "./dist/index.js",
   "bin": {
@@ -19,6 +22,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:fm-helper": "node scripts/build-fm-helper.mjs",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",

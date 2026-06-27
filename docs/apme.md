@@ -4,7 +4,7 @@
 
 평가는 **카테고리별로 방법이 다르다** — 코딩 태스크는 run-level + git diff + 결정론 레이어, 비코딩 태스크는 turn-level + judge only. 모든 데이터는 `~/.agentdeck/apme.sqlite`에 저장되고, daemon HTTP API + WS 프로토콜로 Apple/Android/Stream Deck/ESP32 UI에 실시간 노출된다.
 
-**비용 정책**: judge 백엔드는 **로컬 MLX** (Qwen3.5-30B) 기본, 보조로 OpenClaw Gateway. 모든 run을 평가해도 비용이 0이 되도록 설계.
+**비용 정책**: judge 백엔드는 App Store Swift daemon 에서는 **Apple Intelligence Foundation Models** 기본, CLI-only 경로에서는 Swift daemon proxy 를 먼저 쓰고 없으면 내장 Swift helper 로 Foundation Models 를 호출한다. 둘 다 불가능하면 **MLX**(`mlx-community/Qwen3-1.7B-4bit` fallback) / OpenClaw Gateway 를 사용한다. 모든 run을 평가해도 비용이 0이 되도록 설계.
 
 > **관련 문서**
 > - [why-apme.md](./why-apme.md) — 왜 APME를 만들었는가 (설계 의도, 카테고리별 평가 전략)
@@ -72,6 +72,8 @@ daemon 없이 session bridge 단독 사용 시 데이터만 축적되고 coding 
 | `bridge/src/apme/collector.ts` | 수집 경계 — session/turn lifecycle, hook → steps, PTY response → turns |
 | `bridge/src/apme/classifier.ts` | Task signals 계산 + rule-based + MLX fallback 분류 |
 | `bridge/src/apme/runner.ts` | Run-level (coding) + turn-level (non-coding) 평가 파이프라인 |
+| `bridge/src/foundation-models-helper.ts` | CLI-only Foundation Models Swift helper resolver / JSONL process manager |
+| `bridge/fm-helper/AgentDeckFMHelper.swift` | macOS 26+ Swift helper source bundled with the CLI package |
 | `bridge/src/apme/outcome.ts` | Outcome 판정 (committed/iterated/abandoned 등) + composite score |
 | `bridge/src/apme/tuner.ts` | 루브릭 자동 튜닝 — disagreement 감지, shadow-eval, rubric append |
 | `bridge/src/apme/recommend.ts` | 모델 추천 — scorecard 기반 |
@@ -416,10 +418,11 @@ composite = 0.40 × outcomeScore
       }
     },
     "judge": {
-      "backend": "mlx",
+      "backend": "foundationModels",
       "model": "qwen3-30b",
       "sampleRate": 1.0,
       "onlyWhenDisagreement": false,
+      "fallbackToMlx": true,
       "endpoint": "http://127.0.0.1:8800/v1/chat/completions"
     },
     "availableModels": ["claude-opus-4-6", "claude-sonnet-4-6", "qwen3-30b"]
@@ -434,10 +437,11 @@ composite = 0.40 × outcomeScore
 | `deterministic.enabled` | `true` | Layer 1 (lint/build/test) 실행 여부 |
 | `deterministic.timeoutSec` | `180` | 단계별 하드 타임아웃 (초) |
 | `deterministic.commands` | `{}` | 언어별 명령 override |
-| `judge.backend` | `"mlx"` | `"mlx"` \| `"foundationModels"` \| `"openclaw"` \| `"api"` |
-| `judge.model` | `"qwen3-30b"` | 백엔드에서 사용할 모델 id |
-| `judge.sampleRate` | `1.0` | judge 호출 비율 (0..1) — 로컬 MLX는 비용 0이므로 전수 평가 기본 |
+| `judge.backend` | `"foundationModels"` | `"foundationModels"` \| `"mlx"` \| `"openclaw"` \| `"api"` |
+| `judge.model` | `"qwen3-30b"` | 백엔드에서 사용할 모델 id. `qwen3-30b`는 legacy placeholder 로 취급되고, 실제 MLX fallback 은 `mlx-community/Qwen3-1.7B-4bit` |
+| `judge.sampleRate` | `1.0` | judge 호출 비율 (0..1) — 로컬 backend는 비용 0이므로 전수 평가 기본 |
 | `judge.onlyWhenDisagreement` | `false` | `true`면 결정론 clear pass는 judge skip |
+| `judge.fallbackToMlx` | `true` | CLI에서 Swift daemon Foundation Models endpoint가 없을 때 MLX로 fallback |
 | `availableModels` | `[]` | 추천 엔진이 필터할 가용 모델 목록 |
 
 ## HW sampler

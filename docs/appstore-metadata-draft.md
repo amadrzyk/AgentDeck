@@ -2,7 +2,7 @@
 
 Copy-ready text for the App Store Connect submission form. Each field respects Apple's character limits. Korean first (primary localization), English second.
 
-**Platforms**: macOS 15+ · iOS/iPadOS 17+
+**Platforms**: macOS 26+ · iOS/iPadOS 17+
 **Bundle ID**: `bound.serendipity.agent.deck`
 **App Category**: Primary — Developer Tools · Secondary — Productivity
 **Content Rating**: 4+ (no user-generated content, no ads, no external links to age-restricted sites)
@@ -85,7 +85,7 @@ Apple on-device 음성 인식(SFSpeechRecognizer)으로 음성 → 텍스트 →
 
 ═══ 시스템 요구사항 ═══
 
-• macOS 15 Sequoia 이상
+• macOS 26 이상
 • iOS 17 / iPadOS 17 이상
 • Apple Silicon 또는 Intel Mac
 
@@ -197,7 +197,7 @@ Developer workflows involving Android ADB bridging, OpenCode monitoring, Codex/O
 
 ═══ System requirements ═══
 
-• macOS 15 Sequoia or later
+• macOS 26 or later
 • iOS 17 / iPadOS 17 or later
 • Apple Silicon or Intel Mac
 

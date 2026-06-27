@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const source = join(root, 'fm-helper', 'AgentDeckFMHelper.swift');
+const out = join(root, 'assets', 'fm-helper', 'agentdeck-fm-helper');
+const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
+const target = `${arch}-apple-macos26.0`;
+
+if (process.platform !== 'darwin') {
+  console.log('[fm-helper] skipped: darwin only');
+  process.exit(0);
+}
+
+mkdirSync(dirname(out), { recursive: true });
+const swiftc = execFileSync('/usr/bin/xcrun', ['--find', 'swiftc'], { encoding: 'utf8' }).trim();
+execFileSync(swiftc, ['-parse-as-library', '-target', target, source, '-o', out], { stdio: 'inherit' });
+chmodSync(out, 0o755);
+console.log(`[fm-helper] built ${out}`);

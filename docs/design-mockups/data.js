@@ -48,7 +48,7 @@
   const SERVICES = [
     { key: 'claude',   label: 'Claude',   status: 'ok',   detail: 'OAuth · Opus 4.6, Sonnet 4.5, Haiku 4.5' },
     { key: 'openclaw', label: 'OpenClaw', status: 'ok',   detail: 'Gateway :18789' },
-    { key: 'mlx',      label: 'MLX',      status: 'ok',   detail: 'Qwen3.5-30B · local judge' },
+    { key: 'mlx',      label: 'MLX',      status: 'ok',   detail: 'Qwen3-1.7B · local fallback' },
     { key: 'ollama',   label: 'Ollama',   status: 'warn', detail: 'Stopped' },
   ];
 

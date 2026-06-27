@@ -7,7 +7,7 @@
 //      │ ● Claude  · OAuth      │
 //      │   [▓▓▓▓░░ 62%  2h14]🦑│  ← rate gauge + consumer creature dots
 //      │ ● OpenClaw :18789  🦀  │
-//      │ ● MLX · Qwen3.5-30B    │
+//      │ ● MLX · Qwen3-1.7B     │
 //      │ ○ Ollama · stopped     │
 //      ├────────────────────────┤
 //      │      ▼                 │

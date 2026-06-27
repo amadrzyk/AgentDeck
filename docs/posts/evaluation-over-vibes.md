@@ -19,7 +19,7 @@ Claude Sonnet 4.6    ← Opus 리밋 소진 시
 Codex (GPT-5.4)      ← 세컨드 오피니언
 Gemini Antigravity   ← 대용량 context, research
 GLM-5.1              ← 중간 난이도
-Qwen3.5-30B (MLX)    ← 로컬, 무료
+Qwen3-1.7B (MLX)     ← 로컬 fallback, 무료
 ```
 
 그리고 질문이 생겼다.
@@ -183,7 +183,7 @@ Step 3이 **ground truth**다. Step 4는 Step 3의 데이터가 쌓여야 의미
 judge는 모든 run에 돌아가야 하므로 비용이 감당 안 되면 내가 judge를 꺼버릴 것이다. 껐다가 데이터 축적이 멈추면 Step 4 튜닝도 끝장난다. 그래서:
 
 ```
-  Judge 백엔드      = 로컬 MLX (Qwen3.5-30B)
+  Judge 백엔드      = Apple Intelligence + 로컬 MLX fallback
   보조              = OpenClaw Gateway (그것도 로컬)
   클라우드 API       = 안 씀
   sampleRate        = 1.0 (전수 평가)

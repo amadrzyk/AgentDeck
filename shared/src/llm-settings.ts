@@ -18,7 +18,7 @@ import { homedir } from 'os';
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:8800';
 
 /** Final fallback when neither settings nor probe yield a model id. */
-export const MLX_FALLBACK_MODEL = 'mlx-community/Qwen3.6-35B-A3B-4bit';
+export const MLX_FALLBACK_MODEL = 'mlx-community/Qwen3-1.7B-4bit';
 
 const PLACEHOLDER_MODEL_IDS = new Set(['', 'default', 'qwen3-30b']);
 
@@ -112,8 +112,8 @@ export function resolveMlxModel(probeFirst?: string | null): string {
  *
  * Priority — mirrors the 4-layer policy documented in CLAUDE.md:
  *   1. caller-supplied pin if present in catalog
- *   2. `MLX_FALLBACK_MODEL` (3.6 family) if present in catalog — keeps the
- *      codebase's chosen default in sync with what the dashboard advertises
+ *   2. `MLX_FALLBACK_MODEL` if present in catalog — keeps the codebase's
+ *      chosen lightweight default in sync with what the dashboard advertises
  *   3. first catalog entry (preserves the `auto-pick first` behavior added
  *      in commit 2b7b38b3 for the many-models case)
  *   4. null — no catalog

@@ -45,7 +45,7 @@ enum TimelineSummarizer {
     /// Preferred MLX model when the live catalog advertises it. Mirrors
     /// shared/src/llm-settings.ts MLX_FALLBACK_MODEL. Used only for catalog
     /// matching — never returned when the server is down.
-    private static let mlxFallbackModel = "mlx-community/Qwen3.6-35B-A3B-4bit"
+    private static let mlxFallbackModel = "mlx-community/Qwen3-1.7B-4bit"
 
     /// Cached picked model id from /v1/models, refreshed on staleness.
     /// `nil` means "server probed, nothing usable" and summarize must skip.

@@ -6,9 +6,9 @@
  * 0/1 in `evals` (metrics: lint_clean, build_ok, tests_pass).
  *
  * Layer 2 (llm_judge): G-Eval style rubric against the latest `rubrics` row.
- * Backend is pluggable — default is local MLX (cost-free), API/OpenClaw are
- * opt-in via `~/.agentdeck/settings.json`. Gated by `shouldJudge()` so the
- * common "clear pass" case skips layer 2 entirely.
+ * Backend is pluggable — default is Foundation Models via the Swift daemon or
+ * bundled CLI Swift helper, with local MLX fallback for CLI-only runs. Gated
+ * by `shouldJudge()` so the common "clear pass" case skips layer 2 entirely.
  */
 
 import { spawn } from 'child_process';
@@ -20,6 +20,7 @@ import type { ApmeStore } from './store.js';
 import type { ApmeConfig, ApmeJudgeConfig, ApmeJudgeBackend } from './settings.js';
 import { loadApmeConfig, shouldJudge, DEFAULT_APME_CONFIG } from './settings.js';
 import { loadMlxSettings, mlxChatUrl } from '@agentdeck/shared';
+import { callFoundationModelsHelper, probeFoundationModelsHelper } from '../foundation-models-helper.js';
 import type { SessionSample, TrajectoryEvent } from '@agentdeck/shared';
 import { runSampleScorers } from './scorers/index.js';
 import type { ApmeRunRow, ParsedJudge } from './types.js';
@@ -893,6 +894,48 @@ export interface JudgeResult {
   effectiveLabel: string;
 }
 
+type FoundationModelsAutoCache =
+  | { state: 'ready'; url: string; expiresAt: number }
+  | { state: 'unavailable'; reason: string; expiresAt: number };
+
+const FOUNDATION_MODELS_MISSING_DAEMON_TTL_MS = 15_000;
+const FOUNDATION_MODELS_UNAVAILABLE_TTL_MS = 60_000;
+const FOUNDATION_MODELS_READY_TTL_MS = 60_000;
+
+let foundationModelsAutoCache: FoundationModelsAutoCache | null = null;
+let foundationModelsResolveInFlight: Promise<string | null> | null = null;
+
+function getFoundationModelsAutoCache(now = Date.now()): FoundationModelsAutoCache | null {
+  if (!foundationModelsAutoCache) return null;
+  if (foundationModelsAutoCache.expiresAt <= now) {
+    foundationModelsAutoCache = null;
+    return null;
+  }
+  return foundationModelsAutoCache;
+}
+
+function markFoundationModelsAutoReady(url: string): void {
+  foundationModelsAutoCache = {
+    state: 'ready',
+    url,
+    expiresAt: Date.now() + FOUNDATION_MODELS_READY_TTL_MS,
+  };
+}
+
+function markFoundationModelsAutoUnavailable(reason: string, ttlMs = FOUNDATION_MODELS_UNAVAILABLE_TTL_MS): void {
+  foundationModelsAutoCache = {
+    state: 'unavailable',
+    reason,
+    expiresAt: Date.now() + ttlMs,
+  };
+}
+
+/** Test hook for cache-sensitive runner tests. Production code should not call this. */
+export function clearFoundationModelsAutoCacheForTests(): void {
+  foundationModelsAutoCache = null;
+  foundationModelsResolveInFlight = null;
+}
+
 /** Like `callJudge`, but returns the effective backend + label so callers
  *  can record `judge_model` correctly across fallback paths. */
 export async function callJudgeWithMeta(prompt: string, judgeCfg: ApmeJudgeConfig): Promise<JudgeResult> {
@@ -901,8 +944,8 @@ export async function callJudgeWithMeta(prompt: string, judgeCfg: ApmeJudgeConfi
       const text = await callFoundationModels(prompt, judgeCfg);
       return { text, effectiveBackend: 'foundationModels', effectiveLabel: effectiveJudgeModelTag(judgeCfg) };
     } catch (err) {
-      // Cost-sensitive default: do not silently route to a network backend.
-      // Only retry via MLX when the user explicitly opts in — otherwise
+      // Cost-sensitive default: never route to a paid/network backend.
+      // Retry via local MLX only when fallbackToMlx is enabled; otherwise
       // propagate the error so the runner's try/catch skips this eval.
       if (judgeCfg.fallbackToMlx) {
         debug('APME', `foundationModels unavailable, fallback to MLX: ${String(err)}`);
@@ -1056,9 +1099,19 @@ export async function probeJudgeBackend(cfg: ApmeJudgeConfig): Promise<JudgeBack
       // Mirror callFoundationModels: explicit endpoint wins over auto-resolve.
       const url = cfg.endpoint ?? await resolveFoundationModelsUrl();
       if (!url) {
+        const helper = await probeFoundationModelsHelper();
+        if (helper.available) {
+          return {
+            backend: 'foundationModels',
+            status: 'ready',
+            latencyMs: Date.now() - start,
+            endpoint: helper.path ? `helper:${helper.path}` : 'helper',
+            checkedAt,
+          };
+        }
         return {
           backend: 'foundationModels', status: 'unavailable',
-          reason: 'Swift daemon not found. Foundation Models is App Store macOS only.',
+          reason: `Swift daemon not found and helper unavailable: ${helper.reason ?? 'unknown'}`,
           checkedAt,
         };
       }
@@ -1075,6 +1128,19 @@ export async function probeJudgeBackend(cfg: ApmeJudgeConfig): Promise<JudgeBack
       }).catch((e) => ({ ok: false, status: 0, statusText: String(e).slice(0, 80) } as Response));
       if (!ping.ok) {
         const detail = ping.status ? `HTTP ${ping.status}` : (ping as { statusText?: string }).statusText ?? 'no response';
+        if (!cfg.endpoint) {
+          markFoundationModelsAutoUnavailable(`Swift daemon FM endpoint did not accept probe (${detail}).`);
+          const helper = await probeFoundationModelsHelper();
+          if (helper.available) {
+            return {
+              backend: 'foundationModels',
+              status: 'ready',
+              latencyMs: Date.now() - start,
+              endpoint: helper.path ? `helper:${helper.path}` : 'helper',
+              checkedAt,
+            };
+          }
+        }
         return {
           backend: 'foundationModels', status: 'unavailable',
           reason: `Swift daemon FM endpoint did not accept probe (${detail}).`,
@@ -1083,12 +1149,26 @@ export async function probeJudgeBackend(cfg: ApmeJudgeConfig): Promise<JudgeBack
       }
       const json = await (ping as Response).json().catch(() => ({})) as { text?: string; error?: string; reason?: string };
       if (json.error) {
+        if (!cfg.endpoint) {
+          markFoundationModelsAutoUnavailable(`Foundation Models ${json.error}: ${json.reason ?? 'no reason given'}.`);
+          const helper = await probeFoundationModelsHelper();
+          if (helper.available) {
+            return {
+              backend: 'foundationModels',
+              status: 'ready',
+              latencyMs: Date.now() - start,
+              endpoint: helper.path ? `helper:${helper.path}` : 'helper',
+              checkedAt,
+            };
+          }
+        }
         return {
           backend: 'foundationModels', status: 'unavailable',
           reason: `Foundation Models ${json.error}: ${json.reason ?? 'no reason given'}. Apple Intelligence may not be downloaded yet.`,
           endpoint: url, checkedAt,
         };
       }
+      if (!cfg.endpoint) markFoundationModelsAutoReady(url);
       return { backend: 'foundationModels', status: 'ready', latencyMs: Date.now() - start, endpoint: url, checkedAt };
     }
     if (cfg.backend === 'api') {
@@ -1189,49 +1269,97 @@ async function callOpenClaw(prompt: string, cfg: ApmeJudgeConfig): Promise<strin
 }
 
 /**
- * Route a judge call to the Swift daemon's Foundation Models adapter.
+ * Route a judge call to Foundation Models.
  *
- * The actual on-device LLMSession lives in
- * `apple/AgentDeck/Daemon/Apme/ApmeJudgeFoundationModels.swift`; this TS path
- * just forwards the prompt. Available only when a Swift in-process daemon is
- * running on the same machine (App Store macOS build). Node-only setups don't
- * ship Foundation Models — callers should either opt into `fallbackToMlx` or
- * accept the resulting eval skip.
+ * Prefer the Swift daemon HTTP adapter when it is running; otherwise use the
+ * bundled CLI Swift helper process. Default CLI config enables
+ * `fallbackToMlx`, while callers can set it false to force a skip when
+ * neither Foundation Models path works.
  *
  * Shape contract:
  *   Request  : POST /apme/judge/foundation-models { prompt: string }
  *   Response : { text: string } | { error: "unavailable", reason: string }
  */
 async function callFoundationModels(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
+  const explicitEndpoint = Boolean(cfg.endpoint);
+  const cached = explicitEndpoint ? null : getFoundationModelsAutoCache();
+  if (cached?.state === 'unavailable') {
+    try {
+      return await callFoundationModelsHelper(prompt);
+    } catch (helperErr) {
+      throw new Error(`foundationModels cached unavailable: ${cached.reason}; helper unavailable: ${String(helperErr)}`);
+    }
+  }
+
   const url = cfg.endpoint ?? await resolveFoundationModelsUrl();
-  if (!url) throw new Error('foundationModels: no Swift daemon found — FM is only available in App Store macOS builds');
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!resp.ok) throw new Error(`foundationModels HTTP ${resp.status}`);
-  const json = await resp.json() as { text?: string; error?: string; reason?: string };
-  if (json.error) {
-    throw new Error(`foundationModels ${json.error}: ${json.reason ?? 'no reason'}`);
+  if (!url) {
+    try {
+      return await callFoundationModelsHelper(prompt);
+    } catch (helperErr) {
+      throw new Error(`foundationModels: no Swift daemon found and helper unavailable: ${String(helperErr)}`);
+    }
   }
-  if (typeof json.text !== 'string' || json.text.length === 0) {
-    throw new Error('foundationModels returned empty text');
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!resp.ok) throw new Error(`foundationModels HTTP ${resp.status}`);
+    const json = await resp.json() as { text?: string; error?: string; reason?: string };
+    if (json.error) {
+      throw new Error(`foundationModels ${json.error}: ${json.reason ?? 'no reason'}`);
+    }
+    if (typeof json.text !== 'string' || json.text.length === 0) {
+      throw new Error('foundationModels returned empty text');
+    }
+    if (!explicitEndpoint) markFoundationModelsAutoReady(url);
+    return json.text;
+  } catch (err) {
+    if (!explicitEndpoint) {
+      markFoundationModelsAutoUnavailable(String(err));
+      try {
+        return await callFoundationModelsHelper(prompt);
+      } catch (helperErr) {
+        throw new Error(`${String(err)}; helper unavailable: ${String(helperErr)}`);
+      }
+    }
+    throw err;
   }
-  return json.text;
 }
 
 /** Best-effort resolver for the Swift daemon's FM endpoint. Returns null when
  *  no Swift daemon (httpPort ≠ port) is reachable. */
 async function resolveFoundationModelsUrl(): Promise<string | null> {
+  const cached = getFoundationModelsAutoCache();
+  if (cached?.state === 'ready') return cached.url;
+  if (cached?.state === 'unavailable') return null;
+  if (foundationModelsResolveInFlight) return foundationModelsResolveInFlight;
+
   // Lazy-require to avoid pulling session-registry into every test bundle
   // that imports runner.ts for its pure helpers.
-  const { findDaemonPortAsync } = await import('../session-registry.js');
-  const info = await findDaemonPortAsync();
-  if (!info) return null;
-  const port = info.httpPort ?? info.port;
-  return `http://127.0.0.1:${port}/apme/judge/foundation-models`;
+  foundationModelsResolveInFlight = (async () => {
+    try {
+      const { findDaemonPortAsync } = await import('../session-registry.js');
+      const info = await findDaemonPortAsync();
+      if (!info) {
+        markFoundationModelsAutoUnavailable(
+          'Swift daemon not found',
+          FOUNDATION_MODELS_MISSING_DAEMON_TTL_MS,
+        );
+        return null;
+      }
+      const port = info.httpPort ?? info.port;
+      const url = `http://127.0.0.1:${port}/apme/judge/foundation-models`;
+      markFoundationModelsAutoReady(url);
+      return url;
+    } finally {
+      foundationModelsResolveInFlight = null;
+    }
+  })();
+  return foundationModelsResolveInFlight;
 }
 
 async function callApi(_prompt: string, _cfg: ApmeJudgeConfig): Promise<string> {

@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/host-macOS%2015%2B-lightgrey.svg" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/app-macOS%2026%2B-lightgrey.svg" alt="macOS 26+">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green.svg" alt="Node.js >= 22">
   <img src="https://img.shields.io/badge/Stream%20Deck%2B-8%20keys%20%2B%204%20encoders-black.svg?logo=elgato" alt="Stream Deck+">
   <img src="https://img.shields.io/badge/Android-10%2B%20(tablet%20%2B%20e--ink)-3DDC84.svg?logo=android&logoColor=white" alt="Android 10+">
@@ -44,11 +44,11 @@ AgentDeck is a physical control surface for AI coding agents. It started with an
 
 | | Requirement |
 |---|---|
-| **Platform** | macOS 15+ (Sequoia) primary · Windows 11 runs the bridge + Stream Deck plugin ([see below](#windows-bridge--plugin)) · Linux not supported |
+| **Platform** | macOS 26+ for the App Store Swift dashboard · macOS 15+ for the Node bridge · Windows 11 runs the bridge + Stream Deck plugin ([see below](#windows-bridge--plugin)) · Linux not supported |
 | **Hardware** | Elgato Stream Deck+ (8 keys, 4 encoders, LCD touch strip) |
 | **Terminal** | iTerm2 (required for session management and voice paste) |
 | **Android** | *(Optional)* Android 10+ tablet or e-ink reader for remote dashboard |
-| **Apple** | *(Optional)* iOS 17+ / iPadOS 17+ / macOS 15+ for SwiftUI dashboard |
+| **Apple** | *(Optional)* iOS 17+ / iPadOS 17+ companion · macOS 26+ for SwiftUI dashboard |
 | **TUI** | *(Optional)* Any terminal with truecolor support for `agentdeck dashboard` |
 
 ---
@@ -220,7 +220,8 @@ AgentDeck ships as **independent artifacts, one version track per channel** — 
 
 | Item | Required | Install |
 |------|----------|---------|
-| **macOS 15+** (Sequoia) | Yes (host) | Primary platform. Windows 11 runs the bridge + Stream Deck plugin — see [Windows](#windows-bridge--plugin). Linux not supported |
+| **macOS 26+** | Yes (App Store dashboard) | Primary Swift dashboard platform. Foundation Models integration requires Apple Intelligence availability at runtime. |
+| **macOS 15+** (Sequoia) | Yes (Node bridge) | CLI daemon / Stream Deck plugin host. Windows 11 bridge support is below; Linux not supported |
 | **Xcode Command Line Tools** | Yes | `xcode-select --install` (node-pty native build) |
 | **Node.js** >= 22 | Yes | `brew install node` |
 | **pnpm** >= 9 | Yes | `npm install -g pnpm` |
@@ -681,7 +682,7 @@ The TUI connects to a running Bridge or Daemon over WebSocket and renders a real
 
 ## Agent Performance Evaluation & Model Orchestration (APME)
 
-**The problem:** I route 6+ LLMs (Claude Opus/Sonnet, Codex/GPT-5.4, Gemini Antigravity, GLM-5.1, Qwen3.5-30B MLX) across my daily work by **gut feeling** — "this task to Codex, summaries to local Qwen, important stuff to Opus." I have no idea if that's efficient. Generic benchmarks don't answer it either — they measure average users on standard tasks, not **me on my codebase**.
+**The problem:** I route 6+ LLMs (Claude Opus/Sonnet, Codex/GPT-5.4, Gemini Antigravity, GLM-5.1, Apple Intelligence, small local Qwen MLX) across my daily work by **gut feeling** — "this task to Codex, summaries to local Qwen, important stuff to Opus." I have no idea if that's efficient. Generic benchmarks don't answer it either — they measure average users on standard tasks, not **me on my codebase**.
 
 APME is the personalized evaluation system that fixes this. Every agent session → local SQLite dataset → category-aware auto-evaluation → eventually data-driven model routing.
 
@@ -746,8 +747,8 @@ Judge runs on **local backends only** so `sampleRate: 1.0` (evaluate everything)
 
 | Backend | Endpoint | Role |
 |---|---|---|
-| `mlx` | `127.0.0.1:8800` (Qwen3.5-30B) | Primary (Node CLI/Brew) |
-| `foundationModels` | in-process Swift daemon | Primary (App Store macOS build via Apple Intelligence) |
+| `foundationModels` | Swift daemon HTTP endpoint, then bundled CLI Swift helper | Primary (Apple Intelligence / Foundation Models on macOS 26+) |
+| `mlx` | `127.0.0.1:8800` (`mlx-community/Qwen3-1.7B-4bit` fallback) | CLI fallback when Foundation Models is not available |
 | `openclaw` | `127.0.0.1:18789` (Gateway) | Secondary |
 
 ### Self-healing Daemon Loop + Device Broadcast
@@ -772,7 +773,7 @@ http://localhost:9120/apme
 
 Run table (session · model · task · composite score · cost · git delta), category scorecard (`v_category_scorecard` — which model wins per category), per-run vibe controls, turn-level mid-session eval cards for non-coding sessions.
 
-> **Cost policy:** Judge runs on local backends only (MLX + OpenClaw Gateway). `sampleRate: 1.0` is the default — evaluate every run without worrying about API bills. All session data stays on-device.
+> **Cost policy:** Judge runs on local backends only (Apple Intelligence / MLX / OpenClaw Gateway). `sampleRate: 1.0` is the default — evaluate every run without worrying about API bills. All session data stays on-device.
 
 **Deep dives:**
 - **[Why APME](docs/why-apme.md)** — the motivation, category-aware strategy, design decisions
@@ -1056,7 +1057,7 @@ Building a data-driven answer to "which of my 6+ LLMs should I route this task t
 - **Non-coding (conversation/planning/research/review)** — turn-level mid-session eval, fires immediately after each turn completes, no git diff needed
 - **Composite score** — 4-dimensional weighted sum (0.40 outcome + 0.40 judge + 0.15 efficiency + 0.05 vibe) so a single noisy signal can't poison the run
 
-**Judge is local-only** (MLX Qwen3.5-30B primary, OpenClaw Gateway secondary) so `sampleRate: 1.0` is the default — every session evaluated, zero cost. **Auto-tuning** via OPRO loop picks up disagreement between human vibe labels and judge scores, proposes new rubrics, and shadow-scores them before accepting. The **Model Recommender** reads `v_category_scorecard` to suggest the best model per category + budget.
+**Judge is local-only** (Apple Intelligence primary in the Swift app, MLX fallback in the CLI, OpenClaw Gateway secondary) so `sampleRate: 1.0` is the default — every session evaluated, zero cost. **Auto-tuning** via OPRO loop picks up disagreement between human vibe labels and judge scores, proposes new rubrics, and shadow-scores them before accepting. The **Model Recommender** reads `v_category_scorecard` to suggest the best model per category + budget.
 
 Eval results broadcast to every device simultaneously (Stream Deck/Apple/Android/ESP32/TUI) via the `★ eval_result` timeline entry — pulling labeling into peripheral vision instead of burying it in a dashboard nobody opens.
 

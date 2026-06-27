@@ -4971,7 +4971,7 @@ final class DaemonServer {
         if let pin, catalog.contains(pin) {
             return [pin]
         }
-        let fallback = "mlx-community/Qwen3.6-35B-A3B-4bit"
+        let fallback = "mlx-community/Qwen3-1.7B-4bit"
         if catalog.contains(fallback) {
             return [fallback]
         }

@@ -427,10 +427,10 @@ struct TimelineStripView: View {
 
     /// Short pill label for `summaryKind`. Every kind that AgentDeck knows
     /// it produced gets a visible tag — including heuristic, since the
-    /// App Store deployment target is macOS 15 but FoundationModels needs
-    /// macOS 26, so the default `auto` chain falls through to heuristic on
-    /// the majority of installs. Hiding the heuristic pill made the entire
-    /// feature read as "not running" for those users. Pill is suppressed
+    /// App Store macOS builds now target macOS 26+, but Apple Intelligence can
+    /// still be unavailable when disabled or not downloaded, so `auto` can
+    /// still fall through to heuristic. Hiding the heuristic pill made the
+    /// entire feature read as "not running" for those users. Pill is suppressed
     /// only for unrecognized values, the gave-up sentinel ("none"), and
     /// nil (legacy on-disk rows from before the field existed, plus
     /// gateway pass-through entries that don't carry one).

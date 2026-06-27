@@ -451,10 +451,11 @@ ApmeConfig {
     commands: { typescript, swift, kotlin, ... }
   }
   judge: {
-    backend: 'mlx' | 'openclaw'           // 기본 'mlx' (둘 다 로컬)
-    model: string                         // 기본 'qwen3-30b'
+    backend: 'foundationModels' | 'mlx' | 'openclaw'
+    model: string                         // legacy 기본 'qwen3-30b' (MLX fallback: mlx-community/Qwen3-1.7B-4bit)
     sampleRate: number                    // 0.0-1.0, 기본 1.0
     onlyWhenDisagreement: boolean         // 기본 false
+    fallbackToMlx: boolean                // CLI default true for Swift-daemon-missing fallback
     endpoint: string
   }
   availableModels: string[]
@@ -463,7 +464,7 @@ ApmeConfig {
 
 로드: `~/.agentdeck/settings.json` → fallback defaults.
 
-**비용 원칙**: judge 는 **로컬에서만** 돌린다 — MLX 또는 OpenClaw Gateway. `sampleRate: 1.0`으로 전수 평가해도 비용이 0이므로 가능. 클라우드 API 백엔드는 쓰지 않는다.
+**비용 원칙**: judge 는 **로컬에서만** 돌린다 — App Store Swift daemon 의 Apple Intelligence, CLI 의 MLX fallback, 또는 OpenClaw Gateway. `sampleRate: 1.0`으로 전수 평가해도 비용이 0이므로 가능. 클라우드 API 백엔드는 기본 경로가 아니다.
 
 ---
 

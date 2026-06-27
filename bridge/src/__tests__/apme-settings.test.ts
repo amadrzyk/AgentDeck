@@ -6,7 +6,8 @@ import { loadApmeConfig, DEFAULT_APME_CONFIG } from '../apme/settings.js';
 
 // Regression guard for cost-sensitive defaults: when a user has no
 // ~/.agentdeck/settings.json (or has one without an `apme` section),
-// APME must self-activate with the local MLX judge — that's how the
+// APME must self-activate with Foundation Models via Swift daemon and
+// explicit MLX fallback — that's how the
 // "11-day data stall" diagnostic case (sqlite mtime 2026-04-19) would
 // silently happen if defaults regress to disabled. See plans/…-graham.md
 // stage 0.3.
@@ -31,10 +32,11 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       expect(cfg.enabled).toBe(true);
       expect(cfg.deterministic.enabled).toBe(true);
       expect(cfg.deterministic.timeoutSec).toBe(DEFAULT_APME_CONFIG.deterministic.timeoutSec);
-      expect(cfg.judge.backend).toBe('mlx');
+      expect(cfg.judge.backend).toBe('foundationModels');
       expect(cfg.judge.model).toBe('qwen3-30b');
       expect(cfg.judge.sampleRate).toBe(1.0);
       expect(cfg.judge.onlyWhenDisagreement).toBe(false);
+      expect(cfg.judge.fallbackToMlx).toBe(true);
       expect(cfg.availableModels).toEqual([]);
     });
   });
@@ -48,7 +50,7 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       );
       const cfg = loadApmeConfig();
       expect(cfg.enabled).toBe(true);
-      expect(cfg.judge.backend).toBe('mlx');
+      expect(cfg.judge.backend).toBe('foundationModels');
     });
   });
 
@@ -57,7 +59,7 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
       writeFileSync(join(dir, 'settings.json'), '{not valid json', 'utf-8');
       const cfg = loadApmeConfig();
       expect(cfg.enabled).toBe(true);
-      expect(cfg.judge.backend).toBe('mlx');
+      expect(cfg.judge.backend).toBe('foundationModels');
     });
   });
 
@@ -231,8 +233,9 @@ describe('loadApmeConfig — defaults + merge behaviour', () => {
 });
 
 describe('loadApmeConfig — DEFAULT_APME_CONFIG sanity', () => {
-  it('default backend is local MLX (cost-sensitive policy)', () => {
-    expect(DEFAULT_APME_CONFIG.judge.backend).toBe('mlx');
+  it('default backend is Foundation Models with local MLX fallback (cost-sensitive policy)', () => {
+    expect(DEFAULT_APME_CONFIG.judge.backend).toBe('foundationModels');
+    expect(DEFAULT_APME_CONFIG.judge.fallbackToMlx).toBe(true);
   });
   it('default sampleRate is 1.0 (judge every closed run; cost is local)', () => {
     expect(DEFAULT_APME_CONFIG.judge.sampleRate).toBe(1.0);
