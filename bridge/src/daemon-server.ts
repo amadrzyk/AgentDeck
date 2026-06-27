@@ -50,6 +50,7 @@ import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule 
 import { handleApmeRequest } from './apme/http.js';
 import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
 import { transcriptTimelineForSession } from './session-transcript-timeline.js';
+import { callFoundationModelsHelper } from './foundation-models-helper.js';
 import {
   handleTrmnlSetup,
   handleTrmnlDisplay,
@@ -637,12 +638,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           // don't have AGENTDECK_PORT, so they all come here.
           const hookSessionId = 'daemon-hook';
           if (mapped === 'session_start') {
-            // Extract prompt source from message.content (Claude v2.1+) or prompt field
+            // Claude hooks carry `cwd` (the worktree dir), not project_name/path —
+            // capture it so APME runs are attributable to a specific worktree
+            // (e.g. cockpit grid panes). Without this, project_path stays NULL and
+            // per-worktree scorecards/overlays can't map a run to its branch.
+            const hookCwd = (typeof json.cwd === 'string' ? json.cwd
+              : (typeof json.project_path === 'string' ? json.project_path : '')) || '';
             apme.collector.openRun({
               sessionId: hookSessionId,
               agentType: 'claude-code',
-              projectName: (json.project_name as string) ?? undefined,
-              projectPath: (json.project_path as string) ?? undefined,
+              projectName: (json.project_name as string) || (hookCwd ? hookCwd.split('/').filter(Boolean).pop() : undefined),
+              projectPath: hookCwd || undefined,
             });
           }
           apme.collector.ingestHook(hookSessionId, mapped, json);
@@ -736,6 +742,42 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: `bad body: ${String(err)}` }));
         }
+      });
+      return;
+    }
+
+    // On-device Apple Intelligence (FoundationModels) text generation via the
+    // daemon-managed *persistent* helper. Keeping it warm in the daemon avoids
+    // the ~7s per-process cold start callers would otherwise pay each time
+    // (e.g. cockpit branch naming). localhost only; lazily spawns the helper.
+    if (req.method === 'POST' && pathname === '/generate') {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; if (body.length > 16384) req.destroy(); });
+      req.on('end', () => {
+        let prompt = '', instructions: string | undefined;
+        try {
+          const parsed = body ? JSON.parse(body) as Record<string, unknown> : {};
+          prompt = typeof parsed.prompt === 'string' ? parsed.prompt : '';
+          instructions = typeof parsed.instructions === 'string' ? parsed.instructions : undefined;
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'bad JSON' }));
+          return;
+        }
+        if (!prompt) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'prompt required' }));
+          return;
+        }
+        callFoundationModelsHelper(prompt, instructions)
+          .then((text) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ text }));
+          })
+          .catch((err) => {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: `generate failed: ${String(err)}` }));
+          });
       });
       return;
     }
