@@ -1336,6 +1336,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       core.broadcastSessionsList().catch(() => {});
       return true; // consumed
     }
+    if (msg.type === 'query_session_timeline') {
+      // Reply to THIS requester only with the session's recent timeline so a
+      // device that connected mid-session can fill its Detail view on demand
+      // (the live timeline_event stream is forward-only). Useful for any
+      // reconnecting surface, not just the XTeink X3.
+      const sessionId = (msg as { sessionId?: unknown }).sessionId;
+      const since = (msg as { since?: unknown }).since;
+      if (typeof sessionId === 'string' && sessionId) {
+        const entries = core.bridgeTimeline.getHistoryForSession(
+          sessionId,
+          typeof since === 'number' ? since : undefined,
+        );
+        try {
+          sender.send(JSON.stringify({ type: 'timeline_history', sessionId, entries }));
+        } catch { /* client disconnecting */ }
+      }
+      return true; // consumed
+    }
     return false; // not consumed — pass to command handler
   });
 
