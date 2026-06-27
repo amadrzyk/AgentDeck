@@ -220,6 +220,10 @@ struct ModuleHealthState: Sendable {
     var timebox: BLEMatrixHealth?
     /// iDotMatrix (32×32 BLE) — daemon `statusSnapshot()`.
     var idotmatrix: BLEMatrixHealth?
+    /// Wi-Fi WebSocket e-ink panels (XTeink X3 …) that registered via
+    /// `client_register {clientType:"eink-device"}`. Same volunteer-roster model
+    /// as Stream Deck: present only while the panel's WS is live.
+    var eink: EinkHealth?
 }
 
 /// Shared shape for the BLE matrix panels (Timebox Mini, iDotMatrix). Both
@@ -242,6 +246,22 @@ struct StreamDeckHealth: Sendable {
     /// Physical Stream Deck devices the Elgato plugin is driving, as
     /// reported via the `client_register` announcement.
     var devices: [StreamDeckDeviceInfo] = []
+}
+
+/// Wi-Fi WebSocket e-ink panels (XTeink X3 …) that registered as
+/// `clientType:"eink-device"`. Same volunteer-roster model as Stream Deck.
+struct EinkHealth: Sendable {
+    var devices: [EinkDeviceInfo] = []
+}
+
+struct EinkDeviceInfo: Sendable, Hashable {
+    var id: String
+    var name: String
+    /// Panel family ("eink"). Kept as a String for forward compatibility.
+    var family: String?
+    /// Native panel resolution as reported by the firmware (columns×rows pixels).
+    var columns: Int?
+    var rows: Int?
 }
 
 struct StreamDeckDeviceInfo: Sendable, Hashable {

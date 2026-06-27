@@ -411,6 +411,11 @@ final class DaemonServer {
         var updatedAt: Date
     }
     private var cachedStreamDeck: StreamDeckRegistration?
+    /// Wi-Fi WebSocket e-ink panels (XTeink X3 …) that registered as
+    /// `clientType:"eink-device"`. Same volunteer-roster + evict-on-close model
+    /// as `cachedStreamDeck`. Keyed by WS connection so several panels on the LAN
+    /// each survive independently and are evicted the moment their own WS closes.
+    private var cachedEinkDevices: [UUID: StreamDeckRegistration] = [:]
     /// Connection that registered as the Ulanzi Studio plugin. While present,
     /// the in-process D200H module stands down (Ulanzi Studio drives the device).
     private var ulanziPluginConnectionId: UUID?
@@ -2040,6 +2045,10 @@ final class DaemonServer {
             DaemonLogger.shared.debug("Daemon", "Evicted streamdeck registration: WS closed")
             broadcastStateUpdate()
         }
+        if cachedEinkDevices.removeValue(forKey: conn.id) != nil {
+            DaemonLogger.shared.debug("Daemon", "Evicted eink-device registration: WS closed")
+            broadcastStateUpdate()
+        }
         if ulanziPluginConnectionId == conn.id {
             ulanziPluginConnectionId = nil
             DaemonLogger.shared.debug("Daemon", "Ulanzi plugin disconnected — D200H may resume")
@@ -2758,6 +2767,18 @@ final class DaemonServer {
             )
             DaemonLogger.shared.debug("Daemon", "client_register streamdeck-plugin devices=\(devices.count)")
             broadcastStateUpdate()
+        case "eink-device":
+            // Wi-Fi WebSocket e-ink panel (XTeink X3 …). Pure self-rendered LAN
+            // client like an ESP32 board — it just volunteers its roster so the
+            // dashboard can show an E-ink row. Evicted when this WS closes.
+            let devices = (cmd["devices"] as? [[String: Any]]) ?? []
+            cachedEinkDevices[conn.id] = StreamDeckRegistration(
+                connectionId: conn.id,
+                devices: devices,
+                updatedAt: Date()
+            )
+            DaemonLogger.shared.debug("Daemon", "client_register eink-device devices=\(devices.count)")
+            broadcastStateUpdate()
         case "ulanzi-plugin":
             // Ulanzi Studio drives the D200H — stand down direct-HID so the two
             // don't fight over the device. Reacquired on disconnect.
@@ -2782,6 +2803,14 @@ final class DaemonServer {
         if let sd = cachedStreamDeck, !activeWSConnectionIds.contains(sd.connectionId), sd.updatedAt < cutoff {
             DaemonLogger.shared.debug("Daemon", "Evicted stale streamdeck client registration")
             cachedStreamDeck = nil
+            broadcastStateUpdate()
+        }
+        let staleEink = cachedEinkDevices.filter { _, reg in
+            !activeWSConnectionIds.contains(reg.connectionId) && reg.updatedAt < cutoff
+        }
+        if !staleEink.isEmpty {
+            for key in staleEink.keys { cachedEinkDevices.removeValue(forKey: key) }
+            DaemonLogger.shared.debug("Daemon", "Evicted \(staleEink.count) stale eink-device registration(s)")
             broadcastStateUpdate()
         }
     }
@@ -4379,6 +4408,12 @@ final class DaemonServer {
                 "devices": sd.devices,
             ] as [String: Any]
         }
+        if !cachedEinkDevices.isEmpty {
+            modules["einkDevices"] = [
+                "available": true,
+                "devices": cachedEinkDevices.values.flatMap { $0.devices },
+            ] as [String: Any]
+        }
         return SendableDict([
             "state": stateMachine.state.rawValue,
             "modules": modules,
@@ -4514,6 +4549,12 @@ final class DaemonServer {
             modules["streamDeck"] = [
                 "available": true,
                 "devices": sd.devices,
+            ] as [String: Any]
+        }
+        if !cachedEinkDevices.isEmpty {
+            modules["einkDevices"] = [
+                "available": true,
+                "devices": cachedEinkDevices.values.flatMap { $0.devices },
             ] as [String: Any]
         }
         return modules

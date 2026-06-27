@@ -168,6 +168,22 @@ enum BridgeEventParser {
             health.streamDeck = StreamDeckHealth(devices: sdDevices)
         }
 
+        if let ek = raw["einkDevices"] as? [String: Any] ?? raw["eink_devices"] as? [String: Any] {
+            var einkDevices: [EinkDeviceInfo] = []
+            if let arr = ek["devices"] as? [[String: Any]] {
+                for d in arr {
+                    einkDevices.append(EinkDeviceInfo(
+                        id: d["id"] as? String ?? "",
+                        name: d["name"] as? String ?? "",
+                        family: d["family"] as? String,
+                        columns: d["columns"] as? Int,
+                        rows: d["rows"] as? Int
+                    ))
+                }
+            }
+            health.eink = EinkHealth(devices: einkDevices)
+        }
+
         if let serial = raw["serial"] as? [String: Any] {
             var boards: [SerialPortInfo] = []
             var ports: [String] = []

@@ -187,6 +187,16 @@ struct MenuBarTopologyList: View {
                         )
                     }
                 }
+                // Wi-Fi WS e-ink panels (XTeink X3 …) — volunteer roster, live only.
+                if let eink = health.eink, !eink.devices.isEmpty {
+                    ForEach(eink.devices, id: \.id) { dev in
+                        RailRow(
+                            status: .ok,
+                            name: dev.name.isEmpty ? "E-ink panel" : dev.name,
+                            subtitle: einkDetail(for: dev)
+                        )
+                    }
+                }
                 // D200H first — always the most permanent peripheral.
                 if let d = health.d200h {
                     RailRow(
@@ -288,11 +298,19 @@ struct MenuBarTopologyList: View {
     private var hasAnyDownstream: Bool {
         guard let h = stateHolder.state.moduleHealth else { return false }
         if let sd = h.streamDeck, !sd.devices.isEmpty { return true }
+        if let eink = h.eink, !eink.devices.isEmpty { return true }
         if let adb = h.adb, (adb.available || !adb.devices.isEmpty || adb.lastError != nil) { return true }
         if h.d200h != nil { return true }
         if let p = h.pixoo, p.configuredDeviceCount > 0 { return true }
         if let s = h.serial, !s.connectedBoards.isEmpty { return true }
         return false
+    }
+
+    private func einkDetail(for dev: EinkDeviceInfo) -> String {
+        if let c = dev.columns, let r = dev.rows, c > 0, r > 0 {
+            return "\(c)×\(r) e-ink"
+        }
+        return dev.family ?? "e-ink"
     }
 
     private func streamDeckDisplayName(for dev: StreamDeckDeviceInfo) -> String {

@@ -449,6 +449,7 @@ struct TopologyRail: View {
         if let idm = health.idotmatrix, idm.configuredDeviceCount > 0 { return true }
         if let serial = health.serial, !serial.connectedBoards.isEmpty { return true }
         if let sd = health.streamDeck, !sd.devices.isEmpty { return true }
+        if let eink = health.eink, !eink.devices.isEmpty { return true }
         return false
     }
 
@@ -470,6 +471,7 @@ struct TopologyRail: View {
             #if os(macOS)
             if let health = stateHolder.state.moduleHealth {
                 streamDeckSection(health: health)
+                einkSection(health: health)
                 usbHidSection(health: health)
                 pixelDisplaySection(health: health)
                 bleMatrixSection(health: health)
@@ -541,6 +543,33 @@ struct TopologyRail: View {
             return "\(c)×\(r) keys"
         }
         return dev.family ?? ""
+    }
+
+    /// Wi-Fi WebSocket e-ink panels (XTeink X3 …). Self-rendered LAN clients that
+    /// volunteer their roster via `client_register {clientType:"eink-device"}` —
+    /// no subprocess, same LAN-WS path as an ESP32 board, so App-Store safe. Only
+    /// renders while a panel's WS is live (mirrors the Stream Deck section).
+    @ViewBuilder
+    private func einkSection(health: ModuleHealthState) -> some View {
+        if let eink = health.eink, !eink.devices.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                downstreamSubheader("E-ink")
+                ForEach(eink.devices, id: \.id) { dev in
+                    DeviceRailRow(
+                        name: dev.name.isEmpty ? "E-ink panel" : dev.name,
+                        status: .ok,
+                        detail: einkDetail(for: dev)
+                    )
+                }
+            }
+        }
+    }
+
+    private func einkDetail(for dev: EinkDeviceInfo) -> String {
+        if let c = dev.columns, let r = dev.rows, c > 0, r > 0 {
+            return "\(c)×\(r) e-ink"
+        }
+        return dev.family ?? "e-ink"
     }
 
     @ViewBuilder
