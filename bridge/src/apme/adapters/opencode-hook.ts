@@ -115,13 +115,23 @@ export function opencodeMessageToSpans(
     attributes: { ...baseAttrs, ...attributes },
   });
 
+  const spans: TelemetrySpan[] = [];
+  // Attribute the model as soon as an assistant message reveals it. OpenCode's
+  // SSE `message.updated` carries modelID/providerID, but that only ever
+  // reached the display StateMachine — the APME span pipeline never emitted a
+  // session_meta span, so every opencode run persisted model_id=NULL. Emitting
+  // it here routes through collector.ts (gen_ai.request.model -> updateModel),
+  // which writes directly to the bound APME session (no StateMachine reliance).
+  if (info.role === 'assistant' && info.modelID) {
+    const model = info.providerID ? `${info.providerID}/${info.modelID}` : info.modelID;
+    spans.push(make('session_meta', { 'gen_ai.request.model': model }));
+  }
   if (info.role === 'user' && promptText) {
-    return [make('turn_start', { 'agentdeck.prompt_text': promptText })];
+    spans.push(make('turn_start', { 'agentdeck.prompt_text': promptText }));
+  } else if (info.role === 'assistant' && responseText) {
+    spans.push(make('turn_response', { 'agentdeck.response_text': responseText }));
   }
-  if (info.role === 'assistant' && responseText) {
-    return [make('turn_response', { 'agentdeck.response_text': responseText })];
-  }
-  return [];
+  return spans;
 }
 
 /**

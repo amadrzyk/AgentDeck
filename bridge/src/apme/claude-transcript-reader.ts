@@ -103,6 +103,39 @@ export function readLastTurn(transcriptPath: string): LastTurnExcerpt | null {
   };
 }
 
+/**
+ * Extract the model id from a Claude Code transcript JSONL — the last
+ * assistant record's `message.model`. Returns `null` when unavailable.
+ *
+ * Why this exists: direct `claude` runs reach the daemon only via hook POSTs,
+ * which never carry the model. Without this, every such run persisted
+ * `model_id=NULL` (the bulk of the "unknown" rows in the APME scorecard). The
+ * transcript is the authoritative source Claude writes. Never throws.
+ */
+export function readModelFromTranscript(transcriptPath: string): string | null {
+  let raw: string;
+  try {
+    raw = readFileSync(transcriptPath, 'utf-8');
+  } catch {
+    return null;
+  }
+  const MAX_TAIL = 512 * 1024;
+  const tail = raw.length > MAX_TAIL ? raw.slice(raw.length - MAX_TAIL) : raw;
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    try {
+      const rec = JSON.parse(line) as { message?: { role?: string; model?: string } };
+      const model = rec?.message?.model;
+      if (rec?.message?.role === 'assistant' && typeof model === 'string' && model) {
+        return model;
+      }
+    } catch { /* skip malformed line */ }
+  }
+  return null;
+}
+
 function contentToString(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';

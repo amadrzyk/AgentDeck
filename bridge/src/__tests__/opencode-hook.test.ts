@@ -98,12 +98,27 @@ describe('opencode-hook → telemetry spans', () => {
     expect(spans[0].attributes['agentdeck.prompt_text']).toBe('fix tests please');
   });
 
-  it('message.updated for assistant role with response emits a turn_response', () => {
+  it('message.updated for assistant role with response emits session_meta + turn_response', () => {
     const info = {
       sessionID: 'sess', role: 'assistant', id: 'msg2', modelID: 'm', providerID: 'p',
     } as unknown as OpenCodeMessageInfo;
     const spans = opencodeMessageToSpans(ctx, info, undefined, 'done — all tests pass.');
+    // session_meta carries the model so the APME run gets model_id attributed
+    // (without it, opencode runs always persisted model_id=NULL).
+    expect(spans.length).toBe(2);
+    const meta = spans.find((s) => s.kind === 'session_meta');
+    expect(meta).toBeDefined();
+    expect(meta!.attributes['gen_ai.request.model']).toBe('p/m');
+    expect(spans.some((s) => s.kind === 'turn_response')).toBe(true);
+  });
+
+  it('assistant message with modelID but no response still emits session_meta (early model attribution)', () => {
+    const info = {
+      sessionID: 'sess', role: 'assistant', id: 'msg3', modelID: 'glm-5.2', providerID: 'zai',
+    } as unknown as OpenCodeMessageInfo;
+    const spans = opencodeMessageToSpans(ctx, info, undefined, undefined);
     expect(spans.length).toBe(1);
-    expect(spans[0].kind).toBe('turn_response');
+    expect(spans[0].kind).toBe('session_meta');
+    expect(spans[0].attributes['gen_ai.request.model']).toBe('zai/glm-5.2');
   });
 });
