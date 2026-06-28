@@ -53,3 +53,48 @@ export function spawnPythonSync(
     },
   };
 }
+
+/**
+ * SIGTERM a managed sync child and wait (bounded) for it to exit, so the child's
+ * OFFLINE / blank farewell frame finishes painting before the daemon process
+ * exits.
+ *
+ * The Python sync clients trap SIGTERM, break their loop, push a final OFFLINE
+ * (iDotMatrix) or black (Timebox) frame over BLE, then disconnect. That push
+ * takes ~1s. If we only fire SIGTERM and return immediately (the old behaviour),
+ * the daemon exits right away; when the daemon is a launchd job, launchd then
+ * tears the job down and SIGKILLs the orphaned child mid-farewell — leaving the
+ * stateful BLE panel frozen on its last dashboard frame instead of OFFLINE.
+ * Awaiting the child's exit here keeps the daemon alive just long enough for the
+ * farewell to land. Escalates to SIGKILL if the child overruns `timeoutMs`.
+ */
+export function terminateSyncChild(proc: ChildProcess, timeoutMs = 3_000): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+      finish();
+    }, timeoutMs);
+    timer.unref?.();
+    proc.once('exit', finish);
+    try {
+      proc.kill('SIGTERM');
+    } catch {
+      finish();
+    }
+  });
+}

@@ -11,7 +11,7 @@ import { existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { deviceId, loadTimeboxDevices, type TimeboxDevice } from './timebox-settings.js';
-import { spawnPythonSync } from '../ble-sync-spawn.js';
+import { spawnPythonSync, terminateSyncChild } from '../ble-sync-spawn.js';
 
 interface SyncEntry {
   device: TimeboxDevice;
@@ -108,7 +108,17 @@ function spawnSync(entry: SyncEntry, venvPython: string, syncScript: string, htt
   });
 }
 
-export function stopTimeboxSync(): void {
+/**
+ * Stop all managed Timebox BLE syncs and cancel pending respawns.
+ *
+ * When `awaitFarewell` is true (daemon shutdown), wait for each child to exit so
+ * its blank-panel farewell finishes painting before the daemon process exits —
+ * otherwise launchd tears the job down and SIGKILLs the orphaned children
+ * mid-farewell, freezing each panel on its last dashboard frame. Children are
+ * awaited in parallel (BLE is per-device, so farewells don't serialize).
+ */
+export async function stopTimeboxSync(awaitFarewell = false): Promise<void> {
+  const procs: ChildProcess[] = [];
   for (const entry of entries.values()) {
     entry.stopping = true;
     if (entry.respawnTimer) {
@@ -116,13 +126,19 @@ export function stopTimeboxSync(): void {
       entry.respawnTimer = null;
     }
     if (entry.child) {
-      try {
-        entry.child.kill('SIGTERM');
-      } catch {
-        /* already gone */
-      }
+      const proc = entry.child;
       entry.child = null;
+      if (awaitFarewell) {
+        procs.push(proc);
+      } else {
+        try {
+          proc.kill('SIGTERM');
+        } catch {
+          /* already gone */
+        }
+      }
     }
   }
   entries.clear();
+  if (procs.length) await Promise.all(procs.map((p) => terminateSyncChild(p)));
 }

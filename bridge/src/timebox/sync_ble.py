@@ -292,6 +292,12 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                 if stop.is_set() and client.is_connected:
                     try:
                         await blank_panel(client)
+                        # blank_panel writes WITHOUT response — the await returns once
+                        # the packet is queued to the OS, not once it's transmitted.
+                        # The `async with` below drops the BLE link immediately on
+                        # exit; without this beat the queued blank never goes over the
+                        # air and the panel freezes on its last dashboard frame.
+                        await asyncio.sleep(0.5)
                         print("Shutting down — blanked Timebox panel.")
                     except Exception as e:
                         print(f"Farewell blank failed: {e}", file=sys.stderr)

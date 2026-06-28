@@ -314,6 +314,11 @@ async def run_sync(address: str, url: str, brightness: int = 100, boost: float =
         print("Shutting down — sending OFFLINE frame to iDotMatrix...")
         try:
             await upload_offline_frame(idm_image)
+            # Let the final frame transmit before we drop the BLE link below —
+            # otherwise the disconnect races the in-flight write and the panel
+            # freezes on its last dashboard frame instead of showing OFFLINE.
+            await asyncio.sleep(0.5)
+            print("  OFFLINE frame sent.")
         except Exception as e:
             print(f"  offline frame push failed: {e}")
         try:

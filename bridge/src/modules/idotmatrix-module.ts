@@ -30,7 +30,9 @@ export class IDotMatrixModule implements DeviceModule {
   }
 
   async stop(): Promise<void> {
-    stopIDotMatrixSync();
+    // Await the child's OFFLINE-frame farewell so the panel doesn't freeze on its
+    // last dashboard frame when the daemon exits.
+    await stopIDotMatrixSync(true);
   }
 
   statusSnapshot(): Record<string, unknown> {

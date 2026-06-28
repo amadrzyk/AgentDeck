@@ -31,7 +31,9 @@ export class TimeboxModule implements DeviceModule {
   }
 
   async stop(): Promise<void> {
-    stopTimeboxSync();
+    // Await each child's blank-panel farewell so the panel doesn't freeze on its
+    // last dashboard frame when the daemon exits.
+    await stopTimeboxSync(true);
   }
 
   statusSnapshot(): Record<string, unknown> {

@@ -820,7 +820,7 @@ export class BridgeCore {
     const hardExitTimer = setTimeout(() => {
       logError('Shutdown timeout — forcing exit.');
       exitProcessNow(0);
-    }, 5000);
+    }, 7000);
 
     // Clear all timers
     for (const iv of this.intervals) clearInterval(iv);
@@ -832,13 +832,16 @@ export class BridgeCore {
     // Stop display monitor
     this.displayMonitor.stop();
 
-    // Run shutdown callbacks (best-effort, 2s total budget)
+    // Run shutdown callbacks (best-effort, 5s total budget). Budget covers the
+    // BLE stateful-panel farewell: device modules (iDotMatrix/Timebox) await
+    // their Python sync child painting a final OFFLINE/blank frame over BLE
+    // (~1-3s) so the panel doesn't freeze on its last dashboard frame.
     const callbacksDone = Promise.all(
       this.shutdownCallbacks.map(cb =>
         Promise.resolve().then(cb).catch(() => {}),
       ),
     );
-    await Promise.race([callbacksDone, new Promise(r => { const t = setTimeout(r, 2000); t.unref(); })]);
+    await Promise.race([callbacksDone, new Promise(r => { const t = setTimeout(r, 5000); t.unref(); })]);
 
     // Close WS
     this.wsServer.close();
