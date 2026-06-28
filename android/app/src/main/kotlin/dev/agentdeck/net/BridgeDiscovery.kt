@@ -15,6 +15,13 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.shareIn
 
 private const val TAG = "BridgeDiscovery"
+private const val VERBOSE_DISCOVERY_LOGS = false
+
+private inline fun discoveryDebug(message: () -> String) {
+    if (VERBOSE_DISCOVERY_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
+        Log.d(TAG, message())
+    }
+}
 
 data class DiscoveredBridge(
     val name: String,
@@ -122,7 +129,7 @@ class BridgeDiscovery(context: Context) {
                                     token = token,
                                     agentType = agentType,
                                 )
-                                Log.i(TAG, "Resolved ${si.serviceName} -> ${bridge.host}:${bridge.port} (agent=$agentType)")
+                                discoveryDebug { "Resolved ${si.serviceName} -> ${bridge.host}:${bridge.port} (agent=$agentType)" }
                                 bridges[si.serviceName] = bridge
                                 trySend(bridges.values.toList())
                             }

@@ -18,6 +18,13 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
 private const val TAG = "BridgeConnection"
+private const val VERBOSE_BRIDGE_LOGS = false
+
+private inline fun bridgeDebug(tag: String = TAG, message: () -> String) {
+    if (VERBOSE_BRIDGE_LOGS || Log.isLoggable(tag, Log.DEBUG)) {
+        Log.d(tag, message())
+    }
+}
 
 enum class ConnectionStatus {
     DISCONNECTED,
@@ -75,7 +82,7 @@ class BridgeConnection private constructor() {
     var onEvent: ((BridgeEvent) -> Unit)? = null
 
     fun connect(wsUrl: String) {
-        Log.i(TAG, "connect($wsUrl) — current status=${_status.value}")
+        bridgeDebug { "connect($wsUrl) — current status=${_status.value}" }
         // Cancel any existing connection/reconnect loop before starting fresh
         shouldReconnect = false
         webSocket?.close(1000, "New connection")
@@ -130,10 +137,10 @@ class BridgeConnection private constructor() {
 
     private fun doConnect(wsUrl: String) {
         if (_status.value == ConnectionStatus.CONNECTING) {
-            Log.d(TAG, "doConnect($wsUrl) — skipped, already CONNECTING")
+            bridgeDebug { "doConnect($wsUrl) — skipped, already CONNECTING" }
             return
         }
-        Log.i(TAG, "doConnect($wsUrl) — opening WebSocket")
+        bridgeDebug { "doConnect($wsUrl) — opening WebSocket" }
         _status.value = ConnectionStatus.CONNECTING
 
         val request = Request.Builder()
@@ -142,7 +149,7 @@ class BridgeConnection private constructor() {
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "onOpen — connected to $wsUrl")
+                bridgeDebug { "onOpen — connected to $wsUrl" }
                 _status.value = ConnectionStatus.CONNECTED
                 _isReconnecting.value = false
                 _reconnectAttempt.value = 0
@@ -153,7 +160,9 @@ class BridgeConnection private constructor() {
                 val event = parseBridgeMessage(text)
                 if (event != null) {
                     if (event is BridgeEvent.State) {
-                        Log.d("Terrarium", "WS raw state_update: agentType=${event.data.agentType}, state=${event.data.state}, gwAvail=${event.data.gatewayAvailable}, gwErr=${event.data.gatewayHasError}")
+                        bridgeDebug("Terrarium") {
+                            "WS state_update: agentType=${event.data.agentType}, state=${event.data.state}, gwAvail=${event.data.gatewayAvailable}, gwErr=${event.data.gatewayHasError}"
+                        }
                     }
                     onEvent?.invoke(event)
                 } else {
@@ -162,12 +171,12 @@ class BridgeConnection private constructor() {
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d(TAG, "onClosing — code=$code reason=$reason")
+                bridgeDebug { "onClosing — code=$code reason=$reason" }
                 webSocket.close(1000, null)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.w(TAG, "onClosed — code=$code reason=$reason")
+                bridgeDebug { "onClosed — code=$code reason=$reason" }
                 _status.value = ConnectionStatus.DISCONNECTED
                 onEvent?.invoke(BridgeEvent.Disconnected)
                 // Don't reconnect on auth rejection — token required
@@ -190,7 +199,11 @@ class BridgeConnection private constructor() {
                 } else {
                     "${t.javaClass.simpleName}: ${t.message ?: "unknown"}"
                 }
-                Log.e(TAG, "onFailure — $msg", t)
+                if (VERBOSE_BRIDGE_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
+                    Log.e(TAG, "onFailure — $msg", t)
+                } else {
+                    Log.w(TAG, "onFailure — $msg")
+                }
                 _status.value = ConnectionStatus.DISCONNECTED
                 _lastError.value = msg
                 onEvent?.invoke(BridgeEvent.Disconnected)
@@ -227,7 +240,7 @@ class BridgeConnection private constructor() {
         }
 
         val delayMs = backoffMs
-        Log.d(TAG, "scheduleReconnect — attempt=${_reconnectAttempt.value} backoff=${delayMs}ms url=$currentUrl")
+        bridgeDebug { "scheduleReconnect — attempt=${_reconnectAttempt.value} backoff=${delayMs}ms url=$currentUrl" }
         scope.launch {
             delay(delayMs)
             backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)

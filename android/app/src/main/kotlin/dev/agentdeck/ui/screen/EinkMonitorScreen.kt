@@ -78,6 +78,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "EinkMonitor"
+private const val VERBOSE_EINK_LOGS = false
+
+private inline fun einkDebug(message: () -> String) {
+    if (VERBOSE_EINK_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
+        Log.d(TAG, message())
+    }
+}
 
 private fun shouldPersistBridgeUrl(url: String?): Boolean {
     return url != null && !url.contains("127.0.0.1") && !url.contains("localhost")
@@ -130,10 +137,10 @@ fun EinkMonitorScreen(
         if (rawSavedUrl != null && savedUrl == null) {
             displayPrefs.setLastBridgeUrl(null)
         }
-        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
+        einkDebug { "Auto-connect: savedUrl=$savedUrl" }
         // Try localhost (adb reverse USB connection) before mDNS
         if (connection.status.value != ConnectionStatus.CONNECTED) {
-            Log.i(TAG, "Trying localhost:${BridgeConstants.WS_PORT} (USB)...")
+            einkDebug { "Trying localhost:${BridgeConstants.WS_PORT} (USB)..." }
             connection.connect(BridgeConstants.LOCALHOST_WS_URL)
             delay(3000)
         }
@@ -143,7 +150,7 @@ fun EinkMonitorScreen(
         }
         // If still disconnected, try mDNS discovery with daemon grace period
         if (connection.status.value != ConnectionStatus.CONNECTED) {
-            Log.i(TAG, "Saved URL failed, trying mDNS discovery...")
+            einkDebug { "Saved URL failed, trying mDNS discovery..." }
             var bestBridges = emptyList<DiscoveredBridge>()
             withTimeoutOrNull(6000) {
                 discovery.discover().collect { bridges ->
@@ -151,7 +158,7 @@ fun EinkMonitorScreen(
                     if (bridges.isNotEmpty() && connection.status.value != ConnectionStatus.CONNECTED) {
                         val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                         if (daemon != null) {
-                            Log.i(TAG, "mDNS daemon found: ${daemon.name} at ${daemon.wsUrl()}")
+                            einkDebug { "mDNS daemon found: ${daemon.name} at ${daemon.wsUrl()}" }
                             connection.connect(daemon.wsUrl())
                             return@collect
                         }
@@ -162,7 +169,7 @@ fun EinkMonitorScreen(
             if (false && bestBridges.isNotEmpty() &&
                 connection.status.value != ConnectionStatus.CONNECTED) {
                 val bridge = bestBridges.first()
-                Log.i(TAG, "mDNS daemon not found, fallback: ${bridge.name} (agent=${bridge.agentType}) at ${bridge.wsUrl()}")
+                einkDebug { "mDNS daemon not found, fallback: ${bridge.name} (agent=${bridge.agentType}) at ${bridge.wsUrl()}" }
                 connection.connect(bridge.wsUrl())
             }
         }
@@ -173,12 +180,12 @@ fun EinkMonitorScreen(
     LaunchedEffect(connectionStatus, currentUrl) {
         if (connectionStatus == ConnectionStatus.DISCONNECTED && currentUrl == null) {
             delay(500) // brief pause before re-discovery
-            Log.i(TAG, "Disconnected with no URL — re-discovering via mDNS")
+            einkDebug { "Disconnected with no URL — re-discovering via mDNS" }
             withTimeoutOrNull(6000) {
                 discovery.discover().collect { bridges ->
                     val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                     if (daemon != null && connection.status.value != ConnectionStatus.CONNECTED) {
-                        Log.i(TAG, "mDNS re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}")
+                        einkDebug { "mDNS re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
                         connection.connect(daemon.wsUrl())
                         return@collect
                     }
@@ -187,7 +194,7 @@ fun EinkMonitorScreen(
             if (connection.status.value != ConnectionStatus.CONNECTED && connection.url.value == null) {
                 delay(10_000)
                 if (connection.status.value != ConnectionStatus.CONNECTED && connection.url.value == null) {
-                    Log.i(TAG, "mDNS recovery timed out — retrying localhost:${BridgeConstants.WS_PORT} (USB)")
+                    einkDebug { "mDNS recovery timed out — retrying localhost:${BridgeConstants.WS_PORT} (USB)" }
                     connection.connect(BridgeConstants.LOCALHOST_WS_URL)
                 }
             }

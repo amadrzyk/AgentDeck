@@ -38,6 +38,7 @@ class MonitorService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "dev.agentdeck.STOP_MONITOR"
         private const val KEEPALIVE_INTERVAL_MS = 60_000L
+        private const val VERBOSE_SERVICE_LOGS = false
         // BIT_PLUGGED_AC | BIT_PLUGGED_USB — stay on while charging via either
         private const val STAY_ON_PLUGGED = 3
     }
@@ -53,6 +54,12 @@ class MonitorService : Service() {
     private lateinit var displayPrefs: DisplayPreferences
     private var idleTimeoutJob: Job? = null
     private var lastBridgeDisplayOn = true
+
+    private inline fun serviceDebug(message: () -> String) {
+        if (VERBOSE_SERVICE_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
+            Log.d(TAG, message())
+        }
+    }
 
     private val keepaliveRunnable = object : Runnable {
         override fun run() {
@@ -94,12 +101,12 @@ class MonitorService : Service() {
             val dimEnabled = hostDim?.enabled ?: true
             val dimMode = if (hostDim?.mode == "min") "min" else "off"
             val dimLevel = (hostDim?.level ?: 10).coerceIn(1, 100)
-            Log.d(TAG, "handleDisplaySync: hostDisplayOn=$hostDisplayOn, bridgeConnected=$bridgeConnected, agentState=$agentState, syncEnabled=$syncEnabled, dim=$dimEnabled/$dimMode/$dimLevel, isDimmed=${brightnessController.isDimmed()}, canWrite=${brightnessController.canWriteSettings()}")
+            serviceDebug { "handleDisplaySync: hostDisplayOn=$hostDisplayOn, bridgeConnected=$bridgeConnected, agentState=$agentState, syncEnabled=$syncEnabled, dim=$dimEnabled/$dimMode/$dimLevel, isDimmed=${brightnessController.isDimmed()}, canWrite=${brightnessController.canWriteSettings()}" }
 
             if (!syncEnabled) {
                 // Sync disabled — restore if we dimmed, cancel any idle timeout
                 if (brightnessController.isDimmed()) {
-                    Log.d(TAG, "Sync disabled — restoring brightness")
+                    serviceDebug { "Sync disabled — restoring brightness" }
                     brightnessController.restore()
                 }
                 idleTimeoutJob?.cancel()
@@ -130,10 +137,10 @@ class MonitorService : Service() {
                 // display off"; reconnect/wake will restore explicitly.
                 if (brightnessController.isDimmed()) {
                     if (isEink && !lastBridgeDisplayOn) {
-                        Log.d(TAG, "Bridge disconnected while host was asleep — preserving e-ink snapshot")
+                        serviceDebug { "Bridge disconnected while host was asleep — preserving e-ink snapshot" }
                         return@launch
                     } else {
-                        Log.d(TAG, "Bridge disconnected while dimmed — restoring brightness")
+                        serviceDebug { "Bridge disconnected while dimmed — restoring brightness" }
                         brightnessController.restore()
                     }
                 }
@@ -141,7 +148,7 @@ class MonitorService : Service() {
                 if (isIdle) {
                     if (idleTimeoutJob == null) {
                         val timeoutMinutes = displayPrefs.idleTimeoutMinutesFlow.first()
-                        Log.d(TAG, "Starting idle timeout: ${timeoutMinutes}m")
+                        serviceDebug { "Starting idle timeout: ${timeoutMinutes}m" }
                         idleTimeoutJob = serviceScope.launch {
                             delay(timeoutMinutes * 60_000L)
                             Log.i(TAG, "Idle timeout reached — dimming")

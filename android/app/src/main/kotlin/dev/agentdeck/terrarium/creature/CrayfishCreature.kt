@@ -1,6 +1,5 @@
 package dev.agentdeck.terrarium.creature
 
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,7 +50,6 @@ class CrayfishCreature(
 
     fun setState(newState: CrayfishVisualState) {
         if (newState != visualState) {
-            Log.d("Terrarium", "Crayfish: $visualState -> $newState")
             visualState = newState
             transitionProgress = 0f
         }

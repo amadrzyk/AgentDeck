@@ -26,7 +26,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 private const val TAG = "Terrarium"
+private const val VERBOSE_STATE_LOGS = false
 private val AGGREGATE_AGENT_TYPES = setOf("daemon", "openclaw")
+
+private inline fun stateDebug(message: () -> String) {
+    if (VERBOSE_STATE_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
+        Log.d(TAG, message())
+    }
+}
 
 data class DashboardState(
     val agentState: AgentState = AgentState.DISCONNECTED,
@@ -107,7 +114,7 @@ class AgentStateHolder private constructor() {
     private fun handleEvent(event: BridgeEvent) {
         when (event) {
             is BridgeEvent.State -> {
-                Log.d(TAG, "StateEvent: state=${event.data.state}, agentType=${event.data.agentType}, tool=${event.data.currentTool}")
+                stateDebug { "StateEvent: state=${event.data.state}, agentType=${event.data.agentType}, tool=${event.data.currentTool}" }
                 _state.update { current ->
                     // Keep aggregate identity when current is daemon/openclaw and incoming event is from a coding agent.
                     // No need to wait for siblingSessions to be populated — the first state_update may arrive
@@ -128,7 +135,7 @@ class AgentStateHolder private constructor() {
                         event.data.gatewayHasError ?: current.gatewayHasError
                     }
                     val clearOpenClawDetails = resolvedGatewayConnected != true
-                    Log.d(TAG, "AgentType resolve: event=${event.data.agentType}, current=${current.agentType}, resolved=$resolvedAgentType")
+                    stateDebug { "AgentType resolve: event=${event.data.agentType}, current=${current.agentType}, resolved=$resolvedAgentType" }
                     // When the dashboard is pinned to an aggregate primary
                     // (daemon / openclaw) and a sibling (claude / codex / …)
                     // emits a state_update, that sibling's state is *not* the
@@ -208,7 +215,7 @@ class AgentStateHolder private constructor() {
                             current.focusedSessionId
                         },
                     ).also {
-                        Log.d(TAG, "State updated: sessionId=${it.sessionId}, agentType=${it.agentType}, agentState=${it.agentState}, siblingSessions.size=${it.siblingSessions.size}")
+                        stateDebug { "State updated: sessionId=${it.sessionId}, agentType=${it.agentType}, agentState=${it.agentState}, siblingSessions.size=${it.siblingSessions.size}" }
                     }
                 }
                 lastKnownState = _state.value
@@ -284,9 +291,11 @@ class AgentStateHolder private constructor() {
             }
 
             is BridgeEvent.SessionsList -> {
-                Log.d(TAG, "SessionsList: ${event.sessions.size} sessions")
-                for (s in event.sessions) {
-                    Log.d(TAG, "  Session: id=${s.id}, agentType=${s.agentType}, state=${s.state}, projectName=${s.projectName}")
+                stateDebug { "SessionsList: ${event.sessions.size} sessions" }
+                if (VERBOSE_STATE_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
+                    for (s in event.sessions) {
+                        Log.d(TAG, "  Session: id=${s.id}, agentType=${s.agentType}, state=${s.state}, projectName=${s.projectName}")
+                    }
                 }
                 _state.update { it.copy(siblingSessions = event.sessions) }
             }

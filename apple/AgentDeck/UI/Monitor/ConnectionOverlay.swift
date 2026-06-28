@@ -28,11 +28,7 @@ struct ConnectionOverlay: View {
                         Spacer(minLength: 0)
                         VStack(spacing: 16) {
                     // Brand icon + title
-                    Image("AgentDeckIcon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 80, height: 80)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    AgentDeckLogo(size: 80, color: TerrariumHUD.tetraNeon)
 
                     Text("AgentDeck")
                         .font(.title.bold())

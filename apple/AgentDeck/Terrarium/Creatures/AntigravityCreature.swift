@@ -1,7 +1,7 @@
 // AntigravityCreature.swift — Peak/arc logo creature for Antigravity
 // Geometric brand mark, NOT biomorphic. Renders the canonical Antigravity
 // "double-peak / mountain arc" silhouette (ANTIGRAVITY_PATH, viewBox 0 0 24 24)
-// filled in the brand gray (#5F6368). The creature IS the logo.
+// filled with the brand rainbow gradient. The creature IS the logo.
 //
 // WORKING shows a rising-spark shimmer above the peaks (anti-gravity nod);
 // SLEEPING dims the body; FLOATING breathes a gentle bob; ASKING shows a
@@ -122,7 +122,6 @@ final class AntigravityCreature: Creature {
 
     // MARK: - Colors
 
-    private static let bodyColor = TerrariumColors.antigravityBody
     private static let lightColor = TerrariumColors.antigravityLight
     private static let dimColor = TerrariumColors.antigravityDim
     static let nameBg = TerrariumColors.antigravityNameBg
@@ -170,8 +169,6 @@ final class AntigravityCreature: Creature {
 
     private func drawSvgBody(context: inout GraphicsContext, cx: CGFloat, cy: CGFloat,
                              radius: CGFloat, alpha: CGFloat) {
-        let bodyColor = bodyColorForState()
-
         // Subtle breath scale (none when sleeping).
         let breathScale: CGFloat = switch visualState {
         case .sleeping: 1.0
@@ -187,20 +184,46 @@ final class AntigravityCreature: Creature {
         transform = transform.scaledBy(x: effScale, y: effScale)
         transform = transform.translatedBy(x: -Self.viewBox / 2, y: -Self.viewBox / 2)
         let body = Self.peakPath.applying(transform)
+        let fillStyle = FillStyle(eoFill: true)
 
-        context.fill(body, with: .color(bodyColor.opacity(alpha)))
+        if visualState == .sleeping {
+            context.fill(body, with: .color(Self.dimColor.opacity(alpha * 0.72)), style: fillStyle)
+        } else {
+            context.stroke(
+                body,
+                with: .color(Self.lightColor.opacity(0.34 * Double(alpha))),
+                lineWidth: max(0.8, radius * 0.08)
+            )
+            context.fill(
+                body,
+                with: Self.rainbowShading(in: body.boundingRect, alpha: bodyAlpha(alpha)),
+                style: fillStyle
+            )
+        }
     }
 
-    private func bodyColorForState() -> Color {
-        switch visualState {
-        case .working:
-            let t = sin(time * TerrariumTiming.thinkingPulseSpeed) * 0.5 + 0.5
-            return TerrariumColors.lerpColor(Self.bodyColor, Self.lightColor, Float(t))
-        case .sleeping:
-            return Self.dimColor
-        default:
-            return Self.bodyColor
-        }
+    private func bodyAlpha(_ baseAlpha: CGFloat) -> Double {
+        guard visualState == .working else { return Double(baseAlpha) }
+        let pulse = max(0, sin(time * TerrariumTiming.thinkingPulseSpeed))
+        return min(1.0, Double(baseAlpha) + Double(pulse) * 0.10)
+    }
+
+    private static func rainbowShading(in bounds: CGRect, alpha: Double) -> GraphicsContext.Shading {
+        .linearGradient(
+            Gradient(colors: [
+                TerrariumColors.antigravityLime.opacity(alpha),
+                TerrariumColors.antigravityTeal.opacity(alpha),
+                TerrariumColors.antigravityCyan.opacity(alpha),
+                TerrariumColors.antigravityBlue.opacity(alpha),
+                TerrariumColors.antigravityViolet.opacity(alpha),
+                TerrariumColors.antigravityPink.opacity(alpha),
+                TerrariumColors.antigravityRed.opacity(alpha),
+                TerrariumColors.antigravityOrange.opacity(alpha),
+                TerrariumColors.antigravityYellow.opacity(alpha),
+            ]),
+            startPoint: CGPoint(x: bounds.minX + bounds.width * 0.12, y: bounds.maxY),
+            endPoint: CGPoint(x: bounds.maxX, y: bounds.minY)
+        )
     }
 
     // MARK: - Rising Sparks (WORKING anti-gravity shimmer)

@@ -177,6 +177,13 @@ class MainActivity : ComponentActivity() {
 }
 
 private const val TAG = "MainActivity"
+private const val VERBOSE_MAIN_LOGS = false
+
+private inline fun mainDebug(message: () -> String) {
+    if (VERBOSE_MAIN_LOGS || Log.isLoggable(TAG, Log.DEBUG)) {
+        Log.d(TAG, message())
+    }
+}
 
 private fun shouldPersistBridgeUrl(url: String?): Boolean {
     return url != null && !url.contains("127.0.0.1") && !url.contains("localhost")
@@ -199,10 +206,10 @@ fun TabletDashboard(
         if (rawSavedUrl != null && savedUrl == null) {
             displayPrefs.setLastBridgeUrl(null)
         }
-        Log.i(TAG, "Auto-connect: savedUrl=$savedUrl")
+        mainDebug { "Auto-connect: savedUrl=$savedUrl" }
         // Try localhost (adb reverse USB connection) before mDNS
         if (connection.status.value != ConnectionStatus.CONNECTED) {
-            Log.i(TAG, "Trying localhost:${BridgeConstants.WS_PORT} (USB)...")
+            mainDebug { "Trying localhost:${BridgeConstants.WS_PORT} (USB)..." }
             connection.connect(BridgeConstants.LOCALHOST_WS_URL)
             delay(3000)
         }
@@ -212,14 +219,14 @@ fun TabletDashboard(
         }
         // If still disconnected, try mDNS discovery
         if (connection.status.value != ConnectionStatus.CONNECTED) {
-            Log.i(TAG, "Saved URL failed, trying mDNS discovery...")
+            mainDebug { "Saved URL failed, trying mDNS discovery..." }
             val discovery = BridgeDiscovery(context)
             // Phase 1: collect bridges, connect immediately if daemon found
             withTimeoutOrNull(6000) {
                 discovery.discover().collect { bridges ->
                     val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                     if (daemon != null) {
-                        Log.i(TAG, "mDNS auto-connect (daemon): ${daemon.name} at ${daemon.wsUrl()}")
+                        mainDebug { "mDNS auto-connect (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
                         connection.connect(daemon.wsUrl())
                         return@collect
                     }
@@ -242,13 +249,13 @@ fun TabletDashboard(
     LaunchedEffect(connectionStatus, currentUrl) {
         if (connectionStatus == ConnectionStatus.DISCONNECTED && currentUrl == null) {
             delay(500) // brief pause before re-discovery
-            Log.i(TAG, "Disconnected with no URL — re-discovering via mDNS")
+            mainDebug { "Disconnected with no URL — re-discovering via mDNS" }
             val discovery = BridgeDiscovery(context)
             withTimeoutOrNull(6000) {
                 discovery.discover().collect { bridges ->
                     val daemon = bridges.firstOrNull { it.agentType == "daemon" }
                     if (daemon != null) {
-                        Log.i(TAG, "Re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}")
+                        mainDebug { "Re-discover (daemon): ${daemon.name} at ${daemon.wsUrl()}" }
                         connection.connect(daemon.wsUrl())
                         return@collect
                     }
@@ -257,7 +264,7 @@ fun TabletDashboard(
             if (connection.status.value != ConnectionStatus.CONNECTED && connection.url.value == null) {
                 delay(10_000)
                 if (connection.status.value != ConnectionStatus.CONNECTED && connection.url.value == null) {
-                    Log.i(TAG, "mDNS recovery timed out — retrying localhost:${BridgeConstants.WS_PORT} (USB)")
+                    mainDebug { "mDNS recovery timed out — retrying localhost:${BridgeConstants.WS_PORT} (USB)" }
                     connection.connect(BridgeConstants.LOCALHOST_WS_URL)
                 }
             }

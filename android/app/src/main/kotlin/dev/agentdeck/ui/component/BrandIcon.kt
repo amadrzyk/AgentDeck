@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asComposePath
@@ -33,12 +35,27 @@ fun BrandIcon(
     val spec = remember(agentType) { BrandIconSpec.fromAgentType(agentType) } ?: return
     val color = tint ?: if (isEink) spec.einkColor else spec.color
     val paths = remember(agentType) { spec.pathDataList.map { parseSvgPath(it) } }
+    val rainbowBrush = remember(agentType, isEink, tint) {
+        if (spec.rainbow && !isEink && tint == null) {
+            Brush.linearGradient(
+                colors = ANTIGRAVITY_RAINBOW,
+                start = Offset(3f, 22f),
+                end = Offset(22f, 2f),
+            )
+        } else {
+            null
+        }
+    }
 
     Canvas(modifier = modifier.size(size)) {
         val s = this.size.minDimension / spec.viewBox
         scale(s, s) {
             for (path in paths) {
-                drawPath(path, color)
+                if (rainbowBrush != null) {
+                    drawPath(path, rainbowBrush)
+                } else {
+                    drawPath(path, color)
+                }
             }
         }
     }
@@ -167,6 +184,7 @@ private class BrandIconSpec(
     val viewBox: Float,
     val color: Color,
     val einkColor: Color,
+    val rainbow: Boolean = false,
 ) {
     companion object {
         fun fromAgentType(agentType: String?): BrandIconSpec? = when (agentType) {
@@ -199,11 +217,24 @@ private class BrandIconSpec(
                 viewBox = 24f,
                 color = Color(0xFF5F6368),
                 einkColor = Color(0xFF444444),
+                rainbow = true,
             )
             else -> null
         }
     }
 }
+
+private val ANTIGRAVITY_RAINBOW = listOf(
+    Color(0xFF5CD64D),
+    Color(0xFF1FC6B3),
+    Color(0xFF3AC7EB),
+    Color(0xFF247EFF),
+    Color(0xFF666FE1),
+    Color(0xFFB75CB6),
+    Color(0xFFFF5241),
+    Color(0xFFFF8410),
+    Color(0xFFF5CB24),
+)
 
 // Claude Code mark — lobe-icons MIT (viewBox 0 0 24 24, grid pattern)
 private const val CLAUDE_PATH =

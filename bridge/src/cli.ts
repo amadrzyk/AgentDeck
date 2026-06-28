@@ -690,6 +690,7 @@ program
     const port = opts.port != null
       ? parseInt(opts.port, 10)
       : (info?.httpPort ?? info?.port ?? findDaemonPort() ?? 9120);
+    const cfg = loadTrmnlConfig();
     const lanIp = getLanIp() ?? '<this-machine-LAN-IP>';
 
     log('\nTRMNL BYOS setup');
@@ -714,7 +715,12 @@ program
           `(idle ${t.refreshRate}s / active ${t.refreshActive ?? '?'}s)`);
         const tele: any[] = Array.isArray(t.telemetry) ? t.telemetry : [];
         if (tele.length === 0) {
-          log('Enrolled panels: none have polled yet.');
+          if (cfg.devices.length === 0) {
+            log('Configured panels: none.');
+          } else {
+            log(`Configured panels: ${cfg.devices.length} · no live poll seen since daemon start.`);
+            for (const d of cfg.devices) log(`  ${d.mac}${d.name ? ` (${d.name})` : ''}`);
+          }
         } else {
           log('Enrolled panels:');
           for (const d of tele) {
@@ -730,7 +736,6 @@ program
         log('Daemon is up but it did not expose TRMNL health. Upgrade the hub or verify it owns /api/display.');
       }
     } catch {
-      const cfg = loadTrmnlConfig();
       log(`Daemon not reachable on ${port}. Configured panels: ${cfg.devices.length}.`);
       for (const d of cfg.devices) log(`  ${d.mac}${d.name ? ` (${d.name})` : ''}`);
     }
