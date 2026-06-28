@@ -4,21 +4,23 @@
  * The Timebox Mini has only 121 LEDs. Downscaling the 32×32 terrarium creature to
  * 11×11 bottoms out at a fuzzy silhouette — so for this device the creatures are
  * **hand-authored directly at 11×11** as bold, high-contrast bitmaps. Every pixel
- * is intentional, which is dramatically more legible than any downscale.
+ * is intentional, which is dramatically more legible than any downscale. Treat
+ * this screen as a status badge, not a shrunken aquarium: one dominant creature,
+ * no labels, no HUD chrome, and only the pixels that identify the canonical mark.
  *
  * The glyphs are the canonical brand marks (matching assets/logos/*_creature_gen.png
  * and design/brand/*.svg), not loose creature approximations:
- *   Claude  → rusty robot (rectangular head, two amber eyes, body, arms, legs)
+ *   Claude  → rusty robot (rectangular body, dark cutout eyes, arms, legs)
  *   Codex   → lavender cloud carrying a white `>_` terminal prompt
- *   OpenClaw→ red lobster (raised top claws, teal eyes, segmented tail)
- *   OpenCode→ nested-square ring logo
+ *   OpenClaw→ red lobster (side claws, antennae, teal eyes)
+ *   OpenCode→ hollow rectangular ring logo
  *   Antigravity→ peak/arc logo
  * The MicroCreature keys are legacy internal codenames kept for the renderer
  * mapping — only the art behind them is brand-true.
  *
  * Each glyph is an 11-row × 11-col string grid. Characters map to colors:
  *   '.' transparent (shows the status-color background)
- *   'B' body   'A' arm/antenna/leg   'C' claw   'D' joint/shadow   'E' eye   'M' prompt mark   'F' logo frame
+ *   'B' body   'A' arm/antenna/leg   'C' claw   'D' joint/shadow   'E' eye   'K' cutout   'M' prompt mark   'F' logo frame
  *   Antigravity additionally uses gradient bands: L/T/Q/Y/O/R/P/V/U/N plus K for black cutout.
  * `work` is an optional second frame for a simple processing animation (leg wiggle).
  */
@@ -35,49 +37,49 @@ interface Glyph {
   work?: string[];
 }
 
-// Claude Code — rusty robot (assets/logos/robot_creature_gen.png, design/brand/
-// claudecode.svg): rectangular head with two glowing amber eyes, neck, body with
-// arms (darker joints) jutting out the sides, two legs. Terracotta body (#C07058
-// family, kept bright for the LED panel), amber eyes for the lit-display look.
+// Claude Code — rusty robot (design/brand/claudecode.svg): broad rectangular
+// body, full-width side arms, straight vertical legs, and two narrow vertical
+// cutout eyes. The eyes occupy two LED rows because the SVG holes are taller
+// than they are wide; the legs stay aligned instead of wiggling.
 const OCTOPUS: Glyph = {
-  colors: { B: [235, 130, 90], D: [150, 84, 64], E: [255, 176, 64] },
+  colors: { B: [235, 130, 90], D: [150, 84, 64], K: [0, 0, 0] },
   idle: [
     '...........',
-    '..BBBBBBB..',
-    '..BEEBEEB..',
-    '..BBBBBBB..',
-    '....BBB....',
-    '.DBBBBBBBD.',
-    '.DBBBBBBBD.',
-    '..BBBBBBB..',
-    '...BB.BB...',
-    '...BB.BB...',
+    '.BBBBBBBBB.',
+    '.BBBBBBBBB.',
+    '.BBKBBBKBB.',
+    '.BBKBBBKBB.',
+    'BBBBBBBBBBB',
+    'BBBBBBBBBBB',
+    '.BBBBBBBBB.',
+    '..BB...BB..',
+    '..BB...BB..',
     '...........',
   ],
   work: [
     '...........',
-    '..BBBBBBB..',
-    '..BEEBEEB..',
-    '..BBBBBBB..',
-    '....BBB....',
-    '.DBBBBBBBD.',
-    '.DBBBBBBBD.',
-    '..BBBBBBB..',
-    '...BB.BB...',
+    '.BBBBBBBBB.',
+    '.BBBBBBBBB.',
+    '.BBKBBBKBB.',
+    '.BBKBBBKBB.',
+    'BBBBBBBBBBB',
+    'BBBBBBBBBBB',
+    '.BBBBBBBBB.',
     '..BB...BB..',
-    '..D.....D..',
+    '..BB...BB..',
+    '...........',
   ],
 };
 
-// Codex — lavender cloud (#6166E0, assets/logos/cloud_creature_gen.png): a bumpy
-// round cloud body carrying a white `>` chevron + `_` terminal prompt — the Codex
-// identity. Keyed 'jellyfish' to match the renderer's creatureType for codex agents.
+// Codex — lavender cloud (assets/logos/cloud_creature_gen.png, design/brand/codex.svg):
+// puffy cloud outline with no dangling legs, plus an oversized `>_` prompt. The
+// prompt is deliberately brighter than the body so it survives the LED diffuser.
 const JELLYFISH: Glyph = {
   colors: { B: [120, 126, 236], M: [238, 240, 255] },
   idle: [
-    '.BB.BB.BB..',
-    'BBBBBBBBBB.',
-    'BBBBBBBBBBB',
+    '...........',
+    '...BBBBB...',
+    '.BBBBBBBBB.',
     'BBBBBBBBBBB',
     'BBMBBBBBBBB',
     'BBBMMBBBBBB',
@@ -85,33 +87,33 @@ const JELLYFISH: Glyph = {
     'BBBBBMMMBBB',
     'BBBBBBBBBBB',
     '.BBBBBBBBB.',
-    '..B.BB.B...',
+    '...BBBBB...',
   ],
 };
 
-// OpenCode — two overlapping HOLLOW squares (the canonical opencode.svg ring
-// logo; no filled core — a solid center reads as a shadow). Light stroke so it
-// reads (#3a3a3a brand gray is too dark for LEDs). Centered in the 11×11 field.
+// OpenCode — canonical opencode.svg: a single tall rectangular ring, not two
+// overlapping squares and not a filled core. Light stroke so it reads on LEDs
+// (#3a3a3a brand gray is too dark for this panel).
 const OPENCODE: Glyph = {
   colors: { F: [232, 232, 232] },
   idle: [
     '...........',
-    '.FFFFFF....',
-    '.F....F....',
-    '.F....F....',
-    '.F..FFFFFF.',
-    '.F..F...F..',
-    '.FFFF...F..',
-    '....F...F..',
-    '....F...F..',
-    '....FFFFFF.',
+    '..FFFFFFF..',
+    '..FFFFFFF..',
+    '..FF...FF..',
+    '..FF...FF..',
+    '..FF...FF..',
+    '..FF...FF..',
+    '..FF...FF..',
+    '..FFFFFFF..',
+    '..FFFFFFF..',
     '...........',
   ],
 };
 
-// Antigravity — rainbow peak/arc mark, simplified for an 11×11 matrix. The black
-// K cells preserve the central hollow from the reference image even when the
-// status field behind the creature is not fully black.
+// Antigravity — rainbow peak/arc mark, simplified for an 11×11 matrix. The
+// central hollow is transparent, not black, so the status field shows through
+// like the open space in the official arc silhouette.
 const ANTIGRAVITY: Glyph = {
   colors: {
     L: [92, 214, 77],
@@ -124,64 +126,62 @@ const ANTIGRAVITY: Glyph = {
     V: [102, 111, 225],
     U: [36, 126, 255],
     N: [41, 184, 238],
-    K: [0, 0, 0],
   },
   idle: [
     '.....O.....',
     '....YOR....',
-    '....YORP...',
+    '...LYORP...',
     '...LYORPV..',
     '...LTQRPV..',
-    '..LTQKKVU..',
-    '..TQKKKVU..',
-    '.TQKKKKKVU.',
-    '.QKKKKKKKUU',
-    'NQKKKKKKKUU',
-    'NKKKKKKKKKU',
+    '..LTQRPVU..',
+    '..TQ...VU..',
+    '..Q.....U..',
+    '.NQ.....UU.',
+    '.N.......UU',
+    '...........',
   ],
   work: [
     '....YO.....',
     '....YORP...',
     '...LYORPV..',
     '...LTQRPV..',
-    '..LTQKPVU..',
-    '..TQKKKVU..',
-    '.TQKKKKKVU.',
-    '.QKKKKKKKUU',
-    'NQKKKKKKKUU',
-    'NKKKKKKKKKU',
-    'NKKKKKKKKKU',
+    '..LTQRPVU..',
+    '..TQ...VU..',
+    '..Q.....U..',
+    '.NQ.....UU.',
+    '.N.......UU',
+    '...........',
+    '...........',
   ],
 };
 
-// OpenClaw — red mechanical lobster (#FF4D4D, assets/logos/lobster_creature_gen.png):
-// two big claws raised at the top corners, antennae rising from the center, a head
-// with two teal eyes (#00E5CC), and a vertical segmented tail fanning out at the
-// bottom. Legs splay from the thorax. Darker red claws give them depth.
+// OpenClaw — red mechanical lobster (assets/logos/lobster_creature_gen.png,
+// Pixoo LOD): side claws, small antennae, teal eyes, and a tapered body. The
+// full asset's raised claws are too tall for 11px and read as a different head.
 const CRAYFISH: Glyph = {
   colors: { B: [255, 92, 92], C: [210, 52, 52], A: [225, 180, 170], E: [0, 229, 204] },
   idle: [
-    'CC.......CC',
-    'CC...A...CC',
-    '.C..AAA..C.',
+    '...A...A...',
+    '....A.A....',
+    '....BBB....',
     '...BEBEB...',
-    '...BBBBB...',
-    'A..BBBBB..A',
-    '.A.BBBBB.A.',
-    '...BBBBB...',
+    'C.BBBBBBB.C',
+    'CC.BBBBB.CC',
+    '.CBBBBBBB.C',
+    '..BBBBBBB..',
     '...BBBBB...',
     '...BB.BB...',
     '..BB...BB..',
   ],
   work: [
-    'CC.......CC',
-    '.C...A...C.',
-    '..C.AAA.C..',
+    '....A.A....',
+    '...A...A...',
+    '....BBB....',
     '...BEBEB...',
-    '...BBBBB...',
-    '.A.BBBBB.A.',
-    'A..BBBBB..A',
-    '...BBBBB...',
+    '.CBBBBBBB.C',
+    'CC.BBBBB.CC',
+    'C.BBBBBBB.C',
+    '..BBBBBBB..',
     '...BBBBB...',
     '...B.B.B...',
     '..BB...BB..',

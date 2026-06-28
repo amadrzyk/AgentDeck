@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { COLORS, creatureCellSize, getOctopusPaletteForSession } from '../pixoo/pixoo-sprites.js';
+import {
+  COLORS,
+  JELLYFISH_GRID_MD,
+  JELLYFISH_LOD,
+  creatureCellSize,
+  getOctopusPaletteForSession,
+} from '../pixoo/pixoo-sprites.js';
 import { quantizeCameraPixels, type Camera } from '../pixoo/pixoo-camera.js';
 
 describe('getOctopusPaletteForSession', () => {
@@ -57,6 +63,19 @@ describe('creatureCellSize', () => {
 
   it('never returns less than 1', () => {
     expect(creatureCellSize(0.1, 32, 24)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('Codex cloud low-detail grids', () => {
+  it('keeps the MD cloud as one rounded body instead of separated dangling lobes', () => {
+    expect(JELLYFISH_GRID_MD[0]).toEqual([0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]);
+    expect(JELLYFISH_GRID_MD[10]).toEqual([0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]);
+    expect(JELLYFISH_GRID_MD[10].filter((cell) => cell === 1)).toHaveLength(5);
+  });
+
+  it('keeps the LOD cloud rounded for iDotMatrix-wide shots', () => {
+    expect(JELLYFISH_LOD[0]).toEqual([0, 0, 1, 1, 1, 1, 1, 0, 0]);
+    expect(JELLYFISH_LOD[6]).toEqual([0, 0, 1, 1, 1, 1, 1, 0, 0]);
   });
 });
 

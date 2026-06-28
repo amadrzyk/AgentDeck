@@ -14,7 +14,7 @@
 // can never drift. This file holds only the consuming logic (paint + statusBg).
 //
 // Grid characters: '.' transparent (shows status bg), 'B' body, 'A' arm/leg/antenna,
-// 'C' claw, 'D' joint/shadow, 'E' eye, 'M' prompt marking, 'F' logo frame.
+// 'C' claw, 'D' joint/shadow, 'E' eye, 'K' cutout, 'M' prompt marking, 'F' logo frame.
 // Antigravity also uses L/T/Q/Y/O/R/P/V/U/N gradient bands and K black cutout.
 
 import Foundation

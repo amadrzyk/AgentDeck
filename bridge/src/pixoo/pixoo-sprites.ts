@@ -202,8 +202,8 @@ const JF_HD_ROWS = 24;
 
 // ===== Jellyfish MD 13×11 — Codex mascot =====
 export const JELLYFISH_GRID_MD: number[][] = [
-  [0,0,1,1,1,0,0,0,1,1,1,0,0],  // Distinct clover lobes
-  [0,1,1,1,1,1,0,1,1,1,1,1,0],
+  [0,0,0,1,1,1,1,1,0,0,0,0,0],  // Rounded top lobe
+  [0,1,1,1,1,1,1,1,1,1,1,1,0],
   [1,1,1,1,1,1,1,1,1,1,1,1,1],
   [1,1,1,1,1,1,1,1,1,1,1,1,1],
   [3,1,2,2,1,1,1,1,1,1,1,1,3],  // `>` top stroke (2px thick)
@@ -211,8 +211,8 @@ export const JELLYFISH_GRID_MD: number[][] = [
   [3,1,2,2,1,1,1,1,1,1,1,1,3],  // `>` bottom stroke
   [1,1,1,1,1,1,1,1,1,1,1,1,1],
   [1,1,1,1,1,1,1,1,1,1,1,1,1],
-  [0,1,1,1,1,1,0,1,1,1,1,1,0],  // Bottom lobes
-  [0,0,1,1,1,0,0,0,1,1,1,0,0]
+  [0,1,1,1,1,1,1,1,1,1,1,1,0],
+  [0,0,0,1,1,1,1,1,0,0,0,0,0]   // Bottom cloud lobe, not dangling legs
 ];
 const JF_GRID_MD_COLS = 13;
 const JF_GRID_MD_ROWS = 11;
@@ -226,13 +226,13 @@ export const JF_WORLD_W = 13 / 64;
 
 // ===== Jellyfish LOD 9×7 — compact for zoom < 1.3 =====
 export const JELLYFISH_LOD: number[][] = [
-  [0,1,1,0,1,1,0,1,0],
-  [1,1,1,1,1,1,1,1,1],
+  [0,0,1,1,1,1,1,0,0],
+  [0,1,1,1,1,1,1,1,0],
   [1,2,2,1,1,1,1,1,1],  // `>` upper stroke (2px)
   [1,1,2,2,1,2,2,2,1],  // `>` point + `_` prompt (3px)
   [1,2,2,1,1,1,1,1,1],  // `>` lower stroke
-  [1,1,1,1,1,1,1,1,1],
-  [0,1,1,0,1,1,0,1,0],
+  [0,1,1,1,1,1,1,1,0],
+  [0,0,1,1,1,1,1,0,0],
 ];
 const JF_LOD_COLS = 9;
 const JF_LOD_ROWS = 7;
