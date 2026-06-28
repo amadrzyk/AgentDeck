@@ -39,8 +39,9 @@ class SessionDisplayOrderingTest {
         assertEquals(2, agentTypeRank("codex-cli"))
         assertEquals(3, agentTypeRank("codex-app"))
         assertEquals(4, agentTypeRank("opencode"))
-        assertEquals(5, agentTypeRank("unknown"))
-        assertEquals(5, agentTypeRank(null))
+        assertEquals(5, agentTypeRank("antigravity"))
+        assertEquals(6, agentTypeRank("unknown"))
+        assertEquals(6, agentTypeRank(null))
     }
 
     @Test

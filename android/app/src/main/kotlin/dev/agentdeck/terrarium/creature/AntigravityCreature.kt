@@ -77,6 +77,11 @@ class AntigravityCreature(
             }
             visualState = newState
             transitionProgress = 0f
+            if (newState == OctopusVisualState.WORKING) {
+                waypointTimer = 0f
+                waypointInterval = WORKING_FIRST_WAYPOINT_INTERVAL
+                pickNewWaypoint()
+            }
         }
     }
 
@@ -112,14 +117,14 @@ class AntigravityCreature(
             }
             OctopusVisualState.FLOATING -> {
                 val myStandingY = (STANDING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
-                val breathBob = sin(time * 0.55f) * 0.003f
-                val idleSway = sin(time * 0.22f) * 0.004f
+                val breathBob = sin(time * 0.72f) * 0.006f
+                val idleSway = sin(time * 0.34f) * 0.010f
                 currentX += (homeX + idleSway - currentX) * dt * 4f
                 currentY += (myStandingY + breathBob - currentY) * dt * 4f
             }
             OctopusVisualState.ASKING -> {
                 val myStandingY = (ASKING_Y + standingJitter + (homeX - 0.4f) * 0.15f).coerceAtMost(0.65f)
-                val fidgetX = sin(time * 0.9f) * 0.005f
+                val fidgetX = sin(time * 1.2f) * 0.012f
                 currentX += (homeX + fidgetX - currentX) * dt * 4f
                 currentY += (myStandingY - currentY) * dt * 4f
             }
@@ -185,8 +190,8 @@ class AntigravityCreature(
         // Bob only when swimming (WORKING); standing states have no bob
         val bobOffset = when (visualState) {
             OctopusVisualState.WORKING -> sin(time * 2f * PI.toFloat() / (TerrariumTiming.FLOAT_PERIOD_MS / 1000f)) *
-                h * TerrariumTiming.FLOAT_AMPLITUDE_FRACTION
-            OctopusVisualState.FLOATING -> sin(time * 0.55f) * h * 0.003f
+                h * TerrariumTiming.FLOAT_AMPLITUDE_FRACTION * 1.35f
+            OctopusVisualState.FLOATING -> sin(time * 0.72f) * h * 0.005f
             else -> 0f
         }
         val centerY = h * currentY + bobOffset
@@ -237,29 +242,69 @@ class AntigravityCreature(
         // Center the SVG at (cx, cy): shift center (12,12) to origin, scale, translate.
         scope.withTransform({
             translate(left = cx, top = cy)
+            rotate(degrees = bodyTiltDegrees())
             scale(scaleX = effScale, scaleY = effScale, pivot = Offset.Zero)
             translate(left = -SVG_VIEWBOX / 2f, top = -SVG_VIEWBOX / 2f)
         }) {
             if (visualState == OctopusVisualState.SLEEPING) {
                 drawPath(peakPath, color = TerrariumColors.AntigravityDim, alpha = alpha * 0.72f)
             } else {
-                drawPath(
-                    peakPath,
-                    brush = antigravityBrush(bodyRadius = bodyRadius, time = time),
-                    alpha = alpha,
-                )
+                drawAntigravityRainbow(alpha)
             }
         }
     }
 
-    private fun antigravityBrush(bodyRadius: Float, time: Float): Brush {
-        val colors = if (visualState == OctopusVisualState.WORKING &&
-            sin(time * TerrariumTiming.THINKING_PULSE_SPEED) > 0.75f
-        ) RAINBOW_COLORS_BRIGHT else RAINBOW_COLORS
-        return Brush.linearGradient(
-            colors = colors,
-            start = Offset(-bodyRadius, bodyRadius),
-            end = Offset(bodyRadius, -bodyRadius),
+    private fun bodyTiltDegrees(): Float {
+        return when (visualState) {
+            OctopusVisualState.WORKING -> sin(time * 2.4f) * 8f
+            OctopusVisualState.ASKING -> sin(time * 1.8f) * 5f
+            OctopusVisualState.FLOATING -> sin(time * 0.75f) * 3f
+            OctopusVisualState.SLEEPING -> -4f
+        }
+    }
+
+    private fun DrawScope.drawAntigravityRainbow(alpha: Float) {
+        val pulse = if (visualState == OctopusVisualState.WORKING) {
+            0.10f + (sin(time * TerrariumTiming.THINKING_PULSE_SPEED).coerceAtLeast(0f) * 0.18f)
+        } else {
+            0f
+        }
+        val bodyAlpha = (alpha + pulse).coerceAtMost(1f)
+        drawPath(
+            peakPath,
+            brush = Brush.verticalGradient(
+                colors = BASE_RAINBOW_COLORS,
+                startY = 1f,
+                endY = 23f,
+            ),
+            alpha = bodyAlpha,
+        )
+        drawPath(
+            peakPath,
+            brush = Brush.radialGradient(
+                colors = TOP_WARM_OVERLAY,
+                center = Offset(9f, 2.2f),
+                radius = 8.5f,
+            ),
+            alpha = bodyAlpha,
+        )
+        drawPath(
+            peakPath,
+            brush = Brush.radialGradient(
+                colors = LEFT_GREEN_OVERLAY,
+                center = Offset(4.2f, 10f),
+                radius = 8.2f,
+            ),
+            alpha = bodyAlpha,
+        )
+        drawPath(
+            peakPath,
+            brush = Brush.radialGradient(
+                colors = RIGHT_PURPLE_OVERLAY,
+                center = Offset(20f, 9f),
+                radius = 8.5f,
+            ),
+            alpha = bodyAlpha,
         )
     }
 
@@ -427,8 +472,9 @@ class AntigravityCreature(
         /** ASKING: mid-water. */
         private const val ASKING_Y = 0.48f
         /** WORKING swim band — upper-mid water. */
-        private const val WORKING_MIN_Y = 0.20f
-        private const val WORKING_MAX_Y = 0.40f
+        private const val WORKING_MIN_Y = 0.18f
+        private const val WORKING_MAX_Y = 0.42f
+        private const val WORKING_FIRST_WAYPOINT_INTERVAL = 0.15f
 
         /** SVG viewBox dimension (24×24) — canonical peak/arc geometry. */
         private const val SVG_VIEWBOX = CreatureGeometry.ANTIGRAVITY_VIEWBOX
@@ -439,30 +485,29 @@ class AntigravityCreature(
             }
         }
 
-        private val RAINBOW_COLORS = listOf(
-            TerrariumColors.AntigravitySky,
-            TerrariumColors.AntigravityCyan,
-            TerrariumColors.AntigravityTeal,
-            TerrariumColors.AntigravityLime,
-            TerrariumColors.AntigravityYellow,
+        private val BASE_RAINBOW_COLORS = listOf(
             TerrariumColors.AntigravityOrange,
             TerrariumColors.AntigravityRed,
-            TerrariumColors.AntigravityPink,
-            TerrariumColors.AntigravityViolet,
+            TerrariumColors.AntigravityCyan,
             TerrariumColors.AntigravityBlue,
         )
 
-        private val RAINBOW_COLORS_BRIGHT = listOf(
-            TerrariumColors.AntigravityLight,
-            TerrariumColors.AntigravityCyan,
-            TerrariumColors.AntigravityTeal,
-            TerrariumColors.AntigravityLime,
+        private val TOP_WARM_OVERLAY = listOf(
             TerrariumColors.AntigravityYellow,
-            TerrariumColors.AntigravityOrange,
-            TerrariumColors.AntigravityRed,
-            TerrariumColors.AntigravityPink,
-            TerrariumColors.AntigravityViolet,
-            TerrariumColors.AntigravityBlue,
+            TerrariumColors.AntigravityOrange.copy(alpha = 0.72f),
+            Color.Transparent,
+        )
+
+        private val LEFT_GREEN_OVERLAY = listOf(
+            TerrariumColors.AntigravityLime,
+            TerrariumColors.AntigravityTeal.copy(alpha = 0.62f),
+            Color.Transparent,
+        )
+
+        private val RIGHT_PURPLE_OVERLAY = listOf(
+            TerrariumColors.AntigravityPink.copy(alpha = 0.74f),
+            TerrariumColors.AntigravityViolet.copy(alpha = 0.52f),
+            Color.Transparent,
         )
 
         // Rising sparks (WORKING anti-gravity shimmer)
