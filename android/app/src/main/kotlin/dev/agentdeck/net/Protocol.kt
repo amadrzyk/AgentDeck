@@ -173,6 +173,7 @@ data class AntigravityStatusInfo(
     val planName: String? = null,
     val availableCredits: Int? = null,
     val minimumCreditAmountForUsage: Int? = null,
+    val subscriptionActiveUntil: String? = null,
 )
 
 /** One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape.

@@ -7,6 +7,7 @@ export interface AntigravityStatusInfo {
   planName?: string;
   availableCredits?: number;
   minimumCreditAmountForUsage?: number;
+  subscriptionActiveUntil?: string;
 }
 
 const DB_PATH = join(
@@ -146,9 +147,37 @@ function parseModelCredits(text: string | null): Pick<AntigravityStatusInfo, 'av
   }
 }
 
+function parseSubscriptionActiveUntil(authStatusText: string | null): string | undefined {
+  if (!authStatusText) return undefined;
+  try {
+    const auth = JSON.parse(authStatusText) as {
+      subscriptionActiveUntil?: string;
+      expiresAt?: string | number;
+      expirationTime?: string | number;
+      activeUntil?: string;
+      userStatusProtoBinaryBase64?: string;
+    };
+    if (auth.subscriptionActiveUntil) return auth.subscriptionActiveUntil;
+    if (auth.expiresAt) return String(auth.expiresAt);
+    if (auth.expirationTime) return String(auth.expirationTime);
+    if (auth.activeUntil) return auth.activeUntil;
+
+    if (auth.userStatusProtoBinaryBase64) {
+      const proto = Buffer.from(auth.userStatusProtoBinaryBase64, 'base64');
+      const strings = extractAsciiStrings(proto);
+      const datePattern = /^\d{4}-\d{2}-\d{2}/;
+      const hit = strings.find((s) => datePattern.test(s));
+      if (hit) return hit;
+    }
+  } catch {}
+  return undefined;
+}
+
 export function readAntigravityLocalStatus(): AntigravityStatusInfo | undefined {
   const planName = parsePlanName(sqliteValue('antigravityAuthStatus'));
   if (!planName) return undefined;
+
+  const subscriptionActiveUntil = parseSubscriptionActiveUntil(sqliteValue('antigravityAuthStatus'));
 
   // Remaining model credits live under a separate vscdb key. This is the same
   // local value the Antigravity IDE shows to the user — reading their own local
@@ -159,5 +188,6 @@ export function readAntigravityLocalStatus(): AntigravityStatusInfo | undefined 
     planName,
     availableCredits: credits.availableCredits,
     minimumCreditAmountForUsage: credits.minimumCreditAmountForUsage,
+    subscriptionActiveUntil,
   };
 }

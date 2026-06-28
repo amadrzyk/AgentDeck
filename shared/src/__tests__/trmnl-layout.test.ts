@@ -144,8 +144,10 @@ describe('renderTrmnlDashboard', () => {
       },
       { now: NOW },
     );
-    expect(svg).toContain('Claude');
-    expect(svg).toContain('ChatGPT Plus');
+    // Claude is represented by the 'claude-code' mono glyph without redundant text
+    expect(svg).toContain('agent-mono-glyph-claude-code');
+    // ChatGPT Plus is compacted to 'Plus' with the expiry
+    expect(svg).toContain('Plus');
     expect(svg).toContain('Jun 30');
   });
 

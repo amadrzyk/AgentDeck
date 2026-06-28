@@ -32,6 +32,7 @@ export function buildSubscriptions(
   codexAuth?: CodexAuthStatus | null,
   apiUsage?: ApiUsageData | null,
   billingType?: BillingType,
+  antigravityStatus?: AntigravityStatusInfo | null,
 ): SubscriptionInfo[] | undefined {
   const items: SubscriptionInfo[] = [];
   const chatgptName = formatChatGptPlan(codexAuth?.planType);
@@ -45,6 +46,13 @@ export function buildSubscriptions(
   const claude = formatClaudeSubscription(apiUsage, billingType);
   if (claude) {
     items.push(claude);
+  }
+
+  if (antigravityStatus?.planName) {
+    items.push({
+      name: antigravityStatus.planName,
+      until: antigravityStatus.subscriptionActiveUntil ?? undefined,
+    });
   }
 
   return items.length > 0 ? items : undefined;
@@ -141,7 +149,7 @@ export function buildUsageEvent(
     codexRateLimits: codexRateLimits ?? undefined,
     modelCatalog: modelCatalog && modelCatalog.length > 0 ? modelCatalog : undefined,
     mlxModels: mlxModels && mlxModels.length > 0 ? mlxModels : undefined,
-    subscriptions: buildSubscriptions(codexAuth, apiUsage, billingType),
+    subscriptions: buildSubscriptions(codexAuth, apiUsage, billingType, antigravityStatus),
     antigravityStatus: antigravityStatus ?? undefined,
   };
   return event;

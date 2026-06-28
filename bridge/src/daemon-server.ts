@@ -31,6 +31,7 @@ import {
   findExistingDaemon,
   DAEMON_DEFAULT_PORT,
   probeDaemonHealth,
+  requestDaemonShutdown,
   shouldConcedePortToOccupant,
   writeDaemonInfo,
   removeDaemonInfo,
@@ -117,6 +118,20 @@ function loadDaemonSettings(): Record<string, unknown> {
     }
   }
   return best?.parsed ?? {};
+}
+
+function latestTimelinePath(): string | null {
+  let best: { path: string; mtime: number } | null = null;
+  for (const dir of getCandidateDataDirs()) {
+    try {
+      const path = join(dir, 'timeline.json');
+      const mtime = statSync(path).mtimeMs;
+      if (!best || mtime > best.mtime) best = { path, mtime };
+    } catch {
+      // Missing or unreadable — skip this candidate.
+    }
+  }
+  return best?.path ?? null;
 }
 
 // Observed-session attention (the hook-driven Notification overlay + PreToolUse
@@ -365,21 +380,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     const probePort = existingInfo.httpPort ?? existingInfo.port;
     const health = await probeDaemonHealth(probePort);
     if (health?.mode === 'daemon') {
-      log(`[agentdeck] Daemon already running on port ${existingInfo.port} (PID ${existingInfo.pid}).`);
-      process.exit(0);
+      if (health.isSwift) {
+        log(`[agentdeck] Swift daemon detected on port ${probePort}. Requesting shutdown to take over...`);
+        await requestDaemonShutdown(probePort);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        removeDaemonInfo();
+      } else {
+        log(`[agentdeck] Daemon already running on port ${existingInfo.port} (PID ${existingInfo.pid}).`);
+        process.exit(0);
+      }
+    } else {
+      log(`[agentdeck] Ignoring stale daemon entry on port ${existingInfo.port} (PID ${existingInfo.pid}; /health did not respond).`);
+      removeDaemonInfo();
     }
-    log(`[agentdeck] Ignoring stale daemon entry on port ${existingInfo.port} (PID ${existingInfo.pid}; /health did not respond).`);
-    removeDaemonInfo();
   }
   const existingSession = findExistingDaemon();
   if (existingSession) {
     const health = await probeDaemonHealth(existingSession.port);
     if (health?.mode === 'daemon') {
-      log(`[agentdeck] Daemon already running on port ${existingSession.port} (PID ${existingSession.pid}).`);
-      process.exit(0);
+      if (health.isSwift) {
+        log(`[agentdeck] Swift daemon detected on port ${existingSession.port}. Requesting shutdown to take over...`);
+        await requestDaemonShutdown(existingSession.port);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        removeDaemonSession(existingSession);
+      } else {
+        log(`[agentdeck] Daemon already running on port ${existingSession.port} (PID ${existingSession.pid}).`);
+        process.exit(0);
+      }
+    } else {
+      log(`[agentdeck] Ignoring stale daemon session on port ${existingSession.port} (PID ${existingSession.pid}; /health did not respond).`);
+      removeDaemonSession(existingSession);
     }
-    log(`[agentdeck] Ignoring stale daemon session on port ${existingSession.port} (PID ${existingSession.pid}; /health did not respond).`);
-    removeDaemonSession(existingSession);
   }
 
   // 2. Determine port — try default first, fallback if occupied by non-daemon
@@ -391,13 +422,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     const health = await probeDaemonHealth(requestedPort);
     if (health) {
       if (health.mode === 'daemon') {
-        // Daemon alive but not in our registry — race condition or stale state
-        log(`[agentdeck] Daemon already running on port ${requestedPort} (detected via /health).`);
-        process.exit(0);
+        if (health.isSwift) {
+          log(`[agentdeck] Swift daemon detected on port ${requestedPort} via /health. Requesting shutdown to take over...`);
+          await requestDaemonShutdown(requestedPort);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        } else {
+          // Daemon alive but not in our registry — race condition or stale state
+          log(`[agentdeck] Daemon already running on port ${requestedPort} (detected via /health).`);
+          process.exit(0);
+        }
+      } else {
+        // Port occupied by non-daemon (e.g. session bridge) — find alternative
+        log(`[agentdeck] Port ${requestedPort} occupied (${health.mode ?? 'unknown'}), finding alternative...`);
+        port = await findAvailablePort();
       }
-      // Port occupied by non-daemon (e.g. session bridge) — find alternative
-      log(`[agentdeck] Port ${requestedPort} occupied (${health.mode ?? 'unknown'}), finding alternative...`);
-      port = await findAvailablePort();
     }
   }
 
@@ -850,6 +888,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // Timeline
   const bridgeLogStream = new BridgeLogStream();
   core.wireTimeline(bridgeLogStream);
+  const timelinePath = latestTimelinePath();
+  if (timelinePath) {
+    const loaded = core.bridgeTimeline.loadPersistedFile(timelinePath);
+    if (loaded > 0) log(`[agentdeck] Loaded ${loaded} persisted timeline entries`);
+  }
   core.wireDisplayMonitor();
   let lastStateEvent: BridgeEvent | null = null;
   let userFocusedSessionId: string | null = null;

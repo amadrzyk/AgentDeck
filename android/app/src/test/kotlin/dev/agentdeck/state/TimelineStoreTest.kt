@@ -491,9 +491,10 @@ class TimelineStoreTest {
     }
 
     @Test
-    fun `addEntry keeps meaningful raw on otel-active session`() {
-        // Same session_id but raw is a real bash command — must stay so we
-        // don't lose user-visible exec rows under the same sentinel.
+    fun `addEntry drops codex tool_exec even when raw is meaningful`() {
+        // Matches macOS: Codex emits one tool_exec per Bash/MCP action. These
+        // remain useful for telemetry/eval ingestion, but the device timeline
+        // should show chat/task lifecycle rows instead of a Bash firehose.
         val real = TimelineEntry(
             timestamp = 1_000,
             type = "tool_exec",
@@ -502,8 +503,20 @@ class TimelineStoreTest {
             sessionId = "codex:otel-active",
         )
         store.addEntry(real)
-        assertEquals(1, store.entries.value.size)
-        assertEquals("Bash: pnpm vitest", store.entries.value[0].summary)
+        assertTrue(store.entries.value.isEmpty())
+    }
+
+    @Test
+    fun `addEntry drops codex tool_exec from normal codex session`() {
+        val bash = TimelineEntry(
+            timestamp = 1_000,
+            type = "tool_exec",
+            summary = "Bash: git status --short",
+            agentType = "codex-cli",
+            sessionId = "codex:019f0884-8e13-77f2-9c4b-2c82e00760e9",
+        )
+        store.addEntry(bash)
+        assertTrue("Normal Codex session Bash rows must not enter Android timeline", store.entries.value.isEmpty())
     }
 
     @Test

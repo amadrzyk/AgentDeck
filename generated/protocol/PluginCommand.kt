@@ -25,6 +25,10 @@ private val klaxon = Klaxon()
     .convert(Value::class,     { Value.fromJson(it) },               { it.toJson() }, true)
 
 /**
+ * Request a session's recent timeline. The daemon replies (to the requester only) with a
+ * `timeline_history` carrying that session's entries. Lets a device that connects
+ * mid-session fill its per-session Detail view.
+ *
  * Session-scoped command — daemon forwards the inner command to the specified session's
  * bridge. Enables direct control of a specific session from any client (MenuBarExtra,
  * Dashboard, etc.)
@@ -55,6 +59,12 @@ data class PluginCommand (
     val text: String? = null,
     val mode: Mode? = null,
     val action: Action? = null,
+
+    /**
+     * Optional epoch-ms lower bound; omit for the full retained history.
+     */
+    val since: Double? = null,
+
     val agent: Agent? = null,
     val command: Command? = null,
 
@@ -211,6 +221,7 @@ enum class Type(val value: String) {
     Interrupt("interrupt"),
     NavigateOption("navigate_option"),
     PermissionDecision("permission_decision"),
+    QuerySessionTimeline("query_session_timeline"),
     QueryUsage("query_usage"),
     Respond("respond"),
     SelectOption("select_option"),
@@ -223,26 +234,27 @@ enum class Type(val value: String) {
 
     companion object {
         public fun fromValue(value: String): Type = when (value) {
-            "apme_recommend"      -> ApmeRecommend
-            "apme_vibe"           -> ApmeVibe
-            "clear_session_focus" -> ClearSessionFocus
-            "client_register"     -> ClientRegister
-            "diag"                -> Diag
-            "escape"              -> Escape
-            "focus_session"       -> FocusSession
-            "interrupt"           -> Interrupt
-            "navigate_option"     -> NavigateOption
-            "permission_decision" -> PermissionDecision
-            "query_usage"         -> QueryUsage
-            "respond"             -> Respond
-            "select_option"       -> SelectOption
-            "send_prompt"         -> SendPrompt
-            "session_command"     -> SessionCommand
-            "switch_agent"        -> SwitchAgent
-            "switch_mode"         -> SwitchMode
-            "utility"             -> Utility
-            "voice"               -> Voice
-            else                  -> throw IllegalArgumentException()
+            "apme_recommend"         -> ApmeRecommend
+            "apme_vibe"              -> ApmeVibe
+            "clear_session_focus"    -> ClearSessionFocus
+            "client_register"        -> ClientRegister
+            "diag"                   -> Diag
+            "escape"                 -> Escape
+            "focus_session"          -> FocusSession
+            "interrupt"              -> Interrupt
+            "navigate_option"        -> NavigateOption
+            "permission_decision"    -> PermissionDecision
+            "query_session_timeline" -> QuerySessionTimeline
+            "query_usage"            -> QueryUsage
+            "respond"                -> Respond
+            "select_option"          -> SelectOption
+            "send_prompt"            -> SendPrompt
+            "session_command"        -> SessionCommand
+            "switch_agent"           -> SwitchAgent
+            "switch_mode"            -> SwitchMode
+            "utility"                -> Utility
+            "voice"                  -> Voice
+            else                     -> throw IllegalArgumentException()
         }
     }
 }

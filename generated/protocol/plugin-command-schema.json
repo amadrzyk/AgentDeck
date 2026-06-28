@@ -265,6 +265,9 @@
           "$ref": "#/definitions/QueryUsageCommand"
         },
         {
+          "$ref": "#/definitions/QuerySessionTimelineCommand"
+        },
+        {
           "$ref": "#/definitions/DiagCommand"
         },
         {
@@ -295,6 +298,28 @@
           "$ref": "#/definitions/PermissionDecisionCommand"
         }
       ]
+    },
+    "QuerySessionTimelineCommand": {
+      "additionalProperties": false,
+      "description": "Request a session's recent timeline. The daemon replies (to the requester only) with a `timeline_history` carrying that session's entries. Lets a device that connects mid-session fill its per-session Detail view.",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "since": {
+          "description": "Optional epoch-ms lower bound; omit for the full retained history.",
+          "type": "number"
+        },
+        "type": {
+          "const": "query_session_timeline",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId"
+      ],
+      "type": "object"
     },
     "QueryUsageCommand": {
       "additionalProperties": false,

@@ -52,6 +52,7 @@ struct AntigravityStatus: Sendable {
     var planName: String?
     var availableCredits: Int?
     var minimumCreditAmountForUsage: Int?
+    var subscriptionActiveUntil: String?
 }
 
 /// One Codex (ChatGPT) rate-limit window read from local rollout files.
@@ -547,6 +548,7 @@ final class UsageAPIClient: Sendable {
 
             let authStatusText = sqliteValue(forKey: "antigravityAuthStatus", dbURL: dbURL)
             guard let planName = parseAntigravityPlanName(authStatusText) else { return nil }
+            let subscriptionActiveUntil = parseAntigravitySubscriptionActiveUntil(authStatusText)
 
             let creditsText = sqliteValue(forKey: "antigravityUnifiedStateSync.modelCredits", dbURL: dbURL)
             let credits = parseAntigravityModelCredits(creditsText)
@@ -554,9 +556,39 @@ final class UsageAPIClient: Sendable {
             return AntigravityStatus(
                 planName: planName,
                 availableCredits: credits.available,
-                minimumCreditAmountForUsage: credits.minimum
+                minimumCreditAmountForUsage: credits.minimum,
+                subscriptionActiveUntil: subscriptionActiveUntil
             )
         }
+    }
+
+    private func parseAntigravitySubscriptionActiveUntil(_ authStatusText: String?) -> String? {
+        guard let authStatusText,
+              let data = authStatusText.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        if let until = json["subscriptionActiveUntil"] as? String { return until }
+        if let expires = json["expiresAt"] as? String { return expires }
+        if let expiresNum = json["expiresAt"] as? Double { return String(expiresNum) }
+        if let expiration = json["expirationTime"] as? String { return expiration }
+        if let expirationNum = json["expirationTime"] as? Double { return String(expirationNum) }
+
+        if let protoB64 = json["userStatusProtoBinaryBase64"] as? String,
+           let proto = Data(base64Encoded: protoB64) {
+            let ascii = extractASCIIStrings(from: proto)
+            let datePattern = "^\\d{4}-\\d{2}-\\d{2}"
+            if let regex = try? NSRegularExpression(pattern: datePattern) {
+                for str in ascii {
+                    let range = NSRange(location: 0, length: str.utf16.count)
+                    if regex.firstMatch(in: str, options: [], range: range) != nil {
+                        return str
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     private func sqliteValue(forKey key: String, dbURL: URL) -> String? {

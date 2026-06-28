@@ -321,7 +321,7 @@ export function readDaemonInfo(): DaemonInfo | null {
  * `httpPort` from `DaemonInfo` when available; otherwise the same `port` is
  * used (Node daemon unifies HTTP + WS on one port).
  */
-export function probeDaemonHealth(port: number): Promise<{ mode?: string; pid?: number } | null> {
+export function probeDaemonHealth(port: number): Promise<{ mode?: string; pid?: number; isSwift?: boolean } | null> {
   return new Promise((resolve) => {
     const req = http.get(`http://127.0.0.1:${port}/health`, { timeout: 2000 }, (res) => {
       let body = '';
@@ -337,6 +337,27 @@ export function probeDaemonHealth(port: number): Promise<{ mode?: string; pid?: 
     });
     req.on('error', () => resolve(null));
     req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+/**
+ * Request another daemon to shutdown (used to clear Swift daemon when CLI starts)
+ */
+export function requestDaemonShutdown(port: number): Promise<void> {
+  return new Promise((resolve) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/shutdown',
+      method: 'POST',
+      timeout: 2000
+    }, (res) => {
+      res.on('data', () => {});
+      res.on('end', () => { resolve(); });
+    });
+    req.on('error', () => resolve());
+    req.on('timeout', () => { req.destroy(); resolve(); });
+    req.end();
   });
 }
 

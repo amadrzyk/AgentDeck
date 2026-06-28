@@ -502,7 +502,7 @@ private fun buildEinkLimitRows(state: DashboardState): List<EinkLimitLine> {
         state.usage.fiveHourPercent?.let { rows.add(EinkLimitLine(label = "5h", percent = it)) }
         state.usage.sevenDayPercent?.let { rows.add(EinkLimitLine(label = "7d", percent = it)) }
     }
-    buildAntigravityLimitValue(state)?.let { rows.add(EinkLimitLine(label = "AG", value = it)) }
+    buildAntigravityLimitValue(state)?.let { rows.add(EinkLimitLine(label = "", value = it)) }
     return rows
 }
 
@@ -511,14 +511,25 @@ private fun buildAntigravityLimitValue(state: DashboardState): String? {
     val plan = status.planName
         ?.replace("Google AI ", "")
         ?.replace("Antigravity ", "")
-        ?.takeIf { it.isNotBlank() }
-    val credits = status.availableCredits
-    return when {
-        plan != null && credits != null -> "$plan ${credits}cr"
-        credits != null -> "${credits}cr"
-        plan != null -> plan
-        else -> null
+        ?.takeIf { it.isNotBlank() } ?: "Pro"
+    val until = status.subscriptionActiveUntil?.let { iso ->
+        try {
+            val dateStr = iso.split("T")[0]
+            val parts = dateStr.split("-")
+            if (parts.size == 3) {
+                val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+                val monthIdx = parts[1].toIntOrNull()?.minus(1) ?: 0
+                val month = if (monthIdx in 0..11) months[monthIdx] else parts[1]
+                val day = parts[2].toIntOrNull()?.toString() ?: parts[2]
+                "→ $month $day"
+            } else {
+                "→ $dateStr"
+            }
+        } catch (e: Exception) {
+            "→ $iso"
+        }
     }
+    return if (until != null) "$plan $until" else plan
 }
 
 @Composable

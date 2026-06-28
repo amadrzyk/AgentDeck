@@ -86,10 +86,9 @@ private fun isMeaningfulTaskTitle(raw: String): Boolean {
 }
 
 /**
- * Codex OTel low-signal entries — `codex:otel-active` session emits raw
- * "tool" / "exec" / "unknown" markers that have no user value next to the
- * adapter-generated rich rows. Mirrors `timelineIsLowSignalEntry` in
- * apple/AgentDeck/UI/Monitor/TimelineStripView.swift.
+ * Low-signal tool entries that should not enter the device-facing timeline.
+ * Mirrors `DaemonTimelineStore.shouldDropLowSignalEntry` and
+ * `timelineIsLowSignalEntry` on Apple.
  *
  * Visible at package level so `TimelineStore` can drop these on the
  * **add** path too — Apple filters at storage AND display, so legacy
@@ -99,6 +98,13 @@ private fun isMeaningfulTaskTitle(raw: String): Boolean {
  */
 internal fun isLowSignalEntry(entry: TimelineEntry): Boolean {
     if (entry.type !in lowSignalTypes) return false
+    // Codex tool hooks fire for every internal Bash/MCP action and can easily
+    // evict the actual turn/task rows from the bounded timeline. APME still
+    // ingests the hook trajectory; the device timeline keeps Codex chat/task
+    // lifecycle rows only.
+    if ((entry.agentType == "codex-cli" || entry.agentType == "codex-app") && entry.type == "tool_exec") {
+        return true
+    }
     // Real signal in detail → keep regardless of placeholder raw. The
     // OpenClaw producer's detail format is
     //   `[status: X]\n[input: ...]\n[output: ...]`

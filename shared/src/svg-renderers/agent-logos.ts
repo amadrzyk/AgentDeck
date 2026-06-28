@@ -219,7 +219,8 @@ export function agentGlyphMono(
 ): string {
   const g = AGENT_MONO_GLYPH[(agent || '').toLowerCase()] ?? AGENT_MONO_GLYPH.openclaw;
   const s = size / 24;
-  const out: string[] = [`<g transform="translate(${cx.toFixed(2)},${cy.toFixed(2)}) scale(${s.toFixed(4)}) translate(-12,-12)">`];
+  const agentClass = (agent || '').toLowerCase();
+  const out: string[] = [`<g class="agent-mono-glyph-${agentClass}" transform="translate(${cx.toFixed(2)},${cy.toFixed(2)}) scale(${s.toFixed(4)}) translate(-12,-12)">`];
   for (const p of g.paths) out.push(`<path d="${p}" fill="${ink}" fill-rule="evenodd"/>`);
   if (g.eyes) for (const [ex, ey, er] of g.eyes) out.push(`<circle cx="${ex}" cy="${ey}" r="${er}" fill="${paper}"/>`);
   out.push('</g>');

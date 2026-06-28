@@ -22,9 +22,13 @@ set -euo pipefail
 : "${COCKPIT_AGENTS:=claude codex opencode}"
 : "${COCKPIT_SENDKEYS_AGENTS:=agy}"   # non-builtin agents workmux can't prompt-inject -> send via send-keys
 : "${COCKPIT_SEND_DELAY:=0.4}"        # delay between paste and Enter (avoids codex submit race)
+: "${COCKPIT_AGY_DELAY:=4}"           # wait before sending to send-keys agents (agy startup: auth + model load)
 WIN_PREFIX="wt"
 BAR_HEIGHT=6
 APME_DB="$HOME/.agentdeck/apme.sqlite"
+# Always-visible shortcut cheatsheet (shown on the command-bar pane border).
+# Use Ctrl + the letter; the Ctrl variant passes through the Korean IME.
+BAR_KEYS='wt  [prefix, then]   Ctrl-P pick   ·   Ctrl-X drop   ·   Ctrl-S send-all   ·   Ctrl-R score      (Ctrl + letter — works with Korean IME)'
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 # Path the keybindings call back through. When run via `agentdeck wt`, the CLI
 # sets COCKPIT_INVOKE='agentdeck wt'; standalone falls back to this script path.
@@ -50,7 +54,11 @@ _wt_path(){
     root=$(tmux show-options -wqv @cockpit_root 2>/dev/null || true)
     [ -n "$root" ] && p="$(dirname "$root")/$(basename "$root")__worktrees/$1"
   fi
-  [ -d "$p" ] && printf '%s' "$p"
+  # Must return 0 even when not found: callers use `path=$(_wt_path ...)` and a
+  # non-zero status there aborts the whole script under `set -e` (was the cause
+  # of `wt score` exiting 1 when a pane's worktree path couldn't be resolved).
+  if [ -d "$p" ]; then printf '%s' "$p"; fi
+  return 0
 }
 # Keep only [a-z0-9-] for a git-safe kebab name (stdin or $1). Capped at 28 chars.
 _sanitize_slug(){
@@ -110,9 +118,27 @@ slugify(){
   [ -n "$out" ] && printf '%s' "$out" || printf 'task-%s' "$(date +%H%M%S)"
 }
 
+# Ensure agy (Antigravity) is launchable by workmux: add `agy: "agy"` to the
+# agents: map in the global config if it's not there yet (idempotent). agy isn't
+# a workmux builtin, so without this it can't be spawned. Prompt delivery is
+# handled by COCKPIT_SENDKEYS_AGENTS, so nothing else is needed.
+_ensure_agy_config(){
+  local CFG="$HOME/.config/workmux/config.yaml"
+  mkdir -p "$(dirname "$CFG")"
+  [ -f "$CFG" ] || printf 'nerdfont: true\n' > "$CFG"
+  grep -qE '^[[:space:]]*agy:' "$CFG" && return 0
+  if grep -qE '^agents:' "$CFG"; then
+    awk '/^agents:/ && !d {print; print "  agy: \"agy\""; d=1; next} {print}' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+  else
+    printf '\nagents:\n  agy: "agy"\n' >> "$CFG"
+  fi
+}
+
 # One round: branch N agents from base (empty base = current main) + broadcast prompt + assemble grid.
 _run_round(){
   local prompt="$1" task="$2" base="${3:-}"
+  # Auto-configure non-builtin agents (currently agy) so they "just work".
+  case " $COCKPIT_AGENTS " in *" agy "*) _ensure_agy_config;; esac
   local root; root=$(git rev-parse --show-toplevel)
   local addargs=(); for a in $COCKPIT_AGENTS; do addargs+=(-a "$a"); done
   [ -n "$base" ] && addargs+=(--base "$base")
@@ -139,19 +165,25 @@ _run_round(){
     src=$(tmux list-panes -t "$w" -F '#{pane_id}' | head -1)
     tmux join-pane -d -s "$src" -t "$cwin"
     tmux set-option -p -t "$src" @worktree "$wt"
+    tmux set-option -p -t "$src" @pane_label "$wt"
   done <<< "$neww"
   tmux kill-pane -t "$ph" 2>/dev/null || true
   tmux select-layout -t "$cwin" tiled
   # Full-width bottom command bar (grid compresses above it; it survives drops).
   local bar
   bar=$(tmux split-window -d -f -v -l "$BAR_HEIGHT" -t "$cwin" -P -F '#{pane_id}' \
-        "printf '%s\n' '-- agentdeck wt --  in bar: agentdeck wt send \"...\"  |  on a pane (all after prefix): P=pick  F=fork  X=drop  G=grid  S=send-all  R=score'; exec \${SHELL:-/bin/zsh}")
+        "printf '%s\n' '-- agentdeck wt -- shortcut keys are on the pane borders above. Follow-up to all: agentdeck wt send \"...\"'; exec \${SHELL:-/bin/zsh}")
   tmux set-option -p -t "$bar" @cockpit_bar 1
+  # Always-visible cheatsheet: pane-border line shows the keys on the bar and the
+  # worktree name on each agent pane (score later augments these with ★ scores).
+  tmux set-window-option -t "$cwin" pane-border-status top
+  tmux set-window-option -t "$cwin" pane-border-format ' #{@pane_label} '
+  tmux set-option -p -t "$bar" @pane_label "$BAR_KEYS"
   # Non-builtin agents (agy, etc.) aren't prompt-injected by workmux -p -> deliver via send-keys.
   local sa p wt
   for sa in $COCKPIT_SENDKEYS_AGENTS; do
     while IFS=' ' read -r p wt; do
-      case "$wt" in *-"$sa") sleep 1; _send_to_pane "$p" "$prompt";; esac
+      case "$wt" in *-"$sa") sleep "$COCKPIT_AGY_DELAY"; _send_to_pane "$p" "$prompt";; esac
     done < <(tmux list-panes -t "$cwin" -F '#{pane_id} #{@worktree}')
   done
   tmux select-pane -t "$bar"
@@ -159,10 +191,44 @@ _run_round(){
   echo "wt: grid ready."
 }
 
+# True if any `<task>-<agent>` branch already exists (collision).
+_task_collides(){
+  local a
+  for a in $COCKPIT_AGENTS; do
+    git show-ref --verify --quiet "refs/heads/$1-$a" && return 0
+  done
+  return 1
+}
+# Next free name by appending -2, -3, ... until no collision.
+_free_task(){
+  local base="$1" t="$1" i=1
+  while _task_collides "$t"; do i=$((i+1)); t="$base-$i"; done
+  printf '%s' "$t"
+}
+# Remove the existing `<task>-<agent>` worktrees so the name can be reused.
+_clean_task(){
+  local a
+  for a in $COCKPIT_AGENTS; do workmux remove "$1-$a" -f 2>/dev/null || true; done
+}
+# On collision, ask the user what to do. Sets global RESOLVED_TASK (or aborts).
+# Defaults to auto-rename when there's no TTY (non-interactive).
+_resolve_task(){
+  RESOLVED_TASK="$1"
+  _task_collides "$1" || return 0
+  printf "wt: worktrees for '%s-*' already exist.\n  [n] new auto-named name  ·  [c] clean existing & reuse  ·  [a] abort? [n/c/a] " "$1" >&2
+  local ans=""; read -r ans </dev/tty 2>/dev/null || ans=n
+  case "$ans" in
+    c|C) _clean_task "$1"; echo "wt: cleaned existing, reusing '$1'" >&2;;
+    a|A) die "aborted";;
+    *)   RESOLVED_TASK=$(_free_task "$1"); echo "wt: name in use -> using '$RESOLVED_TASK'" >&2;;
+  esac
+}
+
 cmd_broadcast(){
   need_tmux; need_repo
   local prompt="${1:-}"; [ -n "$prompt" ] || die 'start "<prompt>" [name]'
   local task="${2:-}"; [ -n "$task" ] || task=$(slugify "$prompt"); [ -n "$task" ] || task="t$(date +%H%M%S)"
+  _resolve_task "$task"; task="$RESOLVED_TASK"
   _run_round "$prompt" "$task" ""
 }
 
@@ -179,6 +245,7 @@ cmd_fork(){
     git -C "$wpath" add -A && git -C "$wpath" commit -q -m "wip: fork base from $wt" || true
   fi
   local task; task=$(slugify "$prompt"); [ -n "$task" ] || task="t$(date +%H%M%S)"
+  _resolve_task "$task"; task="$RESOLVED_TASK"
   echo "wt: forking from [$wt] -> new round"
   _run_round "$prompt" "$task" "$wt"
 }
@@ -205,27 +272,24 @@ cmd_score(){
   local p wt path sc
   while IFS= read -r p; do
     wt=$(pane_wt "$p")
-    if [ -z "$wt" ]; then tmux set-option -p -t "$p" @pane_label "[ cmd ]"; continue; fi
+    if [ -z "$wt" ]; then tmux set-option -p -t "$p" @pane_label "$BAR_KEYS"; continue; fi
     path=$(_wt_path "$wt")
     sc=""
-    [ -f "$APME_DB" ] && sc=$(sqlite3 "$APME_DB" "SELECT printf('%.2f',composite_score) FROM runs WHERE (project_name='$wt' OR project_path='$path') AND composite_score IS NOT NULL ORDER BY started_at DESC LIMIT 1" 2>/dev/null || true)
+    # Most recent COMPLETED + scored run for this worktree. Open runs aren't yet
+    # judged, so they'd show a meaningless 0.00 — exclude them.
+    [ -f "$APME_DB" ] && sc=$(sqlite3 "$APME_DB" "SELECT printf('%.2f',composite_score) FROM runs WHERE (project_name='$wt' OR project_path='$path') AND ended_at IS NOT NULL AND composite_score IS NOT NULL ORDER BY started_at DESC LIMIT 1" 2>/dev/null || true)
     tmux set-option -p -t "$p" @pane_label "$wt${sc:+   ★ $sc}"
   done < <(tmux list-panes -t "$cwin" -F '#{pane_id}')
-  echo "wt: ★ APME score overlay refreshed (use workmux dashboard 'd' for diffs)"
+  # No stdout: run-shell would otherwise pop the message over the screen. The
+  # border labels are the feedback.
 }
 
 # Add agy (Antigravity) to the compare set: bare interactive in the global config; prompt via send-keys.
 cmd_setup_agy(){
-  local CFG="$HOME/.config/workmux/config.yaml"
-  [ -f "$CFG" ] || die "global config not found: $CFG"
-  if grep -qE '^[[:space:]]*agy:' "$CFG"; then
-    sed -i '' -E 's/^([[:space:]]*agy:).*/\1 "agy"/' "$CFG"
-    echo "wt: set agy -> \"agy\" (bare interactive) in the global config"
-  else
-    echo "  warning: add 'agy: \"agy\"' to the agents: map in $CFG"
-  fi
-  echo "  then: agentdeck wt agents claude codex opencode agy"
-  echo "  (agy is prompted via send-keys — COCKPIT_SENDKEYS_AGENTS=agy)"
+  _ensure_agy_config
+  echo "wt: agy (Antigravity) is configured in the workmux global config."
+  echo "  Add it to the compare set:  agentdeck wt agents claude codex opencode agy"
+  echo "  After that it launches automatically on 'wt start' (prompt via send-keys)."
 }
 
 cmd_send(){
@@ -277,14 +341,19 @@ cmd_drop(){
 
 cmd_setup(){
   need_tmux
-  tmux bind-key S command-prompt -p 'send-all:' "run-shell \"$INVOKE send '%%'\""
-  tmux bind-key P run-shell "$INVOKE pick"
-  tmux bind-key X run-shell "$INVOKE drop"
-  tmux bind-key G run-shell "$INVOKE grid"
-  tmux bind-key F command-prompt -p 'fork-from-focused:' "run-shell \"$INVOKE fork '%%'\""
-  tmux bind-key R run-shell "$INVOKE score"
-  echo "wt: keybindings -> prefix+S=send-all, P=pick, F=fork, X=drop, G=grid, R=score"
-  echo "  (use workmux dashboard 'd'/'a' for diff/patch review — wt does not reimplement it)"
+  # Bind each verb to BOTH the bare uppercase letter and Ctrl+lowercase. The
+  # Ctrl+letter variant passes through the Korean IME (the bare letters get
+  # composed into Hangul), so prefix -> C-p etc. work without switching input.
+  # Core in-grid actions only. fork/grid stay available as `agentdeck wt fork|grid`
+  # but aren't bound to keys (rarely used). Each is bound to BOTH bare uppercase
+  # and Ctrl+lowercase; the Ctrl variant passes through the Korean IME.
+  local k
+  for k in P C-p; do tmux bind-key "$k" run-shell "$INVOKE pick"; done
+  for k in X C-x; do tmux bind-key "$k" run-shell "$INVOKE drop"; done
+  for k in R C-r; do tmux bind-key "$k" run-shell "$INVOKE score"; done
+  for k in S C-s; do tmux bind-key "$k" command-prompt -p 'send-all:' "run-shell \"$INVOKE send '%%'\""; done
+  echo "wt: keybindings -> prefix, then  Ctrl-P pick  ·  Ctrl-X drop  ·  Ctrl-S send-all  ·  Ctrl-R score"
+  echo "  Use Ctrl + the letter (works with the Korean IME). For diffs: workmux dashboard 'd'."
 }
 
 # Jump to the active grid window (overlay-like "button"). Most recent one.

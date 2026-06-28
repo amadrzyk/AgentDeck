@@ -6,6 +6,7 @@
 
 import type { TimelineEntry } from './types.js';
 import { deduplicateEntry, normalizeTimelineEntryForStorage } from '@agentdeck/shared';
+import { readFileSync } from 'fs';
 
 type EntryListener = (entry: TimelineEntry, upsert?: boolean) => void;
 /** Attribute an entry with session-scoped metadata (sessionId, projectName,
@@ -111,6 +112,48 @@ export class BridgeTimelineStore {
       return this.entries.filter((e) => e.ts > since);
     }
     return [...this.entries];
+  }
+
+  /** Load persisted timeline rows into the bounded replay buffer without
+   *  broadcasting them as live events. The Node daemon normally keeps the
+   *  device timeline in memory, but macOS/previous daemon runs may leave a
+   *  timeline.json behind. Rehydrating it lets reconnecting Android/tablet
+   *  clients receive a non-empty initial `timeline_history`.
+   */
+  loadPersistedFile(path: string): number {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(path, 'utf-8'));
+    } catch {
+      return 0;
+    }
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { entries?: unknown }).entries)
+        ? (parsed as { entries: unknown[] }).entries
+        : [];
+    const before = this.entries.length;
+    this.loadPersistedEntries(rows);
+    return Math.max(0, this.entries.length - before);
+  }
+
+  loadPersistedEntries(rows: unknown[]): void {
+    const normalized: TimelineEntry[] = [];
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const entry = row as Partial<TimelineEntry>;
+      if (typeof entry.ts !== 'number' || typeof entry.type !== 'string' || typeof entry.raw !== 'string') continue;
+      const clean = normalizeTimelineEntryForStorage(entry as TimelineEntry);
+      if (clean) normalized.push(clean);
+    }
+    if (normalized.length === 0) return;
+    const byKey = new Map<string, TimelineEntry>();
+    for (const entry of [...this.entries, ...normalized].sort((a, b) => a.ts - b.ts)) {
+      byKey.set(`${entry.ts}:${entry.type}:${entry.raw}`, entry);
+    }
+    this.entries = Array.from(byKey.values())
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-MAX_ENTRIES);
   }
 
   /** Recent entries attributed to one session, for the `query_session_timeline`

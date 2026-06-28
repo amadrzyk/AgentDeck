@@ -8,6 +8,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { BridgeTimelineStore } from '../timeline-store.js';
 import type { TimelineEntry } from '../types.js';
 import { deduplicateEntry } from '@agentdeck/shared';
+import { mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 function makeEntry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
   return {
@@ -80,6 +83,49 @@ describe('BridgeTimelineStore', () => {
 
     expect(store.getHistory()).toHaveLength(0);
     expect(received).toHaveLength(0);
+  });
+
+  it('drops Codex tool_exec rows before broadcast/history', () => {
+    const received: TimelineEntry[] = [];
+    store.onEntry((entry) => received.push(entry));
+    store.addEntry(makeEntry({
+      ts: 100,
+      type: 'tool_exec',
+      raw: 'Bash: git status --short',
+      agentType: 'codex-cli',
+      sessionId: 'codex:019f0884-8e13-77f2-9c4b-2c82e00760e9',
+    }));
+
+    expect(store.getHistory()).toHaveLength(0);
+    expect(received).toHaveLength(0);
+  });
+
+  it('loads persisted timeline history without replaying Codex tool_exec firehose', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agentdeck-timeline-'));
+    const path = join(dir, 'timeline.json');
+    writeFileSync(path, JSON.stringify([
+      makeEntry({
+        ts: 100,
+        type: 'tool_exec',
+        raw: 'Bash: git status --short',
+        agentType: 'codex-cli',
+        sessionId: 'codex:019f0884-8e13-77f2-9c4b-2c82e00760e9',
+      }),
+      makeEntry({
+        ts: 200,
+        type: 'chat_response',
+        raw: '작업 완료',
+        agentType: 'codex-cli',
+        sessionId: 'codex:019f0884-8e13-77f2-9c4b-2c82e00760e9',
+      }),
+    ]));
+
+    const received: TimelineEntry[] = [];
+    store.onEntry((entry) => received.push(entry));
+    expect(store.loadPersistedFile(path)).toBe(1);
+    expect(received).toHaveLength(0);
+    expect(store.getHistory()).toHaveLength(1);
+    expect(store.getHistory()[0].type).toBe('chat_response');
   });
 
   it('calls listeners on new entries', () => {

@@ -165,6 +165,7 @@ struct JudgeBackendStatus: Sendable {
 final class DaemonServer {
     let port: UInt16
     let sessionId = UUID().uuidString
+    var onShutdown: (() -> Void)?
     private let wsServer = WebSocketServer()
     private let httpServer = HTTPServer()
     private let stateMachine = StateMachine()
@@ -1288,6 +1289,7 @@ final class DaemonServer {
                 "state": state,
                 "pairingToken": AuthManager.shared.token,
                 "modules": health["modules"] as Any,
+                "isSwift": true,
             ]
             if let m = focus.model { payload["modelName"] = m }
             if let e = focus.effort { payload["effortLevel"] = e }
@@ -3879,6 +3881,7 @@ final class DaemonServer {
                     changed = prev.planName != next.planName
                         || prev.availableCredits != next.availableCredits
                         || prev.minimumCreditAmountForUsage != next.minimumCreditAmountForUsage
+                        || prev.subscriptionActiveUntil != next.subscriptionActiveUntil
                 } else {
                     changed = (self.cachedAntigravityStatus == nil) != (next == nil)
                 }
@@ -4735,6 +4738,9 @@ final class DaemonServer {
         if let minimumCreditAmountForUsage = status.minimumCreditAmountForUsage {
             payload["minimumCreditAmountForUsage"] = minimumCreditAmountForUsage
         }
+        if let subscriptionActiveUntil = status.subscriptionActiveUntil {
+            payload["subscriptionActiveUntil"] = subscriptionActiveUntil
+        }
         return payload
     }
 
@@ -5133,6 +5139,7 @@ final class DaemonServer {
         await httpServer.stop()
 
         DaemonLogger.shared.info("Daemon stopped")
+        onShutdown?()
     }
 
     // MARK: - Helpers

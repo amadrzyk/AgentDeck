@@ -140,6 +140,10 @@ data class BridgeEvent (
 
     /**
      * Session ID associated with this state payload; may move with hook activity.
+     *
+     * Set when this history is a reply to `query_session_timeline` — scopes the entries to one
+     * session so reconnecting glance devices (XTeink X3) can fill a per-session Detail view on
+     * demand instead of waiting for live events.
      */
     @Json(name = "sessionId")
     val sessionID: String? = null,
@@ -330,7 +334,8 @@ enum class AgentType(val value: String) {
 data class AntigravityStatusInfo (
     val availableCredits: Double? = null,
     val minimumCreditAmountForUsage: Double? = null,
-    val planName: String? = null
+    val planName: String? = null,
+    val subscriptionActiveUntil: String? = null
 )
 
 enum class BillingType(val value: String) {
@@ -378,8 +383,21 @@ data class ApmeRecommendation (
 /**
  * Codex usage limits parsed from local rollout files. `primary` is the short (5h-style)
  * window, `secondary` the long (weekly) window — same idea as the Claude 5h/7d gauges.
+ * Credit-based plans report `primary`/`secondary` as null and convey usage via `credits` +
+ * `limitId` instead.
  */
 data class CodexRateLimits (
+    /**
+     * Credit balance for credit-based plans (present when windows are null).
+     */
+    val credits: CodexCredits? = null,
+
+    /**
+     * Limit identifier reported by Codex (e.g. "premium" for credit-based plans).
+     */
+    @Json(name = "limitId")
+    val limitID: String? = null,
+
     /**
      * Plan tier reported alongside the limits (e.g. "plus", "pro").
      */
@@ -387,6 +405,30 @@ data class CodexRateLimits (
 
     val primary: CodexRateLimitWindow? = null,
     val secondary: CodexRateLimitWindow? = null
+)
+
+/**
+ * Credit balance for credit-based plans (present when windows are null).
+ *
+ * Codex credits balance, the metering Codex reports for credit-based plans (e.g. `limit_id:
+ * "premium"`) where the rolling 5h/7d windows are null. Mirrors the rollout's
+ * `rate_limits.credits` block.
+ */
+data class CodexCredits (
+    /**
+     * Remaining balance — Codex reports this as a string (e.g. "0").
+     */
+    val balance: String? = null,
+
+    /**
+     * Whether the plan has any credit allowance configured.
+     */
+    val hasCredits: Boolean,
+
+    /**
+     * Unlimited credits (no balance ceiling).
+     */
+    val unlimited: Boolean
 )
 
 /**
@@ -885,6 +927,12 @@ data class OcSessionStatus (
 )
 
 data class SessionInfo (
+    /**
+     * Daemon-synthesized "what is this agent doing right now" one-liner — a shared source so
+     * glance surfaces (XTeink X3 rows, TRMNL list) render the same text.
+     */
+    val activity: String? = null,
+
     val agentType: AgentType? = null,
     val alive: Boolean,
     val contextPercent: Double? = null,

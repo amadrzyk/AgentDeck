@@ -387,6 +387,7 @@ struct AntigravityStatusInfo: Codable, Sendable {
     var planName: String?
     var availableCredits: Int?
     var minimumCreditAmountForUsage: Int?
+    var subscriptionActiveUntil: String?
 }
 
 /// One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape.

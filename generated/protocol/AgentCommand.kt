@@ -110,6 +110,17 @@ sealed class AgentCommand {
         }
     }
 
+    data class QuerySessionTimeline(val sessionId: String) : AgentCommand() {
+        override val typeTag: String = "query_session_timeline"
+        override fun toJson(): String {
+            val buf = StringBuilder()
+            buf.append("{\"type\":\"query_session_timeline\"")
+            buf.append(",\"sessionId\":").append(encode(sessionId))
+            buf.append("}")
+            return buf.toString()
+        }
+    }
+
     data class Diag(val action: String) : AgentCommand() {
         override val typeTag: String = "diag"
         override fun toJson(): String {

@@ -106,6 +106,7 @@ export interface AntigravityStatusInfo {
   planName?: string;
   availableCredits?: number;
   minimumCreditAmountForUsage?: number;
+  subscriptionActiveUntil?: string;
 }
 
 /** One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape.

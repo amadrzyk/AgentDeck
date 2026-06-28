@@ -332,9 +332,73 @@ export function renderTrmnlDashboard(input: DashState | any, opts: TrmnlRenderOp
 
   // --- Header: wordmark + subscription/plan summary (with expiry) on the right ---
   els.push(
-    `<text x="${pad}" y="38" font-family="${SANS}" font-size="28" font-weight="700" fill="${INK}">AgentDeck</text>`,
-    `<text x="${W - pad}" y="38" text-anchor="end" font-family="${SANS}" font-size="16" font-weight="600" fill="${INK}">${escXml(truncatePx(subSummary || summary, W * 0.62, 16))}</text>`,
-    `<rect x="${pad}" y="${headerH}" width="${W - 2 * pad}" height="2.5" fill="${INK}"/>`,
+    `<text x="${pad}" y="38" font-family="${SANS}" font-size="28" font-weight="700" fill="${INK}">AgentDeck</text>`
+  );
+
+  const headerItems: string[] = [];
+  let currX = W - pad;
+  const fontSize = 15;
+  const iconSize = 18;
+  const iconTextGap = 4;
+  const itemGap = 16;
+
+  if (state.subscriptions && state.subscriptions.length > 0) {
+    for (let i = state.subscriptions.length - 1; i >= 0; i--) {
+      const sub = state.subscriptions[i];
+      let agentType = '';
+      const lowerName = sub.name.toLowerCase();
+      let displayName = sub.name;
+
+      if (lowerName.includes('claude')) {
+        agentType = 'claude-code';
+        displayName = ''; // Logo is enough
+      } else if (lowerName.includes('chatgpt') || lowerName.includes('codex')) {
+        agentType = 'codex-cli';
+        displayName = sub.name
+          .replace(/chatgpt/i, '')
+          .replace(/codex/i, '')
+          .trim();
+      } else if (lowerName.includes('google ai') || lowerName.includes('antigravity')) {
+        agentType = 'antigravity';
+        displayName = sub.name
+          .replace(/google ai/i, '')
+          .replace(/antigravity/i, '')
+          .trim();
+      }
+
+      const untilStr = fmtShortDate(sub.until);
+      const textParts: string[] = [];
+      if (displayName) textParts.push(displayName);
+      if (untilStr) textParts.push(`→ ${untilStr}`);
+      const textToDraw = textParts.join(' ');
+
+      const textWidth = textToDraw ? measureTextWidth(textToDraw, fontSize) : 0;
+      const itemW = iconSize + (textToDraw ? iconTextGap + textWidth : 0);
+      const itemStartX = currX - itemW;
+
+      const iconCx = itemStartX + iconSize / 2;
+      const iconCy = 31; // Centered vertically relative to text baseline (y=38)
+      headerItems.push(agentGlyphMono(agentType, iconCx, iconCy, iconSize, INK, PAPER));
+
+      if (textToDraw) {
+        const textX = itemStartX + iconSize + iconTextGap;
+        headerItems.push(
+          `<text x="${textX}" y="36" font-family="${SANS}" font-size="${fontSize}" font-weight="600" fill="${INK}">${escXml(textToDraw)}</text>`
+        );
+      }
+
+      currX = itemStartX - itemGap;
+    }
+  } else {
+    const txt = truncatePx(summary, W * 0.62, 16);
+    headerItems.push(
+      `<text x="${W - pad}" y="38" text-anchor="end" font-family="${SANS}" font-size="16" font-weight="600" fill="${INK}">${escXml(txt)}</text>`
+    );
+  }
+  els.push(...headerItems);
+
+  els.push(
+    `<rect x="${pad}" y="${headerH}" width="${W - 2 * pad}" height="2.5" fill="${INK}"/>`
   );
 
   // --- AWAITING banner (highest-priority glance signal) ---

@@ -11,6 +11,10 @@
 
 import Foundation
 
+/// Request a session's recent timeline. The daemon replies (to the requester only) with a
+/// `timeline_history` carrying that session's entries. Lets a device that connects
+/// mid-session fill its per-session Detail view.
+///
 /// Session-scoped command — daemon forwards the inner command to the specified session's
 /// bridge. Enables direct control of a specific session from any client (MenuBarExtra,
 /// Dashboard, etc.)
@@ -38,6 +42,8 @@ struct ADPluginCommand: Codable, Equatable {
     var text: String?
     var mode: ADMode?
     var action: ADAction?
+    /// Optional epoch-ms lower bound; omit for the full retained history.
+    var since: Double?
     var agent: ADAgent?
     var command: ADCommand?
     /// Human-readable label for the surface (appears verbatim in diagnostics).
@@ -65,6 +71,7 @@ struct ADPluginCommand: Codable, Equatable {
         case text = "text"
         case mode = "mode"
         case action = "action"
+        case since = "since"
         case agent = "agent"
         case command = "command"
         case clientLabel = "clientLabel"
@@ -109,6 +116,7 @@ extension ADPluginCommand {
         text: String?? = nil,
         mode: ADMode?? = nil,
         action: ADAction?? = nil,
+        since: Double?? = nil,
         agent: ADAgent?? = nil,
         command: ADCommand?? = nil,
         clientLabel: String?? = nil,
@@ -133,6 +141,7 @@ extension ADPluginCommand {
             text: text ?? self.text,
             mode: mode ?? self.mode,
             action: action ?? self.action,
+            since: since ?? self.since,
             agent: agent ?? self.agent,
             command: command ?? self.command,
             clientLabel: clientLabel ?? self.clientLabel,
@@ -322,6 +331,7 @@ enum ADType: String, Codable, Equatable {
     case interrupt = "interrupt"
     case navigateOption = "navigate_option"
     case permissionDecision = "permission_decision"
+    case querySessionTimeline = "query_session_timeline"
     case queryUsage = "query_usage"
     case respond = "respond"
     case selectOption = "select_option"

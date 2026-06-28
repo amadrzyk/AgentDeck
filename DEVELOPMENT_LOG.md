@@ -6,6 +6,61 @@
 
 ---
 
+## 2026-06-28 — Android tablet TIMELINE macOS parity: Codex Bash firehose 제거 + daemon history 복원
+
+### 문제
+Android tablet TIMELINE 이 macOS Dashboard 와 다르게 Codex `tool_exec` row(`Bash: ...`, `Bash completed: ...`, `apply_patch ...`)를 그대로 보여줘 실제 사용자-facing 활동 단위(chat/task)를 밀어냈다. 또한 Node CLI daemon 재시작 뒤 새로 연결한 Android tablet 은 `BridgeTimelineStore` 메모리 buffer 가 비어 있으면 디스크 `~/.agentdeck/timeline.json` 에 최근 활동이 있어도 `timeline_history`를 받지 못해 `No timeline events` 로 보였다.
+
+### 해결
+- Android `TimelineDisplay.kt` low-signal filter 를 Apple/Shared 정책과 맞춰 Codex `tool_exec` 를 전부 device timeline storage/display 에서 제거. APME/내부 trajectory 는 별도 경로로 유지하고, tablet 은 Codex chat/task lifecycle row 만 표시.
+- Node `BridgeTimelineStore` 에 persisted `timeline.json` rehydrate 경로를 추가. daemon 시작 시 후보 data dir 의 최신 `timeline.json` 을 listener broadcast 없이 메모리 replay buffer 로 로드하고, 같은 storage normalization 으로 Codex tool firehose 는 복원하지 않는다.
+- 회귀 테스트: Android `TimelineStoreTest` 에 일반 `codex:<uuid>` Bash row drop 케이스 추가, bridge `timeline-integration.test.ts` 에 persisted history load + Codex tool_exec 제거 케이스 추가.
+
+### 검증
+- Android `./gradlew :app:testDebugUnitTest --tests dev.agentdeck.state.TimelineStoreTest --tests dev.agentdeck.net.ProtocolTest --no-daemon` 성공.
+- `pnpm vitest run bridge/src/__tests__/timeline-integration.test.ts shared/src/__tests__/timeline.test.ts` 성공 — 2 files / 100 tests.
+
+---
+
+## 2026-06-28 — Antigravity 구독 만료일 수집 및 상단 LIMITS 정보 공간 효율 개선 (10" IPS / TRMNL)
+
+### 문제
+10" IPS 및 TRMNL 기기 등 BYOS(Bring Your Own Screen) 환경에서 화면 상단에 표시되는 구독 정보(`LIMITS`)가 가로로 너무 긴 영역을 차지하여 화면 구성의 비효율이 발생했다. 또한, Antigravity(Gemini) 세션의 경우 실시간 크레딧 정보(`1000cr`)가 불명확하게 노출되었고, 구독 만료일 정보는 수집 및 노출되지 않아 관리의 편의성이 부족했다.
+
+### 해결
+1. **Antigravity 구독 만료일 수집**:
+   - `antigravityAuthStatus` DB 데이터로부터 `subscriptionActiveUntil` 등의 속성 값을 파싱하도록 구현함.
+   - 만약 JSON 키로 직접 노출되지 않는 경우를 대비해, base64로 디코딩된 protobuf 아스키 데이터 목록(`strings`)에서 ISO 8601 날짜 정규식 패턴(`^\d{4}-\d{2}-\d{2}`)을 대조하여 안전하게 만료일을 식별하도록 폴백 장치를 추가함.
+2. **구독 텍스트의 로고화 및 가로폭 최소화**:
+   - `shared/src/trmnl-layout.ts` 헤더 영역에 `"Claude"`, `"ChatGPT Plus"`, `"Google AI Pro"` 등 불필요하게 긴 텍스트를 나열하는 대신, 각 플랜에 해당하는 모노크롬 로고 아이콘을 렌더링하고 바로 옆(간격 4px 최소화)에 플랜의 컴팩트 명칭(`Plus`, `Pro` 등)과 만료일(`→ Month Day`)만 표시하는 구조로 개선함.
+   - Claude의 경우 텍스트 명칭을 생략하고 로고 아이콘과 만료일만으로 공간 효율을 극대화함.
+3. **E-ink 모니터 스크린 Parity**:
+   - 안드로이드 E-ink 대시보드의 Limits 행에서도 중복되던 `"AG"` 라는 라벨 접두어와 불명확한 `credits` 값 노출을 제거하고, 순수 플랜 명과 컴팩트하게 포맷팅된 만료일을 렌더링하도록 일치화함.
+4. **Parity 동기화 및 테스트**:
+   - `shared/src/protocol.ts`에 `AntigravityStatusInfo.subscriptionActiveUntil` 스펙을 추가하고 `pnpm generate-protocol`을 수행하여 Kotlin 및 Swift 타입 선언과 동기화함.
+   - 변경된 컴팩트 렌더링 사양에 맞춰 `trmnl-layout.test.ts` 테스트 코드를 갱신하여 1566개 단위 테스트 전원 통과를 확인(Green).
+
+---
+
+## 2026-06-28 — CLI 데몬 ↔ macOS GUI 앱(Swift) 경합 방지 및 포트 Takeover
+
+### 문제
+macOS GUI 앱(Swift 인프로세스 데몬)이 먼저 `9120` 포트를 선점하고 동작할 때, 터미널에서 CLI 데몬(`agentdeck daemon start`)을 띄우면 이미 포트가 점유 중임을 감지하여 CLI 데몬이 즉시 종료(`process.exit(0)`)되었다. 이로 인해 Claude Code/Codex 등 터미널 세션을 띄우는 데 필수적인 PTY 스폰 전용 CLI 데몬 허브를 함께 띄울 수 없어 두 프로그램 간에 경합과 동작 차단이 발생했다.
+
+### 해결
+1. **Swift Daemon `/health` 응답 보완**: `DaemonServer.swift`의 `/health` 응답 JSON에 `"isSwift": true` 플래그를 실어, 해당 데몬이 macOS 앱의 인프로세스 데몬임을 구별할 수 있게 함.
+2. **Swift 앱 자동 양보 및 클라이언트 전환**:
+   - `DaemonServer.swift`에 `onShutdown` 콜백을 등록.
+   - `DaemonService.swift`에서 `onShutdown` 콜백 수신 시 `connectToExternalDaemon`을 바로 실행하여, 로컬 HTTP/WS 소켓을 닫고 외부 CLI 데몬의 중계 클라이언트 모드(`isUsingExternalDaemon = true`)로 실시간 복귀하도록 조치.
+3. **CLI 데몬 Takeover 메커니즘**:
+   - `session-registry.ts`에 타 데몬 종료 유도 API인 `requestDaemonShutdown(port)` 추가.
+   - `daemon-server.ts`의 싱글톤 가드 로직에서 `/health` 프로브 시 `isSwift === true`가 발견되면, 해당 데몬에게 `requestDaemonShutdown`을 쏘고 **1.5초**간 소켓 릴리즈를 대기한 뒤 `process.exit(0)` 없이 포트를 이어받아 기동하게 함.
+
+### 핵심 설계 결정
+- **소유자(Port Owner)의 양보와 백엔드 보존**: GUI 앱이 포트 `9120`을 반납(수신 소켓 Close)하고 외부 데몬의 클라이언트로 붙어도, 앱 프로세스는 유지되므로 **D200H USB HID(Stream Deck+) 통신 등의 샌드박스 내 기기 제어는 온전히 살아남아** 외부 CLI 데몬으로 데이터가 정상 릴레이됨.
+- **100% 완전체 하이브리드 구동**: 샌드박스 외부 CLI의 PTY 기동 권한과 샌드박스 내부 앱의 USB 독점 권한이 경합 없이 한 쌍으로 엮이는 구조를 실현.
+- **검증**: `pnpm test`로 `vitest` 유닛 테스트 1556개 전원 통과 확인.
+
 ## 2026-06-28 — D200H sleep/wake 후 OFFLINE 고착 (실제 원인 = state='disconnected' 오해석)
 
 ### 문제

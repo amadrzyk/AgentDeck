@@ -81,6 +81,9 @@
         },
         "planName": {
           "type": "string"
+        },
+        "subscriptionActiveUntil": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -458,6 +461,29 @@
       ],
       "type": "object"
     },
+    "CodexCredits": {
+      "additionalProperties": false,
+      "description": "Codex credits balance, the metering Codex reports for credit-based plans (e.g. `limit_id: \"premium\"`) where the rolling 5h/7d windows are null. Mirrors the rollout's `rate_limits.credits` block.",
+      "properties": {
+        "balance": {
+          "description": "Remaining balance — Codex reports this as a string (e.g. \"0\").",
+          "type": "string"
+        },
+        "hasCredits": {
+          "description": "Whether the plan has any credit allowance configured.",
+          "type": "boolean"
+        },
+        "unlimited": {
+          "description": "Unlimited credits (no balance ceiling).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
+      "type": "object"
+    },
     "CodexRateLimitWindow": {
       "additionalProperties": false,
       "description": "One Codex (ChatGPT) rate-limit window, mirroring the Claude 5h/7d shape. Sourced from the user's own local Codex session rollout files — Codex CLI writes these snapshots itself, so this is local-file data, not an API call.",
@@ -482,8 +508,16 @@
     },
     "CodexRateLimits": {
       "additionalProperties": false,
-      "description": "Codex usage limits parsed from local rollout files. `primary` is the short (5h-style) window, `secondary` the long (weekly) window — same idea as the Claude 5h/7d gauges.",
+      "description": "Codex usage limits parsed from local rollout files. `primary` is the short (5h-style) window, `secondary` the long (weekly) window — same idea as the Claude 5h/7d gauges. Credit-based plans report `primary`/`secondary` as null and convey usage via `credits` + `limitId` instead.",
       "properties": {
+        "credits": {
+          "$ref": "#/definitions/CodexCredits",
+          "description": "Credit balance for credit-based plans (present when windows are null)."
+        },
+        "limitId": {
+          "description": "Limit identifier reported by Codex (e.g. \"premium\" for credit-based plans).",
+          "type": "string"
+        },
         "planType": {
           "description": "Plan tier reported alongside the limits (e.g. \"plus\", \"pro\").",
           "type": "string"
@@ -865,6 +899,10 @@
     "SessionInfo": {
       "additionalProperties": false,
       "properties": {
+        "activity": {
+          "description": "Daemon-synthesized \"what is this agent doing right now\" one-liner — a shared source so glance surfaces (XTeink X3 rows, TRMNL list) render the same text.",
+          "type": "string"
+        },
         "agentType": {
           "$ref": "#/definitions/AgentType"
         },
@@ -1332,6 +1370,10 @@
             "$ref": "#/definitions/TimelineEntry"
           },
           "type": "array"
+        },
+        "sessionId": {
+          "description": "Set when this history is a reply to `query_session_timeline` — scopes the entries to one session so reconnecting glance devices (XTeink X3) can fill a per-session Detail view on demand instead of waiting for live events.",
+          "type": "string"
         },
         "type": {
           "const": "timeline_history",

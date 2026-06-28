@@ -62,6 +62,10 @@ struct ADBridgeEvent: Codable, Equatable {
     /// bridge/src/permission-resolver.ts.
     var requestId: String?
     /// Session ID associated with this state payload; may move with hook activity.
+    ///
+    /// Set when this history is a reply to `query_session_timeline` — scopes the entries to one
+    /// session so reconnecting glance devices (XTeink X3) can fill a per-session Detail view on
+    /// demand instead of waiting for live events.
     var sessionId: String?
     var sessionStatus: ADOcSessionStatus?
     var state: ADState?
@@ -544,11 +548,13 @@ struct ADAntigravityStatusInfo: Codable, Equatable {
     var availableCredits: Double?
     var minimumCreditAmountForUsage: Double?
     var planName: String?
+    var subscriptionActiveUntil: String?
 
     enum CodingKeys: String, CodingKey {
         case availableCredits = "availableCredits"
         case minimumCreditAmountForUsage = "minimumCreditAmountForUsage"
         case planName = "planName"
+        case subscriptionActiveUntil = "subscriptionActiveUntil"
     }
 }
 
@@ -573,12 +579,14 @@ extension ADAntigravityStatusInfo {
     func with(
         availableCredits: Double?? = nil,
         minimumCreditAmountForUsage: Double?? = nil,
-        planName: String?? = nil
+        planName: String?? = nil,
+        subscriptionActiveUntil: String?? = nil
     ) -> ADAntigravityStatusInfo {
         return ADAntigravityStatusInfo(
             availableCredits: availableCredits ?? self.availableCredits,
             minimumCreditAmountForUsage: minimumCreditAmountForUsage ?? self.minimumCreditAmountForUsage,
-            planName: planName ?? self.planName
+            planName: planName ?? self.planName,
+            subscriptionActiveUntil: subscriptionActiveUntil ?? self.subscriptionActiveUntil
         )
     }
 
@@ -769,14 +777,22 @@ extension ADApmeRecommendation {
 
 /// Codex usage limits parsed from local rollout files. `primary` is the short (5h-style)
 /// window, `secondary` the long (weekly) window — same idea as the Claude 5h/7d gauges.
+/// Credit-based plans report `primary`/`secondary` as null and convey usage via `credits` +
+/// `limitId` instead.
 // MARK: - ADCodexRateLimits
 struct ADCodexRateLimits: Codable, Equatable {
+    /// Credit balance for credit-based plans (present when windows are null).
+    var credits: ADCodexCredits?
+    /// Limit identifier reported by Codex (e.g. "premium" for credit-based plans).
+    var limitId: String?
     /// Plan tier reported alongside the limits (e.g. "plus", "pro").
     var planType: String?
     var primary: ADCodexRateLimitWindow?
     var secondary: ADCodexRateLimitWindow?
 
     enum CodingKeys: String, CodingKey {
+        case credits = "credits"
+        case limitId = "limitId"
         case planType = "planType"
         case primary = "primary"
         case secondary = "secondary"
@@ -802,14 +818,84 @@ extension ADCodexRateLimits {
     }
 
     func with(
+        credits: ADCodexCredits?? = nil,
+        limitId: String?? = nil,
         planType: String?? = nil,
         primary: ADCodexRateLimitWindow?? = nil,
         secondary: ADCodexRateLimitWindow?? = nil
     ) -> ADCodexRateLimits {
         return ADCodexRateLimits(
+            credits: credits ?? self.credits,
+            limitId: limitId ?? self.limitId,
             planType: planType ?? self.planType,
             primary: primary ?? self.primary,
             secondary: secondary ?? self.secondary
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+//
+// Hashable or Equatable:
+// The compiler will not be able to synthesize the implementation of Hashable or Equatable
+// for types that require the use of JSONAny, nor will the implementation of Hashable be
+// synthesized for types that have collections (such as arrays or dictionaries).
+
+/// Credit balance for credit-based plans (present when windows are null).
+///
+/// Codex credits balance, the metering Codex reports for credit-based plans (e.g. `limit_id:
+/// "premium"`) where the rolling 5h/7d windows are null. Mirrors the rollout's
+/// `rate_limits.credits` block.
+// MARK: - ADCodexCredits
+struct ADCodexCredits: Codable, Equatable {
+    /// Remaining balance — Codex reports this as a string (e.g. "0").
+    var balance: String?
+    /// Whether the plan has any credit allowance configured.
+    var hasCredits: Bool
+    /// Unlimited credits (no balance ceiling).
+    var unlimited: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case balance = "balance"
+        case hasCredits = "hasCredits"
+        case unlimited = "unlimited"
+    }
+}
+
+// MARK: ADCodexCredits convenience initializers and mutators
+
+extension ADCodexCredits {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ADCodexCredits.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        balance: String?? = nil,
+        hasCredits: Bool? = nil,
+        unlimited: Bool? = nil
+    ) -> ADCodexCredits {
+        return ADCodexCredits(
+            balance: balance ?? self.balance,
+            hasCredits: hasCredits ?? self.hasCredits,
+            unlimited: unlimited ?? self.unlimited
         )
     }
 
@@ -1898,6 +1984,9 @@ extension ADOcSessionStatus {
 
 // MARK: - ADSessionInfo
 struct ADSessionInfo: Codable, Equatable {
+    /// Daemon-synthesized "what is this agent doing right now" one-liner — a shared source so
+    /// glance surfaces (XTeink X3 rows, TRMNL list) render the same text.
+    var activity: String?
     var agentType: ADAgentType?
     var alive: Bool
     var contextPercent: Double?
@@ -1924,6 +2013,7 @@ struct ADSessionInfo: Codable, Equatable {
     var totalTokens: Double?
 
     enum CodingKeys: String, CodingKey {
+        case activity = "activity"
         case agentType = "agentType"
         case alive = "alive"
         case contextPercent = "contextPercent"
@@ -1970,6 +2060,7 @@ extension ADSessionInfo {
     }
 
     func with(
+        activity: String?? = nil,
         agentType: ADAgentType?? = nil,
         alive: Bool? = nil,
         contextPercent: Double?? = nil,
@@ -1996,6 +2087,7 @@ extension ADSessionInfo {
         totalTokens: Double?? = nil
     ) -> ADSessionInfo {
         return ADSessionInfo(
+            activity: activity ?? self.activity,
             agentType: agentType ?? self.agentType,
             alive: alive ?? self.alive,
             contextPercent: contextPercent ?? self.contextPercent,

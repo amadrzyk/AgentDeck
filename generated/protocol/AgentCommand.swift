@@ -17,6 +17,7 @@ public enum AgentCommand: Equatable {
     case escape
     case voice(action: String)
     case queryUsage
+    case querySessionTimeline(sessionId: String)
     case diag(action: String)
     case utility(action: String, value: Int?)
     case switchAgent(agent: String)
@@ -62,6 +63,10 @@ public enum AgentCommand: Equatable {
             return dict
         case .queryUsage:
             return ["type": "query_usage"]
+        case .querySessionTimeline(let sessionId):
+            var dict: [String: Any] = ["type": "query_session_timeline"]
+            dict["sessionId"] = sessionId
+            return dict
         case .diag(let action):
             var dict: [String: Any] = ["type": "diag"]
             dict["action"] = action
@@ -125,6 +130,7 @@ public enum AgentCommand: Equatable {
         case .escape: return "escape"
         case .voice: return "voice"
         case .queryUsage: return "query_usage"
+        case .querySessionTimeline: return "query_session_timeline"
         case .diag: return "diag"
         case .utility: return "utility"
         case .switchAgent: return "switch_agent"

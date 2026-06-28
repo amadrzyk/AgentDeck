@@ -15,6 +15,7 @@ import type {
   EscapeCommand,
   VoiceCommand,
   QueryUsageCommand,
+  QuerySessionTimelineCommand,
   DiagCommand,
   UtilityCommand,
   SwitchAgentCommand,
@@ -54,6 +55,9 @@ export const agentCommand = {
   },
   queryUsage(): QueryUsageCommand {
     return { type: "query_usage" };
+  },
+  querySessionTimeline(sessionId: string): QuerySessionTimelineCommand {
+    return { type: "query_session_timeline", sessionId };
   },
   diag(action: 'dump' | 'analyze'): DiagCommand {
     return { type: "diag", action };

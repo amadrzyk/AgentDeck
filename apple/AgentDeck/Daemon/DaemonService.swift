@@ -135,6 +135,17 @@ final class DaemonService: ObservableObject {
                 let usingDefault = (port == AppPreferences.defaultDaemonPort && sessionOverridePort == nil)
                 let portArg: Int? = usingDefault ? nil : port
                 let daemon = try await DaemonServer(port: portArg, debug: false)
+                daemon.onShutdown = { [weak self] in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        DaemonLogger.shared.info("In-process daemon shutdown completed, transitioning to external daemon...")
+                        self.server = nil
+                        self.isRunning = false
+                        self.port = 0
+                        self.readyUrl = nil
+                        await self.connectToExternalDaemon()
+                    }
+                }
                 self.server = daemon
                 self.port = daemon.port
                 self.isRunning = true
