@@ -996,7 +996,8 @@ private fun drawEinkAntigravity(
     } else 0f
 
     val cx = w * (centerXFraction + wanderX)
-    val restY = (0.64f + (centerXFraction - 0.6f) * 0.06f).coerceAtMost(0.76f)
+    val restY = (centerYFraction + 0.08f + (centerXFraction - 0.7f) * 0.04f)
+        .coerceIn(0.24f, 0.48f)
     val baseYFraction = when (state) {
         OctopusVisualState.WORKING -> centerYFraction
         OctopusVisualState.ASKING -> (centerYFraction + restY) * 0.5f

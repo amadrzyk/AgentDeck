@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,8 +58,8 @@ import dev.agentdeck.net.BridgeConstants
 import dev.agentdeck.net.BridgeDiscovery
 import dev.agentdeck.net.ConnectionStatus
 import dev.agentdeck.net.DiscoveredBridge
-import dev.agentdeck.net.UsageUpdate
 import dev.agentdeck.state.AgentStateHolder
+import dev.agentdeck.state.DashboardState
 import dev.agentdeck.state.TimelineStore
 import dev.agentdeck.ui.eink.EinkAgentPanel
 import dev.agentdeck.ui.eink.EinkAttentionPanel
@@ -257,9 +258,14 @@ fun EinkMonitorScreen(
             // derivedStateOf + remember would capture the initial state parameter (plain value,
             // not a Compose State) and never re-evaluate — causing stale creature counts.
             val terrariumState = remember(state) { state.toTerrariumState() }
+            val terrariumRefreshKey = remember(state, terrariumState) {
+                buildEinkTerrariumRefreshKey(state, terrariumState)
+            }
 
             // Stable key that captures session count + individual states (for refresh triggers)
-            val sessionsKey = state.siblingSessions.joinToString(",") { "${it.id}:${it.state}" }
+            val sessionsKey = state.siblingSessions.joinToString(",") {
+                "${it.id}:${it.agentType}:${it.state}:${it.projectName}"
+            }
 
             Column(modifier = Modifier.fillMaxSize()) {
                 EinkRefreshZone(
@@ -333,12 +339,7 @@ fun EinkMonitorScreen(
 
                         Box(modifier = Modifier.weight(if (showSessionList) 0.64f else 1f).fillMaxHeight()) {
                             EinkAnimatedRefreshZone(
-                                stateKey = listOf(
-                                    state.agentState,
-                                    sessionsKey,
-                                    state.usage.fiveHourPercent,
-                                    state.usage.sevenDayPercent,
-                                ),
+                                stateKey = terrariumRefreshKey,
                                 sleepSnapshotMode = sleepSnapshotMode,
                                 modifier = Modifier.fillMaxSize(),
                             ) { onFrameRendered ->
@@ -348,9 +349,9 @@ fun EinkMonitorScreen(
                                     onFrameRendered = onFrameRendered,
                                 )
                             }
-                            if (hasEinkLimitData(state.usage)) {
+                            if (hasEinkLimitData(state)) {
                                 EinkLimitsCornerCard(
-                                    usage = state.usage,
+                                    state = state,
                                     compact = true,
                                     modifier = Modifier
                                         .align(Alignment.BottomStart)
@@ -400,22 +401,55 @@ fun EinkMonitorScreen(
     }
 }
 
-private fun hasEinkLimitData(usage: dev.agentdeck.net.UsageUpdate): Boolean {
-    return usage.usageStale != true &&
-        (usage.fiveHourPercent != null || usage.sevenDayPercent != null)
+private fun buildEinkTerrariumRefreshKey(
+    state: DashboardState,
+    terrariumState: dev.agentdeck.terrarium.TerrariumState,
+): List<Any?> {
+    val sessionProjection = state.siblingSessions.map {
+        "${it.id}:${it.agentType}:${it.state}:${it.projectName}"
+    }
+    return listOf(
+        state.sessionId,
+        state.agentType,
+        state.agentState,
+        state.projectName,
+        sessionProjection,
+        state.usage.fiveHourPercent,
+        state.usage.sevenDayPercent,
+        state.antigravityStatus?.planName,
+        state.antigravityStatus?.availableCredits,
+        state.antigravityStatus?.minimumCreditAmountForUsage,
+        terrariumState.agents.map { "${it.sessionId}:${it.agentType}:${it.visualState}" },
+        terrariumState.cloudCreatures.map { "${it.sessionId}:${it.agentType}:${it.visualState}" },
+        terrariumState.openCodeCreatures.map { "${it.sessionId}:${it.agentType}:${it.visualState}" },
+        terrariumState.antigravityCreatures.map { "${it.sessionId}:${it.agentType}:${it.visualState}" },
+    )
+}
+
+private fun hasEinkLimitData(state: DashboardState): Boolean {
+    return buildEinkLimitRows(state).isNotEmpty()
 }
 
 @Composable
 private fun EinkLimitsCornerCard(
-    usage: dev.agentdeck.net.UsageUpdate,
+    state: DashboardState,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val width = if (compact) 148.dp else 176.dp
+    val rows = buildEinkLimitRows(state)
+    val width = if (compact) 164.dp else 190.dp
+    val height = when {
+        compact && rows.size <= 1 -> 56.dp
+        compact && rows.size == 2 -> 70.dp
+        compact -> 86.dp
+        rows.size <= 1 -> 64.dp
+        rows.size == 2 -> 80.dp
+        else -> 96.dp
+    }
     Surface(
         modifier = modifier
             .width(width)
-            .height(if (compact) 68.dp else 78.dp),
+            .height(height),
         shape = RoundedCornerShape(3.dp),
         border = BorderStroke(1.dp, Color.Black),
         color = MaterialTheme.colorScheme.background,
@@ -438,25 +472,57 @@ private fun EinkLimitsCornerCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "node",
+                    text = if (state.antigravityStatus != null) "node+ag" else "node",
                     fontSize = 9.sp,
                     lineHeight = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            usage.fiveHourPercent?.let { pct ->
-                EinkLimitRow(label = "5h", percent = pct)
-            }
-            usage.sevenDayPercent?.let { pct ->
-                EinkLimitRow(label = "7d", percent = pct)
+            rows.forEach { row ->
+                if (row.percent != null) {
+                    EinkLimitGaugeRow(label = row.label, percent = row.percent)
+                } else {
+                    EinkLimitTextRow(label = row.label, value = row.value.orEmpty())
+                }
             }
         }
     }
 }
 
+private data class EinkLimitLine(
+    val label: String,
+    val percent: Double? = null,
+    val value: String? = null,
+)
+
+private fun buildEinkLimitRows(state: DashboardState): List<EinkLimitLine> {
+    val rows = mutableListOf<EinkLimitLine>()
+    if (state.usage.usageStale != true) {
+        state.usage.fiveHourPercent?.let { rows.add(EinkLimitLine(label = "5h", percent = it)) }
+        state.usage.sevenDayPercent?.let { rows.add(EinkLimitLine(label = "7d", percent = it)) }
+    }
+    buildAntigravityLimitValue(state)?.let { rows.add(EinkLimitLine(label = "AG", value = it)) }
+    return rows
+}
+
+private fun buildAntigravityLimitValue(state: DashboardState): String? {
+    val status = state.antigravityStatus ?: return null
+    val plan = status.planName
+        ?.replace("Google AI ", "")
+        ?.replace("Antigravity ", "")
+        ?.takeIf { it.isNotBlank() }
+    val credits = status.availableCredits
+    return when {
+        plan != null && credits != null -> "$plan ${credits}cr"
+        credits != null -> "${credits}cr"
+        plan != null -> plan
+        else -> null
+    }
+}
+
 @Composable
-private fun EinkLimitRow(label: String, percent: Double) {
+private fun EinkLimitGaugeRow(label: String, percent: Double) {
     val pct = percent.coerceIn(0.0, 100.0).toInt()
     Text(
         text = "$label ${einkBlockGauge(pct)} $pct%",
@@ -465,6 +531,19 @@ private fun EinkLimitRow(label: String, percent: Double) {
         fontFamily = FontFamily.Monospace,
         color = MaterialTheme.colorScheme.onSurface,
         maxLines = 1,
+    )
+}
+
+@Composable
+private fun EinkLimitTextRow(label: String, value: String) {
+    Text(
+        text = "$label $value",
+        fontSize = 11.sp,
+        lineHeight = 13.sp,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -913,8 +992,13 @@ private fun EinkPortraitLayout(
     onSettingsClick: () -> Unit,
 ) {
     val terrariumState = remember(state) { state.toTerrariumState() }
+    val terrariumRefreshKey = remember(state, terrariumState) {
+        buildEinkTerrariumRefreshKey(state, terrariumState)
+    }
     val featuredAttention = remember(state) { buildEinkAttentionFeatured(state) }
-    val sessionsKey = state.siblingSessions.joinToString(",") { "${it.id}:${it.state}" }
+    val sessionsKey = state.siblingSessions.joinToString(",") {
+        "${it.id}:${it.agentType}:${it.state}:${it.projectName}"
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         EinkRefreshZone(
@@ -980,12 +1064,7 @@ private fun EinkPortraitLayout(
 
         Box(modifier = Modifier.weight(if (showTimeline) 0.32f else 0.66f).fillMaxWidth()) {
             EinkAnimatedRefreshZone(
-                stateKey = listOf(
-                    state.agentState,
-                    sessionsKey,
-                    state.usage.fiveHourPercent,
-                    state.usage.sevenDayPercent,
-                ),
+                stateKey = terrariumRefreshKey,
                 sleepSnapshotMode = sleepSnapshotMode,
                 modifier = Modifier.fillMaxSize(),
             ) { onFrameRendered ->
@@ -995,9 +1074,9 @@ private fun EinkPortraitLayout(
                     onFrameRendered = onFrameRendered,
                 )
             }
-            if (hasEinkLimitData(state.usage)) {
+            if (hasEinkLimitData(state)) {
                 EinkLimitsCornerCard(
-                    usage = state.usage,
+                    state = state,
                     compact = true,
                     modifier = Modifier
                         .align(Alignment.BottomStart)
