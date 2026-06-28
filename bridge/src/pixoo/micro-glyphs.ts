@@ -127,30 +127,30 @@ const ANTIGRAVITY: Glyph = {
     K: [0, 0, 0],
   },
   idle: [
-    '....YOO....',
-    '....YOO....',
-    '...LYOOR...',
-    '...LTORR...',
-    '..LLTVPP...',
-    '..TTKKVPP..',
-    '.TQQK.KVU..',
-    '.QQK...KUU.',
-    'NQK.....KUU',
-    'NN.......UU',
-    '...........',
+    '.....O.....',
+    '....YOR....',
+    '....YORP...',
+    '...LYORPV..',
+    '...LTQRPV..',
+    '..LTQKKVU..',
+    '..TQKKKVU..',
+    '.TQKKKKKVU.',
+    '.QKKKKKKKUU',
+    'NQKKKKKKKUU',
+    'NKKKKKKKKKU',
   ],
   work: [
-    '...YYOO....',
-    '...LYOOR...',
-    '..LLYOOR...',
-    '..LTTORR...',
-    '.LTTTVPP...',
-    '.TQQKKVPP..',
-    'TQQK.KVUU..',
-    'QQK...KUUU.',
-    'NQK.....KUU',
-    'N.........U',
-    '...........',
+    '....YO.....',
+    '....YORP...',
+    '...LYORPV..',
+    '...LTQRPV..',
+    '..LTQKPVU..',
+    '..TQKKKVU..',
+    '.TQKKKKKVU.',
+    '.QKKKKKKKUU',
+    'NQKKKKKKKUU',
+    'NKKKKKKKKKU',
+    'NKKKKKKKKKU',
   ],
 };
 
@@ -225,8 +225,11 @@ export function paintMicroGlyph(
 ): void {
   const g = GLYPHS[creature];
   const grid = state === 'working' && g.work && ((animFrame >> 2) & 1) ? g.work : g.idle;
-  const offsetX = creature === 'antigravity' && state === 'working' && ((animFrame >> 3) & 1) ? 1 : 0;
-  const offsetY = creature === 'antigravity' && state !== 'idle' && ((animFrame >> 2) & 1) ? -1 : 0;
+  const drift = creature === 'antigravity' ? Math.floor(animFrame / 6) % 4 : 0;
+  const offsetX = creature === 'antigravity' && state === 'working'
+    ? (drift === 1 ? 1 : drift === 3 ? -1 : 0)
+    : 0;
+  const offsetY = creature === 'antigravity' && state !== 'idle' && (drift === 0 || drift === 1) ? -1 : 0;
   for (let y = 0; y < MICRO_SIZE; y++) {
     const row = grid[y];
     for (let x = 0; x < MICRO_SIZE; x++) {

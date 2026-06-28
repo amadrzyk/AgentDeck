@@ -532,7 +532,7 @@ final class PixooRenderer {
     /// + `micro-glyphs.ts` in the bridge: the Timebox Mini has 121 LEDs, so instead
     /// of downscaling the 32×32 terrarium (which bottoms out at a fuzzy silhouette)
     /// each creature is drawn per-pixel as a bold glyph on a dark status field.
-    /// The 4 glyph tables and brand colors are kept byte-identical to micro-glyphs.ts.
+    /// The glyph tables and brand colors are kept byte-identical to micro-glyphs.ts.
     func renderMicro(dashboardState: DashboardState) -> Data {
         let usagePct = dashboardState.fiveHourPercent ?? 0
         let hasGateway = dashboardState.gatewayConnected || dashboardState.siblingSessions.contains { $0.agentType == "openclaw" }

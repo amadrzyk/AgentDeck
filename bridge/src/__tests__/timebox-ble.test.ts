@@ -63,10 +63,11 @@ describe('micro layout (Timebox 11×11)', () => {
       const i = (y * 11 + x) * 3;
       return [buf[i], buf[i + 1], buf[i + 2]];
     };
-    expect(pixel(4, 0)).toEqual([245, 203, 36]);  // yellow peak
-    expect(pixel(5, 0)).toEqual([255, 132, 16]);  // orange peak
-    expect(pixel(3, 2)).toEqual([92, 214, 77]);   // green left slope
-    expect(pixel(4, 5)).toEqual([0, 0, 0]);       // central hollow
-    expect(pixel(9, 8)).toEqual([36, 126, 255]);  // blue right foot
+    expect(pixel(5, 0)).toEqual([255, 132, 16]);  // orange tip
+    expect(pixel(3, 3)).toEqual([92, 214, 77]);   // green left slope
+    expect(pixel(2, 6)).toEqual([31, 198, 179]);  // teal left leg
+    expect(pixel(7, 3)).toEqual([183, 92, 182]);  // magenta right slope
+    expect(pixel(5, 7)).toEqual([0, 0, 0]);       // central hollow
+    expect(pixel(10, 9)).toEqual([36, 126, 255]); // blue right foot
   });
 });

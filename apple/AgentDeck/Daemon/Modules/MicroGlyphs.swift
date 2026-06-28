@@ -68,8 +68,11 @@ enum MicroGlyphs {
         } else {
             grid = g.idle
         }
-        let offsetX = creature == .antigravity && state == .working && ((animFrame >> 3) & 1) == 1 ? 1 : 0
-        let offsetY = creature == .antigravity && state != .idle && ((animFrame >> 2) & 1) == 1 ? -1 : 0
+        let drift = creature == .antigravity ? (animFrame / 6) % 4 : 0
+        let offsetX = creature == .antigravity && state == .working
+            ? (drift == 1 ? 1 : (drift == 3 ? -1 : 0))
+            : 0
+        let offsetY = creature == .antigravity && state != .idle && (drift == 0 || drift == 1) ? -1 : 0
         for y in 0..<size {
             let row = Array(grid[y])
             for x in 0..<size {
