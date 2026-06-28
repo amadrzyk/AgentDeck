@@ -6,20 +6,24 @@
 
 ---
 
-## 2026-06-28 — D200H sleep/wake 후 OFFLINE 고착 = Studio 브리지 재연결 부재
+## 2026-06-28 — D200H sleep/wake 후 OFFLINE 고착 (실제 원인 = state='disconnected' 오해석)
 
 ### 문제
-macOS 잠자기 → 깨우면 Ulanzi D200H 가 OFFLINE 으로 남고 수동 개입(액션 토글 / Studio 재시작) 없이는 복구되지 않았다.
+macOS 잠자기 → 깨우면 Ulanzi D200H 가 OFFLINE 으로 남고 수동 개입 없이는 복구되지 않았다.
 
-### 해결
-원인: plugin-ulanzi 프로세스는 **독립된 WS 2개**를 보유 — (A) 데몬 링크(`daemon-client.ts`, 세션상태/OFFLINE 배너; wake-watchdog+backoff 있음), (B) Ulanzi Studio 브리지(`ulanzi.ts`+vendored `vendor/ulanzi-api`, 키입력+아이콘 push = **실제 렌더링 경로**; **재연결 전무**). vendored SDK 의 `connect()` 는 WS 1회만 열고 `onclose` 에서 `Events.CLOSE` emit 만, `app.ts` 는 로그만 찍었다. sleep → USB detach → Studio 소켓 끊김 → wake 후에도 죽은 채 영원히 방치.
+### 해결 (실제 근본 원인)
+런타임 점검(lsof)으로 plugin↔Studio, plugin↔daemon WS 둘 다 ESTABLISHED·생존(15s ping-evict 통과) 확인 → WS 층은 멀쩡. 데몬 WS 프로브로 진짜 원인 발견: 데몬이 `state_update{state:'disconnected', allSessions:[]}` + `sessions_list{6 observed sessions}` 를 보내는데, `shared/src/d200h-layout.ts buildSessionDeck` 이 top-level `state==='disconnected'` 만 보고 **allSessions 무시한 채 OFFLINE hero** 를 그렸다. 데몬의 top-level state 는 **managed/focused 세션 기준** — sleep 으로 managed PTY 세션이 끝나고 observed(ps) 세션만 남으면 state='disconnected' 가 되어, 세션 6개가 살아있어도 OFFLINE.
 
-vendored SDK 무수정. `app.ts` 에 신규 `ReconnectSupervisor`(`plugin-ulanzi/src/reconnect-supervisor.ts`) 추가 — `daemon-client.ts` 패턴 미러: `RECONNECT_BACKOFF_MS` backoff + 10s wake-watchdog(gap>20s 강제 재연결, half-open 으로 close 안 떠도 복구) + connect-timeout 인플라이트 가드(vendored connect() 가 옛 소켓 닫을 때 나는 spurious close 무시). 재연결 성공 시 `instances`/`lastDeckSig`/`inst.lastSig` 리셋 → 전 키 강제 재푸시.
+Fix: OFFLINE 게이트에 `&& state.allSessions.length === 0` 추가(`5616ab73`). 진짜 링크끊김은 plugin store 가 `{state:'DISCONNECTED'(대문자), allSessions:[]}` 로 보내므로 여전히 OFFLINE.
+
+### 함께 고친 latent 버그 (증상 원인은 아님)
+점검 중 plugin-ulanzi 가 독립 WS 2개 중 **Ulanzi Studio 브리지**(vendored `vendor/ulanzi-api`)에만 재연결이 없음을 발견(데몬 링크는 wake-watchdog+backoff 있음). vendored `connect()` 는 1회만 열고 `onclose`→`Events.CLOSE` emit, `app.ts` 는 로그만. → `ReconnectSupervisor`(`plugin-ulanzi/src/reconnect-supervisor.ts`, backoff+10s wake-watchdog+connect-timeout 인플라이트 가드) 추가(`2cd6221a`). 이번 증상의 원인은 아니지만 sleep 시 Studio 소켓 사망 시나리오 대비 견고성 개선.
 
 ### 핵심 설계 결정
-- **두 WS 비대칭이 근본 원인**: 한쪽(데몬)만 wake 복구 → 데몬이 멀쩡해도 렌더링 경로(Studio)가 죽어 디바이스 고착. 새 외부-peer WS 디버깅 시 모든 링크가 timeout/재연결을 갖는지 먼저 확인.
-- **테스트 인프라 신규 진입**: plugin-ulanzi 는 vitest include 에 없었음 → 루트 `vitest.config.ts` 에 등록. coverage include 는 supervisor 파일만(미테스트 렌더러 다수가 전역 임계치 깰까봐). 타이머/클록 주입형 supervisor 로 결정론적 유닛테스트 8개(89% 라인).
-- **검증**: 전체 1554 tests pass, coverage gate exit 0, sim 로그(연결실패→connect timed out→backoff 재시도→connected) 확인. 실기 D200H sleep/wake 는 사용자 확인 대기.
+- **"disconnected" 두 의미 혼동이 핵심**: (1) plugin store.connected=false=진짜 링크끊김(대문자 DISCONNECTED+빈목록) vs (2) 데몬 session-state 'disconnected'(소문자)+세션존재. 레이아웃이 둘을 혼동 → allSessions 유무로 구분.
+- **점검 순서 교훈**: WS "OFFLINE" 증상이라고 WS 재연결부터 의심하지 말 것. lsof 로 소켓 생존 먼저 확인 → 살아있으면 페이로드(브로드캐스트) 프로브로 렌더 입력을 직접 봐야 진짜 원인이 보인다. 첫 세션의 reconnect 진단은 실증 없이 코드만 보고 내린 오진이었다.
+- **배포**: fix 가 shared → plugin-ulanzi esbuild 가 app.js 에 번들 → `pnpm package:install` → **Ulanzi Studio 재시작 필수**(Studio 는 플러그인 프로세스 kill 해도 자동 재기동 안 함).
+- **검증**: 전체 1556 tests pass, coverage exit 0, repro(state=disconnected+세션 → OFFLINE=0/open=N) 로 증명, 설치본 app.js 에 게이트 번들 확인, 재시작 후 plugin(16972) 양 링크 재연결 확인. 실기 화면은 사용자 확인.
 
 ## 2026-06-28 — observed 세션 Detail = transcript 재구성 (CLI 데몬)
 
