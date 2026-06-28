@@ -577,7 +577,15 @@ export function buildSessionDeck(stateEvt: any, view: DeckView, positions: strin
   // the companion app on press (parity with the SD/SD+ keypad). If AgentDeck
   // isn't installed yet, the hero shows the install command so a marketplace-only
   // user knows the daemon is the missing piece.
-  if (state.state === 'DISCONNECTED' || state.state === 'disconnected') {
+  //
+  // Gate on an EMPTY session list, not the top-level state alone: the daemon
+  // reports `state:'disconnected'` whenever no managed/focused session is active
+  // — which is the normal case when only passively-observed sessions exist (e.g.
+  // after a managed PTY session ends on sleep). Those still arrive via
+  // `sessions_list`, so showing OFFLINE while sessions are present would hide a
+  // live deck. Genuine link-down funnels through the store as DISCONNECTED with
+  // an empty list, so this still fires for a truly absent daemon.
+  if ((state.state === 'DISCONNECTED' || state.state === 'disconnected') && state.allSessions.length === 0) {
     const hero = Math.floor(slots.length / 2);
     slots.forEach((pos, i) => out.set(pos, {
       svg: i === hero ? renderInfoSlot('OFFLINE', 'Open AgentDeck', 'activity', 'info', 'npx @agentdeck/setup') : renderEmptySlot(),

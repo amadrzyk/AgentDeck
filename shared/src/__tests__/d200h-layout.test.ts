@@ -86,4 +86,28 @@ describe('buildSessionDeck — daemon offline', () => {
       expect(cell.action).not.toEqual({ kind: 'launch' });
     }
   });
+
+  // Regression: the daemon reports state:'disconnected' whenever no managed /
+  // focused session is active — the normal case when only passively-observed
+  // sessions exist (e.g. after a managed PTY session ends on sleep). Those
+  // sessions still arrive via sessions_list, so the deck must render them, NOT
+  // the OFFLINE hero. OFFLINE is reserved for a genuinely empty session list.
+  it('shows the session list (not OFFLINE) when state is disconnected but sessions exist', () => {
+    const sessions = [
+      { id: 'observed:claude:a', agentType: 'claude-code', state: 'processing', modelName: 'claude-opus-4-8', cwd: '/x', projectName: 'x', window: 'x' },
+      { id: 'observed:opencode:b', agentType: 'opencode', state: 'idle', cwd: '/y', projectName: 'y', window: 'y' },
+    ] as any;
+    const deck = buildSessionDeck(
+      { state: 'disconnected', focusedSessionId: '', allSessions: sessions },
+      { mode: 'list', page: 0 },
+      positions(7),
+    );
+    for (const cell of deck.values()) {
+      expect(cell.svg).not.toContain('OFFLINE');
+      expect(cell.action).not.toEqual({ kind: 'launch' });
+    }
+    // The two observed sessions should be openable tiles.
+    const openable = [...deck.values()].filter((c) => c.action?.kind === 'open');
+    expect(openable.length).toBe(2);
+  });
 });
