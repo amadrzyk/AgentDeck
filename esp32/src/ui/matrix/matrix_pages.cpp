@@ -193,6 +193,50 @@ static void drawCreature(CRGB* leds, int x0, int y0,
     if (accent) drawSprite(leds, x0, y0, accent, w, h, accentColor);
 }
 
+static CRGB scaleByBody(CRGB hue, CRGB body, float boost) {
+    uint8_t bodyMax = body.r;
+    if (body.g > bodyMax) bodyMax = body.g;
+    if (body.b > bodyMax) bodyMax = body.b;
+    float s = (bodyMax / 255.0f) * boost;
+    if (s > 1.0f) s = 1.0f;
+    return CRGB(clamp8((int)(hue.r * s)), clamp8((int)(hue.g * s)), clamp8((int)(hue.b * s)));
+}
+
+static CRGB antigravityPixelColor(char ch, CRGB body) {
+    switch (ch) {
+        case 'L': return scaleByBody(CRGB(92, 214, 77), body, 1.45f);
+        case 'T': return scaleByBody(CRGB(31, 198, 179), body, 1.45f);
+        case 'Q': return scaleByBody(CRGB(58, 199, 235), body, 1.45f);
+        case 'Y': return scaleByBody(CRGB(245, 203, 36), body, 1.45f);
+        case 'O': return scaleByBody(CRGB(255, 132, 16), body, 1.45f);
+        case 'R': return scaleByBody(CRGB(255, 82, 65), body, 1.45f);
+        case 'P': return scaleByBody(CRGB(183, 92, 182), body, 1.45f);
+        case 'V': return scaleByBody(CRGB(102, 111, 225), body, 1.45f);
+        case 'U': return scaleByBody(CRGB(36, 126, 255), body, 1.45f);
+        case 'N': return scaleByBody(CRGB(41, 184, 238), body, 1.45f);
+        case 'K': return CRGB::Black;
+        default: return CRGB::Black;
+    }
+}
+
+static void drawAntigravityMicro(CRGB* leds, int x0, int y0, CRGB bodyColor) {
+    static const char* SPR_AG[6] = {
+        ".YOO..",
+        ".LYOR.",
+        "LTORRP",
+        "TQKKVP",
+        "QK..KU",
+        "N....U",
+    };
+    for (int row = 0; row < 6; row++) {
+        for (int col = 0; col < 6; col++) {
+            char ch = SPR_AG[row][col];
+            if (ch == '.') continue;
+            setPixel(leds, x0 + col, y0 + row, antigravityPixelColor(ch, bodyColor));
+        }
+    }
+}
+
 // Tiny state dot in bottom-right corner of USAGE page (row 7, col 31)
 // Shows brightest active agent state so user can glance at activity without
 // waiting for the AGENTS page.
@@ -554,7 +598,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
                     baseColor = CRGB(70 + (uint8_t)(140 * pulse), 66 + (uint8_t)(132 * pulse), 66 + (uint8_t)(132 * pulse));
                     break;
                 case AGENT_ANTIGRAVITY:
-                    // Cool light gray pulsing toward bright (matches the #D2D6DC mark).
+                    // Cool light gray brightness envelope for the rainbow micro mark.
                     baseColor = CRGB(70 + (uint8_t)(140 * pulse), 72 + (uint8_t)(142 * pulse), 76 + (uint8_t)(144 * pulse));
                     break;
                 default: // AGENT_CLAUDE
@@ -570,7 +614,7 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             switch (kind) {
                 case AGENT_CODEX:    baseColor = CRGB(30, 30, 80);  break;  // dim indigo
                 case AGENT_OPENCODE: baseColor = CRGB(72, 67, 67);  break;  // dim warm gray (brand #F1ECEC)
-                case AGENT_ANTIGRAVITY: baseColor = CRGB(68, 70, 73); break;  // dim cool gray (brand #D2D6DC)
+                case AGENT_ANTIGRAVITY: baseColor = CRGB(68, 70, 73); break;  // dim envelope for rainbow micro mark
                 default:             baseColor = CRGB(80, 45, 35);  break;  // dim terracotta
             }
         }
@@ -621,8 +665,12 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             int x = 1 + i * spacing;
             int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.5f));
             CRGB bc = agentColor(agents[i].state, agents[i].kind, agents[i].instanceIdx);
-            drawCreature(leds, x, bobY, agentSprite(agents[i].kind), agentAccent(agents[i].kind),
-                         5, 6, bc, agentAccentColor(agents[i].kind, bc));
+            if (agents[i].kind == AGENT_ANTIGRAVITY) {
+                drawAntigravityMicro(leds, x, bobY, bc);
+            } else {
+                drawCreature(leds, x, bobY, agentSprite(agents[i].kind), agentAccent(agents[i].kind),
+                             5, 6, bc, agentAccentColor(agents[i].kind, bc));
+            }
         }
     } else {
         // Ping-pong scroll: pause → slide right → pause → slide back left
@@ -653,8 +701,12 @@ void MatrixPages::renderAgents(CRGB* leds, float animTime) {
             if (x > agentMaxX || x < -5) continue;
             int bobY = 1 + (int)(0.3f * sinf(animTime * 2.0f + i * 1.2f));
             CRGB bc = agentColor(agents[i].state, agents[i].kind, agents[i].instanceIdx);
-            drawCreature(leds, x, bobY, agentSprite(agents[i].kind), agentAccent(agents[i].kind),
-                         5, 6, bc, agentAccentColor(agents[i].kind, bc));
+            if (agents[i].kind == AGENT_ANTIGRAVITY) {
+                drawAntigravityMicro(leds, x, bobY, bc);
+            } else {
+                drawCreature(leds, x, bobY, agentSprite(agents[i].kind), agentAccent(agents[i].kind),
+                             5, 6, bc, agentAccentColor(agents[i].kind, bc));
+            }
         }
     }
 }

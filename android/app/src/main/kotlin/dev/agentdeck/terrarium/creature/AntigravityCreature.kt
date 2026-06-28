@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
@@ -33,8 +34,8 @@ import kotlin.math.sin
 /**
  * Antigravity peak/arc creature — geometric brand mark, NOT biomorphic.
  * Renders the canonical Antigravity "double-peak / mountain arc" silhouette
- * (CreatureGeometry.ANTIGRAVITY_PATH_DATA, viewBox 0 0 24 24) filled in the
- * brand gray (#5F6368). The creature IS the logo, so it carries no watermark.
+ * (CreatureGeometry.ANTIGRAVITY_PATH_DATA, viewBox 0 0 24 24) filled with the
+ * reference rainbow gradient. The creature IS the logo, so it carries no watermark.
  *
  * WORKING state shows a rising-spark shimmer above the peaks (anti-gravity nod).
  * Same public API as OctopusCreature/CloudCreature/OpenCodeCreature for
@@ -222,7 +223,6 @@ class AntigravityCreature(
         bodyRadius: Float,
         alpha: Float,
     ) {
-        val bodyColor = bodyColorForState()
         // The SVG viewBox is 24×24. Scale so the mark width = bodyRadius * 2.
         val svgScale = (bodyRadius * 2f) / SVG_VIEWBOX
 
@@ -240,19 +240,27 @@ class AntigravityCreature(
             scale(scaleX = effScale, scaleY = effScale, pivot = Offset.Zero)
             translate(left = -SVG_VIEWBOX / 2f, top = -SVG_VIEWBOX / 2f)
         }) {
-            drawPath(peakPath, color = bodyColor, alpha = alpha)
+            if (visualState == OctopusVisualState.SLEEPING) {
+                drawPath(peakPath, color = TerrariumColors.AntigravityDim, alpha = alpha * 0.72f)
+            } else {
+                drawPath(
+                    peakPath,
+                    brush = antigravityBrush(bodyRadius = bodyRadius, time = time),
+                    alpha = alpha,
+                )
+            }
         }
     }
 
-    private fun bodyColorForState(): Color {
-        return when (visualState) {
-            OctopusVisualState.WORKING -> {
-                val t = sin(time * TerrariumTiming.THINKING_PULSE_SPEED) * 0.5f + 0.5f
-                lerpColor(TerrariumColors.AntigravityBody, TerrariumColors.AntigravityLight, t)
-            }
-            OctopusVisualState.SLEEPING -> TerrariumColors.AntigravityDim
-            else -> TerrariumColors.AntigravityBody
-        }
+    private fun antigravityBrush(bodyRadius: Float, time: Float): Brush {
+        val colors = if (visualState == OctopusVisualState.WORKING &&
+            sin(time * TerrariumTiming.THINKING_PULSE_SPEED) > 0.75f
+        ) RAINBOW_COLORS_BRIGHT else RAINBOW_COLORS
+        return Brush.linearGradient(
+            colors = colors,
+            start = Offset(-bodyRadius, bodyRadius),
+            end = Offset(bodyRadius, -bodyRadius),
+        )
     }
 
     /**
@@ -267,7 +275,7 @@ class AntigravityCreature(
             val sy = cy - radius * (0.4f + rise * 1.0f)
             val sparkAlpha = ((1f - rise) * 0.5f + sin(time * 3f + phase) * 0.1f) * alpha
             scope.drawLine(
-                color = TerrariumColors.AntigravityLight,
+                color = TerrariumColors.AntigravityYellow,
                 alpha = sparkAlpha.coerceIn(0f, 1f),
                 start = Offset(sx, sy + radius * 0.08f),
                 end = Offset(sx, sy - radius * 0.08f),
@@ -397,15 +405,6 @@ class AntigravityCreature(
         }
     }
 
-    private fun lerpColor(a: Color, b: Color, t: Float): Color {
-        return Color(
-            red = a.red + (b.red - a.red) * t,
-            green = a.green + (b.green - a.green) * t,
-            blue = a.blue + (b.blue - a.blue) * t,
-            alpha = a.alpha + (b.alpha - a.alpha) * t,
-        )
-    }
-
     private val questionMarkPaint = Paint().apply {
         isAntiAlias = true
         color = android.graphics.Color.argb(180, 226, 232, 240)
@@ -439,6 +438,32 @@ class AntigravityCreature(
                 fillType = PathFillType.NonZero
             }
         }
+
+        private val RAINBOW_COLORS = listOf(
+            TerrariumColors.AntigravitySky,
+            TerrariumColors.AntigravityCyan,
+            TerrariumColors.AntigravityTeal,
+            TerrariumColors.AntigravityLime,
+            TerrariumColors.AntigravityYellow,
+            TerrariumColors.AntigravityOrange,
+            TerrariumColors.AntigravityRed,
+            TerrariumColors.AntigravityPink,
+            TerrariumColors.AntigravityViolet,
+            TerrariumColors.AntigravityBlue,
+        )
+
+        private val RAINBOW_COLORS_BRIGHT = listOf(
+            TerrariumColors.AntigravityLight,
+            TerrariumColors.AntigravityCyan,
+            TerrariumColors.AntigravityTeal,
+            TerrariumColors.AntigravityLime,
+            TerrariumColors.AntigravityYellow,
+            TerrariumColors.AntigravityOrange,
+            TerrariumColors.AntigravityRed,
+            TerrariumColors.AntigravityPink,
+            TerrariumColors.AntigravityViolet,
+            TerrariumColors.AntigravityBlue,
+        )
 
         // Rising sparks (WORKING anti-gravity shimmer)
         private const val SPARK_COUNT = 6

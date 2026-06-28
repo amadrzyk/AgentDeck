@@ -5,6 +5,7 @@ import android.graphics.DashPathEffect
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.view.View
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
@@ -1027,6 +1028,26 @@ private fun drawEinkAntigravity(
 
     paint.style = Paint.Style.FILL
     paint.color = bodyColor
+    paint.shader = if (einkColorEnabled && state != OctopusVisualState.SLEEPING) {
+        LinearGradient(
+            cx - markHalf, cy + markHalf,
+            cx + markHalf, cy - markHalf,
+            intArrayOf(
+                COLOR_ANTIGRAVITY_SKY,
+                COLOR_ANTIGRAVITY_CYAN,
+                COLOR_ANTIGRAVITY_LIME,
+                COLOR_ANTIGRAVITY_YELLOW,
+                COLOR_ANTIGRAVITY_ORANGE,
+                COLOR_ANTIGRAVITY_RED,
+                COLOR_ANTIGRAVITY_PINK,
+                COLOR_ANTIGRAVITY_BLUE,
+            ),
+            null,
+            Shader.TileMode.CLAMP,
+        )
+    } else {
+        null
+    }
     canvas.save()
     canvas.translate(cx, cy)
     canvas.scale(svgScale, svgScale)
@@ -1034,6 +1055,7 @@ private fun drawEinkAntigravity(
         -dev.agentdeck.terrarium.CreatureGeometry.ANTIGRAVITY_VIEWBOX / 2f)
     canvas.drawPath(dev.agentdeck.terrarium.CreatureGeometry.antigravityNativePath, paint)
     canvas.restore()
+    paint.shader = null
 
     // Name tag
     if (displayName != null) {
@@ -1785,8 +1807,8 @@ private const val GRAY_CLOUD_SLEEP = 0xFF888888.toInt()  // level 8 — dormant/
 private const val GRAY_OPENCODE_OUTER = 0xFF888888.toInt() // level 8 — outer frame (visible contrast vs water BG level 13)
 private const val GRAY_OPENCODE_INNER = 0xFF444444.toInt() // level 4 — inner square (dark gray)
 private const val GRAY_OPENCODE_SLEEP = 0xFFAAAAAA.toInt() // level 10 — sleeping/dormant (faded, distinct from active outer)
-private const val GRAY_ANTIGRAVITY_BODY = 0xFF606060.toInt() // level 6 — peak/arc body (brand gray)
-private const val GRAY_ANTIGRAVITY_SLEEP = 0xFF999999.toInt() // level 9 — sleeping/dormant (faded)
+private const val GRAY_ANTIGRAVITY_BODY = 0xFF303030.toInt() // dark peak/arc body for B/W e-ink
+private const val GRAY_ANTIGRAVITY_SLEEP = 0xFF777777.toInt() // sleeping/dormant (faded)
 private const val GRAY_STARBURST  = 0xFF999999.toInt()  // level 9 — WORKING starburst glow
 private const val GRAY_DECORATION = 0xFF444444.toInt()  // level 4 — keyboard, review docs
 private const val GRAY_SEAWEED    = 0xFF666666.toInt()  // level 6 — seaweed stems
@@ -1854,9 +1876,17 @@ private val COLOR_OPENCODE_OUTER = 0xFFF1ECEC.toInt()  // light warm gray outer 
 private val COLOR_OPENCODE_INNER = 0xFF4B4646.toInt()  // dark brown-gray inner square
 private val COLOR_OPENCODE_SLEEP = 0xFF9A9595.toInt()  // muted sleep
 
-// Antigravity (peak/arc mark — brand gray #5F6368)
+// Antigravity (peak/arc mark — rainbow in color mode, gray fallback for B/W e-ink)
 private val COLOR_ANTIGRAVITY_BODY = 0xFF5F6368.toInt()  // Google gray primary
 private val COLOR_ANTIGRAVITY_SLEEP = 0xFF9AA0A6.toInt() // muted gray sleep
+private val COLOR_ANTIGRAVITY_SKY = 0xFF29B8EE.toInt()
+private val COLOR_ANTIGRAVITY_CYAN = 0xFF3AC7EB.toInt()
+private val COLOR_ANTIGRAVITY_LIME = 0xFF5CD64D.toInt()
+private val COLOR_ANTIGRAVITY_YELLOW = 0xFFF5CB24.toInt()
+private val COLOR_ANTIGRAVITY_ORANGE = 0xFFFF8410.toInt()
+private val COLOR_ANTIGRAVITY_RED = 0xFFFF5241.toInt()
+private val COLOR_ANTIGRAVITY_PINK = 0xFFB75CB6.toInt()
+private val COLOR_ANTIGRAVITY_BLUE = 0xFF247EFF.toInt()
 
 // Fish — distinct against light water
 private val COLOR_FISH_BODY    = 0xFF3366AA.toInt()  // royal blue body
