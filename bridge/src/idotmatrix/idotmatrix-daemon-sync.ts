@@ -21,7 +21,7 @@ import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadIDotMatrixDevices, type IDotMatrixDevice } from './idotmatrix-settings.js';
-import { spawnPythonSync } from '../ble-sync-spawn.js';
+import { spawnPythonSync, terminateSyncChild } from '../ble-sync-spawn.js';
 
 let child: ChildProcess | null = null;
 let stopping = false;
@@ -74,7 +74,10 @@ export function startIDotMatrixSync(httpPort: number): void {
     // driving the old panel forever.
     if (runningKey === deviceKey(devices[0])) return;
     log('configured iDotMatrix changed; restarting BLE sync');
-    stopIDotMatrixSync();
+    // Fast stop on re-config (no farewell wait — we repaint immediately with the
+    // new device). Runs synchronously up to the SIGTERM, so `stopping = false`
+    // below still lands after the child is signalled.
+    void stopIDotMatrixSync();
     stopping = false;
   }
 
@@ -130,20 +133,32 @@ function spawnSync(venvPython: string, syncScript: string, httpPort: number): vo
   });
 }
 
-/** Stop the managed BLE sync and cancel any pending respawn (daemon shutdown). */
-export function stopIDotMatrixSync(): void {
+/**
+ * Stop the managed BLE sync and cancel any pending respawn.
+ *
+ * When `awaitFarewell` is true (daemon shutdown), wait for the child to exit so
+ * its OFFLINE-frame farewell finishes painting before the daemon process exits —
+ * otherwise launchd tears the job down and SIGKILLs the orphaned child
+ * mid-farewell, freezing the panel on its last dashboard frame. When false
+ * (re-config restart), just signal the child and return synchronously.
+ */
+export async function stopIDotMatrixSync(awaitFarewell = false): Promise<void> {
   stopping = true;
   if (respawnTimer) {
     clearTimeout(respawnTimer);
     respawnTimer = null;
   }
-  if (child) {
+  const proc = child;
+  child = null;
+  runningKey = null;
+  if (!proc) return;
+  if (awaitFarewell) {
+    await terminateSyncChild(proc);
+  } else {
     try {
-      child.kill('SIGTERM');
+      proc.kill('SIGTERM');
     } catch {
       /* already gone */
     }
-    child = null;
   }
-  runningKey = null;
 }
