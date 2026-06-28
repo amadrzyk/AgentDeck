@@ -257,74 +257,53 @@ static void buildLayout() {
     u = tile / 14; if (u < 2) u = 2;
     wallH = (int)(tile * 0.62f);
 
-    // Lounge (break area) — a bottom-left band around the cooler/coffee where idle
-    // agents congregate. Reserved from desks so it always reads as a social spot.
-    loungeH = 2;
-    loungeW = (cols >= 6) ? 3 : 2;
-    loungeC = 1;
-    loungeR = rows - 1 - loungeH; if (loungeR < 2) loungeR = 2;
+    // Full-width zones stack vertically on the tall portrait strip. Project rooms
+    // fill from the top; the shared COMMONS and the LOUNGE are the two reserved
+    // bottom bands so they're always on screen. Full width → readable name plates.
+    const int deskC0 = 1, deskCols = (cols - 2 > 0) ? cols - 2 : 1;   // desk cols (0 + cols-1 are margins)
 
-    // Commons (shared / system files) — bottom-right room a working agent visits when
-    // it touches shared resources. Reserved from desks like the lounge, clear of it.
-    commonsH = 2;
-    commonsW = 2;
-    commonsC = cols - 1 - commonsW;
-    if (commonsC < loungeC + loungeW + 1) commonsC = loungeC + loungeW + 1;
-    if (commonsC + commonsW > cols) commonsW = cols - commonsC;
-    commonsR = rows - 1 - commonsH; if (commonsR < 2) commonsR = 2;
-    if (commonsW < 1) commonsW = 0;   // no room → disable commons
+    loungeH  = 2; loungeW  = cols; loungeC  = 0; loungeR  = rows - loungeH;
+    commonsH = 2; commonsW = cols; commonsC = 0; commonsR = loungeR - 1 - commonsH;
+    if (commonsR < 3) { commonsR = 0; commonsW = 0; }                 // strip too short → no commons
+    const int projBottom = (commonsW > 0 ? commonsR : loungeR) - 1;   // last project row (corridor above the bands)
 
-    // pack workers into project pods (team rooms); same project sits together
+    // Each project becomes a full-width horizontal "room" band, stacked top→down,
+    // separated by a one-row corridor. Same project sits together in its band.
     podCount = 0;
-    bool wide = W >= H;
-    const int labelBand = 1, maxC = cols - 1;
-    int curC = 1, curR = 1, rowH = 0;
+    int rowCursor = 1;
     bool done[MAXAG] = {false};
-    // Roamers (OpenClaw) don't sit at a project desk — give each a resting corner instead.
-    const int corner[4][2] = { {1, rows - 2}, {cols - 2, rows - 2}, {1, 2}, {cols - 2, 2} };
-    int roamN = 0;
-    for (int a = 0; a < nWk; a++) {
-        if (wk[a].roamer) {
-            const int* cc = corner[roamN++ % 4];
-            wk[a].seatC = cc[0]; wk[a].seatR = cc[1];
-            done[a] = true;
-        }
-    }
     for (int a = 0; a < nWk; a++) {
         if (done[a]) continue;
-        // gather members of this project
         int mem[MAXAG], mc = 0;
-        for (int b = a; b < nWk; b++) if (!done[b] && strcmp(wk[b].project, wk[a].project) == 0) { mem[mc++] = b; done[b] = true; }
-        int pc = (int)ceilf(sqrtf((float)mc)); int cap = wide ? 3 : 2;
-        if (pc < 1) pc = 1; if (pc > cap) pc = cap;
-        int pr = (mc + pc - 1) / pc;
-        int wT = pc, hT = pr + labelBand;
-        if (curC + wT > maxC && curC > 1) { curC = 1; curR += rowH + 1; rowH = 0; }
+        for (int b = a; b < nWk; b++)
+            if (!done[b] && strcmp(wk[b].project, wk[a].project) == 0) { mem[mc++] = b; done[b] = true; }
+        int deskRows = (mc + deskCols - 1) / deskCols; if (deskRows < 1) deskRows = 1;
+        int hT = 1 + deskRows;                                        // header row + desk row(s)
+        if (rowCursor + hT - 1 > projBottom) {                        // out of vertical room
+            hT = projBottom - rowCursor + 1; if (hT < 2) hT = 2;
+        }
         Pod& pod = pods[podCount];
         strncpy(pod.project, wk[a].project, sizeof(pod.project) - 1); pod.project[sizeof(pod.project)-1] = '\0';
-        pod.c = curC; pod.r = curR; pod.w = wT; pod.h = hT; pod.count = mc;
+        pod.c = 0; pod.r = rowCursor; pod.w = cols; pod.h = hT; pod.count = mc;
         for (int k = 0; k < mc; k++) {
-            int sc = curC + (k % pc);
-            int sr = curR + labelBand + k / pc; if (sr > rows - 2) sr = rows - 2;
-            while ((loungeCell(sc, sr) || commonsCell(sc, sr)) && sr > 1) sr--;   // keep desks out of lounge/commons
+            int sc = deskC0 + (k % deskCols);
+            int sr = rowCursor + 1 + k / deskCols;
+            if (sr > rowCursor + hT - 1) sr = rowCursor + hT - 1;     // keep within the band
             wk[mem[k]].seatC = sc; wk[mem[k]].seatR = sr;
         }
         podCount++;
-        curC += wT + 1;
-        if (hT > rowH) rowH = hT;
+        rowCursor += hT + 1;                                          // corridor gap between rooms
+        if (rowCursor > projBottom) break;
     }
 
-    // Office props — a lounge (cooler + coffee), greenery and a filing cabinet around the
-    // perimeter so the room reads as an office, not a classroom of rows. Skip any cell a desk
-    // already owns; pods pack from the top-left so the bottom row + right edge are usually free.
+    // props: cooler + coffee in the LOUNGE band, a shelf in COMMONS, a plant in a corner.
     propCount = 0;
-    const Prop cand[6] = {
-        {1, loungeC, loungeR + loungeH - 1}, {2, loungeC + 1, loungeR + loungeH - 1},  // cooler + coffee (lounge)
-        {3, commonsC, commonsR},                     // shelf/server in the COMMONS room
-        {0, 1, 1}, {0, cols - 2, 1},                 // plants (top corners)
-        {0, cols - 2, rows / 2},                     // a mid plant
+    const Prop cand[4] = {
+        {1, 1, loungeR + loungeH - 1}, {2, 2, loungeR + loungeH - 1},   // cooler + coffee (lounge)
+        {3, cols - 2, commonsR + commonsH - 1},                          // shelf in COMMONS
+        {0, cols - 2, loungeR + loungeH - 1},                            // plant (lounge corner)
     };
-    for (int i = 0; i < 6 && propCount < (int)(sizeof(props)/sizeof(props[0])); i++) {
+    for (int i = 0; i < 4 && propCount < (int)(sizeof(props)/sizeof(props[0])); i++) {
         const Prop& p = cand[i];
         if (p.c < 1 || p.c > cols - 1 || p.r < 1 || p.r > rows - 1) continue;
         if (deskOccupied(p.c, p.r)) continue;
@@ -399,8 +378,12 @@ static void syncRoomLabels() {
     if (!officeParent) return;
     const int N = (int)(sizeof(roomLabels) / sizeof(roomLabels[0]));
     int idx = 0;
-    for (int i = 0; i < podCount && idx < N; i++)
-        placeRoomLabel(idx++, projectBasename(pods[i].project), pods[i].c, pods[i].r, pods[i].w, 0xCFE6DF);
+    for (int i = 0; i < podCount && idx < N; i++) {
+        char lab[48];
+        if (pods[i].count > 1) snprintf(lab, sizeof(lab), "%s  (%d)", projectBasename(pods[i].project), pods[i].count);
+        else                   snprintf(lab, sizeof(lab), "%s", projectBasename(pods[i].project));
+        placeRoomLabel(idx++, lab, pods[i].c, pods[i].r, pods[i].w, 0xCFE6DF);
+    }
     if (commonsW > 0 && idx < N) placeRoomLabel(idx++, "COMMONS", commonsC, commonsR, commonsW, 0x9FD8E8);
     if (loungeW > 0 && idx < N)  placeRoomLabel(idx++, "LOUNGE",  loungeC,  loungeR,  loungeW,  0xE0C27A);
     for (int k = idx; k < N; k++) if (roomLabels[k]) lv_obj_add_flag(roomLabels[k], LV_OBJ_FLAG_HIDDEN);
@@ -427,35 +410,38 @@ static void renderBaseInto() {
         blk(x, gy + wallH - u * 2, winW, u, C_sill);
         x += winW + gap;
     }
-    // project rooms — floor rug + a header nameplate band + a walled border, so each
-    // project group reads as its own labelled room rather than an unlabelled cluster.
+    // project rooms — full-width horizontal bands: a solid header strip (carries the
+    // name plate) over a desk-floor rug, walled, so each project reads as its own room.
     for (int i = 0; i < podCount; i++) {
         int px, py; tilePx(pods[i].c, pods[i].r, px, py);
         int rw = pods[i].w * tile, rh = pods[i].h * tile;
-        // header band (behind the name-plate label) across the top label row
-        for (int yy = py + 1; yy < py + tile - 1; yy++)
-            for (int xx = px + 1; xx < px + rw - 1; xx++) blendPx(xx, yy, C_roomHdr, 130);
-        // desk-area rug
-        int ry = py + (int)(tile * 0.82f);
-        for (int yy = ry; yy < ry + (rh - (int)(tile * 0.82f) - u); yy++)
-            for (int xx = px + u; xx < px + rw - u; xx++) blendPx(xx, yy, C_rug, 120);
-        drawRoomBorder(pods[i].c, pods[i].r, pods[i].w, pods[i].h, C_roomWall, 200);
+        // solid header strip across the top row (name-plate sits on it)
+        blk(px + u, py + u, rw - 2 * u, tile - u, C_roomHdr);
+        blk(px + u, py + tile - u, rw - 2 * u, u, C_roomWall);   // header underline
+        // desk-floor rug for the rest of the band
+        for (int yy = py + tile; yy < py + rh - u; yy++)
+            for (int xx = px + u; xx < px + rw - u; xx++) blendPx(xx, yy, C_rug, 130);
+        drawRoomBorder(pods[i].c, pods[i].r, pods[i].w, pods[i].h, C_roomWall, 205);
     }
-    // commons room (shared / system files) — distinct cool floor + shelf prop + border.
+    // COMMONS band (shared / system files) — header strip + distinct cool floor + shelf.
     if (commonsW > 0) {
         int cx, cy; tilePx(commonsC, commonsR, cx, cy);
         int cw = commonsW * tile, ch = commonsH * tile;
-        for (int yy = cy + u; yy < cy + ch - u; yy++)
-            for (int xx = cx + u; xx < cx + cw - u; xx++) blendPx(xx, yy, C_commons, 120);
+        blk(cx + u, cy + u, cw - 2 * u, tile - u, C_roomHdr);
+        blk(cx + u, cy + tile - u, cw - 2 * u, u, C_commonsWall);
+        for (int yy = cy + tile; yy < cy + ch - u; yy++)
+            for (int xx = cx + u; xx < cx + cw - u; xx++) blendPx(xx, yy, C_commons, 140);
         drawRoomBorder(commonsC, commonsR, commonsW, commonsH, C_commonsWall, 205);
     }
-    // lounge rug (break area floor) — a warmer mat the idle agents gather on.
+    // LOUNGE band (break area) — header strip + warm floor the idle agents gather on.
     if (loungeW > 0) {
         int lx, ly; tilePx(loungeC, loungeR, lx, ly);
         int lw = loungeW * tile, lh = loungeH * tile;
-        for (int yy = ly + u; yy < ly + lh - u; yy++)
-            for (int xx = lx + u; xx < lx + lw - u; xx++) blendPx(xx, yy, C_lounge, 110);
-        drawRoomBorder(loungeC, loungeR, loungeW, loungeH, C_lounge, 150);
+        blk(lx + u, ly + u, lw - 2 * u, tile - u, C_roomHdr);
+        blk(lx + u, ly + tile - u, lw - 2 * u, u, C_roomWall);
+        for (int yy = ly + tile; yy < ly + lh - u; yy++)
+            for (int xx = lx + u; xx < lx + lw - u; xx++) blendPx(xx, yy, C_lounge, 140);
+        drawRoomBorder(loungeC, loungeR, loungeW, loungeH, C_roomWall, 180);
     }
     // props (lounge + greenery + cabinet)
     for (int i = 0; i < propCount; i++) drawProp(props[i].kind, props[i].c, props[i].r);
