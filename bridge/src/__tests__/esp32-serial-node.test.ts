@@ -22,6 +22,7 @@ import {
   ESP32_PORT_PATTERNS,
   EXCLUDE_PATTERNS,
   isUnidentifiedForeign,
+  isHalfOpenIdentifiedCdc,
   recordForeignProbeFailure,
   isForeignPortDenylisted,
   __resetForeignPortState,
@@ -542,5 +543,45 @@ describe('foreign port denylist threshold', () => {
     // Far-future "now" — past the 10-minute cooldown window.
     expect(isForeignPortDenylisted(port, Date.now() + 20 * 60_000)).toBe(false);
     __resetForeignPortState();
+  });
+});
+
+// ─── Half-open identified CDC recovery ──────────────────────────────
+// An AgentDeck board on a CDC port (live or cache-restored device_info) that
+// reads nothing since (re)connect is half-open: the board reset/re-enumerated and
+// its RX pipe is dead, but heartbeat writes keep succeeding so the write-death
+// reaper never fires. It must be recycled so re-poll re-probes — distinct from the
+// foreign path, which owns *unidentified* ports.
+
+const cdcConn = (over: Partial<SerialConnection> = {}): SerialConnection =>
+  ({
+    port: '/dev/cu.usbmodem2111201',
+    deviceInfo: { board: 'round_amoled' },
+    lastReadAt: 0,
+    connectedAt: Date.now() - 5 * 60_000, // well past the 2-min grace
+    ...over,
+  }) as SerialConnection;
+
+describe('half-open identified CDC recovery', () => {
+  it('flags an identified CDC port that has never read since (re)connect', () => {
+    expect(isHalfOpenIdentifiedCdc(cdcConn())).toBe(true); // the round_amoled live bug
+  });
+
+  it('does NOT flag while the read pipe is alive', () => {
+    expect(isHalfOpenIdentifiedCdc(cdcConn({ lastReadAt: Date.now() }))).toBe(false);
+  });
+
+  it('does NOT flag inside the grace window after connect', () => {
+    expect(isHalfOpenIdentifiedCdc(cdcConn({ connectedAt: Date.now() }))).toBe(false);
+  });
+
+  it('does NOT flag an unidentified CDC port — that is the foreign path', () => {
+    const c = cdcConn({ deviceInfo: null });
+    expect(isHalfOpenIdentifiedCdc(c)).toBe(false);
+    expect(isUnidentifiedForeign(c)).toBe(true); // still owned by the foreign denylist
+  });
+
+  it('does NOT flag a UART (non-CDC) port — handled by the read-timeout branch', () => {
+    expect(isHalfOpenIdentifiedCdc(cdcConn({ port: '/dev/cu.usbserial-1420' }))).toBe(false);
   });
 });

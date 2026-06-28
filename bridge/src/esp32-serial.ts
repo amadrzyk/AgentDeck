@@ -61,6 +61,12 @@ const DEVICE_INFO_MAX_REQUESTS = 10;
 const FOREIGN_MAX_PROBE_FAILURES = 3;
 const FOREIGN_DENYLIST_COOLDOWN_MS = 10 * 60_000; // 10 minutes, then re-probe once
 const FOREIGN_CDC_GRACE_MS = 90_000; // a held-open CDC port gets this long to identify
+// An *identified* CDC port (live or cache-restored board) that reads nothing for
+// this long since (re)connect is half-open: the board reset/re-enumerated and its
+// RX pipe is dead, but heartbeat writes keep succeeding so the write-death reaper
+// never fires. Larger than FOREIGN_CDC_GRACE_MS so an unidentified foreign port is
+// always caught by the foreign clause first.
+const CDC_SILENT_READ_TIMEOUT_MS = 120_000;
 const SERIAL_OPEN_PROBE_TIMEOUT_MS = 1500;
 const SERIAL_WRITE_INTERVAL_MS = 120;
 const SERIAL_MAX_QUEUE = 24;
@@ -785,6 +791,26 @@ export function isUnidentifiedForeign(conn: SerialConnection): boolean {
   return !conn.deviceInfo?.board && !lastKnownDeviceInfoByPort.has(conn.port) && conn.lastReadAt === 0;
 }
 
+/**
+ * A CDC port that IS an AgentDeck board (live device_info, or a cached board for
+ * this port) yet has produced no read since this (re)connection. A healthy board
+ * answers device_info/keepalive within seconds, so lastReadAt===0 well past a
+ * generous grace means a half-open USB-CDC pipe (board reset / re-enumerated)
+ * that heartbeat writes will never revive — the FD must be recycled so re-poll
+ * re-probes. Mutually exclusive with isUnidentifiedForeign (this REQUIRES an
+ * identified board; that one requires none).
+ */
+/** @internal Exported for testing only */
+export function isHalfOpenIdentifiedCdc(
+  conn: Pick<SerialConnection, 'port' | 'deviceInfo' | 'lastReadAt' | 'connectedAt'>,
+  now = Date.now(),
+): boolean {
+  const isCDC = /usbmodem|ttyACM/.test(conn.port);
+  if (!isCDC) return false;
+  const isIdentified = Boolean(conn.deviceInfo?.board) || lastKnownDeviceInfoByPort.has(conn.port);
+  return isIdentified && conn.lastReadAt === 0 && (now - conn.connectedAt) > CDC_SILENT_READ_TIMEOUT_MS;
+}
+
 function denylistForeignPort(port: string, reason: string): void {
   foreignDenylistUntil.set(port, Date.now() + FOREIGN_DENYLIST_COOLDOWN_MS);
   foreignProbeFailures.delete(port);
@@ -835,6 +861,18 @@ function checkStaleConnections(): void {
       // it so we stop occupying it (CDC ports aren't otherwise reaped on silence).
       if (isUnidentifiedForeign(conn) && (now - conn.connectedAt) > FOREIGN_CDC_GRACE_MS) {
         denylistForeignPort(conn.port, 'CDC never identified');
+        closeConnection(conn);
+        staleCount++;
+        continue;
+      }
+      // A CDC port whose board is identified but has read nothing since connect is
+      // half-open (board reset, RX pipe dead). Recycle the FD so re-poll re-probes;
+      // the reopen's DTR/RTS toggle may itself revive the board. Feed the foreign
+      // probe-failure counter so a permanently-dead board denylists after a few
+      // strikes instead of getting DTR/RTS-reset every grace window.
+      if (isHalfOpenIdentifiedCdc(conn, now)) {
+        debug('ESP32', `Half-open CDC (identified, no read since connect): ${conn.port} — recycling`);
+        recordForeignProbeFailure(conn.port);
         closeConnection(conn);
         staleCount++;
         continue;
