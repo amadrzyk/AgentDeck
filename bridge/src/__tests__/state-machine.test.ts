@@ -61,6 +61,41 @@ describe('StateMachine', () => {
     });
   });
 
+  // === Tool in flight (Bash etc. silences the spinner mid-turn) ===
+
+  describe('tool in flight', () => {
+    it('stays PROCESSING when the spinner stops while a tool is running', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'sleep 30' } });
+      // A long Bash call stops animating the spinner — the PTY parser would
+      // otherwise debounce to idle and flip us to IDLE mid-turn.
+      sm.handleParserEvent('spinner_stop');
+      sm.handleParserEvent('idle');
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+
+    it('resumes IDLE handling after PostToolUse clears the in-flight guard', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Bash', tool_input: {} });
+      sm.handleHookEvent('PostToolUse', { tool_name: 'Bash' });
+      // Tool done; genuine turn completion (Stop) still settles to IDLE.
+      sm.handleHookEvent('Stop', {});
+      expect(sm.getState()).toBe(State.IDLE);
+    });
+
+    it('re-asserts PROCESSING when PreToolUse fires after a spurious IDLE', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      // Parser wrongly dropped to IDLE (e.g. spinner went quiet between tools).
+      sm.handleParserEvent('idle');
+      expect(sm.getState()).toBe(State.IDLE);
+      sm.handleHookEvent('PreToolUse', { tool_name: 'Read', tool_input: {} });
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+  });
+
   // === Permission Flow ===
 
   describe('permission flow', () => {
@@ -81,6 +116,53 @@ describe('StateMachine', () => {
         options: [{ index: 0, label: 'Yes' }],
       });
       sm.handleUserAction('respond');
+      expect(sm.getState()).toBe(State.PROCESSING);
+    });
+
+    // Notification permission backstop: the PTY parser can't always recover a
+    // Bash approval's "1. Yes / 2. No" (absolute-column ANSI split across chunks),
+    // so the authoritative hook synthesizes standard options.
+    it('Notification permission_prompt synthesizes Yes/No when the parser produced none', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleHookEvent('Notification', { notification_type: 'permission_prompt' });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      const labels = sm.getSnapshot().options.map((o) => o.label);
+      expect(labels).toEqual(['Yes', 'No']);
+    });
+
+    it('Notification permission_prompt rescues a misparsed AWAITING_OPTION (the empty-buttons bug)', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      // Parser misread the Bash approval and emitted a single bogus option.
+      sm.handleParserEvent('option_prompt', { options: [{ index: 2, label: 'No' }], navigable: false });
+      expect(sm.getState()).toBe(State.AWAITING_OPTION);
+      // The authoritative hook reclassifies it as a permission prompt with buttons.
+      sm.handleHookEvent('Notification', { notification_type: 'permission_prompt' });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      expect(sm.getSnapshot().options.map((o) => o.label)).toEqual(['Yes', 'No']);
+    });
+
+    it('Notification permission_prompt does NOT clobber a richly-parsed permission prompt', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleParserEvent('permission_prompt', {
+        options: [
+          { index: 0, label: 'Yes' },
+          { index: 1, label: "Yes, and don't ask again" },
+          { index: 2, label: 'No' },
+        ],
+        question: 'Run this command?',
+      });
+      sm.handleHookEvent('Notification', { notification_type: 'permission_prompt' });
+      // Richer 3-option prompt is preserved, not overwritten with bare Yes/No.
+      expect(sm.getSnapshot().options).toHaveLength(3);
+    });
+
+    it('Notification without permission type stays a no-op for state', () => {
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleHookEvent('Notification', { input_tokens: 10, output_tokens: 5 });
       expect(sm.getState()).toBe(State.PROCESSING);
     });
   });

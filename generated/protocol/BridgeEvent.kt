@@ -945,6 +945,9 @@ data class SessionInfo (
     @Json(name = "elapsedSec")
     val elapsedSEC: Double? = null,
 
+    @Json(name = "focusUrl")
+    val focusURL: String? = null,
+
     @Json(name = "foldedSessionIds")
     val foldedSessionIDS: List<String>? = null,
 

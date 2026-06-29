@@ -301,8 +301,19 @@ export async function attachTmuxInIterm(sessionName: string): Promise<void> {
   ).catch(() => {});
 }
 
-/** Activate Warp terminal. */
-export async function activateWarpTerminal(): Promise<void> {
+/**
+ * Surface Warp. When a per-session focus URL (warp://session/<uuid>) is given,
+ * open it so the exact tab/window is raised and the Space is switched. Without
+ * one (session not launched inside Warp), fall back to app-level activation,
+ * which raises all Warp windows on the current Space.
+ */
+export async function activateWarpTerminal(focusUrl?: string): Promise<void> {
+  if (focusUrl && /^warp(preview)?:\/\//.test(focusUrl)) {
+    await new Promise<void>((resolve) => {
+      execFile('open', [focusUrl], { timeout: 3000 }, () => resolve());
+    });
+    return;
+  }
   await osascript(
     'tell application "Warp"\n' +
     '  activate\n' +

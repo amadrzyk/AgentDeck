@@ -65,7 +65,13 @@ const MODEL_INFO = /((?:Opus|Sonnet|Haiku)[ \t]*[\d.]+|Claude[ \t]*[\d.]+[ \t]*(
 // Keep the whitelist explicit so unrelated "<word> effort" phrases don't match.
 const EFFORT_LEVEL = /\b(max|xhigh|high|medium|low|default|fast)\s+effort\b/i;
 
-const SPINNER_DEBOUNCE_MS = 2000;
+// Gap after the last spinner glyph before we conclude the spinner stopped.
+// Claude animates the spinner at ~10fps, so 800ms still tolerates ~8 dropped
+// frames. The old 2000ms was conservative because the PTY was the only IDLE
+// signal; the state machine now backstops with authoritative hooks (Stop ends
+// the turn, PreToolUse anchors PROCESSING across spinner-quiet tool runs), so a
+// shorter window cuts perceived state lag without risking mid-turn flicker.
+const SPINNER_DEBOUNCE_MS = 800;
 const IDLE_DEBOUNCE_MS = 300;
 const OPTION_DEBOUNCE_MS = 150;
 const SUGGESTION_DEBOUNCE_MS = 500;

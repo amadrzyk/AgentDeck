@@ -81,6 +81,10 @@ export interface SessionEntry {
   tty?: string;
   parentTty?: string;
   startedAt: string;
+  /** Warp per-session focus deep link (warp://session/<uuid>), captured from
+   *  WARP_FOCUS_URL when the session is launched inside Warp. Lets the deck FOCUS
+   *  button raise the exact tab/window (and switch Spaces), not all Warp windows. */
+  focusUrl?: string;
 }
 
 function ensureDir(): void {
@@ -268,16 +272,25 @@ export function writeDaemonInfo(info: DaemonInfo): void {
   debug('SessionRegistry', `Wrote daemon.json: port=${info.port} pid=${info.pid}`);
 }
 
-/** Remove daemon.json on shutdown — try every candidate dir in case a stale
- *  file lingers in a sibling world (e.g. Swift died before cleanup). */
+/** Remove daemon.json on shutdown. Only unlinks a file that this process owns
+ *  (`pid === process.pid`) or whose owner is dead (stale cleanup). A live
+ *  sibling daemon's file is left intact — previously this blindly unlinked
+ *  every candidate dir's file, so a second daemon's exit clobbered the running
+ *  daemon's discovery file and left clients (Stream Deck plugin) stuck offline. */
 export function removeDaemonInfo(): void {
   let removed = false;
   for (const dir of getCandidateDataDirs()) {
+    const path = join(dir, 'daemon.json');
     try {
-      unlinkSync(join(dir, 'daemon.json'));
+      const info = JSON.parse(readFileSync(path, 'utf-8')) as { pid?: number };
+      // Skip a file owned by a different, still-alive daemon.
+      if (typeof info.pid === 'number' && info.pid !== process.pid && isProcessAlive(info.pid)) {
+        continue;
+      }
+      unlinkSync(path);
       removed = true;
     } catch {
-      // Not present — normal.
+      // Not present or unreadable — normal.
     }
   }
   if (removed) debug('SessionRegistry', 'Removed daemon.json');

@@ -28,6 +28,9 @@ export const transitions: StateTransition[] = [
   { from: State.DISCONNECTED, to: State.IDLE, trigger: 'session_start', source: 'hook' },
   { from: State.IDLE, to: State.PROCESSING, trigger: 'user_prompt_submit', source: 'hook' },
   { from: State.IDLE, to: State.PROCESSING, trigger: 'spinner_start', source: 'pty' },
+  // PreToolUse fired while (wrongly) IDLE: a tool can't run unless the turn is
+  // active, so re-assert PROCESSING from the authoritative hook.
+  { from: State.IDLE, to: State.PROCESSING, trigger: 'tool_use', source: 'hook' },
   { from: State.PROCESSING, to: State.IDLE, trigger: 'stop', source: 'hook' },
   { from: State.PROCESSING, to: State.IDLE, trigger: 'idle_detected', source: 'pty' },
   { from: State.AWAITING_PERMISSION, to: State.IDLE, trigger: 'idle_detected', source: 'pty' },
@@ -35,6 +38,10 @@ export const transitions: StateTransition[] = [
   { from: State.AWAITING_DIFF, to: State.IDLE, trigger: 'idle_detected', source: 'pty' },
   { from: State.PROCESSING, to: State.AWAITING_PERMISSION, trigger: 'permission_prompt', source: 'pty' },
   { from: State.IDLE, to: State.AWAITING_PERMISSION, trigger: 'permission_prompt', source: 'pty' },
+  // Notification permission backstop (hook): a misparsed Bash approval can land
+  // the session in AWAITING_OPTION with no usable buttons; the authoritative
+  // hook re-classifies it as a permission prompt with standard Yes/No.
+  { from: State.AWAITING_OPTION, to: State.AWAITING_PERMISSION, trigger: 'permission_prompt', source: 'hook' },
   { from: State.PROCESSING, to: State.AWAITING_OPTION, trigger: 'option_ui_detected', source: 'pty' },
   { from: State.IDLE, to: State.AWAITING_OPTION, trigger: 'option_ui_detected', source: 'pty' },
   { from: State.PROCESSING, to: State.AWAITING_DIFF, trigger: 'diff_ui_detected', source: 'pty' },

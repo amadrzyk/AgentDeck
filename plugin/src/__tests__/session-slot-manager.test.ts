@@ -133,21 +133,26 @@ describe('SessionSlotManager detail layout', () => {
     manager.enterDetailView('openclaw');
     manager.updateDetailState(State.PROCESSING, [], 'logs.tail', 'tail latest logs', undefined, 'gpt-5');
 
+    // Slot 2 is the persistent FOCUS control on SD+; detail content starts at slot 3.
     expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({
+      type: 'preset',
+      preset: { label: 'FOCUS' },
+    });
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'status',
       label: 'logs.tail',
       subtitle: 'tail latest logs',
       icon: 'tool',
     });
-    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({
+    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'preset',
       preset: { label: 'STATUS' },
     });
-    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({
+    expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'preset',
       preset: { label: 'MODEL' },
     });
-    expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({
+    expect(manager.getSlotConfig(6, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'preset',
       preset: { label: 'GATEWAY' },
     });
@@ -165,20 +170,26 @@ describe('SessionSlotManager detail layout', () => {
     manager.enterDetailView('openclaw');
     manager.updateDetailState(State.PROCESSING, []);
 
+    // Slot 2 is the persistent FOCUS control on SD+; the tool status tile leads
+    // the content slots starting at slot 3.
     expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({
+      type: 'preset',
+      preset: { label: 'FOCUS' },
+    });
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'status',
       label: 'ROUTING',
       subtitle: 'running',
       icon: 'tool',
     });
-    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({
+    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'preset',
       preset: { label: 'STATUS' },
     });
   });
 
-  it('aliases the model name on detail MODEL surfaces (status card + OpenClaw preset)', () => {
-    // Claude Code IDLE: MODEL status card subtitle uses the alias, not the raw upstream id.
+  it('aliases the model name on detail MODEL surfaces (OpenClaw preset)', () => {
+    // Claude Code no longer surfaces a MODEL status card in any detail state.
     const cc = new SessionSlotManager();
     cc.updateSessions([makeSession({ modelName: 'claude-sonnet-4-6', effortLevel: undefined })], false);
     cc.enterDetailView('session-1');
@@ -186,7 +197,7 @@ describe('SessionSlotManager detail layout', () => {
     const ccModelCard = [0, 1, 2, 3, 4, 5, 6, 7]
       .map(i => cc.getSlotConfig(i, SD_PLUS_LAYOUT))
       .find(c => c.type === 'status' && c.label === 'MODEL');
-    expect(ccModelCard).toMatchObject({ type: 'status', label: 'MODEL', subtitle: 'sonnet 4.6' });
+    expect(ccModelCard).toBeUndefined();
 
     // OpenClaw IDLE: model preset subtitle is aliased too.
     const oc = new SessionSlotManager();
@@ -199,7 +210,7 @@ describe('SessionSlotManager detail layout', () => {
     expect(ocModelPreset?.preset?.subtitle).toBe('opus 4.7');
   });
 
-  it('renders the MODEL tile exactly once in Claude PROCESSING detail (no duplicate)', () => {
+  it('renders no MODEL tile in Claude PROCESSING detail', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions([makeSession({ state: State.PROCESSING, modelName: 'claude-opus-4-8' })], false);
     manager.enterDetailView('session-1');
@@ -208,7 +219,7 @@ describe('SessionSlotManager detail layout', () => {
     const labels = [0, 1, 2, 3, 4, 5, 6, 7]
       .map(i => manager.getSlotConfig(i, SD_PLUS_LAYOUT))
       .filter(c => c.type === 'status' && c.label === 'MODEL');
-    expect(labels).toHaveLength(1);
+    expect(labels).toHaveLength(0);
   });
 
   it('does not duplicate MODEL on OpenClaw idle (preset + status card)', () => {
@@ -260,8 +271,10 @@ describe('SessionSlotManager detail layout', () => {
       { index: 4, label: 'Explain' },
     ]);
 
-    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
-    expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 3 });
+    // FOCUS control at slot 2 leaves slots 3-5 for options (capacity 3 → 2 pages).
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
+    expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 2 });
     expect(manager.getSlotConfig(6, SD_PLUS_LAYOUT)).toMatchObject({ type: 'next-page', label: '1/2' });
     expect(manager.getSlotConfig(7, SD_PLUS_LAYOUT)).toMatchObject({ type: 'esc', label: 'active' });
   });
@@ -280,13 +293,44 @@ describe('SD+ keypad relocation (Phase 2)', () => {
       { index: 2, label: 'No', shortcut: 'n' },
     ]);
 
-    // Options are pressable keypad buttons that dispatch select-option.
-    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
-    expect(manager.handleSlotPress(2, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 0 });
-    expect(manager.handleSlotPress(4, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 2 });
+    // FOCUS control at slot 2; options fill the content slots from slot 3.
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
+    expect(manager.handleSlotPress(3, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 0 });
+    expect(manager.handleSlotPress(5, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 2 });
     // ESC remains on the last key to cancel.
     expect(manager.getSlotConfig(7, SD_PLUS_LAYOUT)).toMatchObject({ type: 'esc', label: 'active' });
     expect(manager.handleSlotPress(7, SD_PLUS_LAYOUT)).toMatchObject({ action: 'esc' });
+  });
+
+  it('keeps the FOCUS control reachable in PROCESSING and AWAITING on SD+', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({ state: State.PROCESSING })], false);
+    manager.enterDetailView('session-1');
+
+    // PROCESSING: FOCUS still at slot 2, and pressing it raises the terminal.
+    manager.updateDetailState(State.PROCESSING, [], 'Bash', 'sleep 30', undefined, 'claude-opus-4-8');
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
+    expect(manager.handleSlotPress(2, SD_PLUS_LAYOUT)).toMatchObject({ action: 'focus-terminal' });
+
+    // AWAITING: FOCUS persists alongside the option buttons.
+    manager.updateDetailState(State.AWAITING_PERMISSION, [
+      { index: 0, label: 'Yes', shortcut: 'y' },
+      { index: 1, label: 'No', shortcut: 'n' },
+    ]);
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
+  });
+
+  it('does not duplicate FOCUS in the IDLE preset row when the control slot is active (SD+)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({ state: State.IDLE })], false);
+    manager.enterDetailView('session-1');
+    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8');
+
+    const focusTiles = [0, 1, 2, 3, 4, 5, 6, 7]
+      .map(i => manager.getSlotConfig(i, SD_PLUS_LAYOUT))
+      .filter(c => c.type === 'preset' && c.preset?.label === 'FOCUS');
+    expect(focusTiles).toHaveLength(1);
   });
 
   it('shows a SUGGESTED quick-send button leading the IDLE detail content on SD+', () => {
@@ -295,15 +339,17 @@ describe('SD+ keypad relocation (Phase 2)', () => {
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8', undefined, undefined, 'run the test suite');
 
-    // Leading content slot (slot 2 on SD+) = the suggested-prompt preset.
-    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({
+    // Slot 2 is the persistent FOCUS control; the leading content slot (slot 3
+    // on SD+) = the suggested-prompt preset.
+    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'preset',
       preset: { label: 'SUGGESTED', prompt: 'run the test suite' },
     });
     // Pressing it sends the suggestion as a prompt.
-    expect(manager.handleSlotPress(2, SD_PLUS_LAYOUT)).toMatchObject({ action: 'send-prompt', promptText: 'run the test suite' });
+    expect(manager.handleSlotPress(3, SD_PLUS_LAYOUT)).toMatchObject({ action: 'send-prompt', promptText: 'run the test suite' });
     // The CC quick-action presets follow (shifted by one).
-    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'GO ON' } });
+    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'GO ON' } });
   });
 
   it('does NOT add a SUGGESTED button on classic Stream Deck (behavior unchanged)', () => {
@@ -325,7 +371,7 @@ describe('SD+ keypad relocation (Phase 2)', () => {
     manager.updateSessions([makeSession({ state: State.IDLE })], false);
     manager.enterDetailView('session-1');
     manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'm', undefined, undefined, 'do the thing');
-    expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ preset: { label: 'SUGGESTED' } });
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ preset: { label: 'SUGGESTED' } });
 
     // A PROCESSING update with a stale suggestion must not surface the button.
     manager.updateDetailState(State.PROCESSING, [], 'Edit', 'x.ts', undefined, 'm', undefined, undefined, 'do the thing');

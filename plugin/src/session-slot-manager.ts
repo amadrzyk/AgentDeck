@@ -730,6 +730,9 @@ export class SessionSlotManager {
 
   private awaitingStatusCard(session: SessionInfo | undefined, idx: number): SessionSlotConfig {
     const question = this._detailQuestion ? truncateStr(this._detailQuestion, 18) : 'choose option';
+    // MODEL card is OpenClaw-only here: Claude Code drops it (other CC detail
+    // states no longer surface the model status tile either).
+    const includeModel = session?.agentType === 'openclaw';
     const cards = [
       {
         type: 'status',
@@ -738,7 +741,7 @@ export class SessionSlotManager {
         icon: 'option',
         tone: 'warning',
       } satisfies SessionSlotConfig,
-      this.modelStatusCard(session),
+      includeModel ? this.modelStatusCard(session) : null,
     ].filter((card): card is SessionSlotConfig => card != null);
     return cards[idx] ?? { type: 'empty' };
   }
@@ -766,6 +769,11 @@ export class SessionSlotManager {
 
     if (slot === controls.info) {
       return { type: 'info', session, label: session ? this.displayNameFor(session) : 'Session' };
+    }
+
+    // Persistent FOCUS control (SD+): raise the Warp terminal in any state.
+    if (controls.focus != null && slot === controls.focus) {
+      return this.focusControlConfig();
     }
 
     if (slot === controls.more && reserveMore) {
@@ -813,10 +821,6 @@ export class SessionSlotManager {
       };
     }
 
-    if (isProcessing && !isOpenClaw && contentIdx === 1) {
-      return this.modelStatusCard(session) ?? { type: 'empty' };
-    }
-
     // OpenClaw presets (IDLE, or PROCESSING after the tool status tile)
     if (isOpenClaw && !isAwaiting) {
       const presetIdx = isProcessing ? contentIdx - 1 : contentIdx;
@@ -839,9 +843,14 @@ export class SessionSlotManager {
       }
     }
 
-    // Claude Code IDLE: show quick action presets (GO ON, REVIEW, COMMIT, CLEAR, FOCUS)
-    if (!isOpenClaw && this._detailState === State.IDLE && contentIdx < CC_PRESET_DEFS.length) {
-      const def = CC_PRESET_DEFS[contentIdx];
+    // Claude Code IDLE: show quick action presets (GO ON, REVIEW, COMMIT, CLEAR, FOCUS).
+    // When the persistent FOCUS control slot is active (SD+), drop FOCUS from the
+    // preset row so it isn't shown twice.
+    const ccPresetDefs = controls.focus != null
+      ? CC_PRESET_DEFS.filter(def => def.localAction !== 'focus-terminal')
+      : CC_PRESET_DEFS;
+    if (!isOpenClaw && this._detailState === State.IDLE && contentIdx < ccPresetDefs.length) {
+      const def = ccPresetDefs[contentIdx];
       const preset: PresetAction = {
         label: def.label,
         iconSvg: def.iconSvg ?? '',
@@ -854,12 +863,11 @@ export class SessionSlotManager {
     }
 
     if (!isOpenClaw && this._detailState === State.IDLE) {
-      return this.idleStatusCard(session, contentIdx - CC_PRESET_DEFS.length, false);
+      return this.idleStatusCard(session, contentIdx - ccPresetDefs.length, false);
     }
 
-    // OpenClaw already surfaces MODEL as an actionable preset, and PROCESSING
-    // (both agents) already renders the model status tile at content slot 1, so
-    // exclude the model card here to avoid showing MODEL twice.
+    // OpenClaw already surfaces MODEL as an actionable preset, so exclude the
+    // model status card here to avoid showing MODEL twice.
     if (isOpenClaw && this._detailState === State.IDLE) {
       return this.idleStatusCard(session, contentIdx - OC_PRESET_DEFS.length, false);
     }
@@ -872,29 +880,51 @@ export class SessionSlotManager {
     }
 
     if (isProcessing && !isOpenClaw) {
-      return this.idleStatusCard(session, contentIdx - 2, false, false);
+      return this.idleStatusCard(session, contentIdx - 1, false, false);
     }
 
     return { type: 'empty' };
   }
 
-  private detailControlSlots(layout: DeckLayout): { back: number; info: number; more: number; stop: number } {
+  private detailControlSlots(layout: DeckLayout): { back: number; info: number; more: number; stop: number; focus: number | null } {
     const stop = layout.keyCount - 1;
     const back = 0;
     const info = layout.keyCount > 1 ? 1 : 0;
     const more = layout.keyCount > 4 ? layout.keyCount - 2 : Math.max(0, stop - 1);
-    return { back, info, more, stop };
+    // SD+ reserves a persistent FOCUS control (slot 2) available in every detail
+    // state — working/awaiting/idle — so the terminal is always one tap away,
+    // not just when the IDLE preset row is showing. Smaller/other decks keep the
+    // old layout (FOCUS stays in the IDLE presets) to avoid crowding their grid.
+    const focus = layout.family === 'streamdeckplus' && layout.keyCount >= 8 ? 2 : null;
+    return { back, info, more, stop, focus };
   }
 
   private detailContentSlots(layout: DeckLayout, reserveMore: boolean): number[] {
     const controls = this.detailControlSlots(layout);
     const reserved = new Set([controls.back, controls.info, controls.stop]);
     if (reserveMore) reserved.add(controls.more);
+    if (controls.focus != null) reserved.add(controls.focus);
 
     const slots: number[] = [];
     for (let slot = 0; slot < layout.keyCount; slot++) {
       if (!reserved.has(slot)) slots.push(slot);
     }
     return slots;
+  }
+
+  /** The persistent FOCUS control tile (SD+). Reuses the focus-terminal preset
+   *  so the existing handleSlotPress path (`localAction: 'focus-terminal'`)
+   *  applies unchanged. */
+  private focusControlConfig(): SessionSlotConfig {
+    return {
+      type: 'preset',
+      preset: {
+        label: 'FOCUS',
+        iconSvg: FOCUS_TERMINAL_ICON_SVG,
+        color: '#1e293b',
+        textColor: '#22c55e',
+        localAction: 'focus-terminal',
+      },
+    };
   }
 }

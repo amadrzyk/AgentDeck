@@ -1128,14 +1128,24 @@ describe('OutputParser', () => {
       expect(starts).toHaveLength(0);
     });
 
-    it('emits spinner_stop after debounce (2000ms)', () => {
+    it('emits spinner_stop after debounce (800ms)', () => {
       const p = armParser();
       const stops = collectEvents(p, 'spinner_stop');
 
       p.feed('✻');
-      vi.advanceTimersByTime(2100);
+      vi.advanceTimersByTime(900);
 
       expect(stops).toHaveLength(1);
+    });
+
+    it('does NOT emit spinner_stop before the debounce window elapses', () => {
+      const p = armParser();
+      const stops = collectEvents(p, 'spinner_stop');
+
+      p.feed('✻');
+      vi.advanceTimersByTime(700); // < 800ms debounce
+
+      expect(stops).toHaveLength(0);
     });
 
     it('does NOT emit duplicate spinner_start on repeated chars', () => {
@@ -1160,12 +1170,12 @@ describe('OutputParser', () => {
       p.on('spinner_stop', () => events.push('stop'));
 
       p.feed('✳');
-      vi.advanceTimersByTime(1500); // 1500ms elapsed
+      vi.advanceTimersByTime(600); // 600ms elapsed (< 800ms debounce)
       p.feed('✢'); // resets timer
-      vi.advanceTimersByTime(1500); // 3000ms total, 1500 from last
-      expect(events).toEqual(['start']); // no stop yet
+      vi.advanceTimersByTime(600); // 1200ms total, 600 from last char
+      expect(events).toEqual(['start']); // no stop yet — timer was reset
 
-      vi.advanceTimersByTime(600); // now >2000ms from last char
+      vi.advanceTimersByTime(300); // now >800ms from last char
       expect(events).toEqual(['start', 'stop']);
     });
 

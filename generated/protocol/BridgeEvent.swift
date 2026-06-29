@@ -1996,6 +1996,7 @@ struct ADSessionInfo: Codable, Equatable {
     var cwd: String?
     var effortLevel: String?
     var elapsedSec: Double?
+    var focusUrl: String?
     var foldedSessionIds: [String]?
     var goal: String?
     var groupSize: Double?
@@ -2023,6 +2024,7 @@ struct ADSessionInfo: Codable, Equatable {
         case cwd = "cwd"
         case effortLevel = "effortLevel"
         case elapsedSec = "elapsedSec"
+        case focusUrl = "focusUrl"
         case foldedSessionIds = "foldedSessionIds"
         case goal = "goal"
         case groupSize = "groupSize"
@@ -2070,6 +2072,7 @@ extension ADSessionInfo {
         cwd: String?? = nil,
         effortLevel: String?? = nil,
         elapsedSec: Double?? = nil,
+        focusUrl: String?? = nil,
         foldedSessionIds: [String]?? = nil,
         goal: String?? = nil,
         groupSize: Double?? = nil,
@@ -2097,6 +2100,7 @@ extension ADSessionInfo {
             cwd: cwd ?? self.cwd,
             effortLevel: effortLevel ?? self.effortLevel,
             elapsedSec: elapsedSec ?? self.elapsedSec,
+            focusUrl: focusUrl ?? self.focusUrl,
             foldedSessionIds: foldedSessionIds ?? self.foldedSessionIds,
             goal: goal ?? self.goal,
             groupSize: groupSize ?? self.groupSize,

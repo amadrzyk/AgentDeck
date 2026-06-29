@@ -74,6 +74,10 @@ struct DaemonSessionEntry: Codable, Sendable, Identifiable {
     var tty: String?
     var parentTty: String?
     var startedAt: String?
+    // Warp per-session focus deep link (warp://session/<uuid>), captured from
+    // WARP_FOCUS_URL by the session bridge. Lets the deck FOCUS button raise the
+    // exact tab/window (and switch Spaces), not all Warp windows.
+    var focusUrl: String?
     // Enriched fields (from /health probe, not persisted to sessions.json)
     var state: String?
     var modelName: String?

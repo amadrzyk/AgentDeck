@@ -689,6 +689,7 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     agentType,
     core.projectName,
     daemonPortProvider,
+    process.env.WARP_FOCUS_URL,
   );
   daemonWsClient.connect(null);
   core.onShutdown(() => { daemonWsClient.close(); });
@@ -877,6 +878,9 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     tmuxSession,
     parentTty,
     tty: adapter.getTtyPath(),
+    // Warp injects WARP_FOCUS_URL=warp://session/<uuid> into each shell. Capturing
+    // it lets the deck FOCUS button raise this exact session (tab/window/Space).
+    focusUrl: process.env.WARP_FOCUS_URL,
   });
 
 

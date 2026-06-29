@@ -30,6 +30,8 @@ export interface EnrichedSession {
   /** Daemon-synthesized "what is this agent doing right now" one-liner (heuristic,
    *  upgraded to a Foundation Models summary when available). Shared by X3 + TRMNL. */
   activity?: string;
+  /** Warp per-session focus deep link (warp://session/<uuid>) for the FOCUS button. */
+  focusUrl?: string;
 }
 
 /** Cache last-known sibling state to avoid propagating undefined on transient fetch failures.
@@ -113,6 +115,7 @@ export async function enrichSessionsWithState(
       alive: true,
       startedAt: s.startedAt,
       controlMode: 'managed',
+      focusUrl: s.focusUrl,
     };
     if (s.id === ownSessionId) return { ...base, state: ownState, modelName: ownModelName, effortLevel: ownEffortLevel };
     // 1. Use fresh push-channel state if available (< 30s old)

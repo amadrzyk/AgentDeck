@@ -34,6 +34,7 @@ export interface SessionPushRegister {
   port: number;
   agentType?: string;
   projectName?: string;
+  focusUrl?: string;
 }
 
 export class DaemonWsClient {
@@ -62,6 +63,10 @@ export class DaemonWsClient {
      * Return `null` to defer — the client will keep retrying on backoff.
      */
     private readonly portProvider?: () => number | null | Promise<number | null>,
+    /** Warp per-session focus deep link (warp://session/<uuid>), captured from
+     *  WARP_FOCUS_URL. Forwarded on register so the daemon (and deck FOCUS
+     *  button) can raise the exact tab/window/Space. */
+    private readonly focusUrl?: string,
   ) {}
 
   /**
@@ -183,6 +188,7 @@ export class DaemonWsClient {
       port: this.sessionPort,
       agentType: this.agentType,
       projectName: this.projectName,
+      focusUrl: this.focusUrl,
     };
     this.ws.send(JSON.stringify(msg));
   }

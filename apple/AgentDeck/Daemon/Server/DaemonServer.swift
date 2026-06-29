@@ -2097,6 +2097,7 @@ final class DaemonServer {
         }
         let agentType = cmd["agentType"] as? String
         let projectName = cmd["projectName"] as? String ?? ""
+        let focusUrl = cmd["focusUrl"] as? String
         var entry = pushedSessionsById[sessionId] ?? DaemonSessionEntry(
             id: sessionId,
             port: port,
@@ -2106,10 +2107,12 @@ final class DaemonServer {
             tmuxSession: nil,
             tty: nil,
             parentTty: nil,
-            startedAt: nil
+            startedAt: nil,
+            focusUrl: focusUrl
         )
         // Update mutable fields on re-register (port drift, agent type change).
-        if entry.port != port || entry.agentType != agentType || entry.projectName != projectName {
+        // Preserve a previously-captured focusUrl if this register omits it.
+        if entry.port != port || entry.agentType != agentType || entry.projectName != projectName || (focusUrl != nil && entry.focusUrl != focusUrl) {
             entry = DaemonSessionEntry(
                 id: sessionId,
                 port: port,
@@ -2119,7 +2122,8 @@ final class DaemonServer {
                 tmuxSession: entry.tmuxSession,
                 tty: entry.tty,
                 parentTty: entry.parentTty,
-                startedAt: entry.startedAt
+                startedAt: entry.startedAt,
+                focusUrl: focusUrl ?? entry.focusUrl
             )
         }
         evictCodexAnonymousIfNeeded(forIncomingSid: sessionId, agentType: entry.agentType)
@@ -2156,7 +2160,8 @@ final class DaemonServer {
                 tmuxSession: entry.tmuxSession,
                 tty: entry.tty,
                 parentTty: entry.parentTty,
-                startedAt: entry.startedAt
+                startedAt: entry.startedAt,
+                focusUrl: entry.focusUrl
             )
         }
         evictCodexAnonymousIfNeeded(forIncomingSid: sessionId, agentType: entry.agentType)
@@ -5281,6 +5286,7 @@ final class DaemonServer {
     private func sessionToDict(_ s: DaemonSessionEntry) -> [String: Any] {
         var d: [String: Any] = ["id": s.id, "port": s.port, "alive": true, "projectName": s.projectName]
         if let a = s.agentType { d["agentType"] = a }
+        if let fu = s.focusUrl { d["focusUrl"] = fu }
         if let st = s.state { d["state"] = st }
         if let mn = s.modelName { d["modelName"] = mn }
         if let ef = s.effortLevel { d["effortLevel"] = ef }

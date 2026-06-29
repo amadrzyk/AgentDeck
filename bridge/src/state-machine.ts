@@ -56,6 +56,12 @@ export class StateMachine extends EventEmitter {
   private currentTool: string | null = null;
   private toolInput: string | null = null;
   private toolProgress: string | null = null;
+  /** True between PreToolUse and PostToolUse. A running tool (e.g. a long Bash
+   *  command) makes Claude stop animating its spinner glyphs, so the PTY parser
+   *  would otherwise emit `idle_detected` after SPINNER_DEBOUNCE_MS and flip the
+   *  session to IDLE mid-turn. While a tool is in flight we trust the hooks over
+   *  the PTY and suppress those spurious IDLE transitions. */
+  private toolInFlight = false;
   private options: PromptOption[] = [];
   private question: string | null = null;
   private navigable = false;
@@ -97,7 +103,15 @@ export class StateMachine extends EventEmitter {
         this.currentTool = toolName;
         this.toolInput = formatToolInput(toolName, toolInputData);
         this.toolProgress = `Using ${toolName}`;
-        this.emitSnapshot();
+        this.toolInFlight = true;
+        // A tool firing means the turn is active. If the PTY path already
+        // (wrongly) dropped us to IDLE — common when the previous tool's
+        // spinner went quiet — re-assert PROCESSING from the authoritative hook.
+        if (this.state === State.IDLE) {
+          this.transition(State.PROCESSING, 'tool_use', 'hook');
+        } else {
+          this.emitSnapshot();
+        }
         break;
       }
 
@@ -106,6 +120,7 @@ export class StateMachine extends EventEmitter {
         this.currentTool = null;
         this.toolInput = null;
         this.toolProgress = null;
+        this.toolInFlight = false;
         this.emitSnapshot();
         break;
       }
@@ -114,6 +129,7 @@ export class StateMachine extends EventEmitter {
         this.currentTool = null;
         this.toolInput = null;
         this.toolProgress = null;
+        this.toolInFlight = false;
         this.options = [];
         this.question = null;
         this.navigable = false;
@@ -134,6 +150,34 @@ export class StateMachine extends EventEmitter {
             data.input_tokens as number,
             data.output_tokens as number,
           );
+        }
+        // Authoritative permission backstop. Claude Code fires
+        // notification_type:"permission_prompt" ("Claude needs your permission")
+        // whenever it blocks on a tool approval. The PTY parser often can't
+        // recover the options here — Bash approvals lay "1. Yes / 2. No" out via
+        // absolute-column ANSI positioning split across chunks, so parseOptions
+        // sees a partial buffer and emits an incomplete/empty list, leaving the
+        // deck with no approve buttons. When the hook signals a permission prompt
+        // and we aren't already showing a usable one, synthesize the standard
+        // Yes/No so the deck always has actionable buttons. A later PTY
+        // permission_prompt/option_prompt refines these in place if it parses.
+        if (data.notification_type === 'permission_prompt') {
+          const haveUsablePrompt =
+            this.state === State.AWAITING_PERMISSION && this.looksLikePermissionPrompt();
+          if (!haveUsablePrompt) {
+            this.options = [
+              { index: 0, label: 'Yes', shortcut: 'y' },
+              { index: 1, label: 'No', shortcut: 'n' },
+            ];
+            this.question = this.question || 'Do you want to proceed?';
+            this.navigable = false;
+            this.cursorIndex = 0;
+            if (this.state !== State.AWAITING_PERMISSION) {
+              this.transition(State.AWAITING_PERMISSION, 'permission_prompt', 'hook');
+            } else {
+              this.emitSnapshot();
+            }
+          }
         }
         break;
       }
@@ -262,6 +306,14 @@ export class StateMachine extends EventEmitter {
         break;
 
       case 'spinner_stop':
+        // A tool running between PreToolUse/PostToolUse silences the spinner;
+        // don't mistake that for turn completion. Trust the hooks instead.
+        // Scoped to PROCESSING: in AWAITING states this handler is what exits to
+        // IDLE when the user responds via keyboard, so it must not be suppressed.
+        if (this.toolInFlight && this.state === State.PROCESSING) {
+          debug('SM', 'spinner_stop ignored — tool in flight (PreToolUse without PostToolUse)');
+          break;
+        }
         // Spinner stopped — if we're in an active state, go to IDLE
         if (
           this.state === State.PROCESSING ||
@@ -281,6 +333,13 @@ export class StateMachine extends EventEmitter {
         break;
 
       case 'idle':
+        // See spinner_stop: a tool in flight silences the spinner/prompt; the
+        // turn is not done until PostToolUse. Trust the hooks over the PTY.
+        // Scoped to PROCESSING (see spinner_stop) so AWAITING can still settle.
+        if (this.toolInFlight && this.state === State.PROCESSING) {
+          debug('SM', 'idle ignored — tool in flight (PreToolUse without PostToolUse)');
+          break;
+        }
         if (
           this.state === State.PROCESSING ||
           this.state === State.AWAITING_PERMISSION ||
@@ -448,6 +507,7 @@ export class StateMachine extends EventEmitter {
         this.currentTool = null;
         this.toolInput = null;
         this.toolProgress = null;
+        this.toolInFlight = false;
         this.options = [];
         this.question = null;
         this.navigable = false;
@@ -506,6 +566,14 @@ export class StateMachine extends EventEmitter {
     }
   }
 
+  /** Whether the current options already form a usable yes/no permission prompt.
+   *  Used to decide if the Notification permission backstop needs to synthesize
+   *  default options or can leave a richer PTY-parsed prompt untouched. */
+  private looksLikePermissionPrompt(): boolean {
+    const labels = this.options.map((o) => o.label.toLowerCase());
+    return labels.some((l) => /^yes\b/.test(l)) && labels.some((l) => /^no\b/.test(l));
+  }
+
   /** Reset the stuck timer on PTY activity. PROCESSING uses the short hang
    *  timeout; AWAITING_* use the long backstop. Re-arming on activity makes the
    *  backstop "N minutes of genuine silence" rather than a hard cap from entry,
@@ -535,6 +603,9 @@ export class StateMachine extends EventEmitter {
       this.currentTool = null;
       this.toolInput = null;
       this.toolProgress = null;
+      // Clear the in-flight guard so a missed PostToolUse can't wedge the next
+      // turn — the stuck timer is the backstop for exactly that lost hook.
+      this.toolInFlight = false;
       this.options = [];
       this.question = null;
       this.navigable = false;

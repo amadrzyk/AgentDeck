@@ -234,11 +234,16 @@ initSessionSlots((result) => {
       });
       break;
 
-    case 'focus-terminal':
+    case 'focus-terminal': {
+      // Prefer the focused session's Warp per-session deep link so we raise the
+      // exact tab/window (and switch Spaces), not every Warp window. Falls back
+      // to app-level activate for sessions not launched inside Warp.
+      const focusUrl = getSessionSlotManager().getFocusedSession()?.focusUrl;
       import('./utility-modes/macos.js').then(({ activateWarpTerminal }) => {
-        void activateWarpTerminal().catch(() => {});
+        void activateWarpTerminal(focusUrl).catch(() => {});
       });
       break;
+    }
 
     case 'switch-model': {
       const mgr = getSessionSlotManager();

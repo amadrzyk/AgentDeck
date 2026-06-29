@@ -363,6 +363,7 @@ export interface SessionInfo {
   promptType?: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';  // shape of the awaiting prompt (per-session, for inline approve/deny + option buttons on rich panels)
   options?: PromptOption[];  // per-session awaiting options (multi_select) — lets a 10-up panel render inline choices for any session, not just the focused one
   elapsedSec?: number;  // derived seconds since startedAt — devices without reliable NTP render elapsed without recomputing from a wall clock
+  focusUrl?: string;  // Warp per-session focus deep link (warp://session/<uuid>) — FOCUS button raises this exact tab/window/Space
 }
 
 export interface SessionsListEvent {
