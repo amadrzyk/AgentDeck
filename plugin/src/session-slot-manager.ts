@@ -36,7 +36,7 @@ export interface PresetAction {
   textColor: string;
   subtitle?: string;       // secondary text below label (e.g. model name)
   prompt?: string;         // send_prompt text
-  localAction?: string;    // local action: 'open_gateway', 'switch_model'
+  localAction?: string;    // local action: 'open_gateway', 'switch_model', 'focus-terminal'
   loading?: boolean;       // show loading indicator
 }
 
@@ -127,6 +127,7 @@ const GO_ON_ICON_SVG = `<polygon points="60,20 100,44 60,68" fill="#22c55e" opac
 const REVIEW_ICON_SVG = `<rect x="42" y="18" width="60" height="48" rx="4" fill="none" stroke="#93c5fd" stroke-width="2"/><path d="M52,34 h40 M52,46 h32 M52,58 h24" stroke="#93c5fd" stroke-width="1.5" opacity="0.6"/>`;
 const COMMIT_ICON_SVG = `<circle cx="72" cy="40" r="20" fill="none" stroke="#22c55e" stroke-width="2"/><polyline points="62,40 70,48 84,32" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"/>`;
 const CLEAR_ICON_SVG = `<line x1="52" y1="24" x2="92" y2="64" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/><line x1="92" y1="24" x2="52" y2="64" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>`;
+const FOCUS_TERMINAL_ICON_SVG = `<rect x="40" y="40" width="64" height="48" rx="4" fill="none" stroke="#22c55e" stroke-width="2"/><line x1="50" y1="52" x2="86" y2="52" stroke="#22c55e" stroke-width="1.5" opacity="0.6"/><line x1="50" y1="64" x2="78" y2="64" stroke="#22c55e" stroke-width="1.5" opacity="0.6"/><line x1="50" y1="76" x2="90" y2="76" stroke="#22c55e" stroke-width="1.5" opacity="0.6"/>`;
 
 // Suggested-prompt quick-send (relocated from the SD+ E2 idle encoder rotate/press
 // to a keypad button). A spark/lightbulb glyph; amber to read as a hint, not a
@@ -154,6 +155,7 @@ const CC_PRESET_DEFS: Array<Omit<PresetAction, 'iconSvg'> & { iconSvg?: string; 
   { label: 'REVIEW', iconSvg: REVIEW_ICON_SVG, color: '#1e293b', textColor: '#93c5fd', prompt: '/review' },
   { label: 'COMMIT', iconSvg: COMMIT_ICON_SVG, color: '#1e293b', textColor: '#22c55e', prompt: '/commit' },
   { label: 'CLEAR', iconSvg: CLEAR_ICON_SVG, color: '#1e293b', textColor: '#94a3b8', prompt: '/clear' },
+  { label: 'FOCUS', iconSvg: FOCUS_TERMINAL_ICON_SVG, color: '#1e293b', textColor: '#22c55e', localAction: 'focus-terminal' },
 ];
 
 const DEFAULT_LAYOUT: DeckLayout = { columns: 4, rows: 2, keyCount: 8, family: 'streamdeckplus' };
@@ -457,7 +459,7 @@ export class SessionSlotManager {
 
   /** Handle button press. Returns action to take. */
   handleSlotPress(slot: number, layout?: DeckLayout): {
-    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'refresh-usage' | 'cycle-usage-page' | 'none';
+    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'focus-terminal' | 'refresh-usage' | 'cycle-usage-page' | 'none';
     sessionId?: string;
     sessionPort?: number;
     optionIndex?: number;
@@ -497,6 +499,9 @@ export class SessionSlotManager {
         }
         if (config.preset?.localAction === 'switch_model') {
           return { action: 'switch-model' };
+        }
+        if (config.preset?.localAction === 'focus-terminal') {
+          return { action: 'focus-terminal' };
         }
         if (config.preset?.prompt) {
           return { action: 'send-prompt', promptText: config.preset.prompt };
@@ -834,7 +839,7 @@ export class SessionSlotManager {
       }
     }
 
-    // Claude Code IDLE: show quick action presets (GO ON, REVIEW, COMMIT, CLEAR)
+    // Claude Code IDLE: show quick action presets (GO ON, REVIEW, COMMIT, CLEAR, FOCUS)
     if (!isOpenClaw && this._detailState === State.IDLE && contentIdx < CC_PRESET_DEFS.length) {
       const def = CC_PRESET_DEFS[contentIdx];
       const preset: PresetAction = {
@@ -843,6 +848,7 @@ export class SessionSlotManager {
         color: def.color,
         textColor: def.textColor,
         prompt: def.prompt,
+        localAction: def.localAction,
       };
       return { type: 'preset', preset };
     }

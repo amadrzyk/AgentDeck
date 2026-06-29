@@ -301,6 +301,15 @@ export async function attachTmuxInIterm(sessionName: string): Promise<void> {
   ).catch(() => {});
 }
 
+/** Activate Warp terminal. */
+export async function activateWarpTerminal(): Promise<void> {
+  await osascript(
+    'tell application "Warp"\n' +
+    '  activate\n' +
+    'end tell',
+  ).catch(() => {});
+}
+
 // ---- iTerm2 Window Cycling & Exposé ----
 
 /** Cmd+` (next window) */

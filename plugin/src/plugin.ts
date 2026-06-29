@@ -234,6 +234,12 @@ initSessionSlots((result) => {
       });
       break;
 
+    case 'focus-terminal':
+      import('./utility-modes/macos.js').then(({ activateWarpTerminal }) => {
+        void activateWarpTerminal().catch(() => {});
+      });
+      break;
+
     case 'switch-model': {
       const mgr = getSessionSlotManager();
       mgr.startModelSwitch();
