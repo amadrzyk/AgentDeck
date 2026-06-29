@@ -379,9 +379,27 @@ export class OutputParser extends EventEmitter {
       PERMISSION_YN.test(chunk) ||
       OPTION_NUMBERED.test(chunk) || OPTION_BULLET.test(chunk);
 
+    // A permission/option prompt can arrive while the spinner is still
+    // "active" — Claude lays out a Bash approval ("Do you want to proceed? /
+    // 1. Yes / 2. No") using absolute-column ANSI (\x1b[7G) split across PTY
+    // chunks, so the per-chunk regexes above (hasInteractive) miss it. The
+    // accumulated buffer, however, holds the whole prompt. Detect it there so
+    // we stop the spinner immediately instead of waiting out the 800ms spinner
+    // debounce — that wait was the ~9s "prompt is up in the CLI but the deck
+    // still shows working" lag.
+    const bufTail = this.buffer.slice(-2000);
+    // A bare idle prompt in the current chunk ("❯ " with nothing else) means the
+    // prompt was just dismissed — don't let stale option text still in the
+    // buffer re-trigger prompt detection; let the genuine-idle path run.
+    const chunkNonWsContent = chunk.replace(/\s/g, '');
+    const chunkIsBareIdle = chunkNonWsContent === '❯' || chunkNonWsContent === '>';
+    const bufferHasPrompt = !chunkIsBareIdle && (
+      YES_NO_ALWAYS.test(bufTail) || PERMISSION_YN.test(bufTail) ||
+      (chunk.includes('❯') && OPTION_NUMBERED.test(bufTail)));
+
     // --- Spinner + prompt handling ---
     if (this.spinnerActive) {
-      if (hasInteractive) {
+      if (hasInteractive || bufferHasPrompt) {
         // Interactive prompt arrived during spinner (e.g. "❯ 1. Yes")
         // Stop spinner but DON'T emit idle — fall through to prompt detection
         debug('Parser', 'interactive prompt during spinner — stopping spinner');
@@ -414,7 +432,10 @@ export class OutputParser extends EventEmitter {
     }
 
     // --- Spinner detection (only after first idle prompt seen) ---
-    if (this.seenFirstIdle && SPINNER_CHARS.test(chunk)) {
+    // Skip when the buffer already holds a prompt: a chunk can carry both a
+    // trailing spinner glyph and the just-arrived prompt, and re-arming the
+    // spinner here would re-suppress the prompt for another debounce window.
+    if (this.seenFirstIdle && SPINNER_CHARS.test(chunk) && !bufferHasPrompt) {
       // Only treat as spinner if chunk is relatively short (< 80 chars of non-whitespace)
       // This prevents matching spinner chars in large text blocks (responses, banners)
       const nonWs = chunk.replace(/\s/g, '').length;
@@ -442,6 +463,29 @@ export class OutputParser extends EventEmitter {
 
     // While spinner is active, don't match other interactive patterns
     if (this.spinnerActive) return;
+
+    // Buffer holds a prompt but the current chunk is just a column-positioned
+    // fragment (so the chunk-based YES_NO_ALWAYS/PERMISSION_YN/OPTION_NUMBERED
+    // checks below would all miss). Reparse the buffer now and emit, instead of
+    // waiting for a later chunk or the option debounce — this is what makes the
+    // approve buttons appear promptly instead of ~9s late.
+    if (bufferHasPrompt && !YES_NO_ALWAYS.test(chunk) && !PERMISSION_YN.test(chunk) && !OPTION_NUMBERED.test(chunk)) {
+      const parsed = this.parseOptions(bufTail);
+      if (parsed.options.length >= 2 && this.looksLikePermission(parsed.options)) {
+        const options = parsed.options.map(opt => ({
+          ...opt,
+          shortcut: opt.shortcut || this.inferShortcut(opt.label),
+        }));
+        this.lastNavigableEmit = parsed.navigable;
+        this.lastCursorIndex = parsed.cursorIndex;
+        this.resetIdleTimer();
+        this.resetOptionTimer();
+        debug('Parser', `EMIT permission_prompt (${options.length} options, from buffer during/after spinner)`);
+        this.emit('permission_prompt', { options, promptType: 'yes_no_always', navigable: parsed.navigable, cursorIndex: parsed.cursorIndex, question: this.parsePromptQuestion() });
+        this.startInteractiveCooldown();
+        return;
+      }
+    }
 
     // --- Diff prompt ---
     if (DIFF_PROMPT.test(chunk)) {

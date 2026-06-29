@@ -42,18 +42,27 @@ export interface EnrichedSession {
 const siblingStateCache = new Map<string, { state: string; modelName?: string; effortLevel?: string; updatedAt: number }>();
 const LIVENESS_GRACE_MS = 20_000;
 
+/** Awaiting-prompt payload carried alongside push state (so non-focused awaiting
+ *  sessions render approve/deny buttons on the deck). */
+export interface PushAwaiting {
+  options?: PromptOption[];
+  navigable?: boolean;
+  question?: string;
+  promptType?: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review';
+}
+
 /** Push-channel state cache — populated by DaemonWsClient session_push_state messages */
-const pushStateCache = new Map<string, { state: string; modelName?: string; effortLevel?: string; updatedAt: number }>();
+const pushStateCache = new Map<string, { state: string; modelName?: string; effortLevel?: string; awaiting?: PushAwaiting; updatedAt: number }>();
 
 /** Update push-channel cache (called from daemon-server when session_push_state arrives) */
-export function updatePushState(sessionId: string, state: string, modelName?: string, effortLevel?: string): void {
-  pushStateCache.set(sessionId, { state, modelName, effortLevel, updatedAt: Date.now() });
+export function updatePushState(sessionId: string, state: string, modelName?: string, effortLevel?: string, awaiting?: PushAwaiting): void {
+  pushStateCache.set(sessionId, { state, modelName, effortLevel, awaiting, updatedAt: Date.now() });
   // Also update sibling cache so it stays consistent
   siblingStateCache.set(sessionId, { state, modelName, effortLevel, updatedAt: Date.now() });
 }
 
 /** Check if push-channel has fresh state (< 30s old) */
-export function getPushState(sessionId: string): { state: string; modelName?: string; effortLevel?: string } | undefined {
+export function getPushState(sessionId: string): { state: string; modelName?: string; effortLevel?: string; awaiting?: PushAwaiting } | undefined {
   const entry = pushStateCache.get(sessionId);
   if (!entry) return undefined;
   if (Date.now() - entry.updatedAt > 30_000) {
@@ -62,7 +71,7 @@ export function getPushState(sessionId: string): { state: string; modelName?: st
     pushStateCache.delete(sessionId);
     return undefined;
   }
-  return { state: entry.state, modelName: entry.modelName, effortLevel: entry.effortLevel };
+  return { state: entry.state, modelName: entry.modelName, effortLevel: entry.effortLevel, awaiting: entry.awaiting };
 }
 
 /** Clear cache entry when a session is removed (call from session-registry cleanup) */
@@ -118,9 +127,20 @@ export async function enrichSessionsWithState(
       focusUrl: s.focusUrl,
     };
     if (s.id === ownSessionId) return { ...base, state: ownState, modelName: ownModelName, effortLevel: ownEffortLevel };
-    // 1. Use fresh push-channel state if available (< 30s old)
+    // 1. Use fresh push-channel state if available (< 30s old). Carry awaiting
+    //    options through so the deck can render approve/deny buttons for this
+    //    session even when it isn't the focused one.
     const pushed = getPushState(s.id);
-    if (pushed) return { ...base, state: pushed.state, modelName: pushed.modelName, effortLevel: pushed.effortLevel };
+    if (pushed) return {
+      ...base,
+      state: pushed.state,
+      modelName: pushed.modelName,
+      effortLevel: pushed.effortLevel,
+      options: pushed.awaiting?.options,
+      navigable: pushed.awaiting?.navigable,
+      question: pushed.awaiting?.question,
+      promptType: pushed.awaiting?.promptType,
+    };
     // 2. Fall back to HTTP polling
     try {
       const res = await fetch(`http://127.0.0.1:${s.port}/health`, { signal: AbortSignal.timeout(2000) });

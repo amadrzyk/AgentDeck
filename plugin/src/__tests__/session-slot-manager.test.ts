@@ -271,11 +271,12 @@ describe('SessionSlotManager detail layout', () => {
       { index: 4, label: 'Explain' },
     ]);
 
-    // FOCUS control at slot 2 leaves slots 3-5 for options (capacity 3 → 2 pages).
+    // SD+ awaiting: top row = BACK(0), INFO(1), FOCUS(2), MORE(3); options pinned
+    // to the bottom row (4,5,6), ESC at 7. Capacity 3 → 2 pages for 5 options.
     expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
-    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
-    expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 2 });
-    expect(manager.getSlotConfig(6, SD_PLUS_LAYOUT)).toMatchObject({ type: 'next-page', label: '1/2' });
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ type: 'next-page', label: '1/2' });
+    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
+    expect(manager.getSlotConfig(6, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 2 });
     expect(manager.getSlotConfig(7, SD_PLUS_LAYOUT)).toMatchObject({ type: 'esc', label: 'active' });
   });
 });
@@ -293,14 +294,41 @@ describe('SD+ keypad relocation (Phase 2)', () => {
       { index: 2, label: 'No', shortcut: 'n' },
     ]);
 
-    // FOCUS control at slot 2; options fill the content slots from slot 3.
+    // FOCUS control at slot 2; options pinned to the bottom row: Yes=4 (5th key),
+    // Yes-always=5 (6th key), No=6 (7th key), ESC=7. Stable positions every time.
     expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
-    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
-    expect(manager.handleSlotPress(3, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 0 });
-    expect(manager.handleSlotPress(5, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 2 });
+    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
+    expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 1 });
+    expect(manager.getSlotConfig(6, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 2 });
+    expect(manager.handleSlotPress(4, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 0 });
+    expect(manager.handleSlotPress(6, SD_PLUS_LAYOUT)).toMatchObject({ action: 'select-option', optionIndex: 2 });
     // ESC remains on the last key to cancel.
     expect(manager.getSlotConfig(7, SD_PLUS_LAYOUT)).toMatchObject({ type: 'esc', label: 'active' });
     expect(manager.handleSlotPress(7, SD_PLUS_LAYOUT)).toMatchObject({ action: 'esc' });
+  });
+
+  it('pins Yes/Yes-always/No to the bottom row in a stable spot (SD+)', () => {
+    const manager = new SessionSlotManager();
+    manager.updateSessions([makeSession({ state: State.AWAITING_PERMISSION })], false);
+    manager.enterDetailView('session-1');
+
+    // 2-option prompt: Yes at key 5 (slot 4), No at key 6 (slot 5) — leaving the
+    // typical "Yes / Yes-always / No" middle slot empty rather than reflowing.
+    manager.updateDetailState(State.AWAITING_PERMISSION, [
+      { index: 0, label: 'Yes', shortcut: 'y' },
+      { index: 1, label: 'No', shortcut: 'n' },
+    ]);
+    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
+    expect(manager.getSlotConfig(5, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 1 });
+
+    // 3-option prompt: Yes=4, Yes-always=5, No=6 — Yes stays put at slot 4.
+    manager.updateDetailState(State.AWAITING_PERMISSION, [
+      { index: 0, label: 'Yes', shortcut: 'y' },
+      { index: 1, label: "Yes, and don't ask again", shortcut: 'a' },
+      { index: 2, label: 'No', shortcut: 'n' },
+    ]);
+    expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 0 });
+    expect(manager.getSlotConfig(6, SD_PLUS_LAYOUT)).toMatchObject({ type: 'option', optionIndex: 2 });
   });
 
   it('keeps the FOCUS control reachable in PROCESSING and AWAITING on SD+', () => {
@@ -333,21 +361,21 @@ describe('SD+ keypad relocation (Phase 2)', () => {
     expect(focusTiles).toHaveLength(1);
   });
 
-  it('shows a SUGGESTED quick-send button leading the IDLE detail content on SD+', () => {
+  it('shows a CLOSE (Cmd+W) button leading the IDLE detail content on SD+', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions([makeSession({ state: State.IDLE })], false);
     manager.enterDetailView('session-1');
-    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8', undefined, undefined, 'run the test suite');
+    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'claude-opus-4-8');
 
     // Slot 2 is the persistent FOCUS control; the leading content slot (slot 3
-    // on SD+) = the suggested-prompt preset.
+    // on SD+) = the CLOSE quick-action (replaces the former SUGGESTED tile).
     expect(manager.getSlotConfig(2, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'FOCUS' } });
     expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({
       type: 'preset',
-      preset: { label: 'SUGGESTED', prompt: 'run the test suite' },
+      preset: { label: 'CLOSE', localAction: 'close-window' },
     });
-    // Pressing it sends the suggestion as a prompt.
-    expect(manager.handleSlotPress(3, SD_PLUS_LAYOUT)).toMatchObject({ action: 'send-prompt', promptText: 'run the test suite' });
+    // Pressing it dispatches the close-window action.
+    expect(manager.handleSlotPress(3, SD_PLUS_LAYOUT)).toMatchObject({ action: 'close-window' });
     // The CC quick-action presets follow (shifted by one).
     expect(manager.getSlotConfig(4, SD_PLUS_LAYOUT)).toMatchObject({ type: 'preset', preset: { label: 'GO ON' } });
   });
@@ -366,19 +394,19 @@ describe('SD+ keypad relocation (Phase 2)', () => {
     expect(firstContent).toMatchObject({ type: 'preset', preset: { label: 'GO ON' } });
   });
 
-  it('drops the SUGGESTED button when the session leaves IDLE', () => {
+  it('shows CLOSE only in IDLE, not while PROCESSING', () => {
     const manager = new SessionSlotManager();
     manager.updateSessions([makeSession({ state: State.IDLE })], false);
     manager.enterDetailView('session-1');
-    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'm', undefined, undefined, 'do the thing');
-    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ preset: { label: 'SUGGESTED' } });
+    manager.updateDetailState(State.IDLE, [], undefined, undefined, undefined, 'm');
+    expect(manager.getSlotConfig(3, SD_PLUS_LAYOUT)).toMatchObject({ preset: { label: 'CLOSE' } });
 
-    // A PROCESSING update with a stale suggestion must not surface the button.
-    manager.updateDetailState(State.PROCESSING, [], 'Edit', 'x.ts', undefined, 'm', undefined, undefined, 'do the thing');
-    const suggested = [0, 1, 2, 3, 4, 5, 6, 7]
+    // PROCESSING shows the tool/status tile, not the CLOSE quick-action.
+    manager.updateDetailState(State.PROCESSING, [], 'Edit', 'x.ts', undefined, 'm');
+    const closeTiles = [0, 1, 2, 3, 4, 5, 6, 7]
       .map(i => manager.getSlotConfig(i, SD_PLUS_LAYOUT))
-      .filter(c => c.type === 'preset' && c.preset?.label === 'SUGGESTED');
-    expect(suggested).toHaveLength(0);
+      .filter(c => c.type === 'preset' && c.preset?.label === 'CLOSE');
+    expect(closeTiles).toHaveLength(0);
   });
 });
 

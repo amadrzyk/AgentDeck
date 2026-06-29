@@ -742,9 +742,11 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
     core.maybeBroadcastSessionsList();
 
-    // Backward-compat prompt_options
+    // Derive promptType once — used for both the prompt_options broadcast and
+    // the daemon push so non-focused awaiting sessions render the right buttons.
+    let promptType: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review' | undefined;
     if (snapshot.options.length > 0) {
-      let promptType: 'yes_no' | 'yes_no_always' | 'multi_select' | 'diff_review' = 'multi_select';
+      promptType = 'multi_select';
       if (snapshot.state === State.AWAITING_PERMISSION) {
         promptType = snapshot.options.length > 2 ? 'yes_no_always' : 'yes_no';
       } else if (snapshot.state === State.AWAITING_DIFF) {
@@ -760,8 +762,22 @@ export async function startSession(opts: SessionOptions): Promise<void> {
 
     core.broadcastUsage();
 
-    // Push state to daemon via internal WS
-    daemonWsClient.pushState(snapshot.state, snapshot.modelName ?? undefined, snapshot.effortLevel ?? undefined);
+    // Push state to daemon via internal WS, including awaiting options so the
+    // daemon's sessions_list carries them for EVERY awaiting session (the deck
+    // can then render approve/deny buttons even when this session isn't focused).
+    daemonWsClient.pushState(
+      snapshot.state,
+      snapshot.modelName ?? undefined,
+      snapshot.effortLevel ?? undefined,
+      snapshot.options.length > 0
+        ? {
+            options: snapshot.options,
+            navigable: snapshot.navigable,
+            question: snapshot.question ?? undefined,
+            promptType,
+          }
+        : undefined,
+    );
 
     // Encoder + button state
     const encEvt = computeEncoderState();
@@ -790,7 +806,15 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     switch (cmd.type) {
       case 'select_option': {
         const snapshot = core.stateMachine.getSnapshot();
-        if (snapshot.navigable) {
+        // Permission prompts are numbered ("1. Yes / 2. No / 3. ...") and accept
+        // the digit key directly. Prefer that over arrow navigation: the old
+        // navigable path stepped the cursor by (index - cursorIndex), and a stale
+        // cursorIndex (PTY redraw lag) made the step land on the wrong row, so the
+        // press appeared to do nothing and had to be repeated. The digit is
+        // absolute and unambiguous.
+        if (snapshot.state === State.AWAITING_PERMISSION) {
+          adapter.writeInput(String(cmd.index + 1) + '\r');
+        } else if (snapshot.navigable) {
           const delta = cmd.index - snapshot.cursorIndex;
           if (delta !== 0) {
             const arrow = delta > 0 ? '\x1b[B' : '\x1b[A';

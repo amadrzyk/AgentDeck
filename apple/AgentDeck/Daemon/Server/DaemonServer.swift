@@ -2164,6 +2164,17 @@ final class DaemonServer {
                 focusUrl: entry.focusUrl
             )
         }
+        // Awaiting-prompt payload so the deck renders approve/deny buttons for
+        // this session even when it isn't the focused one (mirrors the /health
+        // probe enrichment path above). Clear it when the prompt is gone.
+        entry.navigable = cmd["navigable"] as? Bool
+        entry.question = cmd["question"] as? String
+        entry.promptType = cmd["promptType"] as? String
+        if let rawOptions = cmd["options"] as? [[String: Any]] {
+            entry.options = rawOptions.map { $0.mapValues(AnyCodable.init) }
+        } else {
+            entry.options = nil
+        }
         evictCodexAnonymousIfNeeded(forIncomingSid: sessionId, agentType: entry.agentType)
         pushedSessionsById[sessionId] = entry
 

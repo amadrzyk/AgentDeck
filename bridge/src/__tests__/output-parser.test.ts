@@ -1148,6 +1148,25 @@ describe('OutputParser', () => {
       expect(stops).toHaveLength(0);
     });
 
+    it('emits permission_prompt immediately when a prompt arrives mid-spinner (no debounce wait)', () => {
+      const p = armParser();
+      const perms = collectEvents(p, 'permission_prompt');
+
+      // Spinner running.
+      p.feed('✻ Working');
+      // The Bash approval lands while the spinner is still "active". The prompt
+      // text arrives in its own chunk (numbered options + cursor); the parser
+      // should detect it from the buffer and emit right away, NOT wait out the
+      // 800ms spinner debounce.
+      p.feed('Do you want to proceed?\n❯ 1. Yes\n  2. No\n');
+      vi.advanceTimersByTime(200); // only the option debounce, well under 800ms
+
+      expect(perms).toHaveLength(1);
+      const labels = perms[0].options.map((o: any) => o.label);
+      expect(labels).toContain('Yes');
+      expect(labels).toContain('No');
+    });
+
     it('does NOT emit duplicate spinner_start on repeated chars', () => {
       const p = armParser();
       vi.advanceTimersByTime(500);

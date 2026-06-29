@@ -245,6 +245,16 @@ initSessionSlots((result) => {
       break;
     }
 
+    case 'close-window': {
+      // Close the focused terminal window (Cmd+W). Uses the per-session Warp
+      // deep link to target the exact window before sending the keystroke.
+      const focusUrl = getSessionSlotManager().getFocusedSession()?.focusUrl;
+      import('./utility-modes/macos.js').then(({ closeWarpWindow }) => {
+        void closeWarpWindow(focusUrl).catch(() => {});
+      });
+      break;
+    }
+
     case 'switch-model': {
       const mgr = getSessionSlotManager();
       mgr.startModelSwitch();
@@ -426,6 +436,29 @@ connMgr.on('connection', (ev: ConnectionEvent) => {
 connMgr.on('sessions_list', (ev: { type: 'sessions_list'; sessions: SessionInfo[] }) => {
   dlog('Plugin', `sessions_list: ${ev.sessions.length} sessions`);
   updateSessionSlotSessions(ev.sessions, connMgr.isGatewayAvailable());
+
+  // Detail view falls back to per-session options from sessions_list. The live
+  // state_update relay only covers the focused session; when the focused
+  // session is awaiting but its options arrived via sessions_list (e.g. it
+  // wasn't the relay target when the prompt fired), sync them here so the
+  // approve/deny buttons render instead of empty slots.
+  if (isInDetailView()) {
+    const focused = getFocusedSession();
+    const match = focused ? ev.sessions.find(s => s.id === focused.id) : undefined;
+    if (match?.options && match.options.length > 0) {
+      updateDetailViewState(
+        (match.state as State) ?? currentState,
+        match.options,
+        match.currentTool,
+        undefined,
+        match.question,
+        match.modelName,
+        undefined,
+        match.effortLevel,
+        undefined,
+      );
+    }
+  }
   // Forward to Control Tower utility mode
   updateTowerSessions(
     ev.sessions.map(s => ({

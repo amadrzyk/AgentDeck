@@ -309,15 +309,45 @@ export async function attachTmuxInIterm(sessionName: string): Promise<void> {
  */
 export async function activateWarpTerminal(focusUrl?: string): Promise<void> {
   if (focusUrl && /^warp(preview)?:\/\//.test(focusUrl)) {
+    // `open <url>` raises the exact tab/window, but on some machines it does NOT
+    // bring Warp to the foreground — and macOS's "switch to a Space with open
+    // windows for the application" only fires on app activation. So follow the
+    // deep link with an explicit activate; without it the window is focused on
+    // its own Space but the desktop doesn't switch to it.
     await new Promise<void>((resolve) => {
       execFile('open', [focusUrl], { timeout: 3000 }, () => resolve());
     });
+    await osascript(
+      'tell application "Warp"\n' +
+      '  activate\n' +
+      'end tell',
+    ).catch(() => {});
     return;
   }
   await osascript(
     'tell application "Warp"\n' +
     '  activate\n' +
     'end tell',
+  ).catch(() => {});
+}
+
+/**
+ * Close the focused terminal window (Cmd+W). Raises the exact Warp window via
+ * the per-session deep link first (so Cmd+W targets the right window), then
+ * sends the keystroke through System Events. Falls back to app-level activate
+ * when no per-session focus URL is available.
+ */
+export async function closeWarpWindow(focusUrl?: string): Promise<void> {
+  if (focusUrl && /^warp(preview)?:\/\//.test(focusUrl)) {
+    await new Promise<void>((resolve) => {
+      execFile('open', [focusUrl], { timeout: 3000 }, () => resolve());
+    });
+  }
+  // Activate Warp, then send Cmd+W to the frontmost (now-focused) window.
+  await osascript(
+    'tell application "Warp" to activate\n' +
+    'delay 0.15\n' +
+    'tell application "System Events" to keystroke "w" using command down',
   ).catch(() => {});
 }
 

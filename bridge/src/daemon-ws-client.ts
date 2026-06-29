@@ -13,6 +13,7 @@
 
 import WebSocket from 'ws';
 import { debug } from './logger.js';
+import type { PromptOption } from '@agentdeck/shared';
 
 const TAG = 'DaemonWsClient';
 const RECONNECT_BASE = 2000;
@@ -26,6 +27,14 @@ export interface SessionPushState {
   effortLevel?: string;
   projectName?: string;
   agentType?: string;
+  // Awaiting-prompt payload so the daemon (and deck) can render approve/deny
+  // buttons for ANY awaiting session, not just the one the deck has focused.
+  // Without these the daemon's sessions_list carries opts=0 for non-focused
+  // sessions and the detail view shows empty option slots.
+  options?: PromptOption[];
+  navigable?: boolean;
+  question?: string;
+  promptType?: string;
 }
 
 export interface SessionPushRegister {
@@ -85,7 +94,12 @@ export class DaemonWsClient {
   }
 
   /** Push state update to daemon */
-  pushState(state: string, modelName?: string, effortLevel?: string): void {
+  pushState(
+    state: string,
+    modelName?: string,
+    effortLevel?: string,
+    awaiting?: { options?: PromptOption[]; navigable?: boolean; question?: string; promptType?: string },
+  ): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const msg: SessionPushState = {
       type: 'session_push_state',
@@ -95,6 +109,10 @@ export class DaemonWsClient {
       effortLevel,
       projectName: this.projectName,
       agentType: this.agentType,
+      options: awaiting?.options,
+      navigable: awaiting?.navigable,
+      question: awaiting?.question,
+      promptType: awaiting?.promptType,
     };
     this.ws.send(JSON.stringify(msg));
   }

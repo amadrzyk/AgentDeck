@@ -132,21 +132,23 @@ const FOCUS_TERMINAL_ICON_SVG = `<rect x="40" y="40" width="64" height="48" rx="
 // Suggested-prompt quick-send (relocated from the SD+ E2 idle encoder rotate/press
 // to a keypad button). A spark/lightbulb glyph; amber to read as a hint, not a
 // command. The full suggestion rides `prompt`; the subtitle previews it.
-const SUGGEST_ICON_SVG = [
-  `<path d="M72 18a24 24 0 0 0-14 43c3 2 4 5 4 8v3h20v-3c0-3 1-6 4-8a24 24 0 0 0-14-43z" fill="#f59e0b" opacity="0.18" stroke="#fbbf24" stroke-width="2.5"/>`,
-  `<line x1="63" y1="78" x2="81" y2="78" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>`,
-  `<line x1="66" y1="86" x2="78" y2="86" stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>`,
+// Window with an X — "close this terminal window" (Cmd+W).
+const CLOSE_WINDOW_ICON_SVG = [
+  `<rect x="42" y="40" width="60" height="48" rx="4" fill="none" stroke="#f87171" stroke-width="2.5"/>`,
+  `<line x1="42" y1="52" x2="102" y2="52" stroke="#f87171" stroke-width="2"/>`,
+  `<line x1="60" y1="62" x2="84" y2="86" stroke="#f87171" stroke-width="3" stroke-linecap="round"/>`,
+  `<line x1="84" y1="62" x2="60" y2="86" stroke="#f87171" stroke-width="3" stroke-linecap="round"/>`,
 ].join('');
 
-/** Build the suggested-prompt quick-send keypad preset (SD+ idle detail view). */
-function buildSuggestPreset(prompt: string): PresetAction {
+/** Build the close-window keypad preset (SD+ idle detail view). Sends Cmd+W to
+ *  the focused terminal window. Replaces the SUGGESTED quick-send tile. */
+function buildCloseWindowPreset(): PresetAction {
   return {
-    label: 'SUGGESTED',
-    iconSvg: SUGGEST_ICON_SVG,
-    color: '#3a2a0f',
-    textColor: '#fbbf24',
-    subtitle: truncateStr(prompt, 18),
-    prompt,
+    label: 'CLOSE',
+    iconSvg: CLOSE_WINDOW_ICON_SVG,
+    color: '#3a1414',
+    textColor: '#f87171',
+    localAction: 'close-window',
   };
 }
 
@@ -459,7 +461,7 @@ export class SessionSlotManager {
 
   /** Handle button press. Returns action to take. */
   handleSlotPress(slot: number, layout?: DeckLayout): {
-    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'focus-terminal' | 'refresh-usage' | 'cycle-usage-page' | 'none';
+    action: 'enter-detail' | 'exit-detail' | 'select-option' | 'stop' | 'esc' | 'next-page' | 'send-prompt' | 'open-gateway' | 'switch-model' | 'focus-terminal' | 'close-window' | 'refresh-usage' | 'cycle-usage-page' | 'none';
     sessionId?: string;
     sessionPort?: number;
     optionIndex?: number;
@@ -502,6 +504,9 @@ export class SessionSlotManager {
         }
         if (config.preset?.localAction === 'focus-terminal') {
           return { action: 'focus-terminal' };
+        }
+        if (config.preset?.localAction === 'close-window') {
+          return { action: 'close-window' };
         }
         if (config.preset?.prompt) {
           return { action: 'send-prompt', promptText: config.preset.prompt };
@@ -588,7 +593,7 @@ export class SessionSlotManager {
 
   private detailOptionPages(layout: DeckLayout = DEFAULT_LAYOUT): number {
     if (!this.isAwaitingDetailState()) return 1;
-    const capacity = Math.max(1, this.detailContentSlots(layout, true).length);
+    const capacity = Math.max(1, this.detailContentSlots(layout, true, true).length);
     return Math.max(1, Math.ceil(this._detailOptions.length / capacity));
   }
 
@@ -753,7 +758,7 @@ export class SessionSlotManager {
     const isOpenClaw = session?.agentType === 'openclaw';
     const detailOptionPages = this.detailOptionPages(layout);
     const reserveMore = isAwaiting && detailOptionPages > 1;
-    const contentSlots = this.detailContentSlots(layout, reserveMore);
+    const contentSlots = this.detailContentSlots(layout, reserveMore, isAwaiting);
     const detailOptionStart = this._detailPage * Math.max(1, contentSlots.length);
     const controls = this.detailControlSlots(layout);
 
@@ -783,18 +788,17 @@ export class SessionSlotManager {
     let contentIdx = contentSlots.indexOf(slot);
     if (contentIdx < 0) return { type: 'empty' };
 
-    // SD+ only: the suggested-prompt quick-send leads the IDLE content slots
-    // (relocated from the retired E2 encoder rotate/press). Gated on the
+    // SD+ only: a CLOSE (Cmd+W) quick-action leads the IDLE content slots,
+    // replacing the former SUGGESTED quick-send tile. Gated on the
     // streamdeckplus family so classic-deck detail layouts are unchanged.
-    const suggestEnabled = layout.family === 'streamdeckplus'
-      && this._detailState === State.IDLE
-      && !!this._detailSuggestedPrompt;
-    if (suggestEnabled) {
+    const closeEnabled = layout.family === 'streamdeckplus'
+      && this._detailState === State.IDLE;
+    if (closeEnabled) {
       if (contentIdx === 0) {
-        return { type: 'preset', preset: buildSuggestPreset(this._detailSuggestedPrompt!) };
+        return { type: 'preset', preset: buildCloseWindowPreset() };
       }
       // Shift the remaining IDLE content down by one so the existing layout
-      // (presets → status cards) follows the suggested button.
+      // (presets → status cards) follows the CLOSE button.
       contentIdx -= 1;
     }
 
@@ -886,21 +890,39 @@ export class SessionSlotManager {
     return { type: 'empty' };
   }
 
+  /** True for the 8-key SD+ where we apply the fixed two-row detail layout. */
+  private isSdPlus(layout: DeckLayout): boolean {
+    return layout.family === 'streamdeckplus' && layout.keyCount >= 8;
+  }
+
   private detailControlSlots(layout: DeckLayout): { back: number; info: number; more: number; stop: number; focus: number | null } {
     const stop = layout.keyCount - 1;
     const back = 0;
     const info = layout.keyCount > 1 ? 1 : 0;
-    const more = layout.keyCount > 4 ? layout.keyCount - 2 : Math.max(0, stop - 1);
+    // SD+ awaiting layout pins controls to the TOP row so option buttons keep a
+    // stable spot on the BOTTOM row (keys 4/5/6, ESC at 7). The page-toggle
+    // therefore lives top-right (slot 3) rather than bottom-right. Other states
+    // and other decks keep MORE at keyCount-2.
+    const more = this.isSdPlus(layout) ? 3 : (layout.keyCount > 4 ? layout.keyCount - 2 : Math.max(0, stop - 1));
     // SD+ reserves a persistent FOCUS control (slot 2) available in every detail
     // state — working/awaiting/idle — so the terminal is always one tap away,
     // not just when the IDLE preset row is showing. Smaller/other decks keep the
     // old layout (FOCUS stays in the IDLE presets) to avoid crowding their grid.
-    const focus = layout.family === 'streamdeckplus' && layout.keyCount >= 8 ? 2 : null;
+    const focus = this.isSdPlus(layout) ? 2 : null;
     return { back, info, more, stop, focus };
   }
 
-  private detailContentSlots(layout: DeckLayout, reserveMore: boolean): number[] {
+  private detailContentSlots(layout: DeckLayout, reserveMore: boolean, isAwaiting = false): number[] {
     const controls = this.detailControlSlots(layout);
+
+    // SD+ AWAITING: pin option buttons to the BOTTOM row (keys 4/5/6) with ESC
+    // at 7, so Yes/Yes-always/No land in the same physical spot every time
+    // instead of shifting with the option count. Top row stays BACK/INFO/FOCUS/
+    // MORE. IDLE and PROCESSING keep the original flexible content layout.
+    if (this.isSdPlus(layout) && isAwaiting) {
+      return [4, 5, 6];
+    }
+
     const reserved = new Set([controls.back, controls.info, controls.stop]);
     if (reserveMore) reserved.add(controls.more);
     if (controls.focus != null) reserved.add(controls.focus);
