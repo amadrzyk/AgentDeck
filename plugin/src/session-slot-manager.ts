@@ -854,7 +854,7 @@ export class SessionSlotManager {
     }
 
     if (!isOpenClaw && this._detailState === State.IDLE) {
-      return this.idleStatusCard(session, contentIdx - CC_PRESET_DEFS.length);
+      return this.idleStatusCard(session, contentIdx - CC_PRESET_DEFS.length, false);
     }
 
     // OpenClaw already surfaces MODEL as an actionable preset, and PROCESSING
