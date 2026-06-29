@@ -117,10 +117,9 @@ function stateLabel(state?: string, agentType?: AgentType): string {
   switch (state) {
     case 'idle': return 'IDLE';
     case 'processing': return 'WORKING';
-    case 'awaiting_option':
-    case 'awaiting_permission':
-    case 'awaiting_diff':
-      return 'AWAITING';
+    case 'awaiting_permission': return 'PERMIT?';
+    case 'awaiting_option': return 'CHOOSE';
+    case 'awaiting_diff': return 'REVIEW';
     default: return state.toUpperCase();
   }
 }
@@ -277,7 +276,12 @@ export function renderSessionSlot(
   const sColor = stateColor(session.state);
   const signalColor = isWorking ? '#F5B942' : sColor;
   const fontFam = 'Inter, -apple-system, system-ui, Helvetica Neue, sans-serif';
-  const stateLbl = isWorking ? 'RUNNING' : isAsking ? 'PERMIT?' : 'IDLE';
+  // Distinguish the three awaiting states so the flashing tile tells you what
+  // kind of input it wants, not a blanket "PERMIT?" (which implies yes/no).
+  const askingLbl = session.state === 'awaiting_diff' ? 'REVIEW'
+    : session.state === 'awaiting_option' ? 'CHOOSE'
+    : 'PERMIT?';
+  const stateLbl = isWorking ? 'RUNNING' : isAsking ? askingLbl : 'IDLE';
   const colorText = isWorking ? '#FDE68A' : isAsking ? '#FECACA' : p1;
   const gradId = `sd-bg-${agent}-${session.state || 'idle'}`;
   const filterId = `pg-${animFrame}`;

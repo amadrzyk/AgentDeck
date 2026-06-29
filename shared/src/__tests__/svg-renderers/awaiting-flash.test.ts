@@ -28,4 +28,12 @@ describe('renderSessionSlot awaiting hard flash', () => {
     const idle = { ...awaiting, state: 'idle' } as SessionInfo;
     expect(renderSessionSlot(idle, false, 0)).not.toContain(FLASH);
   });
+
+  it('labels each awaiting state distinctly on the grid tile', () => {
+    const lbl = (state: string) =>
+      renderSessionSlot({ ...awaiting, state } as SessionInfo, false, 0);
+    expect(lbl('awaiting_permission')).toContain('PERMIT?');
+    expect(lbl('awaiting_option')).toContain('CHOOSE');
+    expect(lbl('awaiting_diff')).toContain('REVIEW');
+  });
 });
