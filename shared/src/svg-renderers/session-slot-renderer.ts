@@ -486,7 +486,14 @@ function optionVisual(label: string): { icon: StatusIconKind; tone: StatusCardTo
   return { icon: 'option', tone: 'purple' };
 }
 
-export function renderOptionButton(option: PromptOption, index: number): string {
+/**
+ * Awaiting option/permission button. When `animFrame` is provided the button
+ * pulses an amber attention border + glow (sine-driven, same cadence as the
+ * session-slot awaiting pulse). Per DESIGN.md only the amber awaiting state
+ * animates — this is the one sanctioned button animation. Omit `animFrame` for
+ * a static render (devices/tests that don't drive the animation loop).
+ */
+export function renderOptionButton(option: PromptOption, index: number, animFrame?: number): string {
   const label = option.label || `Option ${index + 1}`;
   const { icon, tone } = optionVisual(label);
   const colors = toneColors(tone);
@@ -495,12 +502,21 @@ export function renderOptionButton(option: PromptOption, index: number): string 
   const startY = lines.length === 1 ? 103 : 96;
   const slotNum = `<circle cx="119" cy="23" r="12" fill="${colors.panel}" stroke="${colors.accent}" stroke-width="1" opacity="0.9"/><text x="119" y="28" text-anchor="middle" font-family="${fontFam}" font-size="12" font-weight="800" fill="${colors.text}" opacity="0.8">${index + 1}</text>`;
   const textEls = lines.map((line, i) => `<text x="72" y="${startY + i * 17}" text-anchor="middle" font-family="${fontFam}" font-size="${line.length > 13 ? '12' : '13'}" font-weight="800" fill="${colors.text}">${escXml(line)}</text>`).join('');
+  // Attention pulse: a breathing amber border around the whole key so an
+  // awaiting prompt is hard to miss at a glance. 0.35..1.0 sine on opacity.
+  const pulse = animFrame != null
+    ? (() => {
+        const o = 0.35 + 0.65 * Math.abs(Math.sin(animFrame * 0.15));
+        return `<rect x="6" y="6" width="132" height="132" rx="14" fill="none" stroke="#fbbf24" stroke-width="5" opacity="${o.toFixed(2)}"/>`;
+      })()
+    : '';
   return svgFrame(
     colors.bg,
     `<rect x="25" y="18" width="94" height="58" rx="14" fill="${colors.panel}" opacity="0.58" stroke="${colors.accent}" stroke-width="1.2" stroke-opacity="0.26"/>`
       + renderGlyphIcon(icon, colors.icon, colors.accent, 72, 43, 0.84)
       + slotNum
-      + textEls,
+      + textEls
+      + pulse,
   );
 }
 

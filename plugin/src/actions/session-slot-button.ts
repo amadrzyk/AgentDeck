@@ -173,7 +173,13 @@ function stopAnimation(): void {
 
 /** Check if any visible session needs animation (active, awaiting, or processing border). */
 function needsAnimation(): boolean {
-  if (manager.view === 'detail') return false; // Detail view doesn't animate session buttons
+  if (manager.view === 'detail') {
+    // Detail view doesn't animate session borders, but DOES pulse the option
+    // buttons while awaiting input so an open prompt grabs attention.
+    return manager.detailState === State.AWAITING_PERMISSION
+      || manager.detailState === State.AWAITING_OPTION
+      || manager.detailState === State.AWAITING_DIFF;
+  }
   if (slotMap.size === 0) {
     return manager.sessions.some((session) =>
       session.state?.startsWith('awaiting') || session.state === 'processing',
@@ -318,7 +324,10 @@ function renderSlotSvg(config: SessionSlotConfig, _slot: number): string {
       });
 
     case 'option':
-      return renderOptionButton(config.option!, config.optionIndex ?? 0);
+      // Pulse the awaiting option buttons so an open prompt grabs attention.
+      // animTimer is only running while needsAnimation() is true (detail +
+      // awaiting), so passing animFrame here is a no-op static render otherwise.
+      return renderOptionButton(config.option!, config.optionIndex ?? 0, animTimer ? animFrame : undefined);
 
     case 'preset':
       if (config.preset) {
