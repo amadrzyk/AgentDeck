@@ -327,6 +327,16 @@ export function renderSessionSlot(
       : `<rect x="10.5" y="10.5" width="123" height="123" rx="10.5" fill="none" stroke="#60A5FA" stroke-width="1.5" opacity="${isIdle ? '0.72' : '0.36'}"/>`;
   }
 
+  // Hard attention flash for an awaiting prompt: the whole tile alternates
+  // between an amber wash and the normal render on a ~0.5s on/off cadence so
+  // it's impossible to miss across the room. Gated on the awaiting state and
+  // the running animation loop (animated); a static render shows no flash.
+  // Square-wave on animFrame: 3 frames on, 3 off (≈450ms each at 150ms/frame).
+  const flashOn = isAsking && animated && (Math.floor(animFrame / 3) % 2 === 0);
+  // Wash sits below the text (so labels stay readable); border sits on top.
+  const askFlashWash = flashOn ? `<rect width="${SIZE}" height="${SIZE}" rx="16" fill="#F5B942" opacity="0.30"/>` : '';
+  const askFlashBorder = flashOn ? `<rect x="8" y="8" width="128" height="128" rx="12" fill="none" stroke="#F5B942" stroke-width="6" opacity="0.95"/>` : '';
+
   const watermark = `<g transform="translate(92, 80)" opacity="${isIdle ? '0.62' : '0.55'}">${agentLogoIcon(agent, 72, 1, 0, 0)}</g>`;
   const badgeObj = isIdle ? `<rect x="100" y="14" width="28" height="16" rx="8" fill="#ffffff" opacity="0.1" /><text x="114" y="25" font-size="10" font-weight="700" text-anchor="middle" fill="#A1A1AA" font-family="${fontFam}">ACT</text>` : '';
   const toolStr = isWorking ? 'Running task' : modelText;
@@ -335,10 +345,12 @@ export function renderSessionSlot(
     `<defs>${defs}</defs>`,
     `<rect width="${SIZE}" height="${SIZE}" rx="16" fill="url(#${gradId})"/>`,
     `<rect x="8" y="8" width="128" height="128" rx="12" fill="#2C2C2E" opacity="0.8"/>`,
+    askFlashWash,
     stateBorder, activeRing, watermark, askDot, runBadge, badgeObj,
     `<text x="20" y="32" font-size="17" font-weight="800" text-anchor="start" fill="${colorText}" font-family="${fontFam}">${escXml(stateLbl)}</text>`,
     `<text x="20" y="52" font-size="13" font-weight="600" text-anchor="start" fill="#E2E8F0" font-family="${fontFam}">${escXml(truncate(nameForDisplay, 13))}</text>`,
     `<text x="20" y="120" font-size="${isWorking ? '13' : '14'}" font-weight="500" text-anchor="start" fill="${colorText}" opacity="0.8" font-family="${fontFam}">${escXml(toolStr)}</text>`,
+    askFlashBorder,
     // Stale overlay: the daemon stopped responding (no pings/state for the
     // stale window) but hasn't yet hit the hard disconnect. Dim the last-known
     // render and flag it so the state on screen isn't mistaken for live.
