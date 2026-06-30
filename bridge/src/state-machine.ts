@@ -11,6 +11,7 @@ import {
 } from './types.js';
 import type { BillingType } from '@agentdeck/shared';
 import { UsageTracker } from './usage-tracker.js';
+import { isPermissionNotification } from './awaiting-overlay.js';
 import { debug } from './logger.js';
 
 /** Extract the most useful field from tool_input for display on E4 */
@@ -161,7 +162,17 @@ export class StateMachine extends EventEmitter {
         // and we aren't already showing a usable one, synthesize the standard
         // Yes/No so the deck always has actionable buttons. A later PTY
         // permission_prompt/option_prompt refines these in place if it parses.
-        if (data.notification_type === 'permission_prompt') {
+        //
+        // Classify via isPermissionNotification (not a bare === check): some
+        // approvals — notably the Bash "untrusted directory / execute hooks"
+        // trust prompt from `cd … && …` — omit the structured notification_type
+        // or carry a different free-text shape, which the PTY misparses as a
+        // plain option_prompt (AWAITING_OPTION, empty list → "choose option"
+        // card with no buttons). The free-text fallback rescues those too.
+        if (isPermissionNotification(
+          data.notification_type as string | undefined,
+          (data.message as string) || '',
+        )) {
           const haveUsablePrompt =
             this.state === State.AWAITING_PERMISSION && this.looksLikePermissionPrompt();
           if (!haveUsablePrompt) {

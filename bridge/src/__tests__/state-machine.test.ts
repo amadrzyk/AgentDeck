@@ -143,6 +143,20 @@ describe('StateMachine', () => {
       expect(sm.getSnapshot().options.map((o) => o.label)).toEqual(['Yes', 'No']);
     });
 
+    it('Notification rescues AWAITING_OPTION via free-text message when structured type is absent', () => {
+      // The Bash "untrusted directory / execute hooks" trust prompt (from
+      // `cd … && git diff`) can arrive without a structured notification_type;
+      // the PTY misparses it as a plain option_prompt with no usable buttons.
+      // The free-text fallback ("needs your permission") must still rescue it.
+      const sm = bootToIdle();
+      sm.handleHookEvent('UserPromptSubmit', {});
+      sm.handleParserEvent('option_prompt', { options: [], navigable: false });
+      expect(sm.getState()).toBe(State.AWAITING_OPTION);
+      sm.handleHookEvent('Notification', { message: 'Claude needs your permission to use Bash' });
+      expect(sm.getState()).toBe(State.AWAITING_PERMISSION);
+      expect(sm.getSnapshot().options.map((o) => o.label)).toEqual(['Yes', 'No']);
+    });
+
     it('Notification permission_prompt does NOT clobber a richly-parsed permission prompt', () => {
       const sm = bootToIdle();
       sm.handleHookEvent('UserPromptSubmit', {});
