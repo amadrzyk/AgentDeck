@@ -308,13 +308,14 @@ export async function attachTmuxInIterm(sessionName: string): Promise<void> {
  * it raises ALL of Warp's windows and only switches Space when Warp has zero
  * windows on the current Space — so with windows scattered across Spaces it
  * surfaces everything on the current desktop and never moves (the reported
- * symptom). The reliable primitive is the Accessibility `AXRaise` action on the
- * specific window: raising a window that lives on another Space forces macOS to
- * switch to that Space, regardless of the Mission Control "switch to a Space
- * with open windows" toggle.
+ * symptom). The reliable recipe is: mark the target window AXMain + AXRaise it,
+ * THEN `activate` the app. macOS's "switch to a Space with open windows" picks
+ * the Space from the app's MAIN window, so AXMain points the activation at the
+ * target's Space and activate performs the switch. AXRaise alone reorders the
+ * window but leaves "main" unchanged, so the desktop never moves.
  *
  * Flow: `open warp://session/<id>` selects the right window/tab inside Warp,
- * then we AXRaise Warp's frontmost window (the one the deep link just fronted).
+ * then AXMain + AXRaise + activate switches to and raises it.
  * Falls back to plain activate when no per-session URL is available.
  *
  * Requires Accessibility permission for the Stream Deck app (System Events UI
@@ -326,20 +327,24 @@ export async function activateWarpTerminal(focusUrl?: string): Promise<void> {
     await new Promise<void>((resolve) => {
       execFile('open', [focusUrl], { timeout: 3000 }, () => resolve());
     });
-    // Give the deep link a beat to front the correct window, then AXRaise it so
-    // macOS switches to that window's Space. Deliberately NO app-level
-    // `activate` here: activate surfaces all Warp windows on the current Space
-    // and suppresses the Space switch (the reported bug). AXRaise on the single
-    // frontmost window (the one the deep link just selected) is what moves the
-    // desktop. `set frontmost` brings Warp forward without the surface-all.
+    // Give the deep link a beat to front the correct window, then switch Spaces.
+    // The recipe (used by Hammerspoon et al.): mark the target window AXMain +
+    // AXRaise it, THEN activate the app. macOS's "switch to a Space with open
+    // windows" decides which Space to jump to from the app's MAIN window — so
+    // AXRaise alone reorders the window but doesn't move the desktop (the
+    // reported symptom). Setting AXMain first points the activation at the
+    // target window's Space; activate then performs the actual Space switch.
     await osascript(
       'delay 0.2\n' +
       'tell application "System Events"\n' +
       '  tell process "Warp"\n' +
-      '    set frontmost to true\n' +
-      '    if (count of windows) > 0 then perform action "AXRaise" of window 1\n' +
+      '    if (count of windows) > 0 then\n' +
+      '      set value of attribute "AXMain" of window 1 to true\n' +
+      '      perform action "AXRaise" of window 1\n' +
+      '    end if\n' +
       '  end tell\n' +
-      'end tell',
+      'end tell\n' +
+      'tell application "Warp" to activate',
     ).catch(() => {});
     return;
   }
